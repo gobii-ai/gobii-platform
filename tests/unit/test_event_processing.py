@@ -126,14 +126,30 @@ class PromptContextBuilderTests(TestCase):
             channel="email",
             address="user@example.com",
         )
-        TaskCredit.objects.create(
+        now = timezone.now()
+        current_month = now.date().replace(day=1)
+        existing_credit = TaskCredit.objects.filter(
             user=self.user,
-            credits=Decimal("50"),
-            credits_used=Decimal("0"),
-            granted_date=timezone.now() - timedelta(days=1),
-            expiration_date=timezone.now() + timedelta(days=30),
             plan=PlanNamesChoices.FREE,
-        )
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+            grant_month=current_month,
+        ).first()
+        credit_defaults = {
+            "credits": Decimal("50"),
+            "credits_used": Decimal("0"),
+            "granted_date": now,
+            "expiration_date": now + timedelta(days=30),
+            "plan": PlanNamesChoices.FREE,
+            "grant_type": GrantTypeChoices.PLAN,
+            "additional_task": False,
+            "voided": False,
+        }
+        if existing_credit is None:
+            TaskCredit.objects.create(user=self.user, **credit_defaults)
+        else:
+            TaskCredit.objects.filter(pk=existing_credit.pk).update(**credit_defaults)
         self._storage_dir = tempfile.mkdtemp()
         self._storage = FileSystemStorage(location=self._storage_dir)
         self._storage_patch = patch('api.agent.core.prompt_context.default_storage', self._storage)
