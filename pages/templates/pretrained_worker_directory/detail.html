@@ -77,7 +77,7 @@
             </section>
             {% endif %}
             <section class="rounded-2xl border border-indigo-200 bg-gradient-to-br from-indigo-500 to-blue-500 px-6 py-8 text-white shadow-lg">
-              <h3 class="text-xl font-semibold">Spawn this worker</h3>
+              <h3 class="text-xl font-semibold">Create Agent</h3>
               <p class="mt-2 text-sm text-indigo-100 leading-relaxed">We’ll preload the playbook, schedule, and integrations—then you choose how it reaches you.</p>
               <form method="post" action="{% url 'pages:pretrained_worker_hire' pretrained_worker.code %}" class="mt-6">
                 {% csrf_token %}
@@ -87,7 +87,7 @@
                 <input type="hidden" name="trial_onboarding_target" value="agent_ui" />
                 {% endif %}
                 <button type="submit" class="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-white text-indigo-600 font-semibold px-5 py-3 shadow-lg shadow-indigo-200 hover:text-indigo-700 transition">
-                  Spawn this worker
+                  Create Agent
                   <span aria-hidden="true">→</span>
                 </button>
               </form>

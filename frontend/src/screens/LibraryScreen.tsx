@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { InfiniteData } from '@tanstack/react-query'
-import { AlertTriangle, Heart, Library as LibraryIcon, Loader2, Search } from 'lucide-react'
+import { AlertTriangle, ArrowRight, Heart, Library as LibraryIcon, Loader2, Search } from 'lucide-react'
 
 import { fetchLibraryAgents, type LibraryAgentsPayload, toggleLibraryAgentLike } from '../api/library'
 
@@ -322,49 +322,66 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="space-y-3">
                 {agents.map((agent) => {
                   const isLikePending = likeMutation.isPending && likeMutation.variables === agent.id
                   return (
-                    <article key={agent.id} className="gobii-card-hoverable group flex h-full flex-col p-5">
-                      <div className="mb-3 flex items-start justify-between gap-2">
-                        <span className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
-                          <span className="size-2 rounded-full bg-indigo-400" />
-                          {agent.category}
-                        </span>
-                        {canLike ? (
-                          <button
-                            type="button"
-                            disabled={isLikePending}
-                            onClick={() => likeMutation.mutate(agent.id)}
-                            className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70"
-                            aria-label={agent.isLiked ? `Remove like from ${agent.name}` : `Like ${agent.name}`}
-                          >
-                            {isLikePending ? (
-                              <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
-                            ) : (
-                              <Heart className={`size-3.5 ${agent.isLiked ? 'fill-rose-500 text-rose-500' : 'text-rose-500'}`} aria-hidden="true" />
-                            )}
-                            <span>{agent.likeCount}</span>
-                          </button>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
-                            <Heart className="size-3.5 text-rose-500" aria-hidden="true" />
-                            <span>{agent.likeCount}</span>
+                    <article
+                      key={agent.id}
+                      className="group relative cursor-pointer overflow-hidden rounded-lg border border-slate-200 bg-white px-5 py-4 transition hover:border-indigo-200 hover:bg-indigo-50/30 focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500/20"
+                    >
+                      <a
+                        href={agent.templateUrl}
+                        aria-label={`View details for ${agent.name}`}
+                        className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-none"
+                      />
+
+                      <div className="pointer-events-none relative z-10 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1 space-y-3">
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-indigo-700">
+                            <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-2.5 py-1">
+                              <span className="size-2 rounded-full bg-indigo-400" />
+                              {agent.category}
+                            </span>
+                            <span className="text-slate-500">@{agent.publicProfileHandle}</span>
+                          </div>
+
+                          <div className="space-y-1">
+                            <h2 className="text-base font-semibold text-slate-900 transition group-hover:text-indigo-700 sm:text-lg">
+                              {agent.name}
+                            </h2>
+                            {agent.tagline ? <p className="text-sm font-medium text-slate-700">{agent.tagline}</p> : null}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:self-stretch">
+                          {canLike ? (
+                            <button
+                              type="button"
+                              disabled={isLikePending}
+                              onClick={() => likeMutation.mutate(agent.id)}
+                              className="pointer-events-auto inline-flex cursor-pointer items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-70"
+                              aria-label={agent.isLiked ? `Remove like from ${agent.name}` : `Like ${agent.name}`}
+                            >
+                              {isLikePending ? (
+                                <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <Heart className={`size-3.5 ${agent.isLiked ? 'fill-rose-500 text-rose-500' : 'text-rose-500'}`} aria-hidden="true" />
+                              )}
+                              <span>{agent.likeCount}</span>
+                            </button>
+                          ) : (
+                            <span className="pointer-events-none inline-flex items-center gap-1 rounded-full border border-rose-100 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-700">
+                              <Heart className="size-3.5 text-rose-500" aria-hidden="true" />
+                              <span>{agent.likeCount}</span>
+                            </span>
+                          )}
+
+                          <span className="pointer-events-none inline-flex items-center gap-1 text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
+                            View details
+                            <ArrowRight className="size-4 transition group-hover:translate-x-0.5" aria-hidden="true" />
                           </span>
-                        )}
-                      </div>
-
-                      <p className="text-xs font-medium text-slate-500">@{agent.publicProfileHandle}</p>
-                      <h2 className="mt-1 text-base font-semibold text-slate-900 transition group-hover:text-indigo-700">
-                        <a href={agent.templateUrl}>{agent.name}</a>
-                      </h2>
-                      {agent.tagline ? <p className="mt-2 text-sm font-medium text-slate-700">{agent.tagline}</p> : null}
-
-                      <div className="mt-auto pt-4">
-                        <a href={agent.templateUrl} className="text-sm font-medium text-indigo-600 transition group-hover:text-indigo-700">
-                          View details {'->'}
-                        </a>
+                        </div>
                       </div>
                     </article>
                   )
