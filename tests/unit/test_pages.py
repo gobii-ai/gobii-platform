@@ -46,6 +46,7 @@ from util.onboarding import (
 from util.personal_signup_preview import (
     GENERIC_STARTER_CHARTER,
 )
+from util.analytics import AnalyticsEvent
 
 
 @tag("batch_pages")
@@ -112,6 +113,20 @@ class HomePageTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "gobii-cta-signup-modal-config")
         self.assertContains(response, 'id="cta-signup-modal"')
+
+    @tag("batch_pages")
+    def test_home_page_signup_modal_config_includes_analytics_events_when_flag_is_on(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        modal_config = response.context.get("cta_signup_modal_config")
+        self.assertIsNotNone(modal_config)
+        self.assertEqual(modal_config["events"]["opened"], AnalyticsEvent.CTA_AUTH_MODAL_OPENED.value)
+        self.assertEqual(modal_config["events"]["closed"], AnalyticsEvent.CTA_AUTH_MODAL_CLOSED.value)
+        self.assertEqual(modal_config["events"]["step_viewed"], AnalyticsEvent.CTA_AUTH_MODAL_STEP_VIEWED.value)
+        self.assertEqual(modal_config["events"]["email_routed"], AnalyticsEvent.CTA_AUTH_MODAL_EMAIL_ROUTED.value)
+        self.assertEqual(modal_config["events"]["failed"], AnalyticsEvent.CTA_AUTH_MODAL_FAILED.value)
 
     @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
@@ -2984,10 +2999,22 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, "Log in or sign up")
 
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        email_start_form = soup.select_one("form[data-auth-email-start-form]")
+        self.assertIsNotNone(email_start_form)
+        self.assertEqual(email_start_form["data-analytics-cta-id"], "auth_modal_email_start_continue")
+        self.assertEqual(email_start_form["data-analytics-placement"], "auth_modal_start")
+        self.assertEqual(email_start_form["data-analytics-intent"], "continue_with_email")
+
         buttons = soup.select("a[data-social-provider]")
         self.assertEqual([button["data-social-provider"] for button in buttons], ["google", "facebook"])
         for button in buttons:
             self.assertEqual(button["data-auth-social-popup"], "true")
+            self.assertEqual(button["data-analytics-placement"], "auth_modal_start")
+            self.assertEqual(button["data-analytics-auth-surface"], "modal_start")
+            self.assertEqual(
+                button["data-analytics-cta-id"],
+                f"auth_modal_start_social_{button['data-social-provider']}",
+            )
             parsed = urlparse(button["href"])
             params = parse_qs(parsed.query)
             popup_next = params.get("next", [None])[0]
@@ -3067,6 +3094,15 @@ class AuthLinkTests(TestCase):
             login_response,
             f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
         )
+        login_soup = BeautifulSoup(login_response.content.decode("utf-8"), "html.parser")
+        login_back = login_soup.select_one('button[data-analytics-cta-id="auth_modal_login_back"]')
+        self.assertIsNotNone(login_back)
+        self.assertEqual(login_back["data-analytics-placement"], "auth_modal_login")
+        self.assertEqual(login_back["data-analytics-intent"], "back_to_start")
+        login_form = login_soup.select_one('form[data-analytics-cta-id="auth_modal_login_submit"]')
+        self.assertIsNotNone(login_form)
+        self.assertEqual(login_form["data-analytics-placement"], "auth_modal_login")
+        self.assertEqual(login_form["data-analytics-intent"], "log_in")
 
         signup_response = self.client.get(
             reverse("account_signup_modal"),
@@ -3081,6 +3117,15 @@ class AuthLinkTests(TestCase):
             signup_response,
             f'data-auth-modal-url="{reverse("account_signup_modal")}?next=%2Fpricing%2F&amp;email=saved%40example.com"',
         )
+        signup_soup = BeautifulSoup(signup_response.content.decode("utf-8"), "html.parser")
+        signup_back = signup_soup.select_one('button[data-analytics-cta-id="auth_modal_signup_back"]')
+        self.assertIsNotNone(signup_back)
+        self.assertEqual(signup_back["data-analytics-placement"], "auth_modal_signup")
+        self.assertEqual(signup_back["data-analytics-intent"], "back_to_start")
+        signup_form = signup_soup.select_one('form[data-analytics-cta-id="auth_modal_signup_submit"]')
+        self.assertIsNotNone(signup_form)
+        self.assertEqual(signup_form["data-analytics-placement"], "auth_modal_signup")
+        self.assertEqual(signup_form["data-analytics-intent"], "sign_up")
 
     @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)

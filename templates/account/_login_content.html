@@ -19,6 +19,9 @@
         type="button"
         data-auth-modal-link
         data-auth-modal-url="{{ auth_modal_start_url }}"
+        data-analytics-cta-id="auth_modal_login_back"
+        data-analytics-placement="auth_modal_login"
+        data-analytics-intent="back_to_start"
         class="inline-flex items-center gap-2 text-sm font-medium text-slate-600 transition hover:text-slate-900"
       >
         <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -72,6 +75,7 @@
     action="{% if auth_modal %}{{ auth_modal_login_url }}{% else %}{% url 'account_login' %}{% endif %}"
     class="space-y-4"
     data-login-form
+    {% if auth_modal %}data-analytics-cta-id="auth_modal_login_submit" data-analytics-placement="auth_modal_login" data-analytics-intent="log_in"{% endif %}
     {% if auth_modal %}data-auth-modal-form{% endif %}
   >
     {% csrf_token %}

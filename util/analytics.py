@@ -98,6 +98,11 @@ class AnalyticsEvent(StrEnum):
     WEB_TASK_CANCELLED = 'Task Cancelled'
     MARKETING_CONTACT_REQUEST_SUBMITTED = 'Marketing Contact Request Submitted'
     CTA_CLICKED = 'CTA Clicked'
+    CTA_AUTH_MODAL_OPENED = 'CTA Auth Modal Opened'
+    CTA_AUTH_MODAL_CLOSED = 'CTA Auth Modal Closed'
+    CTA_AUTH_MODAL_STEP_VIEWED = 'CTA Auth Modal Step Viewed'
+    CTA_AUTH_MODAL_EMAIL_ROUTED = 'CTA Auth Modal Email Routed'
+    CTA_AUTH_MODAL_FAILED = 'CTA Auth Modal Failed'
 
     # Web Chat Events
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
