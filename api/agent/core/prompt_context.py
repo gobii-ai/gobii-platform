@@ -5231,12 +5231,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     """Add summaries + interleaved recent steps & messages to the provided promptree group."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     unified_limit, unified_hysteresis = _get_unified_history_limits(agent)
-    configured_tool_limit = tool_call_history_limit(agent)
-    configured_msg_limit = message_history_limit(agent)
     unified_fetch_span_offset = 5
     unified_fetch_span = unified_limit + unified_hysteresis + unified_fetch_span_offset
-    limit_tool_history = max(configured_tool_limit, unified_fetch_span)
-    limit_msg_history = max(configured_msg_limit, unified_fetch_span)
 
     # ---- summaries (keep unchanged as requested) ----------------------- #
     step_snap = (
@@ -5299,12 +5295,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
     steps = _get_recent_prompt_history_steps(
         agent=agent,
         step_cutoff=step_cutoff,
-        visible_limit=limit_tool_history,
+        visible_limit=unified_fetch_span,
         reasoning_limit=get_prompt_settings().internal_reasoning_history_limit,
     )
     completed_tasks = _get_recent_completed_browser_tasks(
         agent=agent,
-        visible_limit=limit_tool_history,
+        visible_limit=unified_fetch_span,
     )
     messages = list(
         PersistentAgentMessage.objects.filter(
@@ -5312,7 +5308,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         )
         .select_related("from_endpoint", "to_endpoint", "conversation", "peer_agent")
         .prefetch_related("attachments__filespace_node")
-        .order_by("-timestamp")[:limit_msg_history]
+        .order_by("-timestamp")[:unified_fetch_span]
     )
 
     # Collect structured events with their components grouped together
@@ -5327,36 +5323,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         ):
             continue
         step_candidates.append(step)
-
-    history_candidates: List[Tuple[datetime, str, str, Any]] = [
-        (step.created_at, "step", str(step.id), step)
-        for step in step_candidates
-    ]
-    history_candidates.extend(
-        (task.updated_at, "browser_task", str(task.id), task)
-        for task in completed_tasks
-    )
-    # Completed browser tasks now share the same recent-history budget as steps/tool calls.
-    selected_candidates = sorted(
-        history_candidates,
-        key=lambda item: (item[0], item[1], item[2]),
-        reverse=True,
-    )[:configured_tool_limit]
-
-    selected_step_ids = {
-        candidate_id
-        for _, candidate_type, candidate_id, _ in selected_candidates
-        if candidate_type == "step"
-    }
-    steps = [step for step in step_candidates if str(step.id) in selected_step_ids]
-    selected_task_ids = {
-        candidate_id
-        for _, candidate_type, candidate_id, _ in selected_candidates
-        if candidate_type == "browser_task"
-    }
-    completed_tasks = [
-        task for task in completed_tasks if str(task.id) in selected_task_ids
-    ]
+    steps = step_candidates
 
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
