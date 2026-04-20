@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 from django.test import SimpleTestCase, override_settings, tag
 
 from api.services.sandbox_kubernetes import (
+    _container_resources_match,
     _build_sandbox_service_manifest,
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
@@ -431,6 +432,44 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             no_proxy=None,
         )
 
+    def test_deploy_or_resume_keeps_sandbox_pod_when_resource_quantities_are_equivalent(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-resource-equivalent")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:latest",
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                                {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+                            ],
+                            "resources": {
+                                "requests": {"cpu": "0.5", "memory": "1024Mi"},
+                                "limits": {"cpu": "2000m", "memory": "4096Mi"},
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_not_called()
+        backend._create_pod.assert_not_called()
+
     def test_deploy_or_resume_returns_error_when_service_is_not_routable(self):
         backend = self._backend()
         agent = SimpleNamespace(id="agent-routability")
@@ -592,6 +631,21 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
+    def test_container_resources_match_normalizes_equivalent_quantities(self):
+        container = {
+            "resources": {
+                "requests": {"cpu": "500m", "memory": "1024Mi"},
+                "limits": {"cpu": "2e3m", "memory": "4096Mi"},
+            }
+        }
+
+        expected_resources = {
+            "requests": {"cpu": "0.5", "memory": "1Gi"},
+            "limits": {"cpu": "2", "memory": "4Gi"},
+        }
+
+        self.assertTrue(_container_resources_match(container, expected_resources))
+
     def test_sandbox_service_manifest_targets_agent_pod(self):
         manifest = _build_sandbox_service_manifest(
             service_name="sandbox-agent-agent-1",

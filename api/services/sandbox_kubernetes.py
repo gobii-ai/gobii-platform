@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -28,6 +29,27 @@ _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _SANDBOX_SERVICE_PORT = 8080
 _DEFAULT_EGRESS_PROXY_HTTP_PORT = 3128
 _DEFAULT_EGRESS_PROXY_SOCKS_PORT = 1080
+_QUANTITY_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([A-Za-z]{0,2})$")
+_DECIMAL_SI_MULTIPLIERS = {
+    "": Decimal("1"),
+    "n": Decimal("1e-9"),
+    "u": Decimal("1e-6"),
+    "m": Decimal("1e-3"),
+    "k": Decimal("1e3"),
+    "M": Decimal("1e6"),
+    "G": Decimal("1e9"),
+    "T": Decimal("1e12"),
+    "P": Decimal("1e15"),
+    "E": Decimal("1e18"),
+}
+_BINARY_SI_MULTIPLIERS = {
+    "Ki": Decimal(1024),
+    "Mi": Decimal(1024) ** 2,
+    "Gi": Decimal(1024) ** 3,
+    "Ti": Decimal(1024) ** 4,
+    "Pi": Decimal(1024) ** 5,
+    "Ei": Decimal(1024) ** 6,
+}
 
 
 def _required_resource_quantity(setting_name: str, value: Any) -> str:
@@ -1322,9 +1344,36 @@ def _container_resources_match(container: Dict[str, Any], expected_resources: Di
     expected_requests = expected_resources.get("requests") or {}
     expected_limits = expected_resources.get("limits") or {}
     return (
-        all(str(actual_requests.get(key, "")) == value for key, value in expected_requests.items())
-        and all(str(actual_limits.get(key, "")) == value for key, value in expected_limits.items())
+        all(_resource_quantities_match(actual_requests.get(key, ""), value) for key, value in expected_requests.items())
+        and all(_resource_quantities_match(actual_limits.get(key, ""), value) for key, value in expected_limits.items())
     )
+
+
+def _resource_quantities_match(actual: Any, expected: Any) -> bool:
+    actual_value = str(actual or "").strip()
+    expected_value = str(expected or "").strip()
+    if actual_value == expected_value:
+        return True
+    try:
+        return _parse_kubernetes_quantity(actual_value) == _parse_kubernetes_quantity(expected_value)
+    except ValueError:
+        return False
+
+
+def _parse_kubernetes_quantity(value: str) -> Decimal:
+    match = _QUANTITY_RE.fullmatch(value)
+    if not match:
+        raise ValueError(f"Unsupported Kubernetes quantity: {value}")
+    number_text, suffix = match.groups()
+    try:
+        number = Decimal(number_text)
+    except InvalidOperation as exc:
+        raise ValueError(f"Unsupported Kubernetes quantity: {value}") from exc
+    if suffix in _DECIMAL_SI_MULTIPLIERS:
+        return number * _DECIMAL_SI_MULTIPLIERS[suffix]
+    if suffix in _BINARY_SI_MULTIPLIERS:
+        return number * _BINARY_SI_MULTIPLIERS[suffix]
+    raise ValueError(f"Unsupported Kubernetes quantity: {value}")
 
 
 def _build_egress_proxy_service_manifest(
