@@ -1657,6 +1657,25 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(self._normalized_button_text(sales_button), "Spawn Agent")
 
     @tag("batch_pages")
+    def test_sales_solution_how_it_works_links_include_cta_analytics(self):
+        response = self.client.get("/solutions/sales/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+
+        hero_link = soup.find("a", {"data-analytics-cta-id": "sales_hero_how_it_works"})
+        self.assertIsNotNone(hero_link)
+        self.assertEqual(hero_link.get("href"), "#how-it-works")
+        self.assertEqual(hero_link.get("data-analytics-placement"), "hero")
+        self.assertEqual(hero_link.get("data-analytics-intent"), "view_how_it_works")
+
+        final_link = soup.find("a", {"data-analytics-cta-id": "sales_final_cta_how_it_works"})
+        self.assertIsNotNone(final_link)
+        self.assertEqual(final_link.get("href"), "#how-it-works")
+        self.assertEqual(final_link.get("data-analytics-placement"), "final_cta")
+        self.assertEqual(final_link.get("data-analytics-intent"), "view_how_it_works")
+
+    @tag("batch_pages")
     def test_generic_solution_uses_form_backed_spawn_cta(self):
         response = self.client.get("/solutions/operations/")
 
