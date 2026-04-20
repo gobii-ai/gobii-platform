@@ -1265,6 +1265,30 @@ class PretrainedWorkerDirectoryTests(TestCase):
             f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
         )
 
+    @tag("batch_pages")
+    def test_pretrained_worker_detail_uses_create_agent_cta_copy(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        detail_source = soup.find(
+            "input",
+            {"name": "source_page", "value": "pretrained_worker_detail"},
+        )
+        self.assertIsNotNone(detail_source)
+        detail_form = detail_source.find_parent("form")
+        self.assertIsNotNone(detail_form)
+        detail_button = detail_form.find("button", {"type": "submit"})
+        self.assertIsNotNone(detail_button)
+        detail_button_text = " ".join(
+            segment for segment in detail_button.stripped_strings if segment and segment != "→"
+        ).strip()
+        self.assertEqual(detail_button_text, "Create Agent")
+
 
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
