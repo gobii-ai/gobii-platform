@@ -227,8 +227,8 @@
         origin_placement: origin.origin_placement || "",
         origin_intent: origin.origin_intent || "",
         origin_source_page: origin.origin_source_page || "",
-        origin_page_path: origin.origin_page_path || pageContext.pagePath,
-        origin_page_slug: origin.origin_page_slug || pageContext.pageSlug,
+        origin_page_path: pageContext.pagePath,
+        origin_page_slug: pageContext.pageSlug,
         next_path: origin.next_path || "",
       }, extraProperties || {}));
     }
