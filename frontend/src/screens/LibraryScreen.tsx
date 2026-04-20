@@ -336,8 +336,8 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
                         className="absolute inset-0 cursor-pointer rounded-lg focus-visible:outline-none"
                       />
 
-                      <div className="pointer-events-none relative z-10 flex cursor-pointer flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div className="min-w-0 flex-1 space-y-3 pointer-events-none cursor-pointer">
+                      <div className="pointer-events-none relative z-10 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="min-w-0 flex-1 space-y-3">
                           <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-indigo-700">
                             <span className="inline-flex items-center gap-2 rounded-full bg-indigo-50 px-2.5 py-1">
                               <span className="size-2 rounded-full bg-indigo-400" />
@@ -354,7 +354,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
                           </div>
                         </div>
 
-                        <div className="pointer-events-none relative z-10 flex cursor-pointer items-center justify-between gap-3 sm:flex-col sm:items-end sm:self-stretch">
+                        <div className="flex items-center justify-between gap-3 sm:flex-col sm:items-end sm:self-stretch">
                           {canLike ? (
                             <button
                               type="button"
