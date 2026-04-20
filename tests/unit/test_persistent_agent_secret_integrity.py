@@ -11,7 +11,7 @@ from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSecret
 User = get_user_model()
 
 
-@tag("batch_secrets")
+@tag("batch_secrets_profiles")
 class PersistentAgentSecretIntegrityTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

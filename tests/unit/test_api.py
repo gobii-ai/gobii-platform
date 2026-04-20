@@ -647,6 +647,10 @@ class BrowserUseAgentTaskViewSetTests(BrowserUseAgentTaskTestMixin, APITestCase)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn('deleted', str(response.data.get('agent', '')).lower())
 
+@tag("batch_api_tasks_reads")
+class BrowserUseAgentTaskReadTests(BrowserUseAgentTaskTestMixin, APITestCase):
+    """Tests for task parameter validation, results, pagination, and retrieval."""
+
     def test_wait_parameter_validation(self):
         """Test validation of wait parameter."""
         url = reverse('api:agent-tasks-list', kwargs={'agentId': self.agent1_user1.id})

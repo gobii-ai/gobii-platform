@@ -9,7 +9,7 @@ from waffle.testutils import override_switch
 User = get_user_model()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class ClearSignupTrackingViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -75,7 +75,7 @@ class ClearSignupTrackingViewTests(TestCase):
         self.assertEqual(response.json(), {"tracking": False})
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class GoogleAnalyticsRenderingTests(TestCase):
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123")
     def test_base_template_uses_page_meta_title_in_ga_config(self):
@@ -153,7 +153,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn('writeKey: "segment-web-test"', content)
         self.assertIn("enabled: false,", content)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_base_template_uses_legacy_collateral_when_switch_is_off(self):
         with override_switch("fish_collateral", active=False):
             response = self.client.get(reverse("pages:home"))
@@ -165,7 +165,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn('/static/images/apple-touch-icon.png?v=4', content)
         self.assertIn('rel="manifest" href="/manifest.json"', content)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_base_template_uses_fish_collateral_when_switch_is_on(self):
         with override_switch("fish_collateral", active=True):
             response = self.client.get(reverse("pages:home"))
@@ -176,7 +176,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn('/static/images/gobii_fish_favicon_32.png?v=5', content)
         self.assertIn('/static/images/gobii_fish_apple_touch_180.png?v=5', content)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
     def test_app_shell_uses_legacy_icon_when_switch_is_off(self):
         with override_switch("fish_collateral", active=False):
@@ -186,7 +186,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn('href="/static/images/noBgBlue.png"', content)
         self.assertIn('data-fish-collateral-enabled="false"', content)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
     def test_app_shell_uses_fish_icon_when_switch_is_on(self):
         with override_switch("fish_collateral", active=True):
@@ -197,7 +197,7 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn('data-fish-collateral-enabled="true"', content)
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class WebManifestRenderingTests(TestCase):
     def test_manifest_uses_legacy_icons_when_switch_is_off(self):
         with override_switch("fish_collateral", active=False):

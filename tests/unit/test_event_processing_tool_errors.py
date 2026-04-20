@@ -10,7 +10,7 @@ from api.agent.core import event_processing as ep
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentToolCall, UserQuota
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class ToolErrorHandlingTests(TestCase):
     @classmethod
     def setUpTestData(cls):

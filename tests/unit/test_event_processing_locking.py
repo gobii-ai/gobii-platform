@@ -52,7 +52,7 @@ class _ReleaseFailingRedlock:
         raise RuntimeError("release failed")
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class EventProcessingLockFallbackTests(TestCase):
     @classmethod
     def setUpTestData(cls):

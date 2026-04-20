@@ -10,7 +10,7 @@ from api.services.cron_throttle import evaluate_free_plan_cron_throttle
 User = get_user_model()
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 @override_settings(
     AGENT_CRON_THROTTLE_START_AGE_DAYS=16,
     AGENT_CRON_THROTTLE_STAGE_DAYS=7,

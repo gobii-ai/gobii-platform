@@ -37,7 +37,6 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: tag-guard
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,7 +60,6 @@ jobs:
     name: Sandbox Server Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: tag-guard
     env:
       TEST_OUTPUT_DIR: test-results
     steps:
@@ -108,7 +106,6 @@ jobs:
     name: tests (${{ matrix.batch }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: tag-guard
     strategy:
       fail-fast: false
       matrix:
@@ -127,6 +124,8 @@ jobs:
             tag: batch_email_footer
           - batch: pages
             tag: batch_pages
+          - batch: pages_signals
+            tag: batch_pages_signals
           - batch: public_templates
             tag: batch_public_templates
           - batch: marketing_events
@@ -135,12 +134,16 @@ jobs:
             tag: batch_contact_requests
           - batch: console_agents
             tag: batch_console_agents
+          - batch: console_agents_management
+            tag: batch_console_agents_management
           - batch: console_allowlist
             tag: batch_console_allowlist
           - batch: outbound_email
             tag: batch_outbound_email
           - batch: secrets
             tag: batch_secrets
+          - batch: secrets_profiles
+            tag: batch_secrets_profiles
           - batch: global_secrets
             tag: global_secrets_batch
           - batch: global_skill_evals
@@ -181,6 +184,8 @@ jobs:
             tag: batch_api_serializer
           - batch: api_tasks
             tag: batch_api_tasks
+          - batch: api_tasks_reads
+            tag: batch_api_tasks_reads
           - batch: api_tasks_mutations
             tag: batch_api_tasks_mutations
           - batch: periodic
@@ -225,6 +230,8 @@ jobs:
             tag: batch_event_llm
           - batch: event_processing
             tag: batch_event_processing
+          - batch: event_processing_credits
+            tag: batch_event_processing_credits
           - batch: event_parallel
             tag: batch_event_parallel
           - batch: mcp_tools
@@ -475,7 +482,7 @@ jobs:
   publish-static-assets:
     name: Publish Static Assets
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -553,7 +560,7 @@ jobs:
   trigger-preview:
     name: Dispatch Preview Deployment
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests]
     if: >
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -589,7 +596,7 @@ jobs:
   trigger-staging:
     name: Dispatch Staging Deployment
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests, publish-static-assets]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests, publish-static-assets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Generate GitHub App token

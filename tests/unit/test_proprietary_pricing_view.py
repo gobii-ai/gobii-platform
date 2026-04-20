@@ -11,7 +11,7 @@ from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 from pages.models import CallToAction
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class PricingPageCtaCopyTests(TestCase):
     def _set_monthly_task_credits(self, plan_code: str, credits: int) -> None:
         plan_slug = PLAN_SLUG_BY_LEGACY_CODE[plan_code]

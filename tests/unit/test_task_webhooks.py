@@ -9,7 +9,7 @@ from api.models import BrowserUseAgent, BrowserUseAgentTask, BrowserUseAgentTask
 from api.services.task_webhooks import trigger_task_webhook, WEBHOOK_TIMEOUT_SECONDS
 
 
-@tag("batch_api_tasks")
+@tag("batch_api_tasks_reads")
 class TaskWebhookServiceTests(TestCase):
     @classmethod
     def setUpTestData(cls):

@@ -18,7 +18,7 @@ from api.models import (
 from constants.plans import PlanNamesChoices
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class ToolRateLimitTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

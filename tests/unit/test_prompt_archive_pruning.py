@@ -16,7 +16,7 @@ from api.maintenance.prompt_archives import prune_prompt_archives_for_cutoff
 User = get_user_model()
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class PromptArchivePruningTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

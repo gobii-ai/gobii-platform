@@ -61,7 +61,7 @@ from constants.stripe import (
 User = get_user_model()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class UserSignedUpSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -358,7 +358,7 @@ class UserSignedUpSignalTests(TestCase):
         mock_record_fbc_synthesized.assert_not_called()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class UserLoggedInSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -408,7 +408,7 @@ class UserLoggedInSignalTests(TestCase):
         )
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class BuildMarketingContextFromUserTests(TestCase):
     """Tests for _build_marketing_context_from_user used by Subscribe events."""
 
@@ -703,7 +703,7 @@ def _build_setup_intent_payload(
     return payload
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class CheckoutSessionSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -898,7 +898,7 @@ class CheckoutSessionSignalTests(TestCase):
         )
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class SubscriptionSignalTests(TestCase):
     maxDiff = None
 
@@ -927,7 +927,7 @@ class SubscriptionSignalTests(TestCase):
         sub.stripe_data['current_period_end'] = str(aware_end)
         return sub
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(CAPI_LTV_MULTIPLE=1.0)
     def test_subscription_anchor_updates_from_stripe(self):
         self.mock_capi.reset_mock()
@@ -970,7 +970,7 @@ class SubscriptionSignalTests(TestCase):
 
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_event_resumes_signup_preview_agents_after_personal_plan_activation(self):
         payload = _build_event_payload(billing_reason="subscription_create")
         event = _build_djstripe_event(payload, event_type="customer.subscription.created")
@@ -999,7 +999,7 @@ class SubscriptionSignalTests(TestCase):
             plan_after=PlanNamesChoices.STARTUP.value,
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(CAPI_LTV_MULTIPLE=2.0, CAPI_START_TRIAL_CONV_RATE=0.5)
     def test_subscription_capi_value_applies_ltv_multiple(self):
         self.mock_capi.reset_mock()
@@ -1031,7 +1031,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertAlmostEqual(props["value"], 29.99, places=2)
         self.assertEqual(props["currency"], "USD")
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("pages.signals.ensure_single_individual_subscription")
     def test_subscription_created_dedupes_individual_plan(self, mock_ensure):
         payload = _build_event_payload(billing_reason="subscription_create")
@@ -1076,7 +1076,7 @@ class SubscriptionSignalTests(TestCase):
             create_if_missing=False,
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_event_includes_client_ip_from_attribution(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_create", invoice_id=None)
@@ -1109,7 +1109,7 @@ class SubscriptionSignalTests(TestCase):
         context = self.mock_capi.call_args.kwargs["context"]
         self.assertEqual(context.get("client_ip"), "203.0.113.5")
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_create_update_event_does_not_emit_duplicate_marketing(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_create")
@@ -1133,7 +1133,7 @@ class SubscriptionSignalTests(TestCase):
         mock_track_event.assert_called_once()
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_event_refreshes_live_subscription_when_local_status_is_stale(self):
         payload = _build_event_payload(status="active", billing_reason="subscription_create")
         event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
@@ -1165,7 +1165,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(mock_sync.call_count, 2)
         mock_retrieve.assert_called_once_with("sub_123", expand=["items.data.price"])
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_cycle_emits_renewed_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_cycle")
@@ -1194,7 +1194,7 @@ class SubscriptionSignalTests(TestCase):
 
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_update_without_plan_change_skips_credit_grant(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason="subscription_update")
@@ -1221,7 +1221,7 @@ class SubscriptionSignalTests(TestCase):
         mock_grant.assert_not_called()
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_update_plan_change_grants_topoff(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade")
@@ -1288,7 +1288,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_update_plan_change_includes_prior_midcycle_topoff(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade_2")
@@ -1362,7 +1362,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(grant_kwargs["expiration_date"], current_period_end)
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_update_plan_change_survives_identify_failure(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade_500")
@@ -1414,7 +1414,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertTrue(any("Failed to identify subscription analytics state" in str(call.args[0]) for call in mock_logger_exception.call_args_list))
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(CAPI_START_TRIAL_CONV_RATE=0.3)
     def test_trialing_subscription_grants_full_credits(self):
         self.mock_capi.reset_mock()
@@ -1465,7 +1465,7 @@ class SubscriptionSignalTests(TestCase):
         identify_args, _identify_kwargs = mock_identify.call_args
         self.assertTrue(identify_args[1].get("is_trial"))
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @override_settings(
         CAPI_LTV_MULTIPLE=5.0,
         CAPI_START_TRIAL_CONV_RATE=0.322,
@@ -1515,7 +1515,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertAlmostEqual(props["predicted_ltv"], 149.95, places=2)
         self.assertAlmostEqual(props["value"], props["predicted_ltv"] * 0.22, places=6)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_trial_conversion_topoffs_credits(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="active", billing_reason="subscription_cycle", invoice_id="in_paid")
@@ -1568,7 +1568,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(grant_kwargs["expiration_date"], period_end)
         self.assertFalse(grant_kwargs["free_trial_start"])
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_missing_user_billing_logs_exception(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload()
@@ -1596,7 +1596,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertFalse(UserBilling.objects.filter(user=self.user).exists())
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_cancellation_updates_plan_trait(self):
         self.mock_capi.reset_mock()
         self.billing.subscription = PlanNames.STARTUP
@@ -1647,7 +1647,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertNotIn("event_id", props)
         self.assertTrue(capi_kwargs["context"].get("consent"))
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_trial_cancel_scheduled_emits_lifecycle_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="trialing", billing_reason="subscription_update")
@@ -1677,7 +1677,7 @@ class SubscriptionSignalTests(TestCase):
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("trial_cancel_scheduled", emitted_names)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_subscription_delinquency_entered_emits_lifecycle_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="past_due", billing_reason="subscription_update")
@@ -1701,7 +1701,7 @@ class SubscriptionSignalTests(TestCase):
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("subscription_delinquency_entered", emitted_names)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_active_subscription_update_resumes_paused_owner(self):
         self.billing.execution_paused = True
         self.billing.execution_pause_reason = "billing_delinquency"
@@ -1743,7 +1743,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(self.billing.execution_pause_reason, "")
         self.assertIsNone(self.billing.execution_paused_at)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_trial_ended_non_renewal_emits_lifecycle_event(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload(status="canceled")
@@ -1776,7 +1776,7 @@ class SubscriptionSignalTests(TestCase):
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("trial_ended_non_renewal", emitted_names)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_dedicated_ip_allocation_from_subscription(self):
         self.mock_capi.reset_mock()
         dedicated_item = {
@@ -1816,7 +1816,7 @@ class SubscriptionSignalTests(TestCase):
         mock_release.assert_not_called()
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_dedicated_ip_release_on_quantity_decrease(self):
         self.mock_capi.reset_mock()
         proxy = ProxyServer.objects.create(
@@ -1865,7 +1865,7 @@ class SubscriptionSignalTests(TestCase):
         self.assertEqual(mock_release.call_args.kwargs.get("limit"), 1)
         self.mock_capi.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_dedicated_ip_release_on_cancellation(self):
         self.mock_capi.reset_mock()
         payload = _build_event_payload()
@@ -1889,7 +1889,7 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_called_once()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class SubscriptionSignalOrganizationTests(TestCase):
     def setUp(self):
         owner = User.objects.create_user(username="org-owner", email="org@example.com", password="pw")
@@ -2263,7 +2263,7 @@ class SubscriptionSignalOrganizationTests(TestCase):
         self.mock_capi.assert_not_called()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class PaymentFailedSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="fail-user", email="fail@example.com", password="pw")
@@ -2997,7 +2997,7 @@ class PaymentFailedSignalTests(TestCase):
         self.assertEqual(kwargs["event"], AnalyticsEvent.BILLING_PAYMENT_FAILED)
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class PaymentSetupIntentFailedSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -3266,7 +3266,7 @@ class PaymentSetupIntentFailedSignalTests(TestCase):
         mock_track_anonymous.assert_not_called()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class PaymentSetupIntentSucceededSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
@@ -3924,7 +3924,7 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         mock_sync.assert_called_once_with(updated_subscription)
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class PaymentSucceededSignalTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="success-user", email="success@example.com", password="pw")
