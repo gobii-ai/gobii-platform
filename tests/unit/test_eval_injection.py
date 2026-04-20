@@ -8,7 +8,7 @@ from api.agent.comms.message_service import inject_internal_web_message
 
 User = get_user_model()
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class EvalInjectionTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(

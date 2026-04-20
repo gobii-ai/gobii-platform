@@ -31,7 +31,7 @@ from util.analytics import AnalyticsEvent, AnalyticsSource
 User = get_user_model()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class TrialAbuseServiceTests(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -57,7 +57,7 @@ class TrialAbuseServiceTests(TestCase):
             grant_type=GrantTypeChoices.PROMO,
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_capture_request_identity_signals_and_attribution_stores_raw_values(self):
         user = self._create_user("capture-signals@example.com")
         request = self.factory.post(
@@ -103,7 +103,7 @@ class TrialAbuseServiceTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_capture_request_identity_signals_and_attribution_normalizes_ga_cookie_value(self):
         user = self._create_user("capture-ga-cookie@example.com")
         request = self.factory.post("/signup")
@@ -124,7 +124,7 @@ class TrialAbuseServiceTests(TestCase):
             "333.444",
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_fpjs_match_blocks_trial(self, _mock_get_stripe_customer):
         historical_user = self._create_user("historical-fpjs@example.com")
@@ -152,7 +152,7 @@ class TrialAbuseServiceTests(TestCase):
             [UserIdentitySignalTypeChoices.FPJS_VISITOR_ID],
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_user_has_prior_individual_history_returns_true_for_local_trial_history(
         self,
@@ -163,7 +163,7 @@ class TrialAbuseServiceTests(TestCase):
 
         self.assertTrue(user_has_prior_individual_history(current_user))
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_user_has_prior_individual_history_ignores_cross_account_signal_matches(
         self,
@@ -186,7 +186,7 @@ class TrialAbuseServiceTests(TestCase):
 
         self.assertFalse(user_has_prior_individual_history(current_user))
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse._individual_plan_price_ids", return_value=set())
     @patch("api.services.trial_abuse._individual_plan_product_ids", return_value={"prod_individual"})
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
@@ -241,7 +241,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.NO_TRIAL)
         self.assertIn("fpjs_history_match", result.reason_codes)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_multi_signal_match_sends_user_to_review(self, _mock_get_stripe_customer):
         historical_user = self._create_user("historical-multi@example.com")
@@ -273,7 +273,7 @@ class TrialAbuseServiceTests(TestCase):
             ],
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_ip_only_match_does_not_send_user_to_review(self, _mock_get_stripe_customer):
         historical_user = self._create_user("historical-ip@example.com")
@@ -305,7 +305,7 @@ class TrialAbuseServiceTests(TestCase):
             ],
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_fbp_and_ip_match_sends_user_to_review(self, _mock_get_stripe_customer):
         historical_user = self._create_user("historical-fbp-ip@example.com")
@@ -335,7 +335,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.REVIEW)
         self.assertIn("multi_signal_history_match", result.reason_codes)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_password_signup_post_does_not_reuse_staged_fpjs_cookies(self):
         request = self.factory.post(
             "/signup",
@@ -354,7 +354,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID, extracted)
         self.assertNotIn(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID, extracted)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_non_post_signup_flow_can_use_staged_fpjs_cookies(self):
         request = self.factory.get("/accounts/google/login/callback/")
         request.COOKIES = {
@@ -373,7 +373,7 @@ class TrialAbuseServiceTests(TestCase):
             "request-current",
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.Analytics.track_event")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_tracks_trial_assessment_event_for_explicit_source(
@@ -422,7 +422,7 @@ class TrialAbuseServiceTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.Analytics.track_event")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_does_not_track_trial_assessment_event_without_explicit_source(
@@ -437,7 +437,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertTrue(result.eligible)
         mock_track_event.assert_not_called()
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.get_stripe_customer", return_value=None)
     def test_manual_allow_override_keeps_trial_enabled(self, _mock_get_stripe_customer):
         historical_user = self._create_user("historical-override@example.com")
@@ -465,7 +465,7 @@ class TrialAbuseServiceTests(TestCase):
         self.assertEqual(result.decision, UserTrialEligibilityAutoStatusChoices.ELIGIBLE)
         self.assertEqual(result.manual_action, UserTrialEligibilityManualActionChoices.ALLOW_TRIAL)
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     @patch("api.services.trial_abuse.customer_has_any_individual_subscription", return_value=False)
     @patch("api.services.trial_abuse.get_stripe_customer")
     def test_signal_matching_does_not_fan_out_to_candidate_stripe_lookups(

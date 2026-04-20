@@ -29,7 +29,7 @@ from util.analytics import AnalyticsEvent
 from util.trial_enforcement import can_user_access_personal_agent_chat
 
 
-@tag("batch_console_agents")
+@tag("batch_console_agents_management")
 class AgentChatAccessTests(TestCase):
     def setUp(self):
         User = get_user_model()

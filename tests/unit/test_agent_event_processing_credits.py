@@ -55,7 +55,7 @@ class _DummySpan:
         return None
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class PersistentAgentCreditGateTests(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -396,7 +396,7 @@ class PersistentAgentCreditGateTests(TestCase):
         self.assertIsNone(step.completion)
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class PersistentAgentToolCreditTests(TestCase):
     @classmethod
     def setUpTestData(cls):

@@ -67,7 +67,7 @@ def _meta_ads_definition() -> SystemSkillDefinition:
     )
 
 
-@tag("batch_secrets")
+@tag("batch_secrets_profiles")
 @override_settings(
     GOBII_ENCRYPTION_KEY="test-key-for-system-skill-profiles-123",
     SEGMENT_WRITE_KEY="",

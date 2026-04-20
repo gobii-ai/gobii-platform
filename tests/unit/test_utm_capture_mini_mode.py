@@ -14,7 +14,7 @@ from pages.mini_mode import (
 from pages.models import MiniModeCampaignPattern
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class UTMCaptureMiniModeTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()

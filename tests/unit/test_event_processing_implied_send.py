@@ -28,7 +28,7 @@ from api.models import (
 from api.services.web_sessions import start_web_session
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class ImpliedSendTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -1110,7 +1110,7 @@ class ImpliedSendTests(TestCase):
         self.assertIsNone(correction_step)
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class ContinuationSignalTests(TestCase):
     """Tests for the _has_continuation_signal helper function."""
 
@@ -1142,7 +1142,7 @@ class ContinuationSignalTests(TestCase):
         self.assertTrue(ep._has_continuation_signal("Proceeding to extract the data."))
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class CompletionSignalTests(TestCase):
     """Tests for the _has_completion_signal helper function."""
 
@@ -1185,7 +1185,7 @@ class CompletionSignalTests(TestCase):
         self.assertTrue(ep._has_completion_signal("This completes your request."))
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class MessageContinuationInferenceTests(TestCase):
     """Unit tests for omitted will_continue_work inference on message tools."""
 

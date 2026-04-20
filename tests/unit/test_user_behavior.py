@@ -26,7 +26,7 @@ from util.user_behavior import (
 )
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class UserBehaviorUtilsTests(TestCase):
     def setUp(self):
         self.user = get_user_model().objects.create_user(

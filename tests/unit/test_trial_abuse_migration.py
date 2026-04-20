@@ -14,7 +14,7 @@ from api.models import UserAttribution, UserIdentitySignal, UserIdentitySignalTy
 User = get_user_model()
 
 
-@tag("batch_pages")
+@tag("batch_pages_signals")
 class BackfillUserIdentitySignalsMigrationTests(TestCase):
     def setUp(self):
         self.migration = importlib.import_module(
@@ -22,7 +22,7 @@ class BackfillUserIdentitySignalsMigrationTests(TestCase):
         )
         self.schema_editor = SimpleNamespace(connection=connections["default"])
 
-    @tag("batch_pages")
+    @tag("batch_pages_signals")
     def test_backfill_user_identity_signals_from_attribution(self):
         user = User.objects.create_user(
             username="backfill@example.com",

@@ -5,7 +5,7 @@ from django.test import SimpleTestCase, tag
 from api.agent.core.event_processing import _normalize_tool_result_content
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class ToolResultNormalizationTests(SimpleTestCase):
     def test_normalizes_stringified_json_array(self):
         raw = json.dumps({"status": "success", "result": json.dumps([{"name": "Alice"}])})

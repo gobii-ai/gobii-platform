@@ -7,7 +7,7 @@ from django.test import SimpleTestCase, tag
 from api.agent.files.filesystem_prompt import get_agent_filesystem_prompt
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 class FilesystemPromptTests(SimpleTestCase):
     def test_returns_no_filespace_message_when_agent_has_no_filespace(self):
         agent = SimpleNamespace(id="agent-1")

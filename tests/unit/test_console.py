@@ -32,7 +32,6 @@ from api.services.pipedream_apps import get_owner_apps_state
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
-@tag("batch_console_agents")
 class ConsoleViewsTest(TestCase):
     def setUp(self):
         """Set up test user and client."""
@@ -1781,7 +1780,7 @@ class ConsoleViewsTest(TestCase):
         )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_quick_spawn_trial_requirement_redirects_to_trial_onboarding_modal(self):
         session = self.client.session
         session["agent_charter"] = "Help with tasks"
@@ -1806,7 +1805,7 @@ class ConsoleViewsTest(TestCase):
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_trial_required_quick_create_persists_draft_for_quick_spawn_resume(self, _mock_delay):
         from agents.services import PretrainedWorkerTemplateService
 
@@ -1854,7 +1853,7 @@ class ConsoleViewsTest(TestCase):
         PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
     )
     @patch("console.agent_creation.process_agent_events_task.delay")
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_quick_spawn_enables_selected_pipedream_apps_from_session(self, _mock_delay):
         from api.models import PersistentAgent
 
@@ -1896,7 +1895,7 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_updates_daily_credit_limit(self, mock_track_event, mock_resume_delay):
@@ -1967,7 +1966,7 @@ class ConsoleViewsTest(TestCase):
         response = self.client.get(url)
         self.assertFalse(response.context['daily_credit_low'])
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_quick_settings_api_get(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -1996,7 +1995,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
     def test_agent_quick_settings_api_updates_limit(self, mock_resume_delay):
         from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentSystemStep
@@ -2034,7 +2033,7 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNotNone(latest_system_step)
         self.assertIn("Daily credit soft target changed", latest_system_step.step.description)
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_quick_settings_api_hard_limit_blocked(self):
         from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep, PersistentAgentSystemStep
 
@@ -2082,7 +2081,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(status.get('hardLimitBlocked'))
         self.assertFalse(status.get('hardLimitReached'))
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_task_pack_update_queues_owner_resume(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2125,7 +2124,7 @@ class ConsoleViewsTest(TestCase):
         )
         mock_agent_resume.assert_not_called()
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_context_resolves_personal_plan_payload(self):
         from api.models import PersistentAgent, BrowserUseAgent
         from console import api_views as console_api_views
@@ -2158,7 +2157,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(can_manage_billing)
         self.assertTrue(can_open_billing)
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_falls_back_to_agent_resume_when_owner_resume_noops(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2195,7 +2194,7 @@ class ConsoleViewsTest(TestCase):
         )
 
     @override_settings(STRIPE_CUSTOMER_PORTAL="https://billing.example.test/portal")
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_reports_billing_delinquent_for_past_due_subscription(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2268,7 +2267,7 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(billing.get("paymentIntentStatus"), "requires_payment_method")
         self.assertEqual(billing.get("manageBillingUrl"), "https://billing.example.test/portal")
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_ignores_billing_delinquency_for_grandfathered_user(self):
         from api.models import PersistentAgent, BrowserUseAgent, UserFlags
 
@@ -2340,7 +2339,7 @@ class ConsoleViewsTest(TestCase):
         self.assertFalse(billing.get("actionable"))
         self.assertIsNone(billing.get("reason"))
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_reports_billing_not_delinquent_for_active_subscription(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2411,7 +2410,7 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(billing.get("reason"))
 
     @override_settings(STRIPE_CUSTOMER_PORTAL="https://billing.example.test/portal")
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_addons_api_reports_billing_delinquent_for_retrying_invoice(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2486,6 +2485,7 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(billing.get("paymentIntentStatus"))
         self.assertEqual(billing.get("manageBillingUrl"), "https://billing.example.test/portal")
 
+    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):
@@ -2518,6 +2518,7 @@ class ConsoleViewsTest(TestCase):
             "Expected error message about whole number requirement",
         )
 
+    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_blank_soft_target_sets_unlimited(self):
         from api.models import PersistentAgent, BrowserUseAgent
@@ -2549,6 +2550,7 @@ class ConsoleViewsTest(TestCase):
         slider_bounds = get_daily_credit_slider_bounds(credit_settings)
         self.assertEqual(response.context['daily_credit_slider_value'], slider_bounds["slider_unlimited_value"])
 
+    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_soft_target_clamps_to_bounds(self):
         from api.models import PersistentAgent, BrowserUseAgent
@@ -2587,7 +2589,7 @@ class ConsoleViewsTest(TestCase):
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_detail_ajax_clamps_intelligence_tier_and_returns_warning(self):
         from django.db.models import Max
 
@@ -2651,7 +2653,7 @@ class ConsoleViewsTest(TestCase):
         agent.refresh_from_db()
         self.assertEqual(getattr(agent.preferred_llm_tier, "key", None), "standard")
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_detail_uploads_avatar_and_surfaces_urls(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2697,7 +2699,7 @@ class ConsoleViewsTest(TestCase):
             first_agent = list_payload.get('agents', [])[0]
             self.assertTrue(first_agent.get('avatarUrl'))
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_detail_can_clear_avatar(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2747,7 +2749,7 @@ class ConsoleViewsTest(TestCase):
             first_agent = payload.get('agents', [])[0]
             self.assertIsNone(first_agent.get('avatarUrl'))
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_list_shows_daily_credit_warning(self):
         from api.models import PersistentAgent, BrowserUseAgent, PersistentAgentStep
 
@@ -2798,7 +2800,7 @@ class ConsoleViewsTest(TestCase):
         expected_last_24h_burn = today_usage_cost + last_24h_cost
         self.assertAlmostEqual(agent_data['last24hCreditBurn'], float(expected_last_24h_burn), places=2)
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_eval_agents_hidden_from_listing(self):
         from api.models import PersistentAgent, BrowserUseAgent
 
@@ -2836,7 +2838,7 @@ class ConsoleViewsTest(TestCase):
         self.assertNotIn('Eval Agent', names)
         self.assertEqual(len(agents), 1)
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('console.views.AgentService.has_agents_available', return_value=True)
     @patch('console.views.AgentService.get_agents_available', return_value=5)
     def test_agent_list_payload_includes_available_capacity(self, mock_get_available, _mock_has_available):
@@ -2848,7 +2850,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(payload['canSpawnAgents'])
         mock_get_available.assert_called()
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
     @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
     def test_agent_list_payload_includes_personal_agents_for_chat_recovery_users(
@@ -2879,7 +2881,7 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertFalse(payload['canSpawnAgents'])
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
     @patch('console.views.can_user_access_personal_agent_chat', return_value=False)
     def test_agent_list_payload_includes_signup_preview_agents_without_plan(
@@ -2926,7 +2928,7 @@ class ConsoleViewsTest(TestCase):
             PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
         )
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
     def test_agent_list_payload_exposes_signup_preview_state_for_agents(self, _mock_chat_access):
         from api.models import BrowserUseAgent, PersistentAgent
@@ -2968,7 +2970,7 @@ class ConsoleViewsTest(TestCase):
             PersistentAgent.SignupPreviewState.NONE,
         )
 
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_detail_allows_selecting_dedicated_ip(self):
         from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
 
@@ -3040,7 +3042,7 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(browser_agent.preferred_proxy_id)
 
     @override_settings(DEDICATED_IP_ALLOW_MULTI_ASSIGN=False)
-    @tag("batch_console_agents")
+    @tag("batch_console_agents_management")
     def test_agent_detail_blocks_duplicate_dedicated_ip_when_multi_assign_disabled(self):
         from api.models import PersistentAgent, BrowserUseAgent, ProxyServer, DedicatedProxyAllocation
 

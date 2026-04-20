@@ -127,6 +127,8 @@ jobs:
             tag: batch_email_footer
           - batch: pages
             tag: batch_pages
+          - batch: pages_signals
+            tag: batch_pages_signals
           - batch: public_templates
             tag: batch_public_templates
           - batch: marketing_events
@@ -135,12 +137,16 @@ jobs:
             tag: batch_contact_requests
           - batch: console_agents
             tag: batch_console_agents
+          - batch: console_agents_management
+            tag: batch_console_agents_management
           - batch: console_allowlist
             tag: batch_console_allowlist
           - batch: outbound_email
             tag: batch_outbound_email
           - batch: secrets
             tag: batch_secrets
+          - batch: secrets_profiles
+            tag: batch_secrets_profiles
           - batch: global_secrets
             tag: global_secrets_batch
           - batch: global_skill_evals
@@ -181,6 +187,8 @@ jobs:
             tag: batch_api_serializer
           - batch: api_tasks
             tag: batch_api_tasks
+          - batch: api_tasks_reads
+            tag: batch_api_tasks_reads
           - batch: api_tasks_mutations
             tag: batch_api_tasks_mutations
           - batch: periodic
@@ -225,6 +233,8 @@ jobs:
             tag: batch_event_llm
           - batch: event_processing
             tag: batch_event_processing
+          - batch: event_processing_credits
+            tag: batch_event_processing_credits
           - batch: event_parallel
             tag: batch_event_parallel
           - batch: mcp_tools

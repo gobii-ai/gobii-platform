@@ -13,7 +13,7 @@ from api.models import (
 )
 
 
-@tag("batch_event_processing")
+@tag("batch_event_processing_credits")
 @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class EventProcessingHumanInputTests(TestCase):
     @classmethod
