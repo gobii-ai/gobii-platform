@@ -10,7 +10,7 @@ import ast
 import os
 import re
 import sys
-from typing import Iterable, Set, Tuple
+from typing import Iterable
 
 
 _EXCLUDED_DIRS = {
@@ -37,8 +37,8 @@ def find_test_files() -> list[str]:
         # Prune excluded directories in-place so os.walk skips them
         dirnames[:] = [d for d in dirnames if d not in _EXCLUDED_DIRS]
 
-        norm = (dirpath + "/").replace("\\", "/")
-        in_tests_dir = "/tests/" in norm
+        path_parts = dirpath.replace("\\", "/").split("/")
+        in_tests_dir = "tests" in path_parts
         for fname in filenames:
             if not fname.endswith(".py"):
                 continue
@@ -46,6 +46,27 @@ def find_test_files() -> list[str]:
             if is_test_file and in_tests_dir:
                 results.append(os.path.join(dirpath, fname))
     return results
+
+
+def collect_module_string_constants(tree: ast.Module) -> dict[str, str]:
+    constants: dict[str, str] = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if (
+                    isinstance(target, ast.Name)
+                    and isinstance(node.value, ast.Constant)
+                    and isinstance(node.value.value, str)
+                ):
+                    constants[target.id] = node.value.value
+        elif isinstance(node, ast.AnnAssign):
+            if (
+                isinstance(node.target, ast.Name)
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                constants[node.target.id] = node.value.value
+    return constants
 
 
 def decorator_is_tag(node: ast.expr) -> bool:
@@ -60,7 +81,7 @@ def decorator_is_tag(node: ast.expr) -> bool:
 def class_or_func_tags(
     decorators: Iterable[ast.expr],
     constants: dict[str, str] | None = None,
-) -> Set[str]:
+) -> set[str]:
     """Extract tag names from ``@tag(...)`` decorators.
 
     *constants* is an optional mapping of module-level variable names to their
@@ -68,7 +89,7 @@ def class_or_func_tags(
     resolver looks up *NAME* in this map to obtain the real tag value.
     """
     constants = constants or {}
-    tags: Set[str] = set()
+    tags: set[str] = set()
     for d in decorators:
         if isinstance(d, ast.Call):
             if decorator_is_tag(d):
@@ -84,7 +105,7 @@ def has_tag(decorators: Iterable[ast.expr]) -> bool:
     return any(decorator_is_tag(d) for d in decorators)
 
 
-def collect_tests_and_tags(pyfile: str) -> Tuple[int, int, list[str], Set[str]]:
+def collect_tests_and_tags(pyfile: str) -> tuple[int, int, list[str], set[str]]:
     """Return (total_tests, untagged_tests, untagged_names, used_tags)."""
     with open(pyfile, "r", encoding="utf-8") as fh:
         try:
@@ -95,25 +116,16 @@ def collect_tests_and_tags(pyfile: str) -> Tuple[int, int, list[str], Set[str]]:
 
     # Build a map of module-level constant assignments (e.g. BATCH_TAG = "value")
     # so that @tag(BATCH_TAG) can be resolved to the actual string.
-    constants: dict[str, str] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if (
-                    isinstance(target, ast.Name)
-                    and isinstance(node.value, ast.Constant)
-                    and isinstance(node.value.value, str)
-                ):
-                    constants[target.id] = node.value.value
+    constants = collect_module_string_constants(tree)
 
     total = 0
     untagged = 0
     untagged_list: list[str] = []
-    used_tags: Set[str] = set()
+    used_tags: set[str] = set()
 
     # Track class-level tagging status and tags
     class_tagged: dict[str, bool] = {}
-    class_tags: dict[str, Set[str]] = {}
+    class_tags: dict[str, set[str]] = {}
 
     for node in tree.body:
         if isinstance(node, ast.ClassDef):
@@ -144,11 +156,11 @@ def collect_tests_and_tags(pyfile: str) -> Tuple[int, int, list[str], Set[str]]:
     return total, untagged, untagged_list, used_tags
 
 
-def load_ci_tags(ci_yml_path: str = ".github/workflows/ci.yml") -> Set[str]:
+def load_ci_tags(ci_yml_path: str = ".github/workflows/ci.yml") -> set[str]:
     # Only accept YAML mapping lines that begin with optional spaces then 'tag:'
     # to avoid matching shell strings like: echo "... tag: $TAG".
     tag_line = re.compile(r"^\s*tag:\s*([A-Za-z0-9_.-]+)\s*$")
-    tags: Set[str] = set()
+    tags: set[str] = set()
     try:
         with open(ci_yml_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -169,7 +181,7 @@ def main() -> int:
     total = 0
     total_untagged = 0
     untagged_names: list[str] = []
-    used_tags: Set[str] = set()
+    used_tags: set[str] = set()
 
     for f in sorted(files):
         t, u, names, tags = collect_tests_and_tags(f)
@@ -213,4 +225,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
