@@ -37,7 +37,6 @@ jobs:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: tag-guard
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -61,7 +60,6 @@ jobs:
     name: Sandbox Server Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: tag-guard
     env:
       TEST_OUTPUT_DIR: test-results
     steps:
@@ -108,7 +106,6 @@ jobs:
     name: tests (${{ matrix.batch }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    needs: tag-guard
     strategy:
       fail-fast: false
       matrix:
