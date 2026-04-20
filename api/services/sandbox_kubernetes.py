@@ -30,6 +30,36 @@ _DEFAULT_EGRESS_PROXY_HTTP_PORT = 3128
 _DEFAULT_EGRESS_PROXY_SOCKS_PORT = 1080
 
 
+def _required_resource_quantity(setting_name: str, value: Any) -> str:
+    quantity = str(value or "").strip()
+    if not quantity:
+        raise SandboxComputeUnavailable(f"{setting_name} is required for kubernetes backend.")
+    return quantity
+
+
+def _build_container_resources(
+    *,
+    cpu_request: Any,
+    memory_request: Any,
+    cpu_limit: Any,
+    memory_limit: Any,
+    cpu_request_setting: str,
+    memory_request_setting: str,
+    cpu_limit_setting: str,
+    memory_limit_setting: str,
+) -> Dict[str, Dict[str, str]]:
+    return {
+        "requests": {
+            "cpu": _required_resource_quantity(cpu_request_setting, cpu_request),
+            "memory": _required_resource_quantity(memory_request_setting, memory_request),
+        },
+        "limits": {
+            "cpu": _required_resource_quantity(cpu_limit_setting, cpu_limit),
+            "memory": _required_resource_quantity(memory_limit_setting, memory_limit),
+        },
+    }
+
+
 class KubernetesApiError(RuntimeError):
     def __init__(self, status_code: int, message: str) -> None:
         super().__init__(message)
@@ -100,6 +130,16 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pod_runtime_class = getattr(settings, "SANDBOX_COMPUTE_POD_RUNTIME_CLASS", "gvisor")
         self._pod_configmap = getattr(settings, "SANDBOX_COMPUTE_POD_CONFIGMAP_NAME", "gobii-sandbox-common-env")
         self._pod_secret = getattr(settings, "SANDBOX_COMPUTE_POD_SECRET_NAME", "gobii-sandbox-env")
+        self._pod_resources = _build_container_resources(
+            cpu_request=settings.SANDBOX_COMPUTE_POD_CPU_REQUEST,
+            memory_request=settings.SANDBOX_COMPUTE_POD_MEMORY_REQUEST,
+            cpu_limit=settings.SANDBOX_COMPUTE_POD_CPU_LIMIT,
+            memory_limit=settings.SANDBOX_COMPUTE_POD_MEMORY_LIMIT,
+            cpu_request_setting="SANDBOX_COMPUTE_POD_CPU_REQUEST",
+            memory_request_setting="SANDBOX_COMPUTE_POD_MEMORY_REQUEST",
+            cpu_limit_setting="SANDBOX_COMPUTE_POD_CPU_LIMIT",
+            memory_limit_setting="SANDBOX_COMPUTE_POD_MEMORY_LIMIT",
+        )
         self._egress_proxy_image = get_sandbox_egress_proxy_pod_image()
         self._egress_proxy_port = int(
             getattr(settings, "SANDBOX_EGRESS_PROXY_POD_PORT", _DEFAULT_EGRESS_PROXY_HTTP_PORT)
@@ -116,6 +156,16 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._egress_proxy_runtime_class = getattr(settings, "SANDBOX_EGRESS_PROXY_POD_RUNTIME_CLASS", "") or ""
         self._egress_proxy_service_account = (
             getattr(settings, "SANDBOX_EGRESS_PROXY_POD_SERVICE_ACCOUNT", "") or ""
+        )
+        self._egress_proxy_resources = _build_container_resources(
+            cpu_request=settings.SANDBOX_EGRESS_PROXY_POD_CPU_REQUEST,
+            memory_request=settings.SANDBOX_EGRESS_PROXY_POD_MEMORY_REQUEST,
+            cpu_limit=settings.SANDBOX_EGRESS_PROXY_POD_CPU_LIMIT,
+            memory_limit=settings.SANDBOX_EGRESS_PROXY_POD_MEMORY_LIMIT,
+            cpu_request_setting="SANDBOX_EGRESS_PROXY_POD_CPU_REQUEST",
+            memory_request_setting="SANDBOX_EGRESS_PROXY_POD_MEMORY_REQUEST",
+            cpu_limit_setting="SANDBOX_EGRESS_PROXY_POD_CPU_LIMIT",
+            memory_limit_setting="SANDBOX_EGRESS_PROXY_POD_MEMORY_LIMIT",
         )
         self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
         self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
@@ -179,6 +229,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 if not _sandbox_pod_matches(
                     pod,
                     image=self._pod_image,
+                    resources=self._pod_resources,
                     egress_service_name=egress_service_name,
                     http_proxy_port=self._egress_proxy_service_port,
                     socks_proxy_port=self._egress_proxy_socks_service_port,
@@ -497,6 +548,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 if not _egress_proxy_pod_matches(
                     pod,
                     proxy_server=proxy_server,
+                    resources=self._egress_proxy_resources,
                     http_listen_port=self._egress_proxy_port,
                     socks_listen_port=self._egress_proxy_socks_port,
                 ):
@@ -532,6 +584,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             configmap_name=self._pod_configmap,
             secret_name=self._pod_secret,
             agent_id=agent_id,
+            resources=self._pod_resources,
             egress_service_name=egress_service_name,
             http_proxy_port=self._egress_proxy_service_port,
             socks_proxy_port=self._egress_proxy_socks_service_port,
@@ -552,6 +605,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             service_account=self._egress_proxy_service_account or None,
             agent_id=agent_id,
             proxy_server=proxy_server,
+            resources=self._egress_proxy_resources,
             http_listen_port=self._egress_proxy_port,
             socks_listen_port=self._egress_proxy_socks_port,
         )
@@ -904,6 +958,7 @@ def _build_pod_manifest(
     configmap_name: str,
     secret_name: str,
     agent_id: str,
+    resources: Dict[str, Dict[str, str]],
     egress_service_name: Optional[str],
     http_proxy_port: int,
     socks_proxy_port: int,
@@ -937,6 +992,10 @@ def _build_pod_manifest(
             "runAsUser": 1000,
             "runAsGroup": 1000,
             "capabilities": {"drop": ["ALL"]},
+        },
+        "resources": {
+            "requests": dict(resources["requests"]),
+            "limits": dict(resources["limits"]),
         },
         "volumeMounts": [
             {"name": "workspace", "mountPath": "/workspace"},
@@ -1040,6 +1099,7 @@ def _build_egress_proxy_pod_manifest(
     service_account: Optional[str],
     agent_id: str,
     proxy_server: Any,
+    resources: Dict[str, Dict[str, str]],
     http_listen_port: int,
     socks_listen_port: int,
 ) -> Dict[str, Any]:
@@ -1095,6 +1155,10 @@ def _build_egress_proxy_pod_manifest(
                     "runAsGroup": 1000,
                     "capabilities": {"drop": ["ALL"]},
                 },
+                "resources": {
+                    "requests": dict(resources["requests"]),
+                    "limits": dict(resources["limits"]),
+                },
                 "readinessProbe": {
                     "tcpSocket": {"port": http_listen_port},
                     "initialDelaySeconds": 3,
@@ -1147,6 +1211,7 @@ def _egress_proxy_pod_matches(
     pod: Dict[str, Any],
     *,
     proxy_server: Any,
+    resources: Dict[str, Dict[str, str]],
     http_listen_port: int,
     socks_listen_port: int,
 ) -> bool:
@@ -1178,13 +1243,16 @@ def _egress_proxy_pod_matches(
         "UPSTREAM_USERNAME": str(getattr(proxy_server, "username", "") or "").strip(),
         "UPSTREAM_PASSWORD": str(getattr(proxy_server, "password", "") or "").strip(),
     }
-    return all(env.get(key, "") == value for key, value in expected.items())
+    if not all(env.get(key, "") == value for key, value in expected.items()):
+        return False
+    return _container_resources_match(container, resources)
 
 
 def _sandbox_pod_matches(
     pod: Dict[str, Any],
     *,
     image: str,
+    resources: Dict[str, Dict[str, str]],
     egress_service_name: Optional[str],
     http_proxy_port: int,
     socks_proxy_port: int,
@@ -1238,7 +1306,25 @@ def _sandbox_pod_matches(
         "all_proxy",
         "no_proxy",
     }
-    return all(env.get(key, "") == expected_proxy_env.get(key, "") for key in proxy_keys)
+    if not all(env.get(key, "") == expected_proxy_env.get(key, "") for key in proxy_keys):
+        return False
+    return _container_resources_match(container, resources)
+
+
+def _container_resources_match(container: Dict[str, Any], expected_resources: Dict[str, Dict[str, str]]) -> bool:
+    actual_resources = container.get("resources") or {}
+    if not isinstance(actual_resources, dict):
+        return False
+    actual_requests = actual_resources.get("requests") or {}
+    actual_limits = actual_resources.get("limits") or {}
+    if not isinstance(actual_requests, dict) or not isinstance(actual_limits, dict):
+        return False
+    expected_requests = expected_resources.get("requests") or {}
+    expected_limits = expected_resources.get("limits") or {}
+    return (
+        all(str(actual_requests.get(key, "")) == value for key, value in expected_requests.items())
+        and all(str(actual_limits.get(key, "")) == value for key, value in expected_limits.items())
+    )
 
 
 def _build_egress_proxy_service_manifest(
