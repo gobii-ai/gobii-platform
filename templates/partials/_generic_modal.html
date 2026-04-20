@@ -1,19 +1,26 @@
 {# Generic Modal Component #}
 <div 
   id="{% block modal_id %}generic-modal{% endblock %}" 
-  x-data="{ showModal: false, actionUrl: '' }"
+  x-data="{ showModal: false, actionUrl: '', modalId: '{% block modal_event_id %}generic-modal{% endblock %}', closeEventId: '{% block modal_event_id_close %}generic-modal{% endblock %}' }"
   x-show="showModal"
   x-on:open-modal.window="
-    if ($event.detail.id === '{% block modal_event_id %}generic-modal{% endblock %}') { 
-      showModal = true; 
-      if ($event.detail.url) { actionUrl = $event.detail.url; } 
+    if ($event.detail.id === modalId) {
+      showModal = true;
+      if ($event.detail.url) { actionUrl = $event.detail.url; }
     }"
   x-on:close-modal.window="
-    if ($event.detail.id === '{% block modal_event_id_close %}generic-modal{% endblock %}') { 
-      showModal = false; 
-      actionUrl = ''; 
+    if ($event.detail.id === closeEventId) {
+      showModal = false;
+      actionUrl = '';
     }"
-  x-on:keydown.escape.window="showModal = false; actionUrl = '';"
+  x-on:keydown.escape.window="
+    if (showModal) {
+      showModal = false;
+      actionUrl = '';
+      window.dispatchEvent(new CustomEvent('gobii-modal-dismissed', {
+        detail: { id: closeEventId, reason: 'escape' }
+      }));
+    }"
   x-cloak
   class="{% block modal_root_class %}fixed inset-0 z-50 overflow-y-auto{% endblock %}"
   aria-labelledby="modal-title"
@@ -32,8 +39,16 @@
          x-transition:leave-start="opacity-100"
          x-transition:leave-end="opacity-0"
          class="fixed inset-0 z-40 bg-gray-500 bg-opacity-75 backdrop-blur-sm transition-opacity" 
+         data-modal-backdrop
          aria-hidden="true"
-         @click="showModal = false"> {# Close on backdrop click #}
+         @click="
+           if (showModal) {
+             showModal = false;
+             actionUrl = '';
+             window.dispatchEvent(new CustomEvent('gobii-modal-dismissed', {
+               detail: { id: closeEventId, reason: 'backdrop' }
+             }));
+           }"> {# Close on backdrop click #}
     </div>
 
     {# Modal panel with transition #}

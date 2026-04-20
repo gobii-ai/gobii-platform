@@ -267,5 +267,12 @@ def cta_signup_modal(request: HttpRequest):
             "signup_url": reverse("account_signup_modal"),
             "login_url": reverse("account_login_modal"),
             "popup_complete_url": reverse("account_auth_popup_complete"),
+            "events": {
+                "opened": AnalyticsEvent.CTA_AUTH_MODAL_OPENED.value,
+                "closed": AnalyticsEvent.CTA_AUTH_MODAL_CLOSED.value,
+                "step_viewed": AnalyticsEvent.CTA_AUTH_MODAL_STEP_VIEWED.value,
+                "email_routed": AnalyticsEvent.CTA_AUTH_MODAL_EMAIL_ROUTED.value,
+                "failed": AnalyticsEvent.CTA_AUTH_MODAL_FAILED.value,
+            },
         }
     }

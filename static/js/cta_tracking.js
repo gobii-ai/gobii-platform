@@ -53,22 +53,34 @@
     return fromDataset || 'CTA Clicked';
   }
 
-  function buildBaseProps(element) {
-    var pathname = window.location.pathname || '/';
-    var pageSlug = element.dataset.analyticsPageSlug || derivePageSlug(pathname);
+  function getDataset(element) {
+    if (!element || !element.dataset) {
+      return {};
+    }
+    return element.dataset;
+  }
+
+  function buildBaseProps(element, options) {
+    options = options || {};
+    var dataset = getDataset(element);
+    var pathname = options.page_path || window.location.pathname || '/';
+    var pageSlug = options.page_slug || dataset.analyticsPageSlug || derivePageSlug(pathname);
 
     return {
       page_slug: pageSlug,
       medium: 'Web',
       page_path: pathname,
-      placement: element.dataset.analyticsPlacement || ''
+      placement: options.placement !== undefined ? options.placement : (dataset.analyticsPlacement || '')
     };
   }
 
-  function buildDatasetProps(element) {
+  function buildDatasetProps(element, options) {
+    options = options || {};
+    var dataset = getDataset(element);
+
     return compactProperties({
-      auth_provider: element.dataset.analyticsAuthProvider || '',
-      auth_surface: element.dataset.analyticsAuthSurface || ''
+      auth_provider: options.auth_provider !== undefined ? options.auth_provider : (dataset.analyticsAuthProvider || ''),
+      auth_surface: options.auth_surface !== undefined ? options.auth_surface : (dataset.analyticsAuthSurface || '')
     });
   }
 
@@ -84,58 +96,115 @@
     return (element.textContent || '').trim();
   }
 
-  function trackFormSubmit(form, submitEvent) {
+  function getSubmitter(form, options) {
+    options = options || {};
+    if (options.submitter) {
+      return options.submitter;
+    }
+
+    return form.querySelector('button[type="submit"], input[type="submit"]');
+  }
+
+  function buildFormProps(form, options) {
+    options = options || {};
     var sourceInput = form.querySelector('input[name="source_page"]');
-    var sourcePage = sourceInput ? sourceInput.value : '';
-    var ctaId = form.dataset.analyticsCtaId || sourcePage;
+    var sourcePage = options.source_page !== undefined ? options.source_page : (sourceInput ? sourceInput.value : '');
+    var ctaId = options.cta_id || form.dataset.analyticsCtaId || sourcePage;
     if (!ctaId) {
+      return {};
+    }
+
+    var submitter = getSubmitter(form, options);
+    var label = options.cta_label !== undefined ? options.cta_label : getElementLabel(submitter);
+    var action = form.getAttribute('action') || '';
+    var destination = normalizeDestination(
+      options.destination !== undefined ? options.destination : (form.dataset.analyticsDestination || action)
+    );
+    var trialOnboardingTarget = options.trial_onboarding_target !== undefined
+      ? options.trial_onboarding_target
+      : ((form.querySelector('input[name="trial_onboarding_target"]') || {}).value || '');
+
+    return compactProperties(Object.assign(
+      {},
+      buildBaseProps(form, options),
+      {
+        id: ctaId,
+        cta_id: ctaId,
+        source_page: sourcePage,
+        intent: options.intent !== undefined ? options.intent : (form.dataset.analyticsIntent || ''),
+        destination: destination,
+        cta_label: label,
+        cta_type: options.cta_type || 'form_submit',
+        trial_onboarding_target: trialOnboardingTarget,
+        authenticated: options.authenticated !== undefined ? options.authenticated : (form.dataset.authenticated || '')
+      },
+      buildDatasetProps(form, options),
+      compactProperties(options.properties || {})
+    ));
+  }
+
+  function buildClickProps(element, options) {
+    options = options || {};
+    var dataset = getDataset(element);
+    var ctaId = options.cta_id || dataset.analyticsCtaId || '';
+    if (!ctaId) {
+      return {};
+    }
+
+    var label = options.cta_label !== undefined ? options.cta_label : (dataset.analyticsLabel || element.textContent || '').trim();
+    var href = element.getAttribute('href') || '';
+    var destination = normalizeDestination(
+      options.destination !== undefined ? options.destination : (dataset.analyticsDestination || href)
+    );
+
+    return compactProperties(Object.assign(
+      {},
+      buildBaseProps(element, options),
+      {
+        id: ctaId,
+        cta_id: ctaId,
+        intent: options.intent !== undefined ? options.intent : (dataset.analyticsIntent || ''),
+        destination: destination,
+        cta_label: label,
+        cta_type: options.cta_type || 'click'
+      },
+      buildDatasetProps(element, options),
+      compactProperties(options.properties || {})
+    ));
+  }
+
+  function buildCtaTrackingProperties(element, options) {
+    options = options || {};
+    if (!element) {
+      return compactProperties(options.properties || {});
+    }
+
+    var tagName = element.tagName ? element.tagName.toLowerCase() : '';
+    if (tagName === 'form' || options.is_form === true) {
+      return buildFormProps(element, options);
+    }
+
+    return buildClickProps(element, options);
+  }
+
+  function trackCtaElement(element, options) {
+    var properties = buildCtaTrackingProperties(element, options);
+    if (!properties.cta_id) {
       return;
     }
 
-    var submitter = submitEvent && submitEvent.submitter ? submitEvent.submitter : null;
-    if (!submitter) {
-      submitter = form.querySelector('button[type="submit"], input[type="submit"]');
-    }
+    track(options && options.eventName ? options.eventName : getEventName(), properties);
+    return properties;
+  }
 
-    var label = getElementLabel(submitter);
-    var action = form.getAttribute('action') || '';
-    var destination = normalizeDestination(form.dataset.analyticsDestination || action);
-
-    var properties = compactProperties({
-      id: ctaId,
-      cta_id: ctaId,
-      source_page: sourcePage,
-      intent: form.dataset.analyticsIntent || '',
-      destination: destination,
-      cta_label: label,
-      cta_type: 'form_submit',
-      trial_onboarding_target: (form.querySelector('input[name="trial_onboarding_target"]') || {}).value || '',
-      authenticated: form.dataset.authenticated || ''
+  function trackFormSubmit(form, submitEvent) {
+    return trackCtaElement(form, {
+      submitter: submitEvent && submitEvent.submitter ? submitEvent.submitter : null
     });
-
-    track(getEventName(), Object.assign({}, buildBaseProps(form), properties, buildDatasetProps(form)));
   }
 
   function trackClick(element) {
-    var ctaId = element.dataset.analyticsCtaId || '';
-    if (!ctaId) {
-      return;
-    }
-
-    var label = (element.dataset.analyticsLabel || element.textContent || '').trim();
-    var href = element.getAttribute('href') || '';
-    var destination = normalizeDestination(element.dataset.analyticsDestination || href);
-
-    var properties = compactProperties({
-      id: ctaId,
-      cta_id: ctaId,
-      intent: element.dataset.analyticsIntent || '',
-      destination: destination,
-      cta_label: label,
-      cta_type: 'click'
-    });
-
-    track(getEventName(), Object.assign({}, buildBaseProps(element), properties, buildDatasetProps(element)));
+    return trackCtaElement(element);
   }
 
   function isTrackedPage() {
@@ -175,6 +244,8 @@
     });
   }
 
+  window.gobiiGetCtaTrackingProperties = buildCtaTrackingProperties;
+  window.gobiiTrackCtaElement = trackCtaElement;
   window.gobiiTrackCta = function (payload) {
     if (!payload || !payload.cta_id) {
       return;
@@ -188,11 +259,15 @@
       cta_label: payload.cta_label,
       source_page: payload.source_page,
       page_slug: payload.page_slug,
+      page_path: payload.page_path || window.location.pathname || '/',
       placement: payload.placement,
       cta_type: payload.cta_type || 'manual',
-      medium: 'Web'
+      medium: 'Web',
+      auth_provider: payload.auth_provider,
+      auth_surface: payload.auth_surface
     });
 
+    properties = Object.assign(properties, compactProperties(payload.properties || {}));
     track(getEventName(), properties);
   };
 

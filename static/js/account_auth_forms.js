@@ -31,6 +31,34 @@
     };
   }
 
+  function trackModalCta(element, options) {
+    const authRoot = element && typeof element.closest === "function"
+      ? element.closest("[data-account-auth-root]")
+      : null;
+    if (!authRoot || authRoot.dataset.authMode !== "modal" || typeof window.gobiiTrackCtaElement !== "function") {
+      return;
+    }
+
+    const step = options && options.step ? options.step : (authRoot.dataset.authTab || "");
+    const modalOptions = window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.getCtaTrackingOptions === "function"
+      ? window.GobiiCtaSignupModal.getCtaTrackingOptions(step)
+      : {};
+    const trackingOptions = Object.assign({}, modalOptions, options || {});
+    trackingOptions.properties = Object.assign({}, modalOptions.properties || {}, (options && options.properties) || {});
+    window.gobiiTrackCtaElement(element, trackingOptions);
+  }
+
+  function trackModalFailure(authRoot, failureKind) {
+    if (!authRoot || !window.GobiiCtaSignupModal || typeof window.GobiiCtaSignupModal.trackFailure !== "function") {
+      return;
+    }
+
+    window.GobiiCtaSignupModal.trackFailure({
+      step: authRoot.dataset.authTab || "",
+      failureKind: failureKind,
+    });
+  }
+
   function shouldStageIdentitySignals(config) {
     return Boolean(config.fpjsEnabled && config.fpjsLoaderUrl);
   }
@@ -212,6 +240,10 @@
   }
 
   function handleSocialLinkClick(authRoot, link) {
+    const config = getRootConfig(authRoot);
+    if (config.mode === "modal") {
+      trackModalCta(link);
+    }
     const controller = getClientSignalsController(authRoot);
     const prepared = prepareSocialHref(authRoot, link);
     controller.readyPromise.finally(() => {
@@ -331,8 +363,29 @@
     }
   }
 
+  function resetModalSubmitState(form, options) {
+    if (!form) {
+      return;
+    }
+
+    form.dataset.submitting = "false";
+    if (options && options.clearClientSignalsPending) {
+      form.dataset.clientSignalsPending = "false";
+    }
+    if (options && options.submitButtons) {
+      setButtonsDisabled(options.submitButtons, false);
+    }
+  }
+
+  function submitModalFormWithCleanup(form, options) {
+    return submitModalForm(form).finally(() => {
+      resetModalSubmitState(form, options);
+    });
+  }
+
   async function submitModalForm(form) {
     const authRoot = form.closest("[data-account-auth-root]");
+    const authTab = authRoot ? authRoot.dataset.authTab || "" : "";
     const formData = new FormData(form);
 
     try {
@@ -351,10 +404,20 @@
         : null;
 
       if (!response.ok && !(payload && payload.html)) {
-        throw new Error((payload && payload.error) || "Authentication request failed.");
+        const authError = new Error((payload && payload.error) || "Authentication request failed.");
+        if (response.status === 401 || response.status === 403) {
+          authError._gobiiFailureKind = "auth";
+        } else if (response.status === 400) {
+          authError._gobiiFailureKind = "validation";
+        } else {
+          authError._gobiiFailureKind = "unexpected_response";
+        }
+        throw authError;
       }
       if (!payload) {
-        throw new Error("Unexpected authentication response.");
+        const responseError = new Error("Unexpected authentication response.");
+        responseError._gobiiFailureKind = "unexpected_response";
+        throw responseError;
       }
 
       if (payload.location) {
@@ -362,6 +425,17 @@
         return;
       }
       if (payload.auth_url) {
+        if (
+          authTab === "email-start"
+          && window.GobiiCtaSignupModal
+          && typeof window.GobiiCtaSignupModal.trackEmailRouted === "function"
+          && typeof window.GobiiCtaSignupModal.getRouteFromUrl === "function"
+        ) {
+          const route = window.GobiiCtaSignupModal.getRouteFromUrl(payload.auth_url);
+          if (route) {
+            window.GobiiCtaSignupModal.trackEmailRouted(route);
+          }
+        }
         if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.open === "function") {
           window.GobiiCtaSignupModal.open(payload.auth_url);
           return;
@@ -370,10 +444,15 @@
         return;
       }
       if (payload.html) {
+        if (!response.ok && (authTab === "signup" || authTab === "login")) {
+          trackModalFailure(authRoot, "validation");
+        }
         replaceModalContent(payload.html);
         return;
       }
-      throw new Error("Unexpected authentication response.");
+      const unexpectedResponseError = new Error("Unexpected authentication response.");
+      unexpectedResponseError._gobiiFailureKind = "unexpected_response";
+      throw unexpectedResponseError;
     } catch (error) {
       let fallbackMessage = "Unable to continue right now.";
       if (authRoot && authRoot.dataset.authTab === "signup") {
@@ -381,6 +460,10 @@
       } else if (authRoot && authRoot.dataset.authTab === "login") {
         fallbackMessage = "Unable to complete sign in right now.";
       }
+      trackModalFailure(
+        authRoot,
+        error && error._gobiiFailureKind ? error._gobiiFailureKind : "unexpected_response"
+      );
       showModalError((error && error.message) || fallbackMessage);
     }
   }
@@ -424,11 +507,17 @@
       if (form.dataset.clientSignalsPending === "true") {
         return;
       }
+      trackModalCta(form, {
+        submitter: event.submitter || null,
+      });
       form.dataset.clientSignalsPending = "true";
       setButtonsDisabled(submitButtons, true);
       controller.readyPromise.finally(() => {
         form.dataset.submitting = "true";
-        submitModalForm(form);
+        submitModalFormWithCleanup(form, {
+          clearClientSignalsPending: true,
+          submitButtons: submitButtons,
+        });
       });
     });
   }
@@ -446,11 +535,13 @@
       if (form.dataset.submitting === "true") {
         return;
       }
+      trackModalCta(form, {
+        submitter: event.submitter || null,
+      });
       form.dataset.submitting = "true";
       setButtonsDisabled(submitButtons, true);
-      submitModalForm(form).finally(() => {
-        form.dataset.submitting = "false";
-        setButtonsDisabled(submitButtons, false);
+      submitModalFormWithCleanup(form, {
+        submitButtons: submitButtons,
       });
     });
   }
@@ -491,16 +582,22 @@
       }
 
       event.preventDefault();
+      trackModalCta(form, {
+        submitter: event.submitter || null,
+      });
       form.dataset.submitting = "true";
-      submitModalForm(form);
+      submitModalFormWithCleanup(form);
     });
   }
 
   function finalizeLoginSubmit(form) {
     const config = getRootConfig(form.closest("[data-account-auth-root]"));
     if (config.mode === "modal") {
+      trackModalCta(form, {
+        submitter: form.querySelector("[data-turnstile-submit]") || null,
+      });
       form.dataset.submitting = "true";
-      submitModalForm(form);
+      submitModalFormWithCleanup(form);
       return;
     }
     form.dataset.submitting = "true";
@@ -540,6 +637,7 @@
         }
         event.preventDefault();
         event.stopPropagation();
+        trackModalCta(link);
         if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.open === "function") {
           window.GobiiCtaSignupModal.open(modalUrl);
           return;
@@ -622,7 +720,7 @@
       }
       clearPopupSession(payload.state);
       if (window.GobiiCtaSignupModal && typeof window.GobiiCtaSignupModal.close === "function") {
-        window.GobiiCtaSignupModal.close();
+        window.GobiiCtaSignupModal.close("completed", { track: false });
       }
       window.location.assign(session.targetUrl);
     } catch (_error) {

@@ -30,7 +30,7 @@
 
   {% if social_providers %}
     {% trans "Continue" as social_action_text %}
-    {% include "account/_social_auth_buttons.html" with providers=social_providers surface="signup" action_text=social_action_text show_password_divider=False social_next_url=auth_popup_complete_url social_popup_mode=True %}
+    {% include "account/_social_auth_buttons.html" with providers=social_providers surface="modal_start" action_text=social_action_text show_password_divider=False social_next_url=auth_popup_complete_url social_popup_mode=True %}
     <div class="my-6 flex items-center text-xs text-gray-400 uppercase before:flex-1 before:border-t before:border-gray-200 before:me-6 after:flex-1 after:border-t after:border-gray-200 after:ms-6">
       {% trans "or" %}
     </div>
@@ -41,6 +41,9 @@
     action="{{ auth_modal_signup_url }}"
     class="space-y-4"
     data-auth-email-start-form
+    data-analytics-cta-id="auth_modal_email_start_continue"
+    data-analytics-placement="auth_modal_start"
+    data-analytics-intent="continue_with_email"
   >
     {% csrf_token %}
     <input type="hidden" name="email_first" value="1" />
