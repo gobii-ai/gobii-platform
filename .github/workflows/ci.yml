@@ -482,7 +482,7 @@ jobs:
   publish-static-assets:
     name: Publish Static Assets
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -560,7 +560,7 @@ jobs:
   trigger-preview:
     name: Dispatch Preview Deployment
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests]
     if: >
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -596,7 +596,7 @@ jobs:
   trigger-staging:
     name: Dispatch Staging Deployment
     runs-on: ubuntu-latest
-    needs: [tests, frontend-tests, sandbox-server-tests, publish-static-assets]
+    needs: [tag-guard, tests, frontend-tests, sandbox-server-tests, publish-static-assets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Generate GitHub App token
