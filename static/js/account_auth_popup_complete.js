@@ -2,6 +2,7 @@ const statusEl = document.getElementById("auth-popup-complete-status");
 const errorEl = document.getElementById("auth-popup-complete-error");
 const POPUP_STATE_PREFIX = "gobii:cta_auth_popup_state:";
 const POPUP_COMPLETE_KEY = "gobii:cta_auth_popup_complete";
+const SIGNUP_TRACKING_TIMEOUT_MS = 1500;
 
 function setStatus(text) {
   if (statusEl) {
@@ -89,7 +90,25 @@ function attemptCloseWindow() {
   }, 100);
 }
 
-(function completeAuthPopup() {
+function waitForSignupTracking() {
+  if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== "function") {
+    return Promise.resolve(false);
+  }
+
+  return Promise.race([
+    window.GobiiSignupTracking.fetchAndFire({
+      endpoint: "/clear_signup_tracking",
+      source: "auth_popup_complete",
+      maxRetries: 2,
+      baseDelayMs: 400,
+    }),
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve(false), SIGNUP_TRACKING_TIMEOUT_MS);
+    }),
+  ]);
+}
+
+(async function completeAuthPopup() {
   const params = new URLSearchParams(window.location.search);
   const popupState = params.get("auth_popup_state");
   const sessionData = readPopupSession(popupState);
@@ -99,6 +118,8 @@ function attemptCloseWindow() {
     return;
   }
 
+  setStatus("Completing sign in...");
+  await waitForSignupTracking();
   notifyCompletion(popupState);
   setStatus("Authentication complete. Returning to Gobii...");
   focusOpener();

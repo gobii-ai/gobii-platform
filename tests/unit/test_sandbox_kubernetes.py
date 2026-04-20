@@ -1,9 +1,10 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from django.test import SimpleTestCase, tag
+from django.test import SimpleTestCase, override_settings, tag
 
 from api.services.sandbox_kubernetes import (
+    _container_resources_match,
     _build_sandbox_service_manifest,
     KubernetesSandboxBackend,
     _build_egress_proxy_pod_manifest,
@@ -12,6 +13,16 @@ from api.services.sandbox_kubernetes import (
     _build_pod_manifest,
     _pod_name,
 )
+
+SANDBOX_POD_RESOURCES = {
+    "requests": {"cpu": "500m", "memory": "1Gi"},
+    "limits": {"cpu": "2", "memory": "4Gi"},
+}
+
+EGRESS_PROXY_RESOURCES = {
+    "requests": {"cpu": "50m", "memory": "64Mi"},
+    "limits": {"cpu": "250m", "memory": "256Mi"},
+}
 
 
 @tag("batch_agent_lifecycle")
@@ -27,10 +38,12 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._pod_service_account = "sandbox-sa"
         backend._pod_configmap = "sandbox-config"
         backend._pod_secret = "sandbox-secret"
+        backend._pod_resources = SANDBOX_POD_RESOURCES
         backend._egress_proxy_port = 3128
         backend._egress_proxy_service_port = 3128
         backend._egress_proxy_socks_port = 1080
         backend._egress_proxy_socks_service_port = 1080
+        backend._egress_proxy_resources = EGRESS_PROXY_RESOURCES
         backend._pod_ready_timeout = 60
         backend._service_routable_timeout = 45
         backend._proxy_timeout = 30
@@ -378,6 +391,85 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             no_proxy="localhost,127.0.0.1,.svc,.cluster.local",
         )
 
+    def test_deploy_or_resume_recreates_sandbox_pod_when_resource_drifted(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-resource-drift")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:latest",
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                                {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+                            ],
+                            "resources": {},
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-resource-drift")
+        backend._create_pod.assert_called_once_with(
+            "sandbox-agent-agent-resource-drift",
+            "sandbox-workspace-agent-resource-drift",
+            agent_id="agent-resource-drift",
+            egress_service_name=None,
+            no_proxy=None,
+        )
+
+    def test_deploy_or_resume_keeps_sandbox_pod_when_resource_quantities_are_equivalent(self):
+        backend = self._backend()
+        agent = SimpleNamespace(id="agent-resource-equivalent")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Running"},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:latest",
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                                {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
+                            ],
+                            "resources": {
+                                "requests": {"cpu": "0.5", "memory": "1024Mi"},
+                                "limits": {"cpu": "2000m", "memory": "4096Mi"},
+                            },
+                        }
+                    ]
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True, True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._delete_pod.assert_not_called()
+        backend._create_pod.assert_not_called()
+
     def test_deploy_or_resume_returns_error_when_service_is_not_routable(self):
         backend = self._backend()
         agent = SimpleNamespace(id="agent-routability")
@@ -447,9 +539,113 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             "http://sandbox-agent-agent-1.default.svc.cluster.local:8080/healthz",
         )
 
+    @override_settings(
+        SANDBOX_COMPUTE_API_TOKEN="test-token",
+        SANDBOX_COMPUTE_POD_CPU_REQUEST="750m",
+        SANDBOX_COMPUTE_POD_MEMORY_REQUEST="1536Mi",
+        SANDBOX_COMPUTE_POD_CPU_LIMIT="3",
+        SANDBOX_COMPUTE_POD_MEMORY_LIMIT="5Gi",
+    )
+    def test_create_pod_passes_configured_resources_to_manifest_builder(self):
+        client = Mock()
+
+        with patch("api.services.sandbox_kubernetes._k8s_api_url", return_value="https://kubernetes.default.svc"), patch(
+            "api.services.sandbox_kubernetes._read_service_account_token",
+            return_value="service-account-token",
+        ), patch("api.services.sandbox_kubernetes._service_account_path", return_value=None), patch(
+            "api.services.sandbox_kubernetes.KubernetesApiClient",
+            return_value=client,
+        ), patch(
+            "api.services.sandbox_kubernetes.get_sandbox_compute_pod_image",
+            return_value="ghcr.io/example/sandbox:latest",
+        ), patch(
+            "api.services.sandbox_kubernetes.get_sandbox_egress_proxy_pod_image",
+            return_value="ghcr.io/example/egress:latest",
+        ):
+            backend = KubernetesSandboxBackend()
+
+        with patch("api.services.sandbox_kubernetes._build_pod_manifest", return_value={"kind": "Pod"}) as build_manifest:
+            backend._create_pod(
+                "sandbox-agent-agent-1",
+                "sandbox-workspace-agent-1",
+                agent_id="agent-1",
+                egress_service_name=None,
+                no_proxy=None,
+            )
+
+        self.assertEqual(
+            build_manifest.call_args.kwargs["resources"],
+            {
+                "requests": {"cpu": "750m", "memory": "1536Mi"},
+                "limits": {"cpu": "3", "memory": "5Gi"},
+            },
+        )
+
+    @override_settings(
+        SANDBOX_COMPUTE_API_TOKEN="test-token",
+        SANDBOX_EGRESS_PROXY_POD_CPU_REQUEST="75m",
+        SANDBOX_EGRESS_PROXY_POD_MEMORY_REQUEST="96Mi",
+        SANDBOX_EGRESS_PROXY_POD_CPU_LIMIT="300m",
+        SANDBOX_EGRESS_PROXY_POD_MEMORY_LIMIT="384Mi",
+    )
+    def test_create_egress_proxy_pod_passes_configured_resources_to_manifest_builder(self):
+        client = Mock()
+        proxy_server = SimpleNamespace(
+            host="proxy.example",
+            port=8080,
+            username="",
+            password="",
+            id="proxy-1",
+            proxy_type="HTTP",
+        )
+
+        with patch("api.services.sandbox_kubernetes._k8s_api_url", return_value="https://kubernetes.default.svc"), patch(
+            "api.services.sandbox_kubernetes._read_service_account_token",
+            return_value="service-account-token",
+        ), patch("api.services.sandbox_kubernetes._service_account_path", return_value=None), patch(
+            "api.services.sandbox_kubernetes.KubernetesApiClient",
+            return_value=client,
+        ), patch(
+            "api.services.sandbox_kubernetes.get_sandbox_compute_pod_image",
+            return_value="ghcr.io/example/sandbox:latest",
+        ), patch(
+            "api.services.sandbox_kubernetes.get_sandbox_egress_proxy_pod_image",
+            return_value="ghcr.io/example/egress:latest",
+        ):
+            backend = KubernetesSandboxBackend()
+
+        with patch(
+            "api.services.sandbox_kubernetes._build_egress_proxy_pod_manifest",
+            return_value={"kind": "Pod"},
+        ) as build_manifest:
+            backend._create_egress_proxy_pod("sandbox-egress-agent-1", agent_id="agent-1", proxy_server=proxy_server)
+
+        self.assertEqual(
+            build_manifest.call_args.kwargs["resources"],
+            {
+                "requests": {"cpu": "75m", "memory": "96Mi"},
+                "limits": {"cpu": "300m", "memory": "384Mi"},
+            },
+        )
+
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
+    def test_container_resources_match_normalizes_equivalent_quantities(self):
+        container = {
+            "resources": {
+                "requests": {"cpu": "500m", "memory": "1024Mi"},
+                "limits": {"cpu": "2e3m", "memory": "4096Mi"},
+            }
+        }
+
+        expected_resources = {
+            "requests": {"cpu": "0.5", "memory": "1Gi"},
+            "limits": {"cpu": "2", "memory": "4Gi"},
+        }
+
+        self.assertTrue(_container_resources_match(container, expected_resources))
+
     def test_sandbox_service_manifest_targets_agent_pod(self):
         manifest = _build_sandbox_service_manifest(
             service_name="sandbox-agent-agent-1",
@@ -475,6 +671,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-1",
+            resources=SANDBOX_POD_RESOURCES,
             egress_service_name=None,
             http_proxy_port=3128,
             socks_proxy_port=1080,
@@ -501,6 +698,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
             configmap_name="sandbox-config",
             secret_name="sandbox-secret",
             agent_id="agent-2",
+            resources=SANDBOX_POD_RESOURCES,
             egress_service_name=None,
             http_proxy_port=3128,
             socks_proxy_port=1080,
@@ -509,6 +707,26 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
 
         self.assertFalse(manifest["spec"]["automountServiceAccountToken"])
         self.assertEqual(manifest["spec"]["serviceAccountName"], "sandbox-sa")
+
+    def test_agent_pod_manifest_includes_resources(self):
+        manifest = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-resources",
+            pvc_name="sandbox-workspace-agent-resources",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-resources",
+            resources=SANDBOX_POD_RESOURCES,
+            egress_service_name=None,
+            http_proxy_port=3128,
+            socks_proxy_port=1080,
+            no_proxy=None,
+        )
+
+        self.assertEqual(manifest["spec"]["containers"][0]["resources"], SANDBOX_POD_RESOURCES)
 
     def test_egress_proxy_pod_manifest_disables_service_account_token_automount(self):
         manifest = _build_egress_proxy_pod_manifest(
@@ -526,6 +744,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
                 id="proxy-1",
                 proxy_type="HTTP",
             ),
+            resources=EGRESS_PROXY_RESOURCES,
             http_listen_port=3128,
             socks_listen_port=1080,
         )
@@ -569,6 +788,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
                 id="proxy-2",
                 proxy_type="SOCKS5",
             ),
+            resources=EGRESS_PROXY_RESOURCES,
             http_listen_port=3128,
             socks_listen_port=1080,
         )
@@ -599,6 +819,7 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
                 id="proxy-https",
                 proxy_type="HTTPS",
             ),
+            resources=EGRESS_PROXY_RESOURCES,
             http_listen_port=3128,
             socks_listen_port=1080,
         )
@@ -609,6 +830,29 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
         }
         self.assertEqual(env["UPSTREAM_PROTOCOL"], "http")
         self.assertEqual(env["UPSTREAM_PROXY_SCHEME"], "https")
+
+    def test_egress_proxy_pod_manifest_includes_resources(self):
+        manifest = _build_egress_proxy_pod_manifest(
+            pod_name="sandbox-egress-agent-resources",
+            namespace="default",
+            image="ghcr.io/example/egress-proxy:latest",
+            runtime_class="gvisor",
+            service_account="",
+            agent_id="agent-resources",
+            proxy_server=SimpleNamespace(
+                host="proxy.example",
+                port=8080,
+                username="",
+                password="",
+                id="proxy-resources",
+                proxy_type="HTTP",
+            ),
+            resources=EGRESS_PROXY_RESOURCES,
+            http_listen_port=3128,
+            socks_listen_port=1080,
+        )
+
+        self.assertEqual(manifest["spec"]["containers"][0]["resources"], EGRESS_PROXY_RESOURCES)
 
     def test_egress_proxy_service_manifest_exposes_http_and_socks_ports(self):
         manifest = _build_egress_proxy_service_manifest(

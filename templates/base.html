@@ -475,9 +475,11 @@
     }
   </style>
 
-  {% with signup_tracking_source='base_template' %}
-    {% include "includes/_signup_tracking.html" %}
-  {% endwith %}
+  {% if not suppress_signup_tracking_snippet %}
+    {% with signup_tracking_source='base_template' %}
+      {% include "includes/_signup_tracking.html" %}
+    {% endwith %}
+  {% endif %}
 
   {% if user.is_authenticated %}
   <script type="text/javascript">

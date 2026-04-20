@@ -81,7 +81,7 @@
     var baseDelayMs = Number(options.baseDelayMs || 1000);
 
     function fetchWithRetry(attempt) {
-      fetch(endpoint, { credentials: 'same-origin' })
+      return fetch(endpoint, { credentials: 'same-origin' })
         .then(function (response) {
           if (!response.ok) {
             throw new Error('HTTP ' + response.status);
@@ -91,15 +91,18 @@
         .then(function (payload) {
           if (payload.tracking) {
             firePixels(payload, source);
+            return true;
           }
+          return false;
         })
         .catch(function (error) {
           if (attempt < maxRetries) {
             var delay = baseDelayMs * Math.pow(2, attempt - 1);
-            setTimeout(function () {
-              fetchWithRetry(attempt + 1);
-            }, delay);
-            return;
+            return new Promise(function (resolve) {
+              setTimeout(function () {
+                resolve(fetchWithRetry(attempt + 1));
+              }, delay);
+            });
           }
 
           trackWithSegment('Signup Pixel Fetch Failed', {
@@ -107,10 +110,11 @@
             attempts: maxRetries,
             source: source,
           });
+          return false;
         });
     }
 
-    fetchWithRetry(1);
+    return fetchWithRetry(1);
   }
 
   window.GobiiSignupTracking = {

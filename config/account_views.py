@@ -199,3 +199,8 @@ class AccountLoginModalView(ModalAuthViewMixin, LoginView):
 @method_decorator(never_cache, name="dispatch")
 class AccountAuthPopupCompleteView(TemplateView):
     template_name = "account/auth_popup_complete.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["suppress_signup_tracking_snippet"] = True
+        return context
