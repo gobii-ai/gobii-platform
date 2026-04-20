@@ -127,15 +127,13 @@ class PromptContextBuilderTests(TestCase):
             address="user@example.com",
         )
         now = timezone.now()
-        current_month = now.date().replace(day=1)
         existing_credit = TaskCredit.objects.filter(
             user=self.user,
             plan=PlanNamesChoices.FREE,
             grant_type=GrantTypeChoices.PLAN,
             additional_task=False,
             voided=False,
-            grant_month=current_month,
-        ).first()
+        ).order_by("-granted_date", "-pk").first()
         credit_defaults = {
             "credits": Decimal("50"),
             "credits_used": Decimal("0"),
