@@ -861,6 +861,7 @@ class TaskCreditService:
         preferred_credit_id = getattr(preferred_credit, "id", None)
         remaining = refund_amount
         refunded = Decimal("0")
+        now = timezone.now()
 
         def _refund_from_credit(credit) -> Decimal:
             nonlocal remaining, refunded
@@ -893,11 +894,12 @@ class TaskCreditService:
                 credits = (
                     TaskCredit.objects.select_for_update()
                     .filter(
+                        expiration_date__gt=now,
                         credits_used__gt=0,
                         voided=False,
                         **owner_filter,
                     )
-                    .order_by("expiration_date", "granted_date", "id")
+                    .order_by("-expiration_date", "-granted_date", "-id")
                 )
                 if preferred_credit_id is not None:
                     credits = credits.exclude(id=preferred_credit_id)
