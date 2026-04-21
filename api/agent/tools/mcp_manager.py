@@ -19,8 +19,9 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
+import time
 from urllib.parse import urlparse
-from typing import Dict, Any, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, UTC
 
@@ -30,6 +31,7 @@ import litellm  # re-exported for tests expecting to patch LiteLLM directly
 import httpx
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport as FastMCPStdioTransport
+from fastmcp.exceptions import ToolError
 from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
@@ -105,6 +107,12 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
     "search_engine",
     "search_engine_batch",
 }
+
+# Bright Data MCP's search_utils.parse_google_search_response raises this
+# message when Google returns HTML or other non-JSON content despite brd_json=1.
+BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
+BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 3
+MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
 
 
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -1724,6 +1732,193 @@ class MCPToolManager:
                 )
 
         return definitions
+
+    @staticmethod
+    def _extract_tool_result_content(result: Any) -> Any:
+        if isinstance(result, dict) and "result" in result:
+            return result.get("result")
+        if getattr(result, "data", None) is not None:
+            return result.data
+        for block in getattr(result, "content", None) or []:
+            if hasattr(block, "text"):
+                return block.text
+        return None
+
+    @staticmethod
+    def _tool_result_error_message(result: Any) -> Optional[str]:
+        if isinstance(result, dict) and result.get("status") == "error":
+            return str(result.get("message") or result.get("result") or "Unknown error")
+        if not (hasattr(result, "is_error") and result.is_error):
+            return None
+        content = getattr(result, "content", None) or []
+        if content:
+            return str(getattr(content[0], "text", "Unknown error"))
+        return "Unknown error"
+
+    @staticmethod
+    def _json_loads_ok(value: str) -> bool:
+        try:
+            json.loads(value)
+        except json.JSONDecodeError:
+            return False
+        return True
+
+    @staticmethod
+    def _is_empty_scrape_value(value: Any) -> bool:
+        if value is None:
+            return True
+        if isinstance(value, str):
+            stripped = value.strip()
+            return not stripped or stripped == MCP_TOOL_SUCCESS_SENTINEL
+        return False
+
+    def _validate_tool_result_content(
+        self,
+        server_name: str,
+        tool_name: str,
+        content: Any,
+    ) -> Optional[Dict[str, str]]:
+        if server_name != "brightdata" or tool_name != "scrape_as_markdown":
+            return None
+
+        def error_payload() -> Dict[str, str]:
+            return {
+                "status": "error",
+                "message": "Bright Data returned an empty scrape_as_markdown result.",
+            }
+
+        if self._is_empty_scrape_value(content):
+            return error_payload()
+
+        payload = None
+        if isinstance(content, dict):
+            payload = content
+        elif isinstance(content, str):
+            try:
+                parsed = json.loads(content)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(parsed, dict):
+                payload = parsed
+
+        if isinstance(payload, dict) and "result" in payload:
+            if self._is_empty_scrape_value(payload.get("result")):
+                return error_payload()
+
+        return None
+
+    def _result_to_error_response(self, result: Any) -> Optional[Dict[str, str]]:
+        message = self._tool_result_error_message(result)
+        if message is None:
+            return None
+        return {"status": "error", "message": message}
+
+    def _build_mcp_success_response(
+        self,
+        server_name: str,
+        tool_name: str,
+        content: Any,
+        *,
+        use_success_sentinel: bool = True,
+    ) -> Dict[str, Any]:
+        content_error = self._validate_tool_result_content(server_name, tool_name, content)
+        if content_error:
+            return content_error
+        if use_success_sentinel:
+            content = content or MCP_TOOL_SUCCESS_SENTINEL
+        return {"status": "success", "result": content}
+
+    def _finalize_mcp_result(
+        self,
+        server_name: str,
+        tool_name: str,
+        result: Any,
+        *,
+        use_success_sentinel: bool = True,
+    ) -> Dict[str, Any]:
+        error_response = self._result_to_error_response(result)
+        if error_response:
+            return error_response
+
+        content = self._extract_tool_result_content(result)
+        return self._build_mcp_success_response(
+            server_name,
+            tool_name,
+            content,
+            use_success_sentinel=use_success_sentinel,
+        )
+
+    @staticmethod
+    def _is_google_brightdata_search(
+        server_name: str,
+        tool_name: str,
+        params: Dict[str, Any],
+    ) -> bool:
+        if server_name != "brightdata" or tool_name != "search_engine":
+            return False
+        engine = params.get("engine") if isinstance(params, dict) else None
+        return not engine or str(engine).strip().lower() == "google"
+
+    @staticmethod
+    def _is_brightdata_non_json_exception(exc: Exception) -> bool:
+        return isinstance(exc, ToolError) and BRIGHTDATA_NON_JSON_ERROR in str(exc)
+
+    def _is_brightdata_search_non_json_result(self, result: Any) -> bool:
+        message = self._tool_result_error_message(result)
+        if message is not None:
+            # Some sandboxed MCP paths surface tool errors as result dictionaries
+            # rather than FastMCP ToolError instances, and they do not include a
+            # structured code for Bright Data parse failures.
+            return BRIGHTDATA_NON_JSON_ERROR in message
+
+        content = self._extract_tool_result_content(result)
+        if isinstance(content, str):
+            return not self._json_loads_ok(content)
+        return False
+
+    def _execute_with_brightdata_search_retries(
+        self,
+        run_once: Callable[[Dict[str, Any]], Any],
+        server_name: str,
+        tool_name: str,
+        params: Dict[str, Any],
+    ) -> Any:
+        if not self._is_google_brightdata_search(server_name, tool_name, params):
+            return run_once(params)
+
+        original_params = dict(params)
+        last_failure: Optional[str] = None
+        for attempt in range(2):
+            if attempt == 1:
+                time.sleep(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
+            try:
+                result = run_once(dict(original_params))
+            except Exception as exc:
+                if not self._is_brightdata_non_json_exception(exc):
+                    raise
+                last_failure = str(exc)
+                logger.warning(
+                    "Bright Data Google search returned non-JSON response on attempt %d.",
+                    attempt + 1,
+                )
+                continue
+
+            if not self._is_brightdata_search_non_json_result(result):
+                return result
+
+            last_failure = self._tool_result_error_message(result) or "Non-JSON search response"
+            logger.warning(
+                "Bright Data Google search returned non-JSON content on attempt %d.",
+                attempt + 1,
+            )
+
+        fallback_params = dict(original_params)
+        fallback_params["engine"] = "bing"
+        logger.warning(
+            "Bright Data Google search failed with non-JSON response twice; retrying with Bing. Last failure: %s",
+            last_failure or "unknown",
+        )
+        return run_once(fallback_params)
     
     def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a platform-scoped MCP tool without an agent context."""
@@ -1791,33 +1986,30 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
-                result = loop.run_until_complete(
-                    self._execute_async(
-                        client,
-                        info.tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
+                def run_once(attempt_params: Dict[str, Any]) -> Any:
+                    return loop.run_until_complete(
+                        self._execute_async(
+                            client,
+                            info.tool_name,
+                            attempt_params,
+                            timeout_seconds=timeout_seconds,
+                        )
                     )
+                result = self._execute_with_brightdata_search_retries(
+                    run_once,
+                    runtime.name,
+                    info.tool_name,
+                    params,
                 )
             with mcp_result_owner_context(None):
                 result = self._adapt_tool_result(runtime.name, info.tool_name, result)
 
-            if hasattr(result, "is_error") and result.is_error:
-                return {
-                    "status": "error",
-                    "message": str(result.content[0].text if result.content else "Unknown error"),
-                }
-
-            content = None
-            if result.data is not None:
-                content = result.data
-            elif result.content:
-                for block in result.content:
-                    if hasattr(block, "text"):
-                        content = block.text
-                        break
-
-            return {"status": "success", "result": content}
+            return self._finalize_mcp_result(
+                runtime.name,
+                info.tool_name,
+                result,
+                use_success_sentinel=False,
+            )
         except Exception as exc:
             logger.error("Failed to execute platform MCP tool %s/%s: %s", server_name, tool_name, exc)
             return {"status": "error", "message": str(exc)}
@@ -1838,12 +2030,20 @@ class MCPToolManager:
         except SandboxComputeUnavailable as exc:
             return {"status": "error", "message": str(exc)}, False
 
-        sandbox_result = service.mcp_request(
-            agent,
-            runtime.config_id,
+        def run_once(attempt_params: Dict[str, Any]) -> Any:
+            return service.mcp_request(
+                agent,
+                runtime.config_id,
+                actual_tool_name,
+                attempt_params,
+                full_tool_name=full_tool_name,
+            )
+
+        sandbox_result = self._execute_with_brightdata_search_retries(
+            run_once,
+            server_name,
             actual_tool_name,
             params,
-            full_tool_name=full_tool_name,
         )
         if (
             isinstance(sandbox_result, dict)
@@ -1862,6 +2062,13 @@ class MCPToolManager:
                     actual_tool_name,
                     sandbox_result.get("result"),
                 )
+                content_error = self._validate_tool_result_content(
+                    server_name,
+                    actual_tool_name,
+                    adapted,
+                )
+                if content_error:
+                    return content_error, False
                 adapted_result = dict(sandbox_result)
                 adapted_result["result"] = adapted
                 return adapted_result, False
@@ -1876,8 +2083,6 @@ class MCPToolManager:
         force_local: bool = False,
     ) -> Dict[str, Any]:
         """Execute an MCP tool if it's enabled for the agent."""
-        import time
-        
         # Check if tool is blacklisted
         if self._is_tool_blacklisted(tool_name):
             return {
@@ -1980,34 +2185,29 @@ class MCPToolManager:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
-                result = loop.run_until_complete(
-                    self._execute_async(
-                        client,
-                        actual_tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
+                def run_once(attempt_params: Dict[str, Any]) -> Any:
+                    return loop.run_until_complete(
+                        self._execute_async(
+                            client,
+                            actual_tool_name,
+                            attempt_params,
+                            timeout_seconds=timeout_seconds,
+                        )
                     )
+                result = self._execute_with_brightdata_search_retries(
+                    run_once,
+                    server_name,
+                    actual_tool_name,
+                    params,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
             
-            # Convert result to consistent format
-            if hasattr(result, 'is_error') and result.is_error:
-                return {
-                    "status": "error",
-                    "message": str(result.content[0].text if result.content else "Unknown error")
-                }
-            
-            # Extract content
-            content = None
-            if result.data is not None:
-                content = result.data
-            elif result.content:
-                for block in result.content:
-                    if hasattr(block, 'text'):
-                        content = block.text
-                        break
-            
+            response = self._finalize_mcp_result(server_name, actual_tool_name, result)
+            if response.get("status") == "error":
+                return response
+            content = response.get("result")
+
             # Detect Pipedream Connect Link responses and replace with our own Connect Link
             if server_name == self.PIPEDREAM_RUNTIME_NAME:
                 connect_url = None
@@ -2144,7 +2344,6 @@ class MCPToolManager:
                             "connect_url": jit_url,
                         }
 
-            response = {"status": "success", "result": content or "Tool executed successfully"}
             if will_continue_work is False:
                 response["auto_sleep_ok"] = True
             return response
@@ -2218,33 +2417,25 @@ class MCPToolManager:
             )
             timeout_seconds = self._get_timeout_for_runtime(runtime)
             with _use_mcp_proxy(proxy_url):
-                result = self._run_coroutine_isolated(
-                    self._execute_async(
-                        client,
-                        actual_tool_name,
-                        params,
-                        timeout_seconds=timeout_seconds,
+                def run_once(attempt_params: Dict[str, Any]) -> Any:
+                    return self._run_coroutine_isolated(
+                        self._execute_async(
+                            client,
+                            actual_tool_name,
+                            attempt_params,
+                            timeout_seconds=timeout_seconds,
+                        )
                     )
+                result = self._execute_with_brightdata_search_retries(
+                    run_once,
+                    server_name,
+                    actual_tool_name,
+                    params,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
 
-            if hasattr(result, "is_error") and result.is_error:
-                return {
-                    "status": "error",
-                    "message": str(result.content[0].text if result.content else "Unknown error"),
-                }
-
-            content = None
-            if result.data is not None:
-                content = result.data
-            elif result.content:
-                for block in result.content:
-                    if hasattr(block, "text"):
-                        content = block.text
-                        break
-
-            response = {"status": "success", "result": content or "Tool executed successfully"}
+            response = self._finalize_mcp_result(server_name, actual_tool_name, result)
             if will_continue_work is False:
                 response["auto_sleep_ok"] = True
             return response
