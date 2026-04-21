@@ -922,6 +922,7 @@ function deriveLinkedInLabel(toolName: string): string {
 
 const ACTIVE_LABEL_MAP: Record<string, string> = {
   'Assignment updated': 'Updating assignment',
+  'Planning completed': 'Completing planning',
   'Schedule updated': 'Updating schedule',
   'Assignment and schedule updated': 'Updating assignment and schedule',
   'Database enabled': 'Enabling database',

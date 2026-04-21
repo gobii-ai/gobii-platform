@@ -153,7 +153,10 @@ from ..tools.agent_variables import (
 )
 from ..tools.file_export_helpers import resolve_export_target
 from ..files.filespace_service import _normalize_write_path
-from ..comms.human_input_requests import attach_originating_step_from_result
+from ..comms.human_input_requests import (
+    HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED,
+    attach_originating_step_from_result,
+)
 from ...models import (
     PersistentAgent,
     PersistentAgentMessage,
@@ -2052,6 +2055,12 @@ def _finalize_tool_batch(
             attach_originating_step_from_result(step, result)
 
         allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
+        request_human_input_delivery_required = (
+            tool_name == "request_human_input"
+            and isinstance(result, dict)
+            and result.get("status") == "ok"
+            and result.get("relay_mode") == HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED
+        )
         tool_had_warning = _is_warning_status(result)
         if prepared.explicit_continue is not None:
             last_explicit_continue = prepared.explicit_continue
@@ -2059,6 +2068,8 @@ def _finalize_tool_batch(
             inferred_message_continue_this_iteration = True
 
         if is_error_status or tool_had_warning:
+            followup_required = True
+        elif request_human_input_delivery_required:
             followup_required = True
         elif prepared.explicit_continue is None and not allow_auto_sleep:
             followup_required = True

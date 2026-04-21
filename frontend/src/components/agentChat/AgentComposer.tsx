@@ -105,6 +105,12 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
+function hasHumanInputComposerResponse(
+  response: HumanInputComposerResponse | undefined,
+): response is HumanInputComposerResponse {
+  return Boolean(response?.selectedOptionKey || response?.freeText?.trim())
+}
+
 type HumanInputBatchAnalyticsProperties = {
   agent_id: string
   agent_name: string | null
@@ -693,7 +699,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
 
     if (batchRequests.length > 1) {
-      const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
+      const nextUnanswered = batchRequests.find((candidate) => !hasHumanInputComposerResponse(nextDrafts[candidate.id]))
       if (nextUnanswered) {
         const nextPendingAction = pendingActionRequests.find((candidate) => (
           candidate.kind === 'human_input'
@@ -715,7 +721,11 @@ export const AgentComposer = memo(function AgentComposer({
       if (batchRequests.length > 1) {
         const responses = batchRequests
           .map((candidate) => nextDrafts[candidate.id])
-          .filter((candidate): candidate is HumanInputComposerResponse => Boolean(candidate))
+          .filter(hasHumanInputComposerResponse)
+        if (responses.length !== batchRequests.length) {
+          setDraftHumanInputResponses(nextDrafts)
+          return true
+        }
         await onRespondHumanInput({
           batchId: request.batchId,
           responses,

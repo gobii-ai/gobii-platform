@@ -13,15 +13,25 @@ from .access import user_can_manage_agent_settings
 
 
 def _build_human_input_actions(agent: PersistentAgent) -> list[dict]:
-    return [
-        {
-            "id": f"human_input:{request['id']}",
-            "kind": "human_input",
-            "requests": [request],
-            "count": 1,
-        }
-        for request in list_pending_human_input_requests(agent)
-    ]
+    actions_by_batch: dict[str, dict] = {}
+    for request in list_pending_human_input_requests(agent):
+        batch_id = str(request.get("batchId") or request["id"])
+        action = actions_by_batch.setdefault(
+            batch_id,
+            {
+                "id": f"human_input:{batch_id}",
+                "kind": "human_input",
+                "requests": [],
+                "count": 0,
+            },
+        )
+        action["requests"].append(request)
+
+    for action in actions_by_batch.values():
+        action["requests"].sort(key=lambda request: request.get("batchPosition") or 1)
+        action["count"] = len(action["requests"])
+
+    return list(actions_by_batch.values())
 
 
 def _serialize_requested_secret(secret: PersistentAgentSecret) -> dict:

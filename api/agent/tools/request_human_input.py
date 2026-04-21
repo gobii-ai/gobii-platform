@@ -10,6 +10,20 @@ from api.agent.comms.human_input_requests import (
 from api.models import CommsChannel, PersistentAgent
 
 
+def _coerce_optional_bool(raw: Any) -> bool | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return None
+
+
 def get_request_human_input_tool() -> dict[str, Any]:
     """Return the human input request tool definition."""
 
@@ -102,7 +116,15 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         ),
                         **recipient_schema,
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": (
+                            "REQUIRED. true = you'll take another action after creating this request; "
+                            "false = you're waiting for the user's answer and should stop after the request is visible/delivered."
+                        ),
+                    },
                 },
+                "required": ["will_continue_work"],
             },
         },
     }
@@ -176,6 +198,7 @@ def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dic
 def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
     """Create one or more tracked human input requests."""
 
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     recipient, recipient_error = _normalize_recipient(params.get("recipient"))
     if recipient_error:
         return recipient_error
@@ -211,7 +234,10 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 }
             )
 
-        return create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
+        result = create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
+        if will_continue_work is True:
+            result.pop("auto_sleep_ok", None)
+        return result
 
     question = str(params.get("question") or "").strip()
     if not question:
@@ -224,9 +250,12 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     if error:
         return error
 
-    return create_human_input_request(
+    result = create_human_input_request(
         agent,
         question=question,
         raw_options=options or [],
         recipient=recipient,
     )
+    if will_continue_work is True:
+        result.pop("auto_sleep_ok", None)
+    return result

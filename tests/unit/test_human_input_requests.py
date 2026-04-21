@@ -13,6 +13,7 @@ from api.agent.comms.human_input_requests import (
 )
 from api.agent.core.prompt_context import _get_recent_human_input_responses_block
 from console.agent_chat.timeline import serialize_step_entry
+from console.agent_chat.pending_actions import list_pending_action_requests
 from api.agent.tools.request_human_input import (
     execute_request_human_input,
     get_request_human_input_tool,
@@ -29,6 +30,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentStep,
     UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
@@ -292,6 +294,8 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertIn("recipient", function["parameters"]["properties"])
+        self.assertIn("will_continue_work", function["parameters"]["properties"])
+        self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
             ["question"],
@@ -324,6 +328,20 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(request_obj.recipient_channel, "")
         self.assertEqual(request_obj.recipient_address, "")
         self.assertIsNone(request_obj.requested_message_id)
+
+    def test_execute_request_human_input_will_continue_true_keeps_panel_request_active(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "What should I tell the team?",
+                "options": [],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["relay_mode"], "panel_only")
+        self.assertNotIn("auto_sleep_ok", result)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(
@@ -1543,8 +1561,6 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(self.request_obj.selected_option_key, "ship")
 
     def test_batch_response_endpoint_submits_group_once(self):
-        from api.models import PersistentAgentStep
-
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Collect multiple answers",
@@ -1605,6 +1621,47 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
+
+    def test_pending_action_payload_groups_human_input_batches(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        actions = list_pending_action_requests(self.agent, self.user)
+        batch_action = next(action for action in actions if action["id"] == f"human_input:{step.id}")
+
+        self.assertEqual(batch_action["kind"], "human_input")
+        self.assertEqual(batch_action["count"], 2)
+        self.assertEqual(
+            [request["id"] for request in batch_action["requests"]],
+            [str(first_request.id), str(second_request.id)],
+        )
+        self.assertEqual(
+            [request["batchPosition"] for request in batch_action["requests"]],
+            [1, 2],
+        )
 
     def test_timeline_pending_requests_clear_after_cross_channel_resolution(self):
         resolve_human_input_request_for_message(

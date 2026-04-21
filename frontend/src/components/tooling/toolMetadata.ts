@@ -286,6 +286,25 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'end_planning',
+    label: 'Planning completed',
+    icon: ClipboardList,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'endPlanning',
+    derive(entry, parameters) {
+      const fullPlan = coerceString(parameters?.full_plan)
+      const result = parseResultObject(entry.result)
+      const message = coerceString(result?.['message'])
+      return {
+        charterText: fullPlan,
+        caption: fullPlan ? truncate(fullPlan, 56) : message ?? entry.caption ?? 'Planning completed',
+        summary: message ?? 'Planning mode completed.',
+        separateFromPreview: true,
+      }
+    },
+  },
+  {
     name: 'update_schedule',
     label: 'Schedule updated',
     icon: CalendarClock,

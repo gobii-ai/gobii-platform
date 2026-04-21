@@ -107,6 +107,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Skip Planning", prompt)
         self.assertIn("`requests` parameter", prompt)
         self.assertIn("each item contains exactly one question", prompt)
+        self.assertIn("`will_continue_work=false` on request_human_input", prompt)
         self.assertNotIn("Your very first action must be sending a welcome message", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
