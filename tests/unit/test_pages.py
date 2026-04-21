@@ -54,6 +54,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY,
     STRIPE_CHECKOUT_FP_TAMPERING_META_KEY,
     STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY,
+    clear_checkout_fingerprint_metadata,
     clear_checkout_customer_metadata,
 )
 from constants.plans import PlanNames
@@ -2654,12 +2655,8 @@ class CheckoutRedirectTests(TestCase):
         self.assertTrue(
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY]
         )
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_SUSPECT_SCORE_META_KEY, customer_modify_kwargs["metadata"])
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_COUNTRY_META_KEY, customer_modify_kwargs["metadata"])
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY, customer_modify_kwargs["metadata"])
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY, customer_modify_kwargs["metadata"])
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY, customer_modify_kwargs["metadata"])
-        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY, customer_modify_kwargs["metadata"])
+        for key, value in clear_checkout_fingerprint_metadata(customer_context=True).items():
+            self.assertEqual(customer_modify_kwargs["metadata"][key], value)
         mock_record_checkout_context.assert_called_once_with(
             customer_id="cus_scale_trial",
             checkout_session_id="cs_purchase_checkout_context",

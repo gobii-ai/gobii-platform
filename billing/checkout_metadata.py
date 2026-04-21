@@ -75,6 +75,27 @@ def _normalize_fp_visitor_id_metadata(value: str | None) -> str:
     return normalized or _UNKNOWN_METADATA_VALUE
 
 
+def clear_checkout_fingerprint_metadata(*, customer_context: bool = False) -> dict[str, str]:
+    if customer_context:
+        return {
+            STRIPE_CHECKOUT_CUSTOMER_FP_SUSPECT_SCORE_META_KEY: "",
+            STRIPE_CHECKOUT_CUSTOMER_FP_COUNTRY_META_KEY: "",
+            STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY: "",
+            STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY: "",
+            STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY: "",
+            STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY: "",
+        }
+
+    return {
+        STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY: "",
+        STRIPE_CHECKOUT_FP_COUNTRY_META_KEY: "",
+        STRIPE_CHECKOUT_FP_PROXY_META_KEY: "",
+        STRIPE_CHECKOUT_FP_TAMPERING_META_KEY: "",
+        STRIPE_CHECKOUT_FP_BOT_META_KEY: "",
+        STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY: "",
+    }
+
+
 def build_checkout_fingerprint_metadata(
     user,
     *,
@@ -177,8 +198,7 @@ def build_checkout_customer_metadata(
     if extra_metadata:
         for key, raw_value in extra_metadata.items():
             normalized_value = _normalize_checkout_metadata_value(raw_value)
-            if normalized_value:
-                metadata[key] = normalized_value
+            metadata[key] = normalized_value
     return metadata
 
 

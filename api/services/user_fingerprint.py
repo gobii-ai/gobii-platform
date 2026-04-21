@@ -8,7 +8,7 @@ import requests
 from celery.exceptions import CeleryError
 from django.conf import settings
 from django.db import transaction
-from django.db.models import F
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from kombu.exceptions import OperationalError as KombuOperationalError
 from requests import RequestException
@@ -187,10 +187,16 @@ def get_latest_user_fingerprint_visit(user) -> UserFingerprintVisit | None:
             user=user,
             fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
         )
+        .annotate(
+            latest_observed_at=Coalesce(
+                "event_timestamp",
+                "fetched_at",
+                "last_fetch_attempt_at",
+                "created_at",
+            )
+        )
         .order_by(
-            F("event_timestamp").desc(nulls_last=True),
-            F("fetched_at").desc(nulls_last=True),
-            "-created_at",
+            "-latest_observed_at",
             "-id",
         )
         .first()

@@ -43,6 +43,7 @@ from billing.checkout_metadata import (
     build_checkout_customer_metadata,
     build_checkout_flow_metadata,
     clear_checkout_customer_metadata,
+    clear_checkout_fingerprint_metadata,
 )
 from billing.checkout_context import record_checkout_context
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
@@ -2002,7 +2003,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             extra_customer_metadata=(
                 build_checkout_fingerprint_metadata(user, customer_context=True)
                 if include_trial
-                else None
+                else clear_checkout_fingerprint_metadata(customer_context=True)
             ),
             checkout_kwargs=checkout_kwargs,
         )
@@ -2199,7 +2200,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             extra_customer_metadata=(
                 build_checkout_fingerprint_metadata(user, customer_context=True)
                 if include_trial
-                else None
+                else clear_checkout_fingerprint_metadata(customer_context=True)
             ),
             checkout_kwargs=checkout_kwargs,
         )
