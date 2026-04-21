@@ -242,6 +242,13 @@ def get_fp_high_activity(user) -> bool | None:
     return visit.high_activity_device
 
 
+def get_fp_bot(user) -> str | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return _optional_clean_string(visit.bot)
+
+
 def _fingerprint_processing_stale_after() -> dt.timedelta:
     stale_after_seconds = max(int(settings.FINGERPRINT_SERVER_PROCESSING_STALE_SECONDS), 60)
     return dt.timedelta(seconds=stale_after_seconds)

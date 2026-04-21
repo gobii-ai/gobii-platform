@@ -14,6 +14,7 @@ from api.services.trial_abuse import (
 )
 from api.services.user_fingerprint import (
     enqueue_user_fingerprint_visit_refresh,
+    get_fp_bot,
     get_fp_country,
     get_fp_high_activity,
     get_fp_proxy,
@@ -531,6 +532,7 @@ class UserFingerprintVisitTests(TestCase):
         self.assertIsNone(get_fp_proxy(user))
         self.assertIsNone(get_fp_tampering(user))
         self.assertIsNone(get_fp_high_activity(user))
+        self.assertIsNone(get_fp_bot(user))
 
     def test_fp_helpers_use_latest_succeeded_visit(self):
         user = self._create_user("fingerprint-helper-values@example.com")
@@ -563,6 +565,7 @@ class UserFingerprintVisitTests(TestCase):
             proxy=True,
             tampering=True,
             high_activity_device=None,
+            bot="not_detected",
         )
         UserFingerprintVisit.objects.create(
             user=user,
@@ -587,6 +590,7 @@ class UserFingerprintVisitTests(TestCase):
         self.assertTrue(get_fp_proxy(user))
         self.assertTrue(get_fp_tampering(user))
         self.assertIsNone(get_fp_high_activity(user))
+        self.assertEqual(get_fp_bot(user), "not_detected")
 
     def test_fetch_user_fingerprint_visit_task_is_late_acked(self):
         self.assertTrue(fetch_user_fingerprint_visit_task.acks_late)
