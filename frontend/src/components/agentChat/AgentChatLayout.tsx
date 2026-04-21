@@ -612,14 +612,16 @@ export function AgentChatLayout({
     isStreaming && streaming?.reasoning?.trim() && !hasStreamingContent && !hasMoreNewer,
   )
 
-  // Show progress bar whenever processing is active (agent is working)
+  // Show progress bar whenever processing is active.
   // Keep it mounted but hide visually while actively streaming message content or when newer messages are waiting
   const isActivelyStreamingContent = hasStreamingContent && isStreaming
   const showTypingIndicator = Boolean(awaitingResponse || processingActive || isStreaming)
   const hideTypingIndicator = isActivelyStreamingContent || hasMoreNewer
   const typingStatusText = stopProcessingRequested
     ? 'Stopping...'
-    : deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })
+    : planningState === 'planning'
+      ? 'Planning...'
+      : deriveTypingStatusText({ streaming: streaming ?? null, processingWebTasks, awaitingResponse })
 
   const showProcessingIndicator = Boolean((processingActive || isStreaming || awaitingResponse) && !hasMoreNewer)
   const showScheduledResumeEvent = Boolean(

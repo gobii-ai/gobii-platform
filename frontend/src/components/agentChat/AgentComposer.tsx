@@ -317,8 +317,9 @@ export const AgentComposer = memo(function AgentComposer({
   const showPipedreamAppsControl = Boolean(
     canManageAgent && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
   )
+  const isPlanningMode = planningState === 'planning'
   const isStopping = Boolean(isProcessing && stopProcessingRequested)
-  const showStopProcessing = Boolean(isProcessing && !isStopping && agentId && canManageAgent && onStopProcessing)
+  const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
   const handleIntelligenceUpsell = useCallback(async () => {
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
@@ -1020,7 +1021,7 @@ export const AgentComposer = memo(function AgentComposer({
   // Show the panel when processing OR when there are insights to display
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
   const taskCount = processingTasks.length
-  const showPlanningStrip = planningState === 'planning'
+  const showPlanningStrip = isPlanningMode
 
   return (
     <div
@@ -1057,8 +1058,8 @@ export const AgentComposer = memo(function AgentComposer({
                 <>
                   <Sparkles className="composer-working-indicator" aria-hidden="true" />
                   <span className="composer-working-status">
-                    <strong>{agentFirstName}</strong> is {isStopping ? 'stopping' : 'working'}
-                    <span className="composer-working-ellipsis" aria-label="working">
+                    <strong>{agentFirstName}</strong> is {isStopping ? 'stopping' : isPlanningMode ? 'planning' : 'working'}
+                    <span className="composer-working-ellipsis" aria-label={isPlanningMode ? 'planning' : 'working'}>
                       <span className="composer-working-dot" />
                       <span className="composer-working-dot" />
                       <span className="composer-working-dot" />
