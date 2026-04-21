@@ -68,7 +68,7 @@ class EvalInjectionTests(TestCase):
                     trigger_processing=True
                 )
             
-            mock_task.assert_called_once_with(str(self.agent.id), eval_run_id=None)
+            mock_task.assert_called_once_with(str(self.agent.id), eval_run_id=None, inbound_generation=1)
             
         self.assertEqual(msg.body, body)
 

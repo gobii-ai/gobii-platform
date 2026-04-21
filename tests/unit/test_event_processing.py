@@ -35,6 +35,7 @@ from api.agent.core.processing_flags import (
     PendingDrainSettings,
     bump_human_inbound_generation,
     clear_processing_stop_requested,
+    get_consumed_human_inbound_generation,
     get_human_inbound_generation,
     is_processing_stop_requested,
     mark_human_inbound_generation_consumed,
@@ -3656,7 +3657,7 @@ class HumanInboundGenerationTests(TestCase):
                 )
 
         self.assertEqual(get_human_inbound_generation(self.agent.id), before)
-        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=None)
+        mock_delay.assert_called_once_with(str(self.agent.id))
 
     def test_peer_agent_message_does_not_bump_human_generation(self):
         peer_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="PeerGenerationBA")
@@ -3752,6 +3753,46 @@ class OrchestratorHumanInputInterruptTests(TestCase):
 
         self.assertEqual(usage.get("total_tokens"), 0)
         mock_completion.assert_not_called()
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_generation_is_not_consumed_when_completion_fails(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        generation = bump_human_inbound_generation(self.agent.id)
+        mock_build_prompt.return_value = self._prompt_context()
+        mock_completion.side_effect = RuntimeError("provider unavailable")
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        self.assertEqual(get_consumed_human_inbound_generation(self.agent.id), 0)
+        self.assertEqual(get_human_inbound_generation(self.agent.id), generation)
 
     @patch("api.agent.core.event_processing.run_completion")
     def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):

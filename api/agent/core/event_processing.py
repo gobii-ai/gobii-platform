@@ -4587,17 +4587,21 @@ def _run_agent_loop(
                             logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
                         return cumulative_token_usage
 
-                if accepted_human_generation > 0:
+                def _is_orchestrator_prompt_stale() -> bool:
+                    return _current_human_inbound_generation() > accepted_human_generation
+
+                def _mark_accepted_human_generation_consumed() -> None:
+                    if accepted_human_generation <= 0:
+                        return
+                    if _is_orchestrator_prompt_stale():
+                        return
                     mark_human_inbound_generation_consumed(
                         agent.id,
                         accepted_human_generation,
                         client=redis_client,
                     )
-                    if _current_human_inbound_generation() <= accepted_human_generation:
+                    if not _is_orchestrator_prompt_stale():
                         remove_pending_agent(agent.id, client=redis_client)
-
-                def _is_orchestrator_prompt_stale() -> bool:
-                    return _current_human_inbound_generation() > accepted_human_generation
 
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
                     nonlocal prompt_archive_attached
@@ -4987,6 +4991,7 @@ def _run_agent_loop(
                 if not tool_calls:
                     if _apply_runtime_updates():
                         reasoning_only_streak = 0
+                        _mark_accepted_human_generation_consumed()
                         continue
                     if not message_text and not thinking_content:
                         # Truly empty response (no text, no thinking, no tools) = agent is done
@@ -5007,6 +5012,7 @@ def _run_agent_loop(
                             type(msg_content).__name__,
                             len(msg_content) if msg_content else 0,
                         )
+                        _mark_accepted_human_generation_consumed()
                         _attempt_cycle_close_for_sleep(agent, budget_ctx)
                         return cumulative_token_usage
                     # Message or thinking content but no tools - increment streak.
@@ -5044,8 +5050,10 @@ def _run_agent_loop(
                             kanban_state,
                             message_text or thinking_content or "(none)",
                         )
+                        _mark_accepted_human_generation_consumed()
                         _attempt_cycle_close_for_sleep(agent, budget_ctx)
                         return cumulative_token_usage
+                    _mark_accepted_human_generation_consumed()
                     continue
 
                 reasoning_only_streak = 0
@@ -5155,10 +5163,13 @@ def _run_agent_loop(
                                 agent.id,
                             )
                             _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    _mark_accepted_human_generation_consumed()
                     return cumulative_token_usage
 
                 if _apply_runtime_updates():
                     followup_required = True
+
+                _mark_accepted_human_generation_consumed()
 
                 if executed_non_message_action:
                     inferred_message_continue_streak = 0

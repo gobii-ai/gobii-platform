@@ -1235,7 +1235,10 @@ def ingest_inbound_message(
                     return
                 from api.agent.tasks import process_agent_events_task
                 # Top-level trigger: no budget context provided
-                process_agent_events_task.delay(str(owner_id), inbound_generation=inbound_generation)
+                if inbound_generation is None:
+                    process_agent_events_task.delay(str(owner_id))
+                else:
+                    process_agent_events_task.delay(str(owner_id), inbound_generation=inbound_generation)
 
             has_attachments = message.attachments.exists()
             message_id = str(message.id)
