@@ -89,6 +89,7 @@ class PersistentAgentProvisioningService:
         template_code: str | None = None,
         preferred_llm_tier: IntelligenceTier | None = None,
         signup_preview_state: str | None = None,
+        planning_state: str | None = None,
     ) -> ProvisioningResult:
         """Create a new persistent agent and its backing browser agent."""
         agent_name = name or cls.generate_unique_name(user)
@@ -139,6 +140,7 @@ class PersistentAgentProvisioningService:
                 is_active=is_active,
                 preferred_contact_endpoint=preferred_contact_endpoint,
                 preferred_llm_tier=computed_tier,
+                planning_state=planning_state or PersistentAgent.PlanningState.PLANNING,
             )
 
             if life_state:

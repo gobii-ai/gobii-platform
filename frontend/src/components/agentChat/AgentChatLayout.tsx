@@ -21,6 +21,7 @@ import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
+import { PlanningModeStrip } from './PlanningModeStrip'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -34,7 +35,7 @@ import type {
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
-import type { SignupPreviewState } from '../../types/agentRoster'
+import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
 import {
   isContinuationUpgradeModalSource,
@@ -185,6 +186,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   composerErrorShowUpgrade?: boolean
   showSignupPreviewPanel?: boolean
   signupPreviewState?: SignupPreviewState
+  planningState?: PlanningState
+  onSkipPlanning?: () => void | Promise<void>
+  skipPlanningBusy?: boolean
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
@@ -325,6 +329,9 @@ export function AgentChatLayout({
   composerErrorShowUpgrade = false,
   showSignupPreviewPanel = false,
   signupPreviewState = 'none',
+  planningState = 'skipped',
+  onSkipPlanning,
+  skipPlanningBusy = false,
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
@@ -1098,6 +1105,14 @@ export function AgentChatLayout({
           </button>
 
           {/* Composer at bottom of flex layout */}
+          {planningState === 'planning' && (spawnIntentLoading || showSignupPreviewPanel) ? (
+            <PlanningModeStrip
+              canManageAgent={canManageAgent}
+              onSkipPlanning={onSkipPlanning}
+              skipPlanningBusy={skipPlanningBusy}
+              className="mx-4 mb-3 rounded-lg border border-sky-100 sm:mx-6 lg:mx-10"
+            />
+          ) : null}
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">
@@ -1121,6 +1136,9 @@ export function AgentChatLayout({
               agentName={agentName ?? null}
               onSubmit={onSendMessage}
               pendingActionRequests={pendingActionRequests}
+              planningState={planningState}
+              onSkipPlanning={onSkipPlanning}
+              skipPlanningBusy={skipPlanningBusy}
               onRespondHumanInput={onRespondHumanInputRequest}
               onResolveSpawnRequest={onResolveSpawnRequest}
               onFulfillRequestedSecrets={onFulfillRequestedSecrets}

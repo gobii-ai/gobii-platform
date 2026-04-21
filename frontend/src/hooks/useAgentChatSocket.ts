@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
 import { scheduleLoginRedirect } from '../api/http'
 import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
-import type { SignupPreviewState } from '../types/agentRoster'
+import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { useAgentChatStore } from '../stores/agentChatStore'
 import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
@@ -407,6 +407,7 @@ export function useAgentChatSocket(
               agentColorHex?: string | null
               agentAvatarUrl?: string | null
               signupPreviewState?: SignupPreviewState | null
+              planningState?: PlanningState | null
             } = {}
             if (typeof profilePayload.agent_id === 'string') {
               nextIdentity.agentId = profilePayload.agent_id
@@ -428,6 +429,16 @@ export function useAgentChatSocket(
                 || nextSignupPreviewState === 'none'
               )
                 ? nextSignupPreviewState
+                : null
+            }
+            if (Object.prototype.hasOwnProperty.call(profilePayload, 'planning_state')) {
+              const nextPlanningState = profilePayload.planning_state
+              nextIdentity.planningState = (
+                nextPlanningState === 'planning'
+                || nextPlanningState === 'completed'
+                || nextPlanningState === 'skipped'
+              )
+                ? nextPlanningState
                 : null
             }
             updateAgentIdentityRef.current(nextIdentity)

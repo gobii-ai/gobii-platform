@@ -1,6 +1,6 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
-import type { AgentRosterEntry, AgentRosterSortMode, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -20,6 +20,7 @@ export type CreateAgentResponse = {
   agent_id: string
   agent_name: string
   agent_email?: string | null
+  planning_state?: PlanningState | null
 }
 
 type AgentRosterPayload = {
@@ -49,6 +50,7 @@ type AgentRosterPayload = {
     sms: string | null
     last_interaction_at: string | null
     signup_preview_state?: SignupPreviewState | null
+    planning_state?: PlanningState | null
   }[]
 }
 
@@ -85,6 +87,7 @@ export async function fetchAgentRoster(
     sms: agent.sms,
     lastInteractionAt: agent.last_interaction_at,
     signupPreviewState: agent.signup_preview_state ?? null,
+    planningState: agent.planning_state ?? null,
   }))
   return {
     context: payload.context,

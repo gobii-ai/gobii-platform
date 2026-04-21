@@ -6,6 +6,7 @@ import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
+import { PlanningModeStrip } from './PlanningModeStrip'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -14,6 +15,7 @@ import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
+import type { PlanningState } from '../../types/agentRoster'
 
 // Detect if user is on macOS
 function isMacOS(): boolean {
@@ -139,6 +141,9 @@ type AgentComposerProps = {
   agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingActionRequests?: PendingActionRequest[]
+  planningState?: PlanningState
+  onSkipPlanning?: () => void | Promise<void>
+  skipPlanningBusy?: boolean
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
@@ -198,6 +203,9 @@ export const AgentComposer = memo(function AgentComposer({
   agentName = null,
   onSubmit,
   pendingActionRequests = [],
+  planningState = 'skipped',
+  onSkipPlanning,
+  skipPlanningBusy = false,
   onRespondHumanInput,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
@@ -1012,6 +1020,7 @@ export const AgentComposer = memo(function AgentComposer({
   // Show the panel when processing OR when there are insights to display
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
   const taskCount = processingTasks.length
+  const showPlanningStrip = planningState === 'planning'
 
   return (
     <div
@@ -1135,6 +1144,15 @@ export const AgentComposer = memo(function AgentComposer({
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {showPlanningStrip ? (
+          <PlanningModeStrip
+            canManageAgent={canManageAgent}
+            onSkipPlanning={onSkipPlanning}
+            skipPlanningBusy={skipPlanningBusy}
+            className="border-t border-sky-100"
+          />
         ) : null}
 
         {pendingActionRequests.length > 0 ? (

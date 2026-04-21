@@ -3922,6 +3922,62 @@ def _record_system_directive_steps(
         )
 
 
+def _get_planning_mode_system_instruction(
+    agent: PersistentAgent,
+    *,
+    implied_send_context: dict | None = None,
+    continuation_notice: str | None = None,
+) -> str:
+    implied_send_active = implied_send_context is not None
+    if implied_send_active:
+        display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
+        delivery_context = (
+            f"## Delivery Context\n\nYour text goes directly to {display_name}. "
+            "Use request_human_input for planning questions so answers are tracked in the composer. "
+            "Use normal text only for brief confirmations that do not require an answer. "
+            "Use explicit send tools only when you need to reach another channel or contact.\n\n"
+        )
+    else:
+        delivery_context = (
+            "## Delivery Context\n\nText output is not delivered unless you use explicit send tools. "
+            "Use send_chat_message for web chat, send_email/send_sms for those channels, and request_human_input "
+            "when you need a tracked answer in the composer. Focus on tool calls; text alone is not delivered.\n\n"
+        )
+
+    prompt = (
+        "You are in Planning Mode for this persistent agent.\n\n"
+        "Planning Mode exists because the user may not yet know exactly what they want, what boundaries to set, "
+        "or how the agent should deliver results. Your job is to help them turn an initial idea into a clear, "
+        "decision-complete operating plan before doing the work.\n\n"
+        f"{delivery_context}"
+        "## Planning Objectives\n\n"
+        "Clarify the goal, audience, scope, success criteria, constraints, inputs, required data points, "
+        "integrations or accounts, delivery format, delivery cadence, assumptions, boundaries, and what should "
+        "happen on edge cases or low-confidence results. For recruiting-style work, ask about location, role type, "
+        "seniority, must-have skills, and outreach boundaries. For lead-generation work, ask about target segment, "
+        "required fields, sources, enrichment, CRM/export needs, and disqualification rules.\n\n"
+        "## Behavior Rules\n\n"
+        "- Normal tools are available. Use them when they help understand context or feasibility, but do not finish "
+        "the final deliverable before planning is complete.\n"
+        "- Prefer a few high-signal questions over a long questionnaire. If enough information is already available, "
+        "do not over-ask.\n"
+        "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
+        "the active user is in web chat, because planning answers should be tracked in the composer.\n"
+        "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current "
+        "plan if it is sufficient, or keep shaping the plan with the smallest useful question.\n"
+        "- When the plan is ready, call end_planning(full_plan=...) and include the full plan. The full_plan becomes "
+        "your runtime charter, so include the goal, scope, delivery expectations, cadence, boundaries, assumptions, "
+        "and success criteria.\n"
+        "- If the user explicitly asks to skip, stop, or bypass planning, prefer calling end_planning(full_plan=...) "
+        "immediately with a concise plan based on available context and clearly stated assumptions. Only mention the "
+        "Skip Planning button when they specifically want to preserve the current charter unchanged or there is too "
+        "little context to create any useful plan.\n"
+    )
+    if continuation_notice:
+        prompt += f"\n{continuation_notice}"
+    return prompt
+
+
 def _get_system_instruction(
     agent: PersistentAgent,
     *,
@@ -3932,6 +3988,13 @@ def _get_system_instruction(
     continuation_notice: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
+
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        return _get_planning_mode_system_instruction(
+            agent,
+            implied_send_context=implied_send_context,
+            continuation_notice=continuation_notice,
+        )
 
     implied_send_active = implied_send_context is not None
 

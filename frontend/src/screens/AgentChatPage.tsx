@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 
 import { createAgent, updateAgent } from '../api/agents'
@@ -11,6 +11,7 @@ import {
   resolveSpawnRequest,
   respondToHumanInputRequest,
   respondToHumanInputRequestsBatch,
+  skipAgentPlanning,
 } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
@@ -39,7 +40,7 @@ import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnab
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
 import { useSubscriptionStore, type PlanTier } from '../stores/subscriptionStore'
-import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse } from '../hooks/useAgentTimeline'
+import { useAgentTimeline, flattenTimelinePages, getInitialPageResponse, timelineQueryKey, type TimelinePage } from '../hooks/useAgentTimeline'
 import {
   refreshTimelineLatestInCache,
   replacePendingActionRequestsInCache,
@@ -50,7 +51,7 @@ import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { KanbanBoardSnapshot, PendingActionRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
@@ -462,12 +463,19 @@ type AgentSwitchMeta = {
   agentAvatarUrl?: string | null
   processingActive?: boolean
   signupPreviewState?: SignupPreviewState | null
+  planningState?: PlanningState | null
 }
 
 function normalizeSignupPreviewState(value: unknown): SignupPreviewState {
   return value === 'awaiting_first_reply_pause' || value === 'awaiting_signup_completion'
     ? value
     : 'none'
+}
+
+function normalizePlanningState(value: unknown): PlanningState {
+  return value === 'planning' || value === 'completed' || value === 'skipped'
+    ? value
+    : 'skipped'
 }
 
 function deriveConnectionIndicator({
@@ -820,13 +828,15 @@ export function AgentChatPage({
     const name = initialPageResponse.agent_name ?? null
     const avatar = initialPageResponse.agent_avatar_url ?? null
     const signupPreviewState = normalizeSignupPreviewState(initialPageResponse.signup_preview_state)
-    if (color || name || avatar || signupPreviewState !== 'none') {
+    const planningState = normalizePlanningState(initialPageResponse.planning_state)
+    if (color || name || avatar || signupPreviewState !== 'none' || planningState !== 'skipped') {
       store.updateAgentIdentity({
         agentId: activeAgentId,
         ...(color ? { agentColorHex: color } : {}),
         ...(name ? { agentName: name } : {}),
         ...(avatar ? { agentAvatarUrl: avatar } : {}),
         signupPreviewState,
+        planningState,
       })
     }
   }, [initialPageResponse, activeAgentId])
@@ -838,6 +848,7 @@ export function AgentChatPage({
   const storedAgentName = useAgentChatStore((state) => state.agentName)
   const storedAgentAvatarUrl = useAgentChatStore((state) => state.agentAvatarUrl)
   const signupPreviewState = useAgentChatStore((state) => state.signupPreviewState)
+  const planningState = useAgentChatStore((state) => state.planningState)
   const sendMessage = useAgentChatStore((state) => state.sendMessage)
   const receiveRealtimeEvent = useAgentChatStore((state) => state.receiveRealtimeEvent)
   const hasUnseenActivity = useAgentChatStore((state) => state.hasUnseenActivity)
@@ -1103,6 +1114,7 @@ export function AgentChatPage({
       const hasMiniDescription = Object.prototype.hasOwnProperty.call(rawPayload, 'mini_description')
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
+      const hasPlanningState = Object.prototype.hasOwnProperty.call(rawPayload, 'planning_state')
       if (
         !hasName
         && !hasColor
@@ -1111,6 +1123,7 @@ export function AgentChatPage({
         && !hasMiniDescription
         && !hasProcessingActive
         && !hasSignupPreviewState
+        && !hasPlanningState
       ) {
         return
       }
@@ -1190,6 +1203,13 @@ export function AgentChatPage({
               const nextSignupPreviewState = normalizeSignupPreviewState(rawPayload.signup_preview_state)
               if (nextSignupPreviewState !== (next.signupPreviewState ?? 'none')) {
                 next.signupPreviewState = nextSignupPreviewState
+                changed = true
+              }
+            }
+            if (hasPlanningState) {
+              const nextPlanningState = normalizePlanningState(rawPayload.planning_state)
+              if (nextPlanningState !== (next.planningState ?? 'skipped')) {
+                next.planningState = nextPlanningState
                 changed = true
               }
             }
@@ -1945,6 +1965,7 @@ export function AgentChatPage({
     const pendingMeta = pendingAgentMetaRef.current
     const resolvedPendingMeta = pendingMeta && pendingMeta.agentId === activeAgentId ? pendingMeta : null
     const activeRosterSignupPreviewState = activeRosterMeta?.signupPreviewState ?? 'none'
+    const activeRosterPlanningState = activeRosterMeta?.planningState ?? 'skipped'
     pendingAgentMetaRef.current = null
     setAgentId(activeAgentId, {
       agentColorHex: resolvedPendingMeta?.agentColorHex ?? agentColor,
@@ -1952,10 +1973,12 @@ export function AgentChatPage({
       agentAvatarUrl: resolvedPendingMeta?.agentAvatarUrl ?? agentAvatarUrl,
       processingActive: resolvedPendingMeta?.processingActive,
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
+      planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
     void fetchInsights()
   }, [
     activeAgentId,
+    activeRosterMeta?.planningState,
     activeRosterMeta?.signupPreviewState,
     agentAvatarUrl,
     agentColor,
@@ -1973,6 +1996,7 @@ export function AgentChatPage({
   const pendingAgentEmail = activeAgentId ? pendingAgentEmails[activeAgentId] ?? null : null
   const resolvedAgentEmail = activeRosterMeta?.email ?? pendingAgentEmail ?? agentEmail ?? null
   const resolvedAgentSms = activeRosterMeta?.sms ?? agentSms ?? null
+  const effectivePlanningState = isStoreSynced ? planningState : (activeRosterMeta?.planningState ?? 'skipped')
   const resolvedIsOrgOwned = activeRosterMeta?.isOrgOwned ?? false
   const activeIsCollaborator = activeRosterMeta?.isCollaborator ?? (isCollaborator ?? false)
   const activeCanManageAgent = activeRosterMeta?.canManageAgent ?? !activeIsCollaborator
@@ -2069,6 +2093,7 @@ export function AgentChatPage({
   const [sendMessageError, setSendMessageError] = useState<string | null>(null)
   const [stopProcessingBusy, setStopProcessingBusy] = useState(false)
   const [stopProcessingRequested, setStopProcessingRequested] = useState(false)
+  const [skipPlanningBusy, setSkipPlanningBusy] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
   const spawnIntentAutoSubmittedRef = useRef(false)
@@ -2556,6 +2581,7 @@ export function AgentChatPage({
         agentAvatarUrl: agent.avatarUrl,
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
+        planningState: agent.planningState ?? 'skipped',
       }
       setSwitchingAgentId(agent.id)
       setActiveAgentId(agent.id)
@@ -2669,6 +2695,7 @@ export function AgentChatPage({
         )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
+        const createdPlanningState = normalizePlanningState(result.planning_state)
         const createdAgentEntry: AgentRosterEntry = {
           id: result.agent_id,
           name: createdAgentName,
@@ -2681,11 +2708,13 @@ export function AgentChatPage({
           shortDescription: '',
           email: createdAgentEmail,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
+          planningState: createdPlanningState,
         }
         pendingAgentMetaRef.current = {
           agentId: result.agent_id,
           agentName: createdAgentName,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
+          planningState: createdPlanningState,
         }
         trackPendingAvatarRefresh(result.agent_id)
         if (createdAgentEmail) {
@@ -2783,6 +2812,62 @@ export function AgentChatPage({
       setStopProcessingBusy(false)
     }
   }, [activeAgentId, queryClient, refreshProcessing, stopProcessingBusy])
+
+  const handleSkipPlanning = useCallback(async () => {
+    if (!activeAgentId || skipPlanningBusy) {
+      return
+    }
+    setSkipPlanningBusy(true)
+    setSendMessageError(null)
+    try {
+      const result = await skipAgentPlanning(activeAgentId)
+      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+      useAgentChatStore.getState().updateAgentIdentity({
+        agentId: activeAgentId,
+        planningState: result.planningState,
+      })
+      queryClient.setQueryData<InfiniteData<TimelinePage>>(
+        timelineQueryKey(activeAgentId),
+        (current) => {
+          if (!current?.pages?.length) {
+            return current
+          }
+          return {
+            ...current,
+            pages: current.pages.map((page) => ({
+              ...page,
+              raw: {
+                ...page.raw,
+                planning_state: result.planningState,
+                pending_action_requests: result.pendingActionRequests,
+                pending_human_input_requests: result.pendingHumanInputRequests,
+              },
+            })),
+          }
+        },
+      )
+      queryClient.setQueriesData<AgentRosterQueryData>(
+        { queryKey: ['agent-roster'] },
+        (current) => {
+          if (!isAgentRosterQueryData(current)) {
+            return current
+          }
+          return {
+            ...current,
+            agents: current.agents.map((agent) => (
+              agent.id === activeAgentId
+                ? { ...agent, planningState: result.planningState }
+                : agent
+            )),
+          }
+        },
+      )
+    } catch (error) {
+      setSendMessageError(safeErrorMessage(error) || 'Unable to skip planning right now.')
+    } finally {
+      setSkipPlanningBusy(false)
+    }
+  }, [activeAgentId, queryClient, skipPlanningBusy])
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
@@ -3572,6 +3657,9 @@ export function AgentChatPage({
         composerDisabledReason={sendMessageDisabledReason}
         showSignupPreviewPanel={showSignupPreviewPanel}
         signupPreviewState={effectiveSignupPreviewState}
+        planningState={effectivePlanningState}
+        onSkipPlanning={handleSkipPlanning}
+        skipPlanningBusy={skipPlanningBusy}
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}

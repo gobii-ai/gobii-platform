@@ -124,6 +124,7 @@ from api.services.system_settings import get_max_file_size
 from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
+from api.services.agent_planning import skip_agent_planning
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -2485,6 +2486,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                 "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
                 "signup_preview_state": agent.signup_preview_state,
+                "planning_state": agent.planning_state,
             }
             for agent in agents
         ]
@@ -2603,6 +2605,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             "agent_id": str(result.agent.id),
             "agent_name": result.agent.name,
             "agent_email": agent_email,
+            "planning_state": result.agent.planning_state,
         })
 
 
@@ -2957,9 +2960,37 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_url(),
             "signup_preview_state": agent.signup_preview_state,
+            "planning_state": agent.planning_state,
             **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        was_planning = agent.planning_state == PersistentAgent.PlanningState.PLANNING
+        agent, _cancelled_count = skip_agent_planning(agent)
+
+        if was_planning:
+            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
+            from console.agent_chat.signals import emit_agent_planning_state_update
+
+            emit_agent_planning_state_update(agent, include_pending_actions=True)
+
+        return JsonResponse(
+            {
+                "planning_state": agent.planning_state,
+                **_pending_action_payload(agent, request.user),
+            }
+        )
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -6217,6 +6248,7 @@ class AgentProcessingStatusAPIView(LoginRequiredMixin, View):
                 "processing_active": snapshot.active,
                 "processing_snapshot": serialize_processing_snapshot(snapshot),
                 "signup_preview_state": agent.signup_preview_state,
+                "planning_state": agent.planning_state,
             }
         )
 
