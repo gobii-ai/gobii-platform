@@ -249,6 +249,63 @@ class TaskCreditServiceCheckAndConsumeCreditForOwnerTests(TestCase):
         self.assertIsNone(result["credit"])
         self.assertIn("no remaining task credits", result["error_message"].lower())
 
+    def test_refund_consumed_credit_prefers_linked_credit(self):
+        user = User.objects.create(username="refund_user")
+        now = timezone.now()
+        credit = TaskCredit.objects.create(
+            user=user,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("5.000"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=30),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+
+        result = TaskCreditService.refund_consumed_credit_for_owner(
+            user,
+            amount=Decimal("2.000"),
+            preferred_credit=credit,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["refunded"], Decimal("2.000"))
+        credit.refresh_from_db()
+        self.assertEqual(credit.credits_used, Decimal("3.000"))
+
+    def test_refund_consumed_credit_clamps_without_negative_usage(self):
+        user = User.objects.create(username="refund_clamp_user")
+        now = timezone.now()
+        preferred_credit = TaskCredit.objects.create(
+            user=user,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("1.000"),
+            granted_date=now - timedelta(days=2),
+            expiration_date=now + timedelta(days=20),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+        fallback_credit = TaskCredit.objects.create(
+            user=user,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("2.000"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=30),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+
+        result = TaskCreditService.refund_consumed_credit_for_owner(
+            user,
+            amount=Decimal("5.000"),
+            preferred_credit=preferred_credit,
+        )
+
+        self.assertFalse(result["success"])
+        self.assertEqual(result["refunded"], Decimal("3.000"))
+        self.assertEqual(result["remaining"], Decimal("2.000"))
+        preferred_credit.refresh_from_db()
+        fallback_credit.refresh_from_db()
+        self.assertEqual(preferred_credit.credits_used, Decimal("0.000"))
+        self.assertEqual(fallback_credit.credits_used, Decimal("0.000"))
+
 
 @tag("batch_task_credits")
 class TaskCreditServiceGetTasksEntitledTests(TestCase):

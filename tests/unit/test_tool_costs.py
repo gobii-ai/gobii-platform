@@ -1,5 +1,5 @@
 from decimal import Decimal
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.models import CommsChannel, TaskCreditConfig, ToolCreditCost
 from util.tool_costs import (
@@ -8,6 +8,7 @@ from util.tool_costs import (
     get_tool_credit_cost,
     get_most_expensive_tool_cost,
     get_tool_credit_cost_for_channel,
+    should_refund_tool_credit_on_error,
 )
 
 
@@ -104,3 +105,9 @@ class ToolCostTests(TestCase):
         clear_tool_credit_cost_cache()
 
         self.assertEqual(get_most_expensive_tool_cost(), Decimal("0.75"))
+
+    @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS={"Create_Video", " HTTP_REQUEST "})
+    def test_error_refund_allowlist_is_case_insensitive(self):
+        self.assertTrue(should_refund_tool_credit_on_error("create_video"))
+        self.assertTrue(should_refund_tool_credit_on_error("HTTP_request"))
+        self.assertFalse(should_refund_tool_credit_on_error("sqlite_batch"))

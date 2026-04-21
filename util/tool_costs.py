@@ -132,6 +132,27 @@ def get_tool_credit_cost(tool_name: str | None) -> Decimal:
     return default_cost
 
 
+def should_refund_tool_credit_on_error(tool_name: str | None) -> bool:
+    """Return whether the configured tool should not charge credits on error."""
+    key = _normalize_tool_name(tool_name)
+    if not key:
+        return False
+
+    raw_tools = settings.TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS
+    if raw_tools is None:
+        return False
+    if isinstance(raw_tools, str):
+        tool_names = raw_tools.split(",")
+    else:
+        tool_names = raw_tools
+
+    return key in {
+        normalized
+        for normalized in (_normalize_tool_name(name) for name in tool_names)
+        if normalized
+    }
+
+
 def get_most_expensive_tool_cost() -> Decimal:
     """Return the largest configured tool credit cost, including the default."""
     default_cost, overrides = _get_tool_cost_config()

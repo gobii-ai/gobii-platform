@@ -838,6 +838,82 @@ class TaskCreditService:
             return TaskCreditService.consume_credit(owner, additional_task=additional_task, amount=plan_amount)
 
     @staticmethod
+    def refund_consumed_credit_for_owner(owner, amount: Decimal | None, preferred_credit=None) -> dict:
+        """
+        Restore a previously consumed credit amount for either a User or Organization.
+
+        The original credit block is preferred because consumption can span multiple
+        blocks while only the last touched block is attached to the agent step.
+        """
+        if owner is None or amount is None:
+            return {"success": True, "refunded": Decimal("0"), "remaining": Decimal("0")}
+
+        refund_amount = Decimal(amount)
+        if refund_amount <= 0:
+            return {"success": True, "refunded": Decimal("0"), "remaining": Decimal("0")}
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        owner_filter = (
+            {"organization_id": owner.id}
+            if TaskCreditService._is_organization_owner(owner)
+            else {"user_id": owner.id}
+        )
+        preferred_credit_id = getattr(preferred_credit, "id", None)
+        remaining = refund_amount
+        refunded = Decimal("0")
+
+        def _refund_from_credit(credit) -> Decimal:
+            nonlocal remaining, refunded
+            used = Decimal(credit.credits_used or Decimal("0"))
+            if used <= 0 or remaining <= 0:
+                return Decimal("0")
+
+            refund_now = used if used <= remaining else remaining
+            credit.credits_used = used - refund_now
+            credit.save(update_fields=["credits_used"])
+            remaining -= refund_now
+            refunded += refund_now
+            return refund_now
+
+        with transaction.atomic():
+            if preferred_credit_id is not None and remaining > 0:
+                preferred = (
+                    TaskCredit.objects.select_for_update()
+                    .filter(
+                        id=preferred_credit_id,
+                        voided=False,
+                        **owner_filter,
+                    )
+                    .first()
+                )
+                if preferred is not None:
+                    _refund_from_credit(preferred)
+
+            if remaining > 0:
+                credits = (
+                    TaskCredit.objects.select_for_update()
+                    .filter(
+                        credits_used__gt=0,
+                        voided=False,
+                        **owner_filter,
+                    )
+                    .order_by("expiration_date", "granted_date", "id")
+                )
+                if preferred_credit_id is not None:
+                    credits = credits.exclude(id=preferred_credit_id)
+
+                for credit in credits:
+                    _refund_from_credit(credit)
+                    if remaining <= 0:
+                        break
+
+        return {
+            "success": remaining == 0,
+            "refunded": refunded,
+            "remaining": remaining,
+        }
+
+    @staticmethod
     @tracer.start_as_current_span("TaskCreditService Check And Consume Credit For Owner")
     def check_and_consume_credit_for_owner(owner, amount: Decimal | None = None) -> dict:
         """Owner-aware wrapper mirroring check_and_consume_credit."""

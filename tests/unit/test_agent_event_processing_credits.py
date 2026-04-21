@@ -9,9 +9,11 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentStep,
     PersistentAgentSystemStep,
+    PersistentAgentToolCall,
     TaskCredit,
     CommsChannel,
     UserBilling,
@@ -41,6 +43,7 @@ from api.agent.core.prompt_context import (
     compute_burn_rate,
     get_agent_daily_credit_state,
 )
+from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
 from api.agent.core import event_processing as ep
 from api.agent.core import burn_control as bc
@@ -422,6 +425,155 @@ class PersistentAgentToolCreditTests(TestCase):
     def tearDown(self):
         PersistentAgentStep.objects.filter(agent=self.agent).delete()
         PersistentAgentSystemStep.objects.filter(step__agent=self.agent).delete()
+
+    def _create_charged_pending_tool_step(
+        self,
+        *,
+        tool_name: str,
+        amount: Decimal = Decimal("2.000"),
+    ):
+        now = timezone.now()
+        credit = TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("10.000"),
+            credits_used=amount,
+            granted_date=now - timezone.timedelta(days=1),
+            expiration_date=now + timezone.timedelta(days=30),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=completion,
+            description="",
+            credits_cost=amount,
+            task_credit=credit,
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=tool_name,
+            tool_params={},
+            result="",
+            status="pending",
+        )
+        completion.refresh_from_db()
+        return credit, completion, step
+
+    def _finalize_single_tool_result(
+        self,
+        *,
+        tool_name: str,
+        step: PersistentAgentStep,
+        credit: TaskCredit,
+        amount: Decimal,
+        result: dict,
+    ):
+        prepared = ep._PreparedToolExecution(
+            idx=1,
+            tool_name=tool_name,
+            tool_params={},
+            exec_params={},
+            pending_step=step,
+            credits_consumed=amount,
+            consumed_credit=credit,
+            call_id="call-refund-test",
+            explicit_continue=None,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=f"unsafe_tool:{tool_name}",
+        )
+        outcome = ep._ToolExecutionOutcome(
+            prepared=prepared,
+            result=result,
+            duration_ms=10,
+            updated_tools=None,
+            variable_map={},
+        )
+        return ep._finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda _step_kwargs: None,
+            attach_prompt_archive=lambda _step: None,
+        )
+
+    @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS={"create_video"})
+    def test_allowlisted_tool_error_refunds_credit_and_clears_step_charge(self):
+        amount = Decimal("2.000")
+        credit, completion, step = self._create_charged_pending_tool_step(
+            tool_name="create_video",
+            amount=amount,
+        )
+
+        finalized = self._finalize_single_tool_result(
+            tool_name="create_video",
+            step=step,
+            credit=credit,
+            amount=amount,
+            result={"status": "error", "message": "provider failed"},
+        )
+
+        self.assertTrue(finalized.followup_required)
+        credit.refresh_from_db()
+        step.refresh_from_db()
+        completion.refresh_from_db()
+        tool_call = PersistentAgentToolCall.objects.get(step=step)
+        self.assertEqual(credit.credits_used, Decimal("0.000"))
+        self.assertIsNone(step.credits_cost)
+        self.assertIsNone(step.task_credit_id)
+        self.assertIsNone(completion.credits_cost)
+        self.assertEqual(tool_call.status, "error")
+
+    @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS={"create_video"})
+    def test_non_allowlisted_tool_error_remains_charged(self):
+        amount = Decimal("2.000")
+        credit, completion, step = self._create_charged_pending_tool_step(
+            tool_name="sqlite_query",
+            amount=amount,
+        )
+
+        self._finalize_single_tool_result(
+            tool_name="sqlite_query",
+            step=step,
+            credit=credit,
+            amount=amount,
+            result={"status": "error", "message": "query failed"},
+        )
+
+        credit.refresh_from_db()
+        step.refresh_from_db()
+        completion.refresh_from_db()
+        tool_call = PersistentAgentToolCall.objects.get(step=step)
+        self.assertEqual(credit.credits_used, amount)
+        self.assertEqual(step.credits_cost, amount)
+        self.assertEqual(step.task_credit_id, credit.id)
+        self.assertEqual(completion.credits_cost, amount)
+        self.assertEqual(tool_call.status, "error")
+
+    @override_settings(TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS={"create_video"})
+    def test_allowlisted_tool_success_remains_charged(self):
+        amount = Decimal("2.000")
+        credit, completion, step = self._create_charged_pending_tool_step(
+            tool_name="create_video",
+            amount=amount,
+        )
+
+        self._finalize_single_tool_result(
+            tool_name="create_video",
+            step=step,
+            credit=credit,
+            amount=amount,
+            result={"status": "ok", "file": "$[/exports/video.mp4]"},
+        )
+
+        credit.refresh_from_db()
+        step.refresh_from_db()
+        completion.refresh_from_db()
+        tool_call = PersistentAgentToolCall.objects.get(step=step)
+        self.assertEqual(credit.credits_used, amount)
+        self.assertEqual(step.credits_cost, amount)
+        self.assertEqual(step.task_credit_id, credit.id)
+        self.assertEqual(completion.credits_cost, amount)
+        self.assertEqual(tool_call.status, "complete")
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner")
