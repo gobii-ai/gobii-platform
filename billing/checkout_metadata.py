@@ -21,11 +21,13 @@ STRIPE_CHECKOUT_FP_COUNTRY_META_KEY = "fp_country"
 STRIPE_CHECKOUT_FP_PROXY_META_KEY = "fp_proxy"
 STRIPE_CHECKOUT_FP_TAMPERING_META_KEY = "fp_tampering"
 STRIPE_CHECKOUT_FP_BOT_META_KEY = "fp_bot"
+STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY = "fp_visitor_id"
 STRIPE_CHECKOUT_CUSTOMER_FP_SUSPECT_SCORE_META_KEY = "active_checkout_fp_suspect_score"
 STRIPE_CHECKOUT_CUSTOMER_FP_COUNTRY_META_KEY = "active_checkout_fp_country"
 STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY = "active_checkout_fp_proxy"
 STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY = "active_checkout_fp_tampering"
 STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY = "active_checkout_fp_bot"
+STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY = "active_checkout_fp_visitor_id"
 
 _UNKNOWN_METADATA_VALUE = "unknown"
 _CHECKOUT_FINGERPRINT_MAX_AGE = dt.timedelta(days=1)
@@ -68,6 +70,11 @@ def _normalize_fp_bot_metadata(value: str | None) -> str:
     return _UNKNOWN_METADATA_VALUE
 
 
+def _normalize_fp_visitor_id_metadata(value: str | None) -> str:
+    normalized = _normalize_checkout_metadata_value(value)
+    return normalized or _UNKNOWN_METADATA_VALUE
+
+
 def build_checkout_fingerprint_metadata(
     user,
     *,
@@ -79,12 +86,14 @@ def build_checkout_fingerprint_metadata(
         proxy_key = STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY
         tampering_key = STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY
         bot_key = STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY
+        visitor_id_key = STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY
     else:
         suspect_score_key = STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY
         country_key = STRIPE_CHECKOUT_FP_COUNTRY_META_KEY
         proxy_key = STRIPE_CHECKOUT_FP_PROXY_META_KEY
         tampering_key = STRIPE_CHECKOUT_FP_TAMPERING_META_KEY
         bot_key = STRIPE_CHECKOUT_FP_BOT_META_KEY
+        visitor_id_key = STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY
 
     visit = get_latest_user_fingerprint_visit(user)
     if visit is None:
@@ -93,6 +102,7 @@ def build_checkout_fingerprint_metadata(
         proxy = None
         tampering = None
         bot = None
+        visitor_id = None
     else:
         observed_at = (
             visit.event_timestamp
@@ -106,12 +116,14 @@ def build_checkout_fingerprint_metadata(
             proxy = None
             tampering = None
             bot = None
+            visitor_id = None
         else:
             suspect_score = visit.suspect_score
             country = visit.country_code
             proxy = visit.proxy
             tampering = visit.tampering
             bot = visit.bot
+            visitor_id = visit.fingerprint_visitor_id
 
     return {
         suspect_score_key: _normalize_fp_suspect_score_metadata(suspect_score),
@@ -119,6 +131,7 @@ def build_checkout_fingerprint_metadata(
         proxy_key: _normalize_fp_bool_metadata(proxy),
         tampering_key: _normalize_fp_bool_metadata(tampering),
         bot_key: _normalize_fp_bot_metadata(bot),
+        visitor_id_key: _normalize_fp_visitor_id_metadata(visitor_id),
     }
 
 
@@ -183,4 +196,5 @@ def clear_checkout_customer_metadata() -> dict[str, str]:
         STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY: "",
         STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY: "",
         STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY: "",
+        STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY: "",
     }

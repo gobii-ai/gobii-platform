@@ -40,6 +40,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FP_SUSPECT_SCORE_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY,
+    STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY,
@@ -52,6 +53,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FP_PROXY_META_KEY,
     STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY,
     STRIPE_CHECKOUT_FP_TAMPERING_META_KEY,
+    STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY,
     clear_checkout_customer_metadata,
 )
 from constants.plans import PlanNames
@@ -2218,11 +2220,13 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_PROXY_META_KEY], "true")
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_TAMPERING_META_KEY], "false")
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_BOT_META_KEY], "notDetected")
+        self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY], "visitor-fp-startup")
         self.assertNotIn(STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_COUNTRY_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_PROXY_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_TAMPERING_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_BOT_META_KEY, kwargs["subscription_data"]["metadata"])
+        self.assertNotIn(STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         self.assertNotIn("billing_address_collection", kwargs)
         self.assertNotIn("name_collection", kwargs)
@@ -2286,6 +2290,10 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY],
             "notDetected",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY],
+            "visitor-fp-startup",
         )
         mock_record_checkout_context.assert_called_once_with(
             customer_id="cus_trial",
@@ -2602,11 +2610,13 @@ class CheckoutRedirectTests(TestCase):
         self.assertNotIn(STRIPE_CHECKOUT_FP_PROXY_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_TAMPERING_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_BOT_META_KEY, kwargs["subscription_data"]["metadata"])
+        self.assertNotIn(STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY, kwargs["subscription_data"]["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_SUSPECT_SCORE_META_KEY, kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_COUNTRY_META_KEY, kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_PROXY_META_KEY, kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_TAMPERING_META_KEY, kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_FP_BOT_META_KEY, kwargs["metadata"])
+        self.assertNotIn(STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY, kwargs["metadata"])
         self.assertNotIn("trial_period_days", kwargs["subscription_data"])
         self.assertNotIn("billing_address_collection", kwargs)
         self.assertNotIn("name_collection", kwargs)
@@ -2649,6 +2659,7 @@ class CheckoutRedirectTests(TestCase):
         self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_PROXY_META_KEY, customer_modify_kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY, customer_modify_kwargs["metadata"])
         self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY, customer_modify_kwargs["metadata"])
+        self.assertNotIn(STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY, customer_modify_kwargs["metadata"])
         mock_record_checkout_context.assert_called_once_with(
             customer_id="cus_scale_trial",
             checkout_session_id="cs_purchase_checkout_context",
@@ -2774,6 +2785,7 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_PROXY_META_KEY], "unknown")
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_TAMPERING_META_KEY], "unknown")
         self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_BOT_META_KEY], "unknown")
+        self.assertEqual(kwargs["metadata"][STRIPE_CHECKOUT_FP_VISITOR_ID_META_KEY], "unknown")
 
         customer_modify_args, customer_modify_kwargs = mock_customer_modify.call_args
         self.assertEqual(customer_modify_args[0], "cus_trial_stale_fp")
@@ -2795,6 +2807,10 @@ class CheckoutRedirectTests(TestCase):
         )
         self.assertEqual(
             customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY],
+            "unknown",
+        )
+        self.assertEqual(
+            customer_modify_kwargs["metadata"][STRIPE_CHECKOUT_CUSTOMER_FP_VISITOR_ID_META_KEY],
             "unknown",
         )
 
