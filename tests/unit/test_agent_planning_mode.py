@@ -1,5 +1,6 @@
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -50,6 +51,12 @@ class PersistentAgentPlanningModeTests(TestCase):
             charter="Initial charter",
             browser_use_agent=self.browser_agent,
         )
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=True,
+            primary=True,
+        )
 
     def test_direct_agents_default_skipped_but_provisioning_starts_planning(self):
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
@@ -92,7 +99,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False):
             self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
 
-    def test_planning_prompt_includes_first_run_welcome_without_work_prompt(self):
+    def test_planning_prompt_is_inserted_before_first_run_welcome(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -102,10 +109,14 @@ class PersistentAgentPlanningModeTests(TestCase):
             implied_send_context={"display_name": "Matt"},
         )
 
-        self.assertIn("Planning Mode", prompt)
+        self.assertIn("You are a persistent AI agent.", prompt)
+        self.assertIn("Your charter is a living document.", prompt)
+        self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertIn("## Planning Mode", prompt)
         self.assertIn("REQUIRED: First-Run Welcome", prompt)
         self.assertIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("before asking planning questions or calling tools", prompt)
+        self.assertIn("After the welcome, continue Planning Mode", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("Skip Planning", prompt)
         self.assertIn("`requests` parameter", prompt)
@@ -113,8 +124,45 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("`will_continue_work=false` on request_human_input", prompt)
         self.assertIn("already visible to the user or pending delivery", prompt)
         self.assertIn("ask only the new unanswered question", prompt)
+        self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
+        self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
+        self.assertIn("Do not create kanban cards or begin deliverable work", prompt)
+        self.assertIn("treat that instruction as applying only after Planning Mode is completed or skipped", prompt)
         self.assertNotIn("Then sqlite_batch: charter + kanban cards + everything else", prompt)
-        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
+        self.assertNotIn("### Execution Template", prompt)
+
+        normal_prompt_index = prompt.index("You are a persistent AI agent.")
+        planning_index = prompt.index("## Planning Mode")
+        welcome_index = prompt.index("## REQUIRED: First-Run Welcome")
+        self.assertLess(normal_prompt_index, planning_index)
+        self.assertLess(planning_index, welcome_index)
+
+    def test_planning_prompt_keeps_normal_context_without_first_run(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        prompt = _get_system_instruction(
+            self.agent,
+            is_first_run=False,
+            continuation_notice="Resume the pending planning turn.",
+        )
+
+        self.assertIn("You are a persistent AI agent.", prompt)
+        self.assertIn("Your charter is a living document.", prompt)
+        self.assertIn("## Planning Mode", prompt)
+        self.assertIn("Resume the pending planning turn.", prompt)
+        self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
+        self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
+
+    def test_non_planning_first_run_keeps_existing_work_prompt(self):
+        self._set_email_welcome_target()
+
+        prompt = _get_system_instruction(self.agent, is_first_run=True)
+
+        self.assertIn("## Then sqlite_batch: charter + kanban cards + everything else", prompt)
+        self.assertIn("### Execution Template", prompt)
+        self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -182,3 +230,12 @@ class PersistentAgentPlanningModeTests(TestCase):
             channel=CommsChannel.WEB,
             address=user_address,
         )
+
+    def _set_email_welcome_target(self) -> None:
+        contact_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        self.agent.preferred_contact_endpoint = contact_endpoint
+        self.agent.save(update_fields=["preferred_contact_endpoint", "updated_at"])

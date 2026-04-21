@@ -3967,60 +3967,13 @@ def _get_first_run_welcome_target(agent: PersistentAgent) -> _FirstRunWelcomeTar
     )
 
 
-def _get_planning_mode_system_instruction(
-    agent: PersistentAgent,
-    *,
-    is_first_run: bool = False,
-    implied_send_context: dict | None = None,
-    continuation_notice: str | None = None,
-) -> str:
-    implied_send_active = implied_send_context is not None
-    if implied_send_active:
-        display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
-        delivery_context = (
-            f"## Delivery Context\n\nYour text goes directly to {display_name}. "
-            "Use request_human_input for planning questions so answers are tracked in the composer. "
-            "Use normal text only for brief confirmations that do not require an answer. "
-            "Use explicit send tools only when you need to reach another channel or contact.\n\n"
-        )
-    else:
-        delivery_context = (
-            "## Delivery Context\n\nText output is not delivered unless you use explicit send tools. "
-            "Use send_chat_message for web chat, send_email/send_sms for those channels, and request_human_input "
-            "when you need a tracked answer in the composer. Focus on tool calls; text alone is not delivered.\n\n"
-        )
-
-    welcome_instruction = ""
-    if is_first_run and not _has_first_run_welcome_contact(agent):
-        if implied_send_active:
-            display_name = implied_send_context.get("display_name") if implied_send_context else "the user"
-            welcome_instruction = (
-                "## REQUIRED: First-Run Welcome\n\n"
-                f"This is your first run. Start your response with a brief welcome message to {display_name} "
-                "before asking planning questions or calling tools. Introduce yourself by first name, "
-                "acknowledge what they asked for, and explain that you will first clarify the plan. "
-                "After the welcome, continue Planning Mode; use request_human_input for the actual questions.\n\n"
-            )
-        else:
-            welcome_target = _get_first_run_welcome_target(agent)
-            if welcome_target is not None:
-                welcome_instruction = (
-                    "## REQUIRED: First-Run Welcome\n\n"
-                    "This is your first run.\n"
-                    f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
-                    f"Before request_human_input, sqlite_batch, or any other planning tool, call {welcome_target.send_tool_name} "
-                    "with a brief welcome message. Introduce yourself by first name, acknowledge what they asked for, "
-                    "and explain that you will first clarify the plan. After the welcome, continue Planning Mode; "
-                    "use request_human_input for the actual questions.\n\n"
-                )
-
-    prompt = (
+def _get_planning_mode_prompt_block() -> str:
+    return (
+        "## Planning Mode\n\n"
         "You are in Planning Mode for this persistent agent.\n\n"
         "Planning Mode exists because the user may not yet know exactly what they want, what boundaries to set, "
         "or how the agent should deliver results. Your job is to help them turn an initial idea into a clear, "
         "decision-complete operating plan before doing the work.\n\n"
-        f"{welcome_instruction}"
-        f"{delivery_context}"
         "## Planning Objectives\n\n"
         "Clarify the goal, audience, scope, success criteria, constraints, inputs, required data points, "
         "integrations or accounts, delivery format, delivery cadence, assumptions, boundaries, and what should "
@@ -4028,9 +3981,16 @@ def _get_planning_mode_system_instruction(
         "seniority, must-have skills, and outreach boundaries. For lead-generation work, ask about target segment, "
         "required fields, sources, enrichment, CRM/export needs, and disqualification rules.\n\n"
         "## Behavior Rules\n\n"
-        "- Normal tools are available. Use them when they help understand context or feasibility, but do not finish "
-        "the final deliverable before planning is complete. This is not the time to do the work itself; plan around "
-        "what needs to be done, what information is required, and how results should be delivered.\n"
+        "- Planning Mode overrides normal execution-oriented instructions while it is active. Normal tools are "
+        "available, but do not perform the requested work itself or produce the final deliverable before planning "
+        "is complete. Plan around what needs to be done, what information is required, and how results should be "
+        "delivered.\n"
+        "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
+        "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
+        "- Do not create kanban cards or begin deliverable work until planning is completed with end_planning or "
+        "the user skips planning.\n"
+        "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
+        "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 1-3 planning questions "
         "and never ask more than 5 in a planning round. More than 5 causes decision fatigue; make reasonable "
         "assumptions instead and record them in the final plan.\n"
@@ -4060,9 +4020,6 @@ def _get_planning_mode_system_instruction(
         "Skip Planning button when they specifically want to preserve the current charter unchanged or there is too "
         "little context to create any useful plan.\n"
     )
-    if continuation_notice:
-        prompt += f"\n{continuation_notice}"
-    return prompt
 
 
 def _get_system_instruction(
@@ -4076,14 +4033,7 @@ def _get_system_instruction(
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
-    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
-        return _get_planning_mode_system_instruction(
-            agent,
-            is_first_run=is_first_run,
-            implied_send_context=implied_send_context,
-            continuation_notice=continuation_notice,
-        )
-
+    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
 
     if implied_send_active:
@@ -4888,7 +4838,23 @@ def _get_system_instruction(
     if continuation_notice:
         base_prompt += f"\n\n{continuation_notice}"
 
+    if planning_mode_active:
+        base_prompt += "\n\n" + _get_planning_mode_prompt_block()
+
     if is_first_run and not _has_first_run_welcome_contact(agent):
+        if planning_mode_active and implied_send_active:
+            display_name = implied_send_context.get("display_name") if implied_send_context else "the user"
+            welcome_instruction = (
+                "## REQUIRED: First-Run Welcome\n\n"
+                f"This is your first run. Start your response with a brief welcome message to {display_name} "
+                "before asking planning questions or calling tools. Introduce yourself by first name, "
+                "acknowledge what they asked for, and explain that you will first clarify the plan.\n\n"
+                "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
+                "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
+                "until planning is completed or skipped.\n"
+            )
+            return base_prompt + "\n\n" + welcome_instruction
+
         welcome_target = _get_first_run_welcome_target(agent)
         # Only instruct the first outreach if the user can actually receive it.
         # Signup preview gets a single first email before verification is required.
@@ -4904,6 +4870,21 @@ def _get_system_instruction(
                 if signup_preview_first_run
                 else ""
             )
+            if planning_mode_active:
+                welcome_instruction = (
+                    "## REQUIRED: First-Run Welcome\n\n"
+                    "This is your first run.\n"
+                    f"Contact channel: {channel} at {address}.\n\n"
+                    f"Before request_human_input, sqlite_batch, or any other planning tool, call {welcome_target.send_tool_name} "
+                    "with a brief welcome message. Introduce yourself by first name, acknowledge what they asked for, "
+                    "and explain that you will first clarify the plan.\n\n"
+                    f"{signup_preview_instruction}"
+                    "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
+                    "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
+                    "until planning is completed or skipped.\n"
+                )
+                return base_prompt + "\n\n" + welcome_instruction
+
             welcome_instruction = (
                 "This is your first run.\n"
                 f"Contact channel: {channel} at {address}.\n\n"
