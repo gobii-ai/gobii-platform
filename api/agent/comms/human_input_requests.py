@@ -361,14 +361,7 @@ def _render_batch_prompt_text(
     ]
     for index, request_obj in enumerate(request_objects, start=1):
         lines.append("")
-        lines.extend(
-            _build_request_lines(
-                request_obj,
-                compact=compact,
-                question_number=index,
-                option_indent="   ",
-            )
-        )
+        lines.append(f"{index}. {request_obj.question.strip()}")
     return "\n".join(lines)
 
 
@@ -379,22 +372,7 @@ def _render_batch_prompt_html(request_objects: list[PersistentAgentHumanInputReq
         "<ol>",
     ]
     for request_obj in request_objects:
-        parts.append(f"<li><p>{escape(request_obj.question)}</p>")
-        options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-        if options:
-            parts.append("<ol>")
-            for option in options:
-                title = escape(_coerce_string(option.get("title")))
-                description = escape(_coerce_string(option.get("description")))
-                if description:
-                    parts.append(f"<li><strong>{title}</strong><br>{description}</li>")
-                else:
-                    parts.append(f"<li><strong>{title}</strong></li>")
-            parts.append("</ol>")
-            parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
-        else:
-            parts.append("<p>Reply in your own words.</p>")
-        parts.append("</li>")
+        parts.append(f"<li>{escape(request_obj.question)}</li>")
     parts.append("</ol>")
     return "".join(parts)
 

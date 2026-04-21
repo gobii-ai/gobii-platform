@@ -436,8 +436,14 @@ class HumanInputRequestTests(TestCase):
                     "address": self.user.email,
                 },
                 "requests": [
-                    {"question": "What should happen first?"},
-                    {"question": "What should happen second?"},
+                    {
+                        "question": "What should happen first?",
+                        "options": [{"title": "Ship", "description": "Move now."}],
+                    },
+                    {
+                        "question": "What should happen second?",
+                        "options": [{"title": "Wait", "description": "Pause for context."}],
+                    },
                 ],
             },
         )
@@ -449,6 +455,14 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("What should happen first?", result["relay_payload"]["body_text"])
         self.assertIn("What should happen second?", result["relay_payload"]["body_text"])
         self.assertIn("1. <your answer>", result["relay_payload"]["body_text"])
+        self.assertNotIn("Ship", result["relay_payload"]["body_text"])
+        self.assertNotIn("Wait", result["relay_payload"]["body_text"])
+        self.assertNotIn("Reply with the option number", result["relay_payload"]["body_text"])
+        self.assertNotIn("Reply in your own words", result["relay_payload"]["body_text"])
+        self.assertNotIn("Ship", result["relay_payload"]["mobile_first_html"])
+        self.assertNotIn("Wait", result["relay_payload"]["mobile_first_html"])
+        self.assertNotIn("Reply with the option number", result["relay_payload"]["mobile_first_html"])
+        self.assertNotIn("Reply in your own words", result["relay_payload"]["mobile_first_html"])
         request_objects = list(
             PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
         )
