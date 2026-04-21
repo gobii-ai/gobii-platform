@@ -80,6 +80,15 @@ export function truncate(value: string, max = 60): string {
   return `${value.slice(0, max - 1)}…`
 }
 
+function buildTrailingPreview(value: string, max = 96): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  const preview = normalized.length >= max
+    ? normalized.slice(0, max - 1).trimEnd()
+    : normalized
+  return `${preview}…`
+}
+
 export function coerceString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim().length > 0) {
     return value
@@ -292,15 +301,12 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconBgClass: 'bg-emerald-100',
     iconColorClass: 'text-emerald-700',
     detailKind: 'endPlanning',
-    derive(entry, parameters) {
+    derive(_entry, parameters) {
       const fullPlan = coerceString(parameters?.full_plan)
-      const result = parseResultObject(entry.result)
-      const message = coerceString(result?.['message'])
       return {
         charterText: fullPlan,
-        caption: fullPlan ? truncate(fullPlan, 56) : message ?? entry.caption ?? 'Planning completed',
-        summary: message ?? 'Planning mode completed.',
-        separateFromPreview: true,
+        caption: fullPlan ? buildTrailingPreview(fullPlan) : null,
+        summary: null,
       }
     },
   },

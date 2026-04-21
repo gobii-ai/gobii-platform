@@ -1,7 +1,7 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline } from '../api/agentChat'
-import type { PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import {
@@ -67,14 +67,26 @@ export function replacePendingHumanInputRequestsInCache(
     const lastPage = pages[lastIndex]
     const existingPendingActions = lastPage.raw.pending_action_requests ?? []
     const nonHumanActions = existingPendingActions.filter((request) => request.kind !== 'human_input')
+    const humanInputActionsByBatch = new Map<string, PendingHumanInputAction>()
+    pendingHumanInputRequests.forEach((request) => {
+      const batchId = request.batchId || request.id
+      const action = humanInputActionsByBatch.get(batchId) ?? {
+        id: `human_input:${batchId}`,
+        kind: 'human_input' as const,
+        requests: [],
+        count: 0,
+      }
+      action.requests.push(request)
+      humanInputActionsByBatch.set(batchId, action)
+    })
+    const humanInputActions = Array.from(humanInputActionsByBatch.values()).map((action) => ({
+      ...action,
+      requests: [...action.requests].sort((left, right) => left.batchPosition - right.batchPosition),
+      count: action.requests.length,
+    }))
     const nextPendingActions = pendingHumanInputRequests.length > 0
       ? [
-          ...pendingHumanInputRequests.map((request) => ({
-            id: `human_input:${request.id}`,
-            kind: 'human_input' as const,
-            requests: [request],
-            count: 1,
-          })),
+          ...humanInputActions,
           ...nonHumanActions,
         ]
       : nonHumanActions

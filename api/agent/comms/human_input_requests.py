@@ -24,6 +24,7 @@ from api.models import (
     PersistentAgentConversationParticipant,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentStep,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -603,6 +604,7 @@ def _create_human_input_request_for_target(
     question: str,
     raw_options: list[dict[str, Any]] | None,
     recipient: HumanInputRecipient | None = None,
+    originating_step_id: str | None = None,
 ) -> tuple[PersistentAgentHumanInputRequest | None, dict[str, Any] | None]:
     options = build_option_payloads(raw_options)
     input_mode = (
@@ -614,6 +616,7 @@ def _create_human_input_request_for_target(
         request_obj = PersistentAgentHumanInputRequest.objects.create(
             agent=agent,
             conversation=target.conversation,
+            originating_step_id=originating_step_id,
             question=question,
             options_json=options,
             input_mode=input_mode,
@@ -633,6 +636,18 @@ def _create_human_input_request_for_target(
         }
 
     return request_obj, None
+
+
+def _get_current_originating_step_id(agent: PersistentAgent) -> str | None:
+    from api.agent.tools.runtime_execution_context import get_tool_execution_context
+
+    context = get_tool_execution_context()
+    step_id = getattr(context, "step_id", None)
+    if not step_id:
+        return None
+    if not PersistentAgentStep.objects.filter(id=step_id, agent=agent).exists():
+        return None
+    return str(step_id)
 
 
 def create_human_input_request(
@@ -664,6 +679,7 @@ def create_human_input_request(
         question=question,
         raw_options=raw_options,
         recipient=normalized_recipient,
+        originating_step_id=_get_current_originating_step_id(agent),
     )
     if create_error:
         return create_error
@@ -697,45 +713,58 @@ def create_human_input_requests_batch(
                 "message": "No eligible human conversation is available to request input from.",
             }
 
+    originating_step_id = _get_current_originating_step_id(agent)
+
+    def _create_requests() -> dict[str, Any] | None:
+        for request in requests:
+            request_obj, create_error = _create_human_input_request_for_target(
+                agent,
+                target,
+                question=_coerce_string(request.get("question")),
+                raw_options=request.get("options"),
+                recipient=normalized_recipient,
+                originating_step_id=originating_step_id,
+            )
+            if create_error:
+                if created_requests:
+                    failure_message = _coerce_string(create_error.get("message")) or "A later request failed to be created."
+                    return _build_request_result(
+                        created_requests,
+                        target,
+                        status="error",
+                        message=(
+                            f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed. "
+                            f"{failure_message}"
+                        ),
+                        partial_success=True,
+                    )
+                return create_error
+            if request_obj is None:
+                if created_requests:
+                    return _build_request_result(
+                        created_requests,
+                        target,
+                        status="error",
+                        message=(
+                            f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed."
+                        ),
+                        partial_success=True,
+                    )
+                return {
+                    "status": "error",
+                    "message": "Failed to create human input request batch.",
+                }
+            created_requests.append(request_obj)
+        return None
+
     created_requests: list[PersistentAgentHumanInputRequest] = []
-    for request in requests:
-        request_obj, create_error = _create_human_input_request_for_target(
-            agent,
-            target,
-            question=_coerce_string(request.get("question")),
-            raw_options=request.get("options"),
-            recipient=normalized_recipient,
-        )
-        if create_error:
-            if created_requests:
-                failure_message = _coerce_string(create_error.get("message")) or "A later request failed to be created."
-                return _build_request_result(
-                    created_requests,
-                    target,
-                    status="error",
-                    message=(
-                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed. "
-                        f"{failure_message}"
-                    ),
-                    partial_success=True,
-                )
-            return create_error
-        if request_obj is None:
-            if created_requests:
-                return _build_request_result(
-                    created_requests,
-                    target,
-                    status="error",
-                    message=(
-                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed."
-                    ),
-                    partial_success=True,
-                )
-            return {
-                "status": "error",
-                "message": "Failed to create human input request batch.",
-            }
-        created_requests.append(request_obj)
+    if originating_step_id:
+        with transaction.atomic():
+            error_result = _create_requests()
+    else:
+        error_result = _create_requests()
+    if error_result:
+        return error_result
 
     return _build_request_result(created_requests, target)
 
@@ -746,10 +775,30 @@ def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> 
     request_ids = _request_ids_from_result(result)
     if not request_ids:
         return
-    PersistentAgentHumanInputRequest.objects.filter(
+    updated_count = PersistentAgentHumanInputRequest.objects.filter(
         id__in=request_ids,
         originating_step__isnull=True,
     ).update(originating_step=step, updated_at=timezone.now())
+    if updated_count:
+        agent_id = step.agent_id
+        transaction.on_commit(lambda: _emit_pending_human_input_updates(agent_id))
+
+
+def _emit_pending_human_input_updates(agent_id) -> None:
+    if not agent_id:
+        return
+    from console.agent_chat.signals import (
+        emit_pending_action_requests_update,
+        emit_pending_human_input_requests_update,
+    )
+
+    try:
+        agent = PersistentAgent.objects.get(id=agent_id)
+    except PersistentAgent.DoesNotExist:
+        return
+
+    emit_pending_human_input_requests_update(agent)
+    emit_pending_action_requests_update(agent)
 
 
 def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInputRequest) -> dict[str, Any]:

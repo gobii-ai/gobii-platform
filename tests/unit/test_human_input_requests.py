@@ -7,6 +7,7 @@ from django.test import Client, TestCase, override_settings, tag
 import litellm
 
 from api.agent.comms.human_input_requests import (
+    attach_originating_step_from_result,
     create_human_input_request,
     list_pending_human_input_requests,
     resolve_human_input_request_for_message,
@@ -18,6 +19,7 @@ from api.agent.tools.request_human_input import (
     execute_request_human_input,
     get_request_human_input_tool,
 )
+from api.agent.tools.runtime_execution_context import tool_execution_context
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
@@ -393,6 +395,41 @@ class HumanInputRequestTests(TestCase):
                 agent=self.agent,
                 requested_message__isnull=False,
             ).exists()
+        )
+
+    def test_execute_request_human_input_uses_current_tool_step_for_batch(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Pending request_human_input",
+            credits_cost=0,
+        )
+
+        with tool_execution_context(step_id=str(step.id)):
+            result = execute_request_human_input(
+                self.agent,
+                {
+                    "requests": [
+                        {"question": "What should happen first?"},
+                        {"question": "What should happen second?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(result["status"], "ok")
+        request_objects = list(
+            PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
+        )
+        self.assertEqual(len(request_objects), 2)
+        self.assertTrue(all(request_obj.originating_step_id == step.id for request_obj in request_objects))
+        pending_requests = list_pending_human_input_requests(self.agent)
+        self.assertEqual({request["batchId"] for request in pending_requests}, {str(step.id)})
+        self.assertEqual(
+            sorted(request["batchPosition"] for request in pending_requests),
+            [1, 2],
+        )
+        self.assertEqual(
+            sorted(request["batchSize"] for request in pending_requests),
+            [2, 2],
         )
 
     def test_execute_request_human_input_targets_explicit_recipient(self):
@@ -1765,6 +1802,52 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(
             [request["batchPosition"] for request in batch_action["requests"]],
             [1, 2],
+        )
+
+    def test_attach_originating_step_emits_corrected_batch_update(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        with patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates") as mock_emit:
+            with self.captureOnCommitCallbacks(execute=True):
+                attach_originating_step_from_result(
+                    step,
+                    {"request_ids": [str(first_request.id), str(second_request.id)]},
+                )
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.originating_step_id, step.id)
+        self.assertEqual(second_request.originating_step_id, step.id)
+        mock_emit.assert_called_once_with(self.agent.id)
+
+        actions = list_pending_action_requests(self.agent, self.user)
+        batch_action = next(action for action in actions if action["id"] == f"human_input:{step.id}")
+        self.assertEqual(batch_action["count"], 2)
+        self.assertEqual(
+            [request["id"] for request in batch_action["requests"]],
+            [str(first_request.id), str(second_request.id)],
         )
 
     def test_timeline_pending_requests_clear_after_cross_channel_resolution(self):
