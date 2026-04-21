@@ -4,8 +4,14 @@ from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, tag
+from fastmcp.exceptions import ToolError
 
-from api.agent.tools.mcp_manager import MCPServerRuntime, MCPToolInfo, MCPToolManager
+from api.agent.tools.mcp_manager import (
+    MCP_TOOL_SUCCESS_SENTINEL,
+    MCPServerRuntime,
+    MCPToolInfo,
+    MCPToolManager,
+)
 from api.agent.tools.mcp_result_adapters import (
     BrightDataSearchEngineAdapter,
     BrightDataSearchEngineBatchAdapter,
@@ -330,7 +336,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         async def fake_execute(_client, _tool_name, params, timeout_seconds):
             calls.append(dict(params))
             if len(calls) == 1:
-                raise RuntimeError("Unexpected non-JSON response from Bright Data for search_engine.")
+                raise ToolError("Unexpected non-JSON response from Bright Data for search_engine.")
             return DummyResult(json.dumps(payload))
 
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
@@ -546,7 +552,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         tool_info = self.scrape_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
-        dummy_result = DummyResult(json.dumps({"status": "success", "result": "Tool executed successfully"}))
+        dummy_result = DummyResult(json.dumps({"status": "success", "result": MCP_TOOL_SUCCESS_SENTINEL}))
         loop = MagicMock()
         loop.run_until_complete.side_effect = lambda _: dummy_result
 

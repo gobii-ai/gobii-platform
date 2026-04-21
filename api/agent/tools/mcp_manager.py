@@ -31,6 +31,7 @@ import litellm  # re-exported for tests expecting to patch LiteLLM directly
 import httpx
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport as FastMCPStdioTransport
+from fastmcp.exceptions import ToolError
 from mcp import ClientSession, StdioServerParameters
 from mcp.types import Tool as MCPTool
 from opentelemetry import trace
@@ -107,6 +108,8 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
     "search_engine_batch",
 }
 
+# Bright Data MCP's search_utils.parse_google_search_response raises this
+# message when Google returns HTML or other non-JSON content despite brd_json=1.
 BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
 BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 3
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
@@ -1858,11 +1861,14 @@ class MCPToolManager:
 
     @staticmethod
     def _is_brightdata_non_json_exception(exc: Exception) -> bool:
-        return BRIGHTDATA_NON_JSON_ERROR in str(exc)
+        return isinstance(exc, ToolError) and BRIGHTDATA_NON_JSON_ERROR in str(exc)
 
     def _is_brightdata_search_non_json_result(self, result: Any) -> bool:
         message = self._tool_result_error_message(result)
         if message is not None:
+            # Some sandboxed MCP paths surface tool errors as result dictionaries
+            # rather than FastMCP ToolError instances, and they do not include a
+            # structured code for Bright Data parse failures.
             return BRIGHTDATA_NON_JSON_ERROR in message
 
         content = self._extract_tool_result_content(result)
