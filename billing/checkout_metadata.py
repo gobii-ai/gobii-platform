@@ -1,11 +1,10 @@
+import datetime as dt
 from typing import Any, Mapping
 
+from django.utils import timezone
+
 from api.services.user_fingerprint import (
-    get_fp_bot,
-    get_fp_country,
-    get_fp_proxy,
-    get_fp_suspect_score,
-    get_fp_tampering,
+    get_latest_user_fingerprint_visit,
 )
 
 STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE = "purchase"
@@ -29,6 +28,7 @@ STRIPE_CHECKOUT_CUSTOMER_FP_TAMPERING_META_KEY = "active_checkout_fp_tampering"
 STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY = "active_checkout_fp_bot"
 
 _UNKNOWN_METADATA_VALUE = "unknown"
+_CHECKOUT_FINGERPRINT_MAX_AGE = dt.timedelta(days=1)
 
 
 def _normalize_checkout_metadata_value(value: Any) -> str:
@@ -86,12 +86,39 @@ def build_checkout_fingerprint_metadata(
         tampering_key = STRIPE_CHECKOUT_FP_TAMPERING_META_KEY
         bot_key = STRIPE_CHECKOUT_FP_BOT_META_KEY
 
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        suspect_score = None
+        country = None
+        proxy = None
+        tampering = None
+        bot = None
+    else:
+        observed_at = (
+            visit.event_timestamp
+            or visit.fetched_at
+            or visit.last_fetch_attempt_at
+            or visit.created_at
+        )
+        if observed_at is None or observed_at < timezone.now() - _CHECKOUT_FINGERPRINT_MAX_AGE:
+            suspect_score = None
+            country = None
+            proxy = None
+            tampering = None
+            bot = None
+        else:
+            suspect_score = visit.suspect_score
+            country = visit.country_code
+            proxy = visit.proxy
+            tampering = visit.tampering
+            bot = visit.bot
+
     return {
-        suspect_score_key: _normalize_fp_suspect_score_metadata(get_fp_suspect_score(user)),
-        country_key: _normalize_fp_country_metadata(get_fp_country(user)),
-        proxy_key: _normalize_fp_bool_metadata(get_fp_proxy(user)),
-        tampering_key: _normalize_fp_bool_metadata(get_fp_tampering(user)),
-        bot_key: _normalize_fp_bot_metadata(get_fp_bot(user)),
+        suspect_score_key: _normalize_fp_suspect_score_metadata(suspect_score),
+        country_key: _normalize_fp_country_metadata(country),
+        proxy_key: _normalize_fp_bool_metadata(proxy),
+        tampering_key: _normalize_fp_bool_metadata(tampering),
+        bot_key: _normalize_fp_bot_metadata(bot),
     }
 
 

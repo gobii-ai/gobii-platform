@@ -1953,7 +1953,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             if include_trial
             else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
         )
-        fingerprint_metadata = build_checkout_fingerprint_metadata(user)
+        fingerprint_metadata = build_checkout_fingerprint_metadata(user) if include_trial else None
         checkout_metadata = build_checkout_flow_metadata(
             base_metadata,
             flow_type=flow_type,
@@ -1999,7 +1999,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             checkout_source_url=base_metadata.get("checkout_source_url"),
-            extra_customer_metadata=build_checkout_fingerprint_metadata(user, customer_context=True),
+            extra_customer_metadata=(
+                build_checkout_fingerprint_metadata(user, customer_context=True)
+                if include_trial
+                else None
+            ),
             checkout_kwargs=checkout_kwargs,
         )
         # Webhook-based AddPaymentInfo is authoritative so we only send once a
@@ -2148,7 +2152,7 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             if include_trial
             else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
         )
-        fingerprint_metadata = build_checkout_fingerprint_metadata(user)
+        fingerprint_metadata = build_checkout_fingerprint_metadata(user) if include_trial else None
         checkout_metadata = build_checkout_flow_metadata(
             base_metadata,
             flow_type=flow_type,
@@ -2192,7 +2196,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             checkout_source_url=base_metadata.get("checkout_source_url"),
-            extra_customer_metadata=build_checkout_fingerprint_metadata(user, customer_context=True),
+            extra_customer_metadata=(
+                build_checkout_fingerprint_metadata(user, customer_context=True)
+                if include_trial
+                else None
+            ),
             checkout_kwargs=checkout_kwargs,
         )
         # Webhook-based AddPaymentInfo is authoritative so we only send once a
