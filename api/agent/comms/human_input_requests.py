@@ -25,6 +25,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     build_web_agent_address,
+    build_web_user_address,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
@@ -60,6 +61,13 @@ class PreparedHumanInputResponse:
     selected_option_key: str
     selected_option_title: str
     free_text: str
+
+
+@dataclass(slots=True)
+class HumanInputResponseTarget:
+    conversation: PersistentAgentConversation
+    human_endpoint: PersistentAgentCommsEndpoint
+    agent_endpoint: PersistentAgentCommsEndpoint
 
 
 @dataclass(slots=True)
@@ -151,6 +159,30 @@ def _ensure_conversation_participants(
         endpoint=agent_endpoint,
         defaults={"role": PersistentAgentConversationParticipant.ParticipantRole.AGENT},
     )
+
+
+def _get_or_create_conversation(
+    *,
+    channel: str,
+    address: str,
+    owner_agent: PersistentAgent | None = None,
+) -> PersistentAgentConversation:
+    conversation = (
+        PersistentAgentConversation.objects.filter(channel=channel, address=address)
+        .order_by("id")
+        .first()
+    )
+    if conversation is None:
+        return PersistentAgentConversation.objects.create(
+            channel=channel,
+            address=address,
+            owner_agent=owner_agent,
+        )
+
+    if owner_agent is not None and conversation.owner_agent_id is None:
+        conversation.owner_agent = owner_agent
+        conversation.save(update_fields=["owner_agent"])
+    return conversation
 
 
 def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -1652,6 +1684,60 @@ def _resolve_agent_recipient_address(request_obj: PersistentAgentHumanInputReque
     )
 
 
+def _build_console_response_target(
+    agent: PersistentAgent,
+    actor_user_id: int | str | None,
+) -> HumanInputResponseTarget | None:
+    if actor_user_id is None:
+        return None
+    try:
+        user_id = int(actor_user_id)
+    except (TypeError, ValueError):
+        return None
+
+    human_address = build_web_user_address(user_id, agent.id)
+    agent_address = build_web_agent_address(agent.id)
+    conversation = _get_or_create_conversation(
+        channel=CommsChannel.WEB,
+        address=human_address,
+        owner_agent=agent,
+    )
+    human_endpoint = _get_or_create_endpoint(channel=CommsChannel.WEB, address=human_address)
+    agent_endpoint = _get_or_create_endpoint(
+        channel=CommsChannel.WEB,
+        address=agent_address,
+        owner_agent=agent,
+    )
+    return HumanInputResponseTarget(
+        conversation=conversation,
+        human_endpoint=human_endpoint,
+        agent_endpoint=agent_endpoint,
+    )
+
+
+def _build_request_conversation_response_target(
+    request_obj: PersistentAgentHumanInputRequest,
+) -> HumanInputResponseTarget:
+    recipient_address = _resolve_agent_recipient_address(request_obj)
+    if not recipient_address:
+        raise ValueError("Request is missing the agent recipient endpoint.")
+
+    human_endpoint = _get_or_create_endpoint(
+        channel=request_obj.conversation.channel,
+        address=request_obj.conversation.address,
+    )
+    agent_endpoint = _get_or_create_endpoint(
+        channel=request_obj.conversation.channel,
+        address=recipient_address,
+        owner_agent=request_obj.agent,
+    )
+    return HumanInputResponseTarget(
+        conversation=request_obj.conversation,
+        human_endpoint=human_endpoint,
+        agent_endpoint=agent_endpoint,
+    )
+
+
 def _build_batch_response_body(prepared_responses: list[PreparedHumanInputResponse]) -> str:
     lines: list[str] = []
     for index, prepared in enumerate(prepared_responses, start=1):
@@ -1711,9 +1797,9 @@ def submit_human_input_responses_batch(
     ):
         raise ValueError("Batch responses must belong to the same conversation and channel.")
 
-    recipient_address = _resolve_agent_recipient_address(first_request)
-    if not recipient_address:
-        raise ValueError("Request is missing the agent recipient endpoint.")
+    response_target = _build_console_response_target(agent, actor_user_id)
+    if response_target is None:
+        response_target = _build_request_conversation_response_target(first_request)
 
     body = (
         prepared_responses[0].body
@@ -1755,22 +1841,17 @@ def submit_human_input_responses_batch(
     analytics_user_id = str(actor_user_id or agent.user_id)
 
     with transaction.atomic():
-        human_endpoint = _get_or_create_endpoint(
-            channel=first_request.conversation.channel,
-            address=first_request.conversation.address,
+        _ensure_conversation_participants(
+            response_target.conversation,
+            response_target.human_endpoint,
+            response_target.agent_endpoint,
         )
-        agent_endpoint = _get_or_create_endpoint(
-            channel=first_request.conversation.channel,
-            address=recipient_address,
-            owner_agent=agent,
-        )
-        _ensure_conversation_participants(first_request.conversation, human_endpoint, agent_endpoint)
 
         message = PersistentAgentMessage.objects.create(
             is_outbound=False,
-            from_endpoint=human_endpoint,
-            to_endpoint=agent_endpoint,
-            conversation=first_request.conversation,
+            from_endpoint=response_target.human_endpoint,
+            to_endpoint=response_target.agent_endpoint,
+            conversation=response_target.conversation,
             owner_agent=agent,
             body=body,
             raw_payload=raw_payload,

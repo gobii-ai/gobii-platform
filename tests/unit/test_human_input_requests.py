@@ -289,7 +289,10 @@ class HumanInputRequestTests(TestCase):
     def test_tool_definition_allows_optional_options(self):
         tool = get_request_human_input_tool()
         function = tool["function"]
+        description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
+        self.assertIn("already be visible to the user or pending delivery", description)
+        self.assertIn("ask only the new unanswered question", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
@@ -1618,6 +1621,7 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         payload = response.json()
         self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
         self.assertEqual(
             payload["event"]["message"]["bodyText"],
             "Question: What should I do first?\n"
@@ -1635,6 +1639,92 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
+        reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
+        self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.conversation.address, self.user_address)
+        self.assertEqual(reply_message.from_endpoint.address, self.user_address)
+        self.assertEqual(reply_message.to_endpoint.address, self.agent_address)
+
+    def test_console_batch_response_to_email_request_records_web_reply(self):
+        email_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+        )
+        email_user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        requested_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=email_agent_endpoint,
+            to_endpoint=email_user_endpoint,
+            conversation=email_conversation,
+            owner_agent=self.agent,
+            body="Please answer these questions.",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect email answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=email_conversation,
+            originating_step=step,
+            requested_message=requested_message,
+            question="How many candidates?",
+            options_json=[
+                {"key": "large", "title": "Large Batch", "description": "Find many candidates."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.EMAIL,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=email_conversation,
+            originating_step=step,
+            requested_message=requested_message,
+            question="What format?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.EMAIL,
+        )
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/human-input-requests/respond-batch/",
+            data=json.dumps(
+                {
+                    "responses": [
+                        {"request_id": str(first_request.id), "selected_option_key": "large"},
+                        {"request_id": str(second_request.id), "free_text": "Spreadsheet"},
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
+        self.assertEqual(reply_message.id, second_request.raw_reply_message_id)
+        self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.conversation.address, self.user_address)
+        self.assertEqual(reply_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.from_endpoint.address, self.user_address)
+        self.assertEqual(reply_message.to_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.to_endpoint.address, self.agent_address)
+        self.assertEqual(first_request.requested_via_channel, CommsChannel.EMAIL)
+        self.assertEqual(second_request.requested_via_channel, CommsChannel.EMAIL)
 
     def test_pending_action_payload_groups_human_input_batches(self):
         step = PersistentAgentStep.objects.create(

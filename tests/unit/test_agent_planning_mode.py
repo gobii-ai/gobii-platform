@@ -92,7 +92,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False):
             self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
 
-    def test_planning_prompt_replaces_first_run_prompt(self):
+    def test_planning_prompt_includes_first_run_welcome_without_work_prompt(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -103,12 +103,18 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("Planning Mode", prompt)
+        self.assertIn("REQUIRED: First-Run Welcome", prompt)
+        self.assertIn("Start your response with a brief welcome message to Matt", prompt)
+        self.assertIn("before asking planning questions or calling tools", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("Skip Planning", prompt)
         self.assertIn("`requests` parameter", prompt)
         self.assertIn("each item contains exactly one question", prompt)
         self.assertIn("`will_continue_work=false` on request_human_input", prompt)
-        self.assertNotIn("Your very first action must be sending a welcome message", prompt)
+        self.assertIn("already visible to the user or pending delivery", prompt)
+        self.assertIn("ask only the new unanswered question", prompt)
+        self.assertNotIn("Then sqlite_batch: charter + kanban cards + everything else", prompt)
+        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

@@ -84,6 +84,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "can choose one OR reply in their own words. If you omit options, the user will "
                 "reply with free text only. For web chat, the request appears in the console composer panel. "
                 "For email or SMS, this tool returns relay_payload guidance that you must send with send_email or send_sms. "
+                "A successful request may already be visible to the user or pending delivery; do not call this tool "
+                "again for the same question. If you need another detail, ask only the new unanswered question. "
                 "Keep questions concise and make sure it is only the question without extra fluff."
             ),
             "parameters": {
