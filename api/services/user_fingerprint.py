@@ -26,6 +26,8 @@ FINGERPRINT_SERVER_EVENT_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field(
     "fingerprint_server_event_id"
 ).max_length
 FINGERPRINT_VISITOR_ID_MAX_LENGTH = UserFingerprintVisit._meta.get_field("fingerprint_visitor_id").max_length
+_LATEST_USER_FINGERPRINT_VISIT_CACHE_ATTR = "_latest_succeeded_fingerprint_visit_cache"
+_MISSING_USER_FINGERPRINT_VISIT = object()
 
 
 class FingerprintConfigurationError(RuntimeError):
@@ -57,6 +59,11 @@ def _clean_bounded_string(value: Any, *, max_length: int) -> str:
     if len(cleaned) > max_length:
         return ""
     return cleaned
+
+
+def _optional_clean_string(value: Any) -> str | None:
+    cleaned = _clean_string(value)
+    return cleaned or None
 
 
 def _coerce_bool(value: Any) -> bool | None:
@@ -164,6 +171,75 @@ def _extract_proxy_type(payload: dict[str, Any]) -> str:
 
 def is_fingerprint_server_api_configured() -> bool:
     return bool(settings.FINGERPRINT_SERVER_API_KEY.strip())
+
+
+def get_latest_user_fingerprint_visit(user) -> UserFingerprintVisit | None:
+    if not user or not getattr(user, "pk", None):
+        return None
+
+    cached_visit = getattr(user, _LATEST_USER_FINGERPRINT_VISIT_CACHE_ATTR, _MISSING_USER_FINGERPRINT_VISIT)
+    if cached_visit is not _MISSING_USER_FINGERPRINT_VISIT:
+        return cached_visit
+
+    visit = (
+        UserFingerprintVisit.objects.filter(
+            user=user,
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+        )
+        .order_by("-event_timestamp", "-fetched_at", "-created_at", "-id")
+        .first()
+    )
+    setattr(user, _LATEST_USER_FINGERPRINT_VISIT_CACHE_ATTR, visit)
+    return visit
+
+
+def get_fp_suspect_score(user) -> float | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.suspect_score
+
+
+def get_fp_country(user) -> str | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return _optional_clean_string(visit.country_code)
+
+
+def get_fp_vpn(user) -> bool | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.vpn
+
+
+def get_fp_tor(user) -> bool | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.tor
+
+
+def get_fp_proxy(user) -> bool | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.proxy
+
+
+def get_fp_tampering(user) -> bool | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.tampering
+
+
+def get_fp_high_activity(user) -> bool | None:
+    visit = get_latest_user_fingerprint_visit(user)
+    if visit is None:
+        return None
+    return visit.high_activity_device
 
 
 def _fingerprint_processing_stale_after() -> dt.timedelta:
