@@ -158,6 +158,8 @@ jobs:
             tag: batch_subscription
           - batch: task_credits
             tag: batch_task_credits
+          - batch: tool_credit_refund
+            tag: batch_tool_credit_refund
           - batch: output_schema
             tag: batch_output_schema
           - batch: link_shortener

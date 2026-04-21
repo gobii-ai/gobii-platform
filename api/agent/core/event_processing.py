@@ -16,7 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
@@ -272,6 +272,20 @@ def _is_warning_status(result: Any) -> bool:
         return False
     status = result.get("status")
     return isinstance(status, str) and status.lower() == "warning"
+
+
+def _should_refund_on_error(tool_name: str) -> bool:
+    """Return True when `tool_name` is configured to refund its credit on error.
+
+    Reads via ``django.conf.settings`` so tests can use ``@override_settings``;
+    the module-level ``config.settings`` import elsewhere in this file is not
+    affected by override_settings.
+    """
+    if not tool_name:
+        return False
+    from django.conf import settings as dj_settings
+    allowlist = getattr(dj_settings, "TOOL_CREDIT_REFUND_ON_ERROR", ()) or ()
+    return tool_name.lower() in allowlist
 
 
 def _infer_retryable_from_text(message: str) -> bool:
@@ -1214,6 +1228,65 @@ def _finalize_pending_tool_call_step(
         _emit_tool_call_audit(step, "finalized")
 
 
+def _refund_tool_credit_on_error(
+    *,
+    agent: PersistentAgent,
+    tool_name: str,
+    pending_step: Optional["PersistentAgentStep"],
+    consumed_credit: Any,
+    credits_consumed: Any,
+) -> bool:
+    """Refund up-front credit for a tool that returned status=error.
+
+    Reverses ``TaskCredit.credits_used`` and clears ``credits_cost`` /
+    ``task_credit`` on the persisted step so audit reports are accurate.
+    Leaves ``PersistentAgentToolCall.status`` untouched (the error is still
+    recorded). Does not touch the in-loop credit_snapshot/daily_state cache;
+    that cache is rebuilt on the next process_agent_events call and being
+    conservative about mid-batch daily gating is intentional. Never raises.
+    """
+    if consumed_credit is None or credits_consumed is None:
+        return False
+    try:
+        amount = Decimal(credits_consumed)
+    except (InvalidOperation, TypeError, ValueError):
+        return False
+    if amount <= 0:
+        return False
+
+    # Local import keeps this module free of a hard dependency on tasks.services.
+    from tasks.services import TaskCreditService
+
+    refunded = False
+    try:
+        refunded = TaskCreditService.refund_credit(consumed_credit, amount)
+    except Exception:
+        logger.exception(
+            "Agent %s: unexpected error refunding credit for tool %s",
+            agent.id, tool_name,
+        )
+
+    if refunded and pending_step is not None:
+        try:
+            pending_step.credits_cost = None
+            pending_step.task_credit = None
+            pending_step.save(update_fields=["credits_cost", "task_credit"])
+        except Exception:
+            logger.debug(
+                "Agent %s: failed to clear credit fields on step %s after refund",
+                agent.id, getattr(pending_step, "id", None),
+                exc_info=True,
+            )
+
+    if refunded:
+        logger.info(
+            "Agent %s: refunded %s credits for failed tool %s (step_id=%s)",
+            agent.id, amount, tool_name,
+            getattr(pending_step, "id", None),
+        )
+    return refunded
+
+
 def _get_tool_call_arguments(call: Any) -> Any:
     if call is None:
         return None
@@ -1955,6 +2028,14 @@ def _finalize_tool_batch(
                 consumed_credit=prepared.consumed_credit,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
+            )
+        if is_error_status and _should_refund_on_error(tool_name):
+            _refund_tool_credit_on_error(
+                agent=agent,
+                tool_name=tool_name,
+                pending_step=step,
+                consumed_credit=prepared.consumed_credit,
+                credits_consumed=prepared.credits_consumed,
             )
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)

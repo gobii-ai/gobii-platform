@@ -1041,6 +1041,18 @@ TOOL_CREDIT_COSTS = {
     "create_image": Decimal("2"),
 }
 
+# Tools whose up-front credit consumption is refunded when the tool returns
+# a result with `status == "error"`. Names are normalized to lowercase.
+# Override via env var, e.g. TOOL_CREDIT_REFUND_ON_ERROR=create_video,create_image
+TOOL_CREDIT_REFUND_ON_ERROR = [
+    name.strip().lower()
+    for name in env.list(
+        "TOOL_CREDIT_REFUND_ON_ERROR",
+        default=["create_video"],
+    )
+    if name and name.strip()
+]
+
 # Analytics
 SEGMENT_WRITE_KEY = env(
     "SEGMENT_WRITE_KEY",

@@ -1,6 +1,6 @@
 # platform/tasks/services.py
 from django.contrib.auth.models import User
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db.models.aggregates import Sum
 from django.db.models.expressions import F
@@ -871,6 +871,63 @@ class TaskCreditService:
                 }
         else:
             return TaskCreditService.check_and_consume_credit(owner, amount=amount)
+
+    @staticmethod
+    @tracer.start_as_current_span("TaskCreditService Refund Credit")
+    def refund_credit(credit, amount) -> bool:
+        """Atomically refund ``amount`` credits on a previously-consumed TaskCredit.
+
+        Decrements ``credits_used`` under ``select_for_update`` and clamps at 0 so
+        the counter can never go negative. Returns True if a refund was applied,
+        False if skipped (invalid inputs, missing row) or if the update failed.
+        Never raises so agent loops cannot be crashed by refund bugs.
+        """
+        if credit is None or amount is None:
+            return False
+        try:
+            amount = Decimal(amount)
+        except (InvalidOperation, TypeError, ValueError):
+            logger.warning("refund_credit: invalid amount %r; skipping", amount)
+            return False
+        if amount <= 0:
+            return False
+
+        TaskCredit = apps.get_model("api", "TaskCredit")
+        span = trace.get_current_span()
+        try:
+            span.set_attribute("task_credit.id", str(getattr(credit, "id", "")))
+            span.set_attribute("task_credit.refund_amount", float(amount))
+        except Exception:
+            pass
+
+        try:
+            with transaction.atomic():
+                locked = (
+                    TaskCredit.objects
+                    .select_for_update()
+                    .filter(pk=credit.pk)
+                    .first()
+                )
+                if locked is None:
+                    return False
+                current_used = Decimal(locked.credits_used or 0)
+                effective = amount if amount <= current_used else current_used
+                if effective <= 0:
+                    return False
+                TaskCredit.objects.filter(pk=locked.pk).update(
+                    credits_used=F("credits_used") - effective,
+                )
+                try:
+                    span.set_attribute("task_credit.refund_applied", float(effective))
+                except Exception:
+                    pass
+                return True
+        except Exception:
+            logger.exception(
+                "refund_credit: failed to refund %s on TaskCredit %s",
+                amount, getattr(credit, "pk", "<unknown>"),
+            )
+            return False
 
     @staticmethod
     @tracer.start_as_current_span("TaskCreditService Get User Tasks Credits Available")
