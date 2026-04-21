@@ -82,8 +82,13 @@ def fetch_user_fingerprint_visit_task(self, visit_id: int) -> None:
                 fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
                 error_message=str(exc),
             )
-            logger.exception("Fingerprint visit %s failed with an unexpected error", visit.pk)
-            raise
+            logger.warning(
+                "Fingerprint visit %s failed after unexpected retries: %s",
+                visit.pk,
+                exc,
+                exc_info=True,
+            )
+            return
 
         # Keep unexpected task-boundary failures visible while making the row
         # recoverable. This prevents visits from staying wedged in processing.

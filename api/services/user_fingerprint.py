@@ -195,6 +195,7 @@ def _enqueue_fingerprint_visit_refresh(visit_id: int) -> None:
                 exc_info=True,
             )
             UserFingerprintVisit.objects.filter(pk=visit_id).update(
+                fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
                 error_message=f"Failed to enqueue Fingerprint refresh: {exc}",
             )
 

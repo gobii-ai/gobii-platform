@@ -149,7 +149,7 @@ class UserFingerprintVisitTests(TestCase):
 
         visit = UserFingerprintVisit.objects.get(user=user)
         self.assertEqual(captured["fpjs_request_id"], "request-456")
-        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.FAILED)
         self.assertIn("Failed to enqueue Fingerprint refresh", visit.error_message)
         delay_mock.assert_called_once_with(visit.id)
 
@@ -227,6 +227,41 @@ class UserFingerprintVisitTests(TestCase):
 
         visit = UserFingerprintVisit.objects.get(user=user, fingerprint_event_id="request-456")
         self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        delay_mock.assert_called_once_with(visit.id)
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.delay")
+    def test_capture_request_identity_signals_requeues_failed_visit(self, delay_mock):
+        user = self._create_user("fingerprint-failed-requeue@example.com")
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
+            error_message="Failed to enqueue Fingerprint refresh: broker unavailable",
+        )
+        request = self.factory.post(
+            "/signup",
+            {
+                "ufp": "visitor-123",
+                "ufpr": "request-456",
+            },
+        )
+        request.META["REMOTE_ADDR"] = "198.51.100.24"
+        request.COOKIES = {}
+
+        with self.captureOnCommitCallbacks(execute=True):
+            capture_request_identity_signals_and_attribution(
+                user,
+                request,
+                source=SIGNAL_SOURCE_SIGNUP,
+                include_fpjs=True,
+            )
+
+        visit = UserFingerprintVisit.objects.get(user=user, fingerprint_event_id="request-456")
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
+        self.assertEqual(visit.error_message, "")
         delay_mock.assert_called_once_with(visit.id)
 
     @override_settings(
@@ -441,6 +476,36 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.PENDING)
         self.assertEqual(visit.error_message, "bad timestamp")
         retry_mock.assert_called_once()
+
+    @override_settings(FINGERPRINT_SERVER_API_KEY="fp_secret")
+    @patch("api.tasks.fingerprint_tasks.fetch_user_fingerprint_visit_task.retry")
+    @patch("api.tasks.fingerprint_tasks.refresh_user_fingerprint_visit", side_effect=OverflowError("bad timestamp"))
+    def test_fetch_user_fingerprint_visit_task_marks_final_unexpected_error_failed(
+        self,
+        _refresh_mock,
+        retry_mock,
+    ):
+        user = self._create_user("fingerprint-final-unexpected-error@example.com")
+        visit = UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-456",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+
+        fetch_user_fingerprint_visit_task.push_request(
+            retries=fetch_user_fingerprint_visit_task.max_retries,
+        )
+        try:
+            fetch_user_fingerprint_visit_task.run(visit.id)
+        finally:
+            fetch_user_fingerprint_visit_task.pop_request()
+
+        visit.refresh_from_db()
+        self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.FAILED)
+        self.assertEqual(visit.error_message, "bad timestamp")
+        retry_mock.assert_not_called()
 
     def test_fetch_user_fingerprint_visit_task_is_late_acked(self):
         self.assertTrue(fetch_user_fingerprint_visit_task.acks_late)
