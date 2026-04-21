@@ -1,3 +1,4 @@
+import asyncio
 import json
 from unittest.mock import MagicMock, patch
 
@@ -33,6 +34,11 @@ class DummyResult:
         self.content = [DummyContent(text)]
         self.data = None
         self.is_error = False
+
+
+class SyncLoop:
+    def run_until_complete(self, awaitable):
+        return asyncio.run(awaitable)
 
 
 @tag("batch_mcp_tools")
@@ -263,6 +269,14 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
             description="LinkedIn company profile",
             parameters={},
         )
+        self.scrape_tool_info = MCPToolInfo(
+            config_id=self.runtime.config_id,
+            full_name="mcp_brightdata_scrape_as_markdown",
+            server_name="brightdata",
+            tool_name="scrape_as_markdown",
+            description="Scrape",
+            parameters={},
+        )
 
     def _build_manager(self, tool_info: MCPToolInfo) -> MCPToolManager:
         manager = MCPToolManager()
@@ -305,6 +319,93 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(cleaned["kind"], "serp")
         self.assertEqual(cleaned["items"][0]["t"], "Example")
         self.assertNotIn("image", cleaned["items"][0])
+
+    def test_search_engine_retries_google_non_json_exception_once(self):
+        tool_info = self.search_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        calls = []
+        payload = {"organic": [{"title": "Example", "link": "https://example.com"}]}
+
+        async def fake_execute(_client, _tool_name, params, timeout_seconds):
+            calls.append(dict(params))
+            if len(calls) == 1:
+                raise RuntimeError("Unexpected non-JSON response from Bright Data for search_engine.")
+            return DummyResult(json.dumps(payload))
+
+        with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
+             patch.object(manager, "_execute_async", side_effect=fake_execute), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
+             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"query": "test"},
+            )
+
+        self.assertEqual(response.get("status"), "success")
+        self.assertEqual(len(calls), 2)
+        self.assertNotIn("engine", calls[0])
+        self.assertNotIn("engine", calls[1])
+        mock_sleep.assert_called_once_with(3)
+        cleaned = json.loads(response.get("result"))
+        self.assertEqual(cleaned["items"][0]["t"], "Example")
+
+    def test_search_engine_falls_back_to_bing_after_two_non_json_google_results(self):
+        tool_info = self.search_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        calls = []
+
+        async def fake_execute(_client, _tool_name, params, timeout_seconds):
+            calls.append(dict(params))
+            if len(calls) < 3:
+                return DummyResult("<html>blocked</html>")
+            return DummyResult("# Bing Search\n\n[Example](https://example.com)")
+
+        with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
+             patch.object(manager, "_execute_async", side_effect=fake_execute), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
+             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"query": "test"},
+            )
+
+        self.assertEqual(response.get("status"), "success")
+        self.assertEqual(len(calls), 3)
+        self.assertNotIn("engine", calls[0])
+        self.assertNotIn("engine", calls[1])
+        self.assertEqual(calls[2]["engine"], "bing")
+        mock_sleep.assert_called_once_with(3)
+        self.assertIn("Bing Search", response.get("result"))
+
+    def test_search_engine_accepts_bing_markdown_without_json_retry(self):
+        tool_info = self.search_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        calls = []
+
+        async def fake_execute(_client, _tool_name, params, timeout_seconds):
+            calls.append(dict(params))
+            return DummyResult("# Bing Search\n\n[Example](https://example.com)")
+
+        with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
+             patch.object(manager, "_execute_async", side_effect=fake_execute), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
+             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"query": "test", "engine": "bing"},
+            )
+
+        self.assertEqual(response.get("status"), "success")
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["engine"], "bing")
+        mock_sleep.assert_not_called()
+        self.assertIn("Bing Search", response.get("result"))
 
     def test_execute_mcp_tool_strips_linkedin_text_html(self):
         tool_info = self.company_tool_info
@@ -401,15 +502,68 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertIn("Maximum number of queries", response.get("message", ""))
         mock_exec.assert_not_called()
 
+    def test_scrape_as_markdown_empty_markdown_returns_error(self):
+        tool_info = self.scrape_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        dummy_result = DummyResult("   ")
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"url": "https://example.com"},
+            )
+
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn("empty scrape_as_markdown", response.get("message", ""))
+
+    def test_scrape_as_markdown_empty_json_result_returns_error(self):
+        tool_info = self.scrape_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        dummy_result = DummyResult(json.dumps({"status": "success", "result": ""}))
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"url": "https://example.com"},
+            )
+
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn("empty scrape_as_markdown", response.get("message", ""))
+
+    def test_scrape_as_markdown_success_sentinel_result_returns_error(self):
+        tool_info = self.scrape_tool_info
+        manager = self._build_manager(tool_info)
+        self._enable_tool(tool_info)
+        dummy_result = DummyResult(json.dumps({"status": "success", "result": "Tool executed successfully"}))
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
+             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
+            response = manager.execute_mcp_tool(
+                self.agent,
+                tool_info.full_name,
+                {"url": "https://example.com"},
+            )
+
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn("empty scrape_as_markdown", response.get("message", ""))
+
     def test_brightdata_pdf_urls_rejected(self):
-        tool_info = MCPToolInfo(
-            config_id=self.runtime.config_id,
-            full_name="mcp_brightdata_scrape_as_markdown",
-            server_name="brightdata",
-            tool_name="scrape_as_markdown",
-            description="Scrape",
-            parameters={},
-        )
+        tool_info = self.scrape_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
         params = {"url": "https://example.com/doc.pdf"}
