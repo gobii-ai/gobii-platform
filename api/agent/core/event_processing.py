@@ -93,6 +93,7 @@ from tasks.services import TaskCreditService
 from util.tool_costs import (
     get_tool_credit_cost,
     get_default_task_credit_cost,
+    should_refund_tool_credit_on_error,
 )
 from util.constants.task_constants import TASKS_UNLIMITED
 from .llm_config import (
@@ -1214,6 +1215,84 @@ def _finalize_pending_tool_call_step(
         _emit_tool_call_audit(step, "finalized")
 
 
+def _clear_refunded_step_charge(step: "PersistentAgentStep") -> None:
+    completion_id = getattr(step, "completion_id", None)
+
+    PersistentAgentStep.objects.filter(id=step.id).update(
+        credits_cost=None,
+        task_credit=None,
+    )
+    step.credits_cost = None
+    step.task_credit = None
+    step.task_credit_id = None
+
+    if completion_id is None:
+        return
+
+    has_chargeable_sibling = (
+        PersistentAgentStep.objects.filter(
+            completion_id=completion_id,
+            credits_cost__isnull=False,
+        )
+        .exclude(id=step.id)
+        .exists()
+    )
+    if has_chargeable_sibling:
+        return
+
+    PersistentAgentCompletion.objects.filter(id=completion_id).update(credits_cost=None)
+    completion = getattr(step, "completion", None)
+    if completion is not None:
+        completion.credits_cost = None
+
+
+def _refund_tool_credit_on_error_if_configured(
+    *,
+    agent: "PersistentAgent",
+    tool_name: str,
+    step: Optional["PersistentAgentStep"],
+    credits_consumed: Any,
+    consumed_credit: Any,
+) -> None:
+    if step is None or not isinstance(credits_consumed, Decimal):
+        return
+    if consumed_credit is None or not should_refund_tool_credit_on_error(tool_name):
+        return
+
+    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
+    if owner is None:
+        return
+
+    try:
+        with transaction.atomic():
+            refund = TaskCreditService.refund_consumed_credit_for_owner(
+                owner,
+                amount=credits_consumed,
+                preferred_credit=consumed_credit,
+            )
+            if not refund.get("success"):
+                logger.warning(
+                    "Agent %s: partially refunded errored %s tool call on step %s "
+                    "(refunded=%s remaining=%s)",
+                    agent.id,
+                    tool_name,
+                    getattr(step, "id", None),
+                    refund.get("refunded"),
+                    refund.get("remaining"),
+                )
+                raise ValueError("Partial tool credit refund")
+
+            _clear_refunded_step_charge(step)
+    except (ArithmeticError, DatabaseError, TypeError, ValueError):
+        logger.warning(
+            "Agent %s: failed to refund credit or clear charge fields for errored %s tool call on step %s",
+            agent.id,
+            tool_name,
+            getattr(step, "id", None),
+            exc_info=True,
+        )
+
+
 def _get_tool_call_arguments(call: Any) -> Any:
     if call is None:
         return None
@@ -1955,6 +2034,14 @@ def _finalize_tool_batch(
                 consumed_credit=prepared.consumed_credit,
                 attach_completion=attach_completion,
                 attach_prompt_archive=attach_prompt_archive,
+            )
+        if is_error_status:
+            _refund_tool_credit_on_error_if_configured(
+                agent=agent,
+                tool_name=tool_name,
+                step=step,
+                credits_consumed=prepared.credits_consumed,
+                consumed_credit=prepared.consumed_credit,
             )
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)

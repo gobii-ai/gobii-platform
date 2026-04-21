@@ -1041,6 +1041,12 @@ TOOL_CREDIT_COSTS = {
     "create_image": Decimal("2"),
 }
 
+# Tool calls in this allowlist do not consume credits when their result is an
+# error. Names are normalized case-insensitively by the credit helpers.
+TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS = {
+    "create_video",
+}
+
 # Analytics
 SEGMENT_WRITE_KEY = env(
     "SEGMENT_WRITE_KEY",
