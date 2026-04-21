@@ -745,7 +745,7 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(message_payload["webhookMeta"]["payloadKind"], "json")
         self.assertEqual(message_payload["webhookMeta"]["payload"], {"status": "ok"})
         self.assertEqual(message_payload["webhookMeta"]["contentType"], "application/json")
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=None)
 
     @tag("batch_agent_chat")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -808,7 +808,7 @@ class AgentChatAPITests(TestCase):
         self.assertIn("Content-Type: application/json", user_message["content"])
         self.assertIn('Query params: {"priority": "high"}', user_message["content"])
         self.assertNotIn("On other, you received a message", user_message["content"])
-        mock_delay.assert_called_once_with(str(self.agent.id))
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=None)
 
     @tag("batch_agent_chat")
     def test_timeline_includes_create_image_preview_url(self):

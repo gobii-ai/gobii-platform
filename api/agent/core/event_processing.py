@@ -17,7 +17,7 @@ from contextvars import copy_context
 from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
-from typing import List, Tuple, Union, Optional, Dict, Any, Literal
+from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
 import litellm
@@ -61,12 +61,16 @@ from .processing_flags import (
     clear_processing_stop_requested,
     clear_processing_work_state,
     enqueue_pending_agent,
+    get_human_inbound_generation,
     get_pending_drain_settings,
+    is_human_inbound_generation_consumed,
     is_agent_pending,
     is_processing_queued,
     is_processing_stop_requested,
+    mark_human_inbound_generation_consumed,
     mark_processing_lock_active,
     processing_lock_storage_keys,
+    remove_pending_agent,
     set_processing_heartbeat,
 )
 from .llm_utils import (
@@ -244,6 +248,10 @@ CONTINUATION_PHRASES = (
     "proceeding to ",
     "moving on to ",
 )
+
+
+class OrchestratorPromptStale(RuntimeError):
+    """Raised when newer human input makes an in-flight orchestrator prompt stale."""
 
 
 def _truncate_text_bytes(text: str, max_bytes: int) -> str:
@@ -2623,6 +2631,7 @@ def _stream_completion_with_broadcast(
     provider: Optional[str],
     stream_broadcaster: Optional[WebStreamBroadcaster],
     stream_content: bool = True,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> Any:
     if stream_broadcaster:
         stream_broadcaster.start()
@@ -2630,7 +2639,23 @@ def _stream_completion_with_broadcast(
     content_filter = _CanonicalContinuationStreamFilter() if stream_broadcaster else None
     accumulator = StreamAccumulator()
     start_time = time.monotonic()
+    canceled = False
+    stream = None
+
+    def _close_stream() -> None:
+        close = getattr(stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.debug("Failed to close stale orchestrator stream", exc_info=True)
+
     try:
+        if stale_prompt_checker and stale_prompt_checker():
+            canceled = True
+            if stream_broadcaster:
+                stream_broadcaster.cancel()
+            raise OrchestratorPromptStale("Prompt became stale before streaming completion started.")
         stream = run_completion(
             model=model,
             messages=messages,
@@ -2641,6 +2666,12 @@ def _stream_completion_with_broadcast(
             stream_options={"include_usage": True},
         )
         for chunk in stream:
+            if stale_prompt_checker and stale_prompt_checker():
+                canceled = True
+                _close_stream()
+                if stream_broadcaster:
+                    stream_broadcaster.cancel()
+                raise OrchestratorPromptStale("Prompt became stale during streaming completion.")
             reasoning_delta, content_delta = accumulator.ingest_chunk(chunk)
             if stream_broadcaster:
                 filtered_delta = None
@@ -2648,7 +2679,7 @@ def _stream_completion_with_broadcast(
                     filtered_delta = content_filter.ingest(content_delta) if content_filter else content_delta
                 stream_broadcaster.push_delta(reasoning_delta, filtered_delta)
     finally:
-        if stream_broadcaster:
+        if stream_broadcaster and not canceled:
             trailing = content_filter.flush() if content_filter and stream_content else None
             if trailing:
                 stream_broadcaster.push_delta(None, trailing)
@@ -2713,6 +2744,7 @@ def _completion_with_failover(
     preferred_config: Optional[Tuple[str, str]] = None,
     stream_broadcaster: Optional[WebStreamBroadcaster] = None,
     allow_streamed_content: bool = True,
+    stale_prompt_checker: Callable[[], bool] | None = None,
 ) -> Tuple[dict, Optional[dict]]:
     """
     Execute LLM completion with a pre-determined, tiered failover configuration.
@@ -2770,6 +2802,8 @@ def _completion_with_failover(
             )
 
     for provider, model, params_with_hints in ordered_configs:
+        if stale_prompt_checker and stale_prompt_checker():
+            raise OrchestratorPromptStale("Prompt became stale before completion request was sent.")
         logger.info(
             "Attempting provider %s for agent %s",
             provider,
@@ -2827,8 +2861,15 @@ def _completion_with_failover(
                             provider=provider,
                             stream_broadcaster=active_stream_broadcaster,
                             stream_content=stream_content,
+                            stale_prompt_checker=stale_prompt_checker,
                         )
+                    except OrchestratorPromptStale:
+                        raise
                     except Exception:
+                        if stale_prompt_checker and stale_prompt_checker():
+                            raise OrchestratorPromptStale(
+                                "Prompt became stale during streaming completion."
+                            )
                         logger.warning(
                             "Streaming completion failed for provider=%s model=%s; retrying without streaming",
                             provider,
@@ -2852,6 +2893,8 @@ def _completion_with_failover(
                         tools=request_tools_payload,
                         drop_params=True,
                     )
+                if stale_prompt_checker and stale_prompt_checker():
+                    raise OrchestratorPromptStale("Prompt became stale before completion response was accepted.")
 
                 logger.info(
                     "Provider %s succeeded for agent %s",
@@ -2872,6 +2915,10 @@ def _completion_with_failover(
 
                 return response, token_usage
 
+        except OrchestratorPromptStale:
+            if active_stream_broadcaster:
+                active_stream_broadcaster.cancel()
+            raise
         except Exception as exc:
             if use_gemini_cache and is_gemini_cache_conflict_error(exc):
                 disable_gemini_cache_for(provider, model)
@@ -3625,6 +3672,7 @@ def process_agent_events(
     eval_run_id: Optional[str] = None,
     mock_config: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
+    inbound_generation: int | str | None = None,
     worker_pid: Optional[int] = None,
 ) -> None:
     """Process all outstanding events for a persistent agent."""
@@ -3644,6 +3692,20 @@ def process_agent_events(
     logger.info("process_agent_events(%s) called", persistent_agent_id)
 
     redis_client = get_redis_client()
+    if is_human_inbound_generation_consumed(
+        persistent_agent_id,
+        inbound_generation,
+        client=redis_client,
+    ):
+        logger.info(
+            "Skipping event processing for agent %s – inbound generation %s already consumed.",
+            persistent_agent_id,
+            inbound_generation,
+        )
+        span.add_event("Processing skipped - inbound generation already consumed")
+        clear_processing_queued_flag(persistent_agent_id, client=redis_client)
+        return
+
     follow_up_key = burn_follow_up_key(persistent_agent_id)
     cooldown_key = burn_cooldown_key(persistent_agent_id)
 
@@ -4380,6 +4442,9 @@ def _run_agent_loop(
     continuation_notice: Optional[str] = None
     web_session_activation_retry_used = False
 
+    def _current_human_inbound_generation() -> int:
+        return get_human_inbound_generation(agent.id, client=redis_client)
+
     try:
         for i in range(max_remaining):
             had_deliverable_web_target_at_start = has_deliverable_web_session(agent)
@@ -4466,21 +4531,7 @@ def _run_agent_loop(
                     )
                     return cumulative_token_usage
 
-                # Atomically consume one global step; exit if budget exhausted
-                if budget_ctx is not None:
-                    consumed, new_used = AgentBudgetManager.try_consume_step(
-                        agent_id=budget_ctx.agent_id, max_steps=budget_ctx.max_steps
-                    )
-                    iter_span.set_attribute("budget.consumed", consumed)
-                    iter_span.set_attribute("budget.steps_used", new_used)
-                    if not consumed:
-                        logger.info("Agent %s step budget exhausted.", agent.id)
-                        try:
-                            AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
-                        except Exception:
-                            logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
-                        return cumulative_token_usage
-
+                prompt_human_generation = _current_human_inbound_generation()
                 config_snapshot = seed_sqlite_agent_config(agent)
                 kanban_snapshot = seed_sqlite_kanban(agent)
                 skills_snapshot = seed_sqlite_skills(agent)
@@ -4505,6 +4556,48 @@ def _run_agent_loop(
                     prompt_metadata = {}
                 prompt_allows_implied_send = bool(prompt_metadata.get("prompt_allows_implied_send", True))
                 prompt_archive_attached = False
+                latest_human_generation = _current_human_inbound_generation()
+                if latest_human_generation > prompt_human_generation:
+                    logger.info(
+                        "Agent %s: human input generation changed from %s to %s while building prompt; rebuilding.",
+                        agent.id,
+                        prompt_human_generation,
+                        latest_human_generation,
+                    )
+                    continuation_notice = (
+                        "A newer user message arrived while the last prompt was being prepared; "
+                        "rebuild the prompt and answer the latest message."
+                    )
+                    continue
+
+                accepted_human_generation = latest_human_generation
+
+                # Atomically consume one global step only after accepting the prompt.
+                if budget_ctx is not None:
+                    consumed, new_used = AgentBudgetManager.try_consume_step(
+                        agent_id=budget_ctx.agent_id, max_steps=budget_ctx.max_steps
+                    )
+                    iter_span.set_attribute("budget.consumed", consumed)
+                    iter_span.set_attribute("budget.steps_used", new_used)
+                    if not consumed:
+                        logger.info("Agent %s step budget exhausted.", agent.id)
+                        try:
+                            AgentBudgetManager.close_cycle(agent_id=budget_ctx.agent_id, budget_id=budget_ctx.budget_id)
+                        except Exception:
+                            logger.debug("Failed to close budget cycle on exhaustion", exc_info=True)
+                        return cumulative_token_usage
+
+                if accepted_human_generation > 0:
+                    mark_human_inbound_generation_consumed(
+                        agent.id,
+                        accepted_human_generation,
+                        client=redis_client,
+                    )
+                    if _current_human_inbound_generation() <= accepted_human_generation:
+                        remove_pending_agent(agent.id, client=redis_client)
+
+                def _is_orchestrator_prompt_stale() -> bool:
+                    return _current_human_inbound_generation() > accepted_human_generation
 
                 def _attach_prompt_archive(step: PersistentAgentStep) -> None:
                     nonlocal prompt_archive_attached
@@ -4585,6 +4678,7 @@ def _run_agent_loop(
                         preferred_config=preferred_config,
                         stream_broadcaster=stream_broadcaster,
                         allow_streamed_content=prompt_allows_implied_send,
+                        stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
                     if heartbeat:
                         heartbeat.touch("llm_response")
@@ -4607,6 +4701,28 @@ def _run_agent_loop(
                             token_usage.get("total_tokens"),
                         )
 
+                except OrchestratorPromptStale:
+                    latest_human_generation = _current_human_inbound_generation()
+                    logger.info(
+                        "Agent %s: discarded stale orchestrator completion for generation %s; latest is %s.",
+                        agent.id,
+                        accepted_human_generation,
+                        latest_human_generation,
+                    )
+                    iter_span.add_event(
+                        "Orchestrator completion discarded due to newer human input",
+                        {
+                            "accepted_generation": accepted_human_generation,
+                            "latest_generation": latest_human_generation,
+                        },
+                    )
+                    if heartbeat:
+                        heartbeat.touch("prompt_stale")
+                    continuation_notice = (
+                        "A newer user message arrived while the previous response was being generated; "
+                        "discard that stale response and answer using the latest conversation state."
+                    )
+                    continue
                 except Exception as e:
                     current_span = trace.get_current_span()
                     mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")

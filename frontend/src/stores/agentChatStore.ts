@@ -593,10 +593,24 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const isStart = payload.status === 'start'
     const isDone = payload.status === 'done'
     const isDelta = payload.status === 'delta'
+    const isCanceled = payload.status === 'canceled'
     const now = Date.now()
     let shouldInvalidateQuery = false
 
     set((state) => {
+      if (isCanceled) {
+        if (state.streaming?.streamId && state.streaming.streamId !== payload.stream_id) {
+          return state
+        }
+        return {
+          streaming: null,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
+          awaitingResponse: state.awaitingResponse,
+          processingStartedAt: state.processingStartedAt,
+        }
+      }
+
       const existingStream = state.streaming
       let isNewStream = false
       let base: StreamState

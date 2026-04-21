@@ -12,6 +12,7 @@ from django.utils import timezone
 from django.utils.html import escape
 from django.utils.text import slugify
 
+from api.agent.core.processing_flags import bump_human_inbound_generation
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
@@ -1931,10 +1932,14 @@ def submit_human_input_responses_batch(
                 ]
             )
 
-        transaction.on_commit(
-            lambda: __import__("api.agent.tasks", fromlist=["process_agent_events_task"])
-            .process_agent_events_task.delay(str(agent.id))
-        )
+        def _queue_processing() -> None:
+            inbound_generation = bump_human_inbound_generation(agent.id)
+            __import__("api.agent.tasks", fromlist=["process_agent_events_task"]).process_agent_events_task.delay(
+                str(agent.id),
+                inbound_generation=inbound_generation,
+            )
+
+        transaction.on_commit(_queue_processing)
         transaction.on_commit(
             lambda: Analytics.track_event(
                 user_id=analytics_user_id,

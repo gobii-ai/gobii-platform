@@ -260,7 +260,7 @@ export type AgentTimelineSnapshot = {
 
 export type StreamEventPayload = {
   stream_id: string
-  status: 'start' | 'delta' | 'done'
+  status: 'start' | 'delta' | 'done' | 'canceled'
   reasoning_delta?: string | null
   content_delta?: string | null
   timestamp?: string | null

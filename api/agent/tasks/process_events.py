@@ -35,6 +35,7 @@ from ..core.processing_flags import (
     count_pending_agents,
     get_processing_heartbeat,
     get_pending_drain_settings,
+    is_human_inbound_generation_consumed,
     is_agent_pending,
     pop_pending_agents,
     set_processing_queued_flag,
@@ -125,6 +126,7 @@ def process_agent_events_task(
     eval_run_id: str | None = None,
     mock_config: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: str | None = None,
+    inbound_generation: int | str | None = None,
 ) -> None:  # noqa: D401, ANN001
     """Celery task that triggers event processing for one persistent agent."""
     from api.evals.execution import set_current_eval_routing_profile
@@ -220,6 +222,14 @@ def process_agent_events_task(
 
     try:
         set_current_eval_routing_profile(routing_profile)
+        if is_human_inbound_generation_consumed(persistent_agent_id, inbound_generation):
+            logger.info(
+                "Skipping redundant processing task for agent %s; inbound generation %s already consumed.",
+                persistent_agent_id,
+                inbound_generation,
+            )
+            span.add_event("Processing skipped - inbound generation already consumed")
+            return
         # Delegate to core logic
         process_agent_events(
             persistent_agent_id,
@@ -229,6 +239,7 @@ def process_agent_events_task(
             eval_run_id=eval_run_id,
             mock_config=mock_config,
             burn_follow_up_token=burn_follow_up_token,
+            inbound_generation=inbound_generation,
             worker_pid=current_worker_pid,
         )
     finally:

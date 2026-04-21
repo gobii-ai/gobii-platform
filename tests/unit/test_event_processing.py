@@ -5,6 +5,7 @@ import shutil
 import tempfile
 from datetime import timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
@@ -18,6 +19,8 @@ import zstandard as zstd
 from allauth.account.models import EmailAddress
 
 from api.agent.core.event_processing import (
+    OrchestratorPromptStale,
+    _completion_with_failover,
     _execute_prepared_tool_batch,
     _gate_send_chat_tool_for_delivery,
     build_prompt_context,
@@ -30,11 +33,18 @@ from api.agent.core.event_processing import (
 )
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
+    bump_human_inbound_generation,
     clear_processing_stop_requested,
+    get_human_inbound_generation,
     is_processing_stop_requested,
+    mark_human_inbound_generation_consumed,
     set_processing_stop_requested,
     set_processing_queued_flag,
 )
+from api.agent.comms.adapters import ParsedMessage
+from api.agent.comms.human_input_requests import submit_human_input_responses_batch
+from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
+from api.agent.peer_comm import PeerMessagingService
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
 from api.agent.core.prompt_context import (
     get_agent_tools,
@@ -49,12 +59,17 @@ from api.agent.tools.http_request import execute_http_request as _execute_http_r
 from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
 from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
-from api.agent.tasks.process_events import process_agent_cron_trigger_task, _remove_orphaned_celery_beat_task
+from api.agent.tasks.process_events import (
+    process_agent_cron_trigger_task,
+    process_agent_events_task,
+    _remove_orphaned_celery_beat_task,
+)
 from api.models import (
     CommsChannel,
     BrowserUseAgent,
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
+    AgentPeerLink,
     MCPServerConfig,
     Organization,
     OrganizationMembership,
@@ -72,6 +87,8 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentHumanInputRequest,
+    PersistentAgentInboundWebhook,
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
@@ -94,6 +111,7 @@ from util.personal_signup_preview import (
     GENERIC_STARTER_CHARTER,
     SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK,
 )
+from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
 
@@ -3432,6 +3450,9 @@ class EventProcessingRuntimeGuardTests(TestCase):
             def get(self, _key):
                 return None
 
+            def exists(self, _key):
+                return 0
+
         mock_get_redis.return_value = _FakeRedis()
         mock_get_pending_settings.return_value = PendingDrainSettings(
             pending_set_ttl_seconds=123,
@@ -3524,6 +3545,300 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(executed_batch.abort_after_execution)
         self.assertEqual(mock_execute_prepared_tool_call.call_count, 1)
+
+
+@tag("batch_event_processing")
+class HumanInboundGenerationTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="human_generation@example.com",
+            email="human_generation@example.com",
+            password="secret",
+        )
+        EmailAddress.objects.create(user=self.user, email=self.user.email, verified=True, primary=True)
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="HumanGenerationBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="HumanGenerationAgent",
+            charter="Track interrupting human input",
+            browser_use_agent=self.browser_agent,
+        )
+        self.web_agent_address = build_web_agent_address(self.agent.id)
+        self.web_user_address = build_web_user_address(self.user.id, self.agent.id)
+
+    def _owned_endpoint(self, channel: str, address: str) -> PersistentAgentCommsEndpoint:
+        return PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=channel,
+            address=address,
+            is_primary=True,
+        )
+
+    def _ingest(self, channel: str, sender: str, recipient: str, body: str = "hello") -> None:
+        parsed = ParsedMessage(
+            sender=sender,
+            recipient=recipient,
+            subject=None,
+            body=body,
+            attachments=[],
+            raw_payload={"source": "unit_test"},
+            msg_channel=channel,
+        )
+        ingest_inbound_message(channel, parsed)
+
+    def test_human_web_email_and_sms_bump_generation_and_queue_with_generation(self):
+        cases = [
+            (CommsChannel.WEB, self.web_user_address, self.web_agent_address),
+            (CommsChannel.EMAIL, self.user.email, "human-generation-agent@example.com"),
+            (CommsChannel.SMS, "+15555550100", "+15555550101"),
+        ]
+
+        for channel, sender, recipient in cases:
+            with self.subTest(channel=channel):
+                self._owned_endpoint(channel, recipient)
+                before = get_human_inbound_generation(self.agent.id)
+                expected = before + 1
+
+                with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+                    with self.captureOnCommitCallbacks(execute=True):
+                        self._ingest(channel, sender, recipient)
+
+                self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
+                mock_delay.assert_called_once_with(
+                    str(self.agent.id),
+                    inbound_generation=expected,
+                )
+
+    def test_web_human_input_panel_response_bumps_generation_and_queues_with_generation(self):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=self.web_user_address,
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            question="Which result format should I use?",
+            options_json=[
+                {"key": "summary", "title": "Summary", "description": "Reply in chat."},
+                {"key": "csv", "title": "CSV", "description": "Attach a spreadsheet."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        before = get_human_inbound_generation(self.agent.id)
+        expected = before + 1
+
+        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                submit_human_input_responses_batch(
+                    self.agent,
+                    [{"request_id": str(request_obj.id), "selected_option_key": "summary"}],
+                    actor_user_id=self.user.id,
+                )
+
+        self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=expected,
+        )
+
+    def test_inbound_webhook_does_not_bump_human_generation(self):
+        webhook = PersistentAgentInboundWebhook.objects.create(agent=self.agent, name="Deploy Hook")
+        before = get_human_inbound_generation(self.agent.id)
+
+        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                ingest_inbound_webhook_message(
+                    webhook,
+                    body='{"status":"ok"}',
+                    raw_payload={"source": "inbound_webhook", "source_kind": "webhook"},
+                )
+
+        self.assertEqual(get_human_inbound_generation(self.agent.id), before)
+        mock_delay.assert_called_once_with(str(self.agent.id), inbound_generation=None)
+
+    def test_peer_agent_message_does_not_bump_human_generation(self):
+        peer_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="PeerGenerationBA")
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="PeerGenerationAgent",
+            charter="Receive peer work",
+            browser_use_agent=peer_browser_agent,
+        )
+        AgentPeerLink.objects.create(agent_a=self.agent, agent_b=peer_agent, created_by=self.user)
+
+        with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
+            "api.agent.peer_comm.transaction.on_commit",
+            lambda cb: cb(),
+        ):
+            task_mock.delay = MagicMock()
+            PeerMessagingService(self.agent, peer_agent).send_message("handoff")
+
+        self.assertEqual(get_human_inbound_generation(peer_agent.id), 0)
+        task_mock.delay.assert_called_once_with(str(peer_agent.id))
+
+    def test_redundant_queued_task_skips_after_generation_is_consumed(self):
+        generation = bump_human_inbound_generation(self.agent.id)
+        mark_human_inbound_generation_consumed(self.agent.id, generation)
+
+        with patch("api.agent.tasks.process_events.process_agent_events") as mock_process:
+            process_agent_events_task.push_request(id="generation-skip", delivery_info={})
+            try:
+                process_agent_events_task.run(str(self.agent.id), inbound_generation=generation)
+            finally:
+                process_agent_events_task.pop_request()
+
+        mock_process.assert_not_called()
+
+
+@tag("batch_event_processing")
+class OrchestratorHumanInputInterruptTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="interrupt@example.com",
+            email="interrupt@example.com",
+            password="secret",
+        )
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="InterruptBA")
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="InterruptAgent",
+            charter="Handle prompt interrupts",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def _prompt_context(self):
+        return ([{"role": "system", "content": "sys"}], 1000, None, {})
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_prompt_build_retries_without_llm_when_generation_changes_before_send(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+
+        def _build_prompt_and_interrupt(*_args, **_kwargs):
+            bump_human_inbound_generation(self.agent.id)
+            return self._prompt_context()
+
+        mock_build_prompt.side_effect = _build_prompt_and_interrupt
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        mock_completion.assert_not_called()
+
+    @patch("api.agent.core.event_processing.run_completion")
+    def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):
+        accepted_generation = get_human_inbound_generation(self.agent.id)
+
+        def _chunk(content: str):
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        delta=SimpleNamespace(content=content),
+                        finish_reason=None,
+                    )
+                ],
+            )
+
+        def _stream():
+            yield _chunk("partial")
+            bump_human_inbound_generation(self.agent.id)
+            yield _chunk("stale")
+
+        mock_run_completion.return_value = _stream()
+        broadcaster = MagicMock()
+
+        with self.assertRaises(OrchestratorPromptStale):
+            _completion_with_failover(
+                messages=[{"role": "system", "content": "sys"}],
+                tools=[],
+                failover_configs=[("mock", "mock-model", {})],
+                agent_id=str(self.agent.id),
+                stream_broadcaster=broadcaster,
+                stale_prompt_checker=lambda: get_human_inbound_generation(self.agent.id) > accepted_generation,
+            )
+
+        broadcaster.start.assert_called_once()
+        broadcaster.push_delta.assert_called_once_with(None, "partial")
+        broadcaster.cancel.assert_called()
+        broadcaster.finish.assert_not_called()
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.resolve_web_stream_target", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[{"type": "function", "function": {"name": "enable_tools", "parameters": {"type": "object", "properties": {}}}}])
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    @patch("api.agent.core.event_processing.run_completion")
+    def test_stale_non_streaming_response_is_discarded_before_tool_execution(
+        self,
+        mock_run_completion,
+        mock_execute_tool,
+        mock_build_prompt,
+        _mock_failover,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_stream_target,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.return_value = self._prompt_context()
+
+        def _return_stale_response(*_args, **_kwargs):
+            bump_human_inbound_generation(self.agent.id)
+            return make_completion_response(tool_names=["sqlite_batch"])
+
+        mock_run_completion.side_effect = _return_stale_response
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        mock_execute_tool.assert_not_called()
+        self.assertFalse(PersistentAgentCompletion.objects.filter(agent=self.agent).exists())
 
 
 @tag("batch_event_processing")
@@ -3840,6 +4155,9 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             def get(self, _key):
                 return None
 
+            def exists(self, _key):
+                return 0
+
         mock_get_redis.return_value = _FakeRedis()
         mock_get_pending_settings.return_value = PendingDrainSettings(
             pending_set_ttl_seconds=123,
@@ -3857,6 +4175,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
         response_message.tool_calls = [tool_call]
         response_message.function_call = None
         response_message.content = None
+        response_message.reasoning_content = None
 
         response_choice = MagicMock(message=response_message)
         response = MagicMock()

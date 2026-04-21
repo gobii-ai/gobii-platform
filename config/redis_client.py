@@ -75,6 +75,16 @@ class _FakeRedis:
                 self._ttl[key] = 0
         return True
 
+    def incr(self, key: str, amount: int = 1) -> int:
+        current = self.get(key)
+        try:
+            value = int(current) if current is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        value += int(amount)
+        self._kv[key] = value
+        return value
+
     def delete(self, key: str) -> int:
         existed = 1 if key in self._kv or key in self._hash or key in self._sets else 0
         self._kv.pop(key, None)
