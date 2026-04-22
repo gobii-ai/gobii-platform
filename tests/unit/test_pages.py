@@ -2385,6 +2385,65 @@ class CheckoutRedirectTests(TestCase):
         mock_trial_eligibility.assert_not_called()
 
     @tag("batch_pages")
+    @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
+    @patch("pages.views.user_has_prior_individual_history", return_value=False)
+    def test_individual_trial_eligibility_blocks_no_trial_before_one_per_user(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        user = get_user_model().objects.create_user(
+            email="no_trial_before_one_per_user@test.com",
+            password="pw",
+            username="no_trial_before_one_per_user_user",
+        )
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+        ):
+            eligible = page_views._is_individual_trial_eligible(user)
+
+        self.assertFalse(eligible)
+        mock_trial_eligibility.assert_called_once_with(
+            user,
+            request=None,
+            capture_source=None,
+            assessment_source=None,
+        )
+        mock_prior_history.assert_not_called()
+
+    @tag("batch_pages")
+    @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
+    @patch("pages.views.user_has_prior_individual_history", return_value=False)
+    def test_individual_trial_eligibility_blocks_review_before_one_per_user_when_review_flag_disabled(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        user = get_user_model().objects.create_user(
+            email="review_before_one_per_user@test.com",
+            password="pw",
+            username="review_before_one_per_user_user",
+        )
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+            override_flag("user_trial_review_allows_trial", active=False),
+        ):
+            eligible = page_views._is_individual_trial_eligible(user)
+
+        self.assertFalse(eligible)
+        mock_trial_eligibility.assert_called_once_with(
+            user,
+            request=None,
+            capture_source=None,
+            assessment_source=None,
+        )
+        mock_prior_history.assert_not_called()
+
+    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
     @patch("pages.views.ensure_single_individual_subscription")

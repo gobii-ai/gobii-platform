@@ -34,7 +34,7 @@ from constants.feature_flags import (
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import (
-    is_trial_decision_allowed,
+    is_user_trial_allowed_by_policy,
     is_user_trial_eligibility_enforcement_enabled,
     is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
@@ -68,13 +68,26 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         def _is_trial_eligible() -> bool:
             if not authenticated:
                 return True
-            if is_user_trial_eligibility_enforcement_one_per_user_enabled(self.request):
-                return not user_has_prior_individual_history(self.request.user)
-            if not is_user_trial_eligibility_enforcement_enabled(self.request):
-                return True
+            enforcement_enabled = is_user_trial_eligibility_enforcement_enabled(self.request)
+            one_per_user_enabled = is_user_trial_eligibility_enforcement_one_per_user_enabled(
+                self.request
+            )
             try:
-                result = evaluate_user_trial_eligibility(self.request.user)
-                return is_trial_decision_allowed(result.decision, request=self.request)
+                decision = None
+                if enforcement_enabled:
+                    result = evaluate_user_trial_eligibility(self.request.user)
+                    decision = result.decision
+                return is_user_trial_allowed_by_policy(
+                    enforcement_enabled=enforcement_enabled,
+                    one_per_user_enabled=one_per_user_enabled,
+                    has_prior_individual_history=(
+                        (lambda: user_has_prior_individual_history(self.request.user))
+                        if one_per_user_enabled
+                        else None
+                    ),
+                    request=self.request,
+                    decision=decision,
+                )
             except Exception:
                 logger.warning(
                     "Failed to resolve trial eligibility; defaulting to no trial for user %s",
