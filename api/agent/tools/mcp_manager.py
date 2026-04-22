@@ -6,7 +6,7 @@ for MCP servers, allowing agents to intelligently select tools from a large ecos
 
 Pipedream (remote MCP) integration goals:
 - Centralize headers + token handling
-- Discover action tools (sub-agent mode) so the full catalog is searchable
+- Discover action tools with direct schemas so the full catalog is searchable
  - Enable only tools needed (40-cap enforced separately)
 - Route execution automatically and surface Connect Links via action_required
 """
@@ -113,7 +113,6 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
 BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
 BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 3
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
-
 
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(parameters, dict):
@@ -1419,13 +1418,12 @@ class MCPToolManager:
                 prefetch_apps = self._effective_prefetch_apps(server, pipedream_context)
                 prefetch_csv = ",".join(prefetch_apps)
                 headers = self._pd_build_headers(
-                    mode="sub-agent",
                     app_slug=prefetch_csv,
                     external_user_id="gobii-discovery",
                     conversation_id="discovery",
                 )
                 logger.info(
-                    "Pipedream discovery initializing with app slug '%s' and sub-agent mode",
+                    "Pipedream discovery initializing with app slug '%s'",
                     prefetch_csv,
                 )
 
@@ -1919,7 +1917,7 @@ class MCPToolManager:
             last_failure or "unknown",
         )
         return run_once(fallback_params)
-    
+
     def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a platform-scoped MCP tool without an agent context."""
         normalized_server = (server_name or "").strip().lower()
@@ -2160,9 +2158,9 @@ class MCPToolManager:
                 return {"status": "error", "message": proxy_error}
 
         if server_name == self.PIPEDREAM_RUNTIME_NAME:
-            app_slug, mode = self._pd_parse_tool(info.tool_name)
+            app_slug = self._pd_parse_tool(info.tool_name)
             try:
-                client = self._get_pipedream_agent_client(agent, app_slug=app_slug, mode=mode)
+                client = self._get_pipedream_agent_client(agent, app_slug=app_slug)
             except RuntimeError as exc:
                 return {"status": "error", "message": str(exc)}
         else:
@@ -2241,7 +2239,7 @@ class MCPToolManager:
                         except Exception:
                             app_slug = None
                         if not app_slug:
-                            app_slug, _mode = self._pd_parse_tool(actual_tool_name)
+                            app_slug = self._pd_parse_tool(actual_tool_name)
                             logger.info(
                                 "PD Connect: derived app from tool name tool=%s app=%s",
                                 actual_tool_name, app_slug or ""
@@ -2581,7 +2579,7 @@ class MCPToolManager:
             logger.error(f"Failed to obtain Pipedream access token: {e}")
             return None
 
-    def _pd_build_headers(self, mode: str, app_slug: Optional[str], external_user_id: str, conversation_id: str) -> Dict[str, str]:
+    def _pd_build_headers(self, app_slug: Optional[str], external_user_id: str, conversation_id: str) -> Dict[str, str]:
         token = self._get_pipedream_access_token()
         if not token:
             raise RuntimeError(
@@ -2594,24 +2592,24 @@ class MCPToolManager:
             "x-pd-external-user-id": external_user_id,
             "x-pd-conversation-id": conversation_id,
             "x-pd-app-discovery": "true",
-            "x-pd-tool-mode": mode,
+            "x-pd-tool-mode": "tools-only",
         }
         if app_slug:
             headers["x-pd-app-slug"] = app_slug
         return headers
 
-    def _pd_parse_tool(self, tool_name: str) -> Tuple[Optional[str], str]:
-        """Infer app slug for a Pipedream action tool and return sub-agent mode.
+    def _pd_parse_tool(self, tool_name: str) -> Optional[str]:
+        """Infer app slug for a Pipedream action tool.
 
         Expected names look like '<app>-<action>', e.g., 'google_sheets-add-single-row'.
         """
         app = tool_name.split("-", 1)[0] if "-" in tool_name else None
-        return (app or None, "sub-agent")
+        return app or None
 
-    def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str], mode: str) -> Client:
-        """Get or create a Pipedream client for (agent, app_slug, mode)."""
+    def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str]) -> Client:
+        """Get or create a Pipedream client for an agent/app pair."""
         agent_key = str(agent.id)
-        cache_key = f"{agent_key}:{app_slug or ''}:{mode}"
+        cache_key = f"{agent_key}:{app_slug or ''}"
         if cache_key in self._pd_agent_clients:
             client = self._pd_agent_clients[cache_key]
             # Ensure Authorization header is current
@@ -2647,7 +2645,6 @@ class MCPToolManager:
 
         from fastmcp.client.transports import StreamableHttpTransport
         headers = self._pd_build_headers(
-            mode=mode,
             app_slug=app_slug,
             external_user_id=agent_key,
             conversation_id=agent_key,

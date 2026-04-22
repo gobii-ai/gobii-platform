@@ -53,7 +53,7 @@ def seed_platform_servers(apps, schema_editor):
             'command_args': [],
             'url': 'https://remote.mcp.pipedream.net',
             'prefetch_apps': ['google_sheets', 'greenhouse'],
-            'metadata': {'mode': 'sub-agent'},
+            'metadata': {},
             'env_json_encrypted': _encrypt_dict({}),
             'headers_json_encrypted': _encrypt_dict({}),
             'is_active': True,

@@ -157,7 +157,7 @@ class PipedreamTrelloManagerTests(TestCase):
         mock_create.return_value = (MagicMock(), "https://example.com/connect?token=abc&app=trello")
 
         with patch.object(mgr, "_select_agent_proxy_url", return_value=(None, None)):
-            res = mgr.execute_mcp_tool(agent, "trello-create-card", {"instruction": "x"})
+            res = mgr.execute_mcp_tool(agent, "trello-create-card", {"name": "x"})
 
         self.assertEqual(res.get("status"), "action_required")
         self.assertIn("example.com/connect", res.get("connect_url"))
@@ -187,7 +187,7 @@ class PipedreamTrelloDiscoveryTests(TestCase):
 
         seen_app = {}
 
-        def fake_headers(mode, app_slug, external_user_id, conversation_id):
+        def fake_headers(app_slug, external_user_id, conversation_id):
             seen_app["app"] = app_slug
             return {"Authorization": "Bearer x", "x-pd-app-slug": app_slug or ""}
 
