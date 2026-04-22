@@ -75,7 +75,7 @@ class PipedreamConnectHelperTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
-    def test_pipedream_headers_do_not_request_sub_agent_mode(self):
+    def test_pipedream_headers_request_tools_only_mode(self):
         mgr = MCPToolManager()
         mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
 
@@ -86,7 +86,7 @@ class PipedreamConnectHelperTests(TestCase):
         )
 
         self.assertEqual(headers["x-pd-app-slug"], "google_sheets")
-        self.assertNotIn("x-pd-tool-mode", headers)
+        self.assertEqual(headers["x-pd-tool-mode"], "tools-only")
 
     @patch("api.integrations.pipedream_connect.requests.post")
     @patch("api.integrations.pipedream_connect.get_mcp_manager")

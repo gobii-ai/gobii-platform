@@ -2592,6 +2592,7 @@ class MCPToolManager:
             "x-pd-external-user-id": external_user_id,
             "x-pd-conversation-id": conversation_id,
             "x-pd-app-discovery": "true",
+            "x-pd-tool-mode": "tools-only",
         }
         if app_slug:
             headers["x-pd-app-slug"] = app_slug
