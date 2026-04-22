@@ -2739,13 +2739,14 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
             "email_verification_required",
             (
                 "IMPORTANT: External communication is currently unavailable because your owner "
-                "has not verified their email address.\n"
+                "has not verified their email address. \n"
                 "- You cannot send emails or SMS\n"
                 "- You cannot add or contact external people\n"
                 "- Web chat remains available\n\n"
                 "If the user asks you to email, SMS, or loop in someone external, explain that "
                 "external communication requires email verification and ask them to verify their "
-                "email in account settings."
+                "email in account settings. You also cannot receive emails from the user until their email address "
+                "is verified. DO NOT expect an email reply."
             ),
             weight=10,  # High weight to ensure it's prominent
             non_shrinkable=True,
@@ -3990,9 +3991,10 @@ def _get_planning_mode_prompt_block() -> str:
         "the user skips planning.\n"
         "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
-        "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 1-3 planning questions "
+        "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 0-3 planning questions "
         "and never ask more than 3 in a planning round. More than 3 causes decision fatigue; make reasonable "
-        "assumptions instead and record them in the final plan.\n"
+        "assumptions instead and record them in the final plan. The fewer questions the better. If you can perform"
+        "your task without clarifying questions, call end_planning so you can start working.\n"
         "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
         "the active user is in web chat, because planning answers should be tracked in the composer.\n"
         "- Once request_human_input succeeds, treat those questions as already visible in web chat. "

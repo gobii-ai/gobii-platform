@@ -415,6 +415,46 @@ class HumanInputRequestTests(TestCase):
             ).exists()
         )
 
+    def test_execute_request_human_input_decodes_escaped_unicode_text(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "question": "Which delivery format should I use? \\ud83d\\udce6",
+                        "options": [
+                            {
+                                "title": "Weekly Email Digest \\ud83d\\udce7",
+                                "description": "Send one weekly summary \\u2014 not daily alerts.",
+                            },
+                        ],
+                    },
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            result["requests"][0]["question"],
+            "Which delivery format should I use? 📦",
+        )
+        self.assertEqual(
+            result["requests"][0]["options"][0]["title"],
+            "Weekly Email Digest 📧",
+        )
+        self.assertEqual(
+            result["requests"][0]["options"][0]["description"],
+            "Send one weekly summary — not daily alerts.",
+        )
+        self.assertEqual(result["requests"][0]["options"][0]["key"], "weekly_email_digest")
+        self.assertNotIn("\\ud83d", json.dumps(result, ensure_ascii=False))
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        self.assertEqual(request_obj.question, "Which delivery format should I use? 📦")
+        self.assertEqual(request_obj.options_json[0]["title"], "Weekly Email Digest 📧")
+        self.assertEqual(request_obj.options_json[0]["description"], "Send one weekly summary — not daily alerts.")
+        self.assertEqual(request_obj.options_json[0]["key"], "weekly_email_digest")
+
     def test_execute_request_human_input_uses_current_tool_step_for_batch(self):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,

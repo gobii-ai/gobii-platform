@@ -29,6 +29,7 @@ from api.models import (
     build_web_user_address,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.text_sanitizer import normalize_llm_output
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
@@ -88,6 +89,10 @@ class LLMHumanInputMatch:
 
 def _coerce_string(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _normalize_human_input_text(value: Any) -> str:
+    return normalize_llm_output(str(value or "")).strip()
 
 
 def _get_or_create_endpoint(
@@ -154,8 +159,8 @@ def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict
     options: list[dict[str, str]] = []
     used_keys: set[str] = set()
     for index, raw_option in enumerate(raw_options[:MAX_OPTION_COUNT], start=1):
-        title = _coerce_string(raw_option.get("title"))
-        description = _coerce_string(raw_option.get("description"))
+        title = _normalize_human_input_text(raw_option.get("title"))
+        description = _normalize_human_input_text(raw_option.get("description"))
         base_key = slugify(title).replace("-", "_") if title else ""
         candidate = base_key or f"option_{index}"
         suffix = 2
@@ -498,6 +503,7 @@ def _create_human_input_request_for_target(
     recipient: HumanInputRecipient | None = None,
     originating_step_id: str | None = None,
 ) -> tuple[PersistentAgentHumanInputRequest | None, dict[str, Any] | None]:
+    normalized_question = _normalize_human_input_text(question)
     options = build_option_payloads(raw_options)
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
@@ -509,7 +515,7 @@ def _create_human_input_request_for_target(
             agent=agent,
             conversation=target.conversation,
             originating_step_id=originating_step_id,
-            question=question,
+            question=normalized_question,
             options_json=options,
             input_mode=input_mode,
             recipient_channel=recipient.channel if recipient else "",

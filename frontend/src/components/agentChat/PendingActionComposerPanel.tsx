@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
-import type { PendingActionRequest } from '../../types/agentChat'
+import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import { PendingContactRequestsPanel, type PendingContactDraft } from './PendingContactRequestsPanel'
 import { PendingRequestedSecretsPanel } from './PendingRequestedSecretsPanel'
@@ -106,14 +106,22 @@ function actionIcon(action: PendingActionRequest) {
   }
 }
 
-function getActiveHumanInputRequest(
-  action: PendingActionRequest | null,
-  activeHumanInputRequestId: string | null,
-) {
-  if (!action || action.kind !== 'human_input') {
-    return null
-  }
-  return action.requests.find((request) => request.id === activeHumanInputRequestId) ?? action.requests[0] ?? null
+function orderHumanInputRequests(requests: PendingHumanInputRequest[]) {
+  const batchOrder = new Map<string, number>()
+  requests.forEach((request, index) => {
+    if (!batchOrder.has(request.batchId)) {
+      batchOrder.set(request.batchId, index)
+    }
+  })
+
+  return [...requests].sort((left, right) => {
+    const leftBatchOrder = batchOrder.get(left.batchId) ?? 0
+    const rightBatchOrder = batchOrder.get(right.batchId) ?? 0
+    if (leftBatchOrder !== rightBatchOrder) {
+      return leftBatchOrder - rightBatchOrder
+    }
+    return left.batchPosition - right.batchPosition
+  })
 }
 
 export function PendingActionComposerPanel({
@@ -142,8 +150,16 @@ export function PendingActionComposerPanel({
   const [contactError, setContactError] = useState<string | null>(null)
 
   const activeAction = actions.find((action) => action.id === activeActionId) ?? actions[0] ?? null
-  const activeHumanInputRequest = getActiveHumanInputRequest(activeAction, activeHumanInputRequestId)
+  const orderedHumanInputRequests = activeAction?.kind === 'human_input'
+    ? orderHumanInputRequests(activeAction.requests)
+    : []
+  const activeHumanInputRequest = activeAction?.kind === 'human_input'
+    ? (orderedHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? orderedHumanInputRequests[0] ?? null)
+    : null
   const activeIndex = Math.max(0, actions.findIndex((action) => action.id === activeAction?.id))
+  const activeHumanInputIndex = activeHumanInputRequest
+    ? Math.max(0, orderedHumanInputRequests.findIndex((request) => request.id === activeHumanInputRequest.id))
+    : 0
   const ActiveIcon = activeAction ? actionIcon(activeAction) : MessageSquareQuote
   const activeActionHeading = activeAction?.kind === 'human_input'
     ? (activeHumanInputRequest?.question ?? 'Needs your reply')
@@ -296,7 +312,31 @@ export function PendingActionComposerPanel({
             ) : null}
           </div>
         </div>
-        {actions.length > 1 ? (
+        {activeAction.kind === 'human_input' && orderedHumanInputRequests.length > 1 ? (
+          <div className="flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={() => onActiveHumanInputRequestChange(orderedHumanInputRequests[Math.max(0, activeHumanInputIndex - 1)].id)}
+              disabled={disabled || activeHumanInputIndex === 0}
+              aria-label="Previous question"
+            >
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+            </button>
+            <span className="min-w-[3.25rem] text-center text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
+              {activeHumanInputIndex + 1} of {orderedHumanInputRequests.length}
+            </span>
+            <button
+              type="button"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
+              onClick={() => onActiveHumanInputRequestChange(orderedHumanInputRequests[Math.min(orderedHumanInputRequests.length - 1, activeHumanInputIndex + 1)].id)}
+              disabled={disabled || activeHumanInputIndex >= orderedHumanInputRequests.length - 1}
+              aria-label="Next question"
+            >
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
+            </button>
+          </div>
+        ) : actions.length > 1 ? (
           <div className="flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
             <button
               type="button"
@@ -331,8 +371,6 @@ export function PendingActionComposerPanel({
             draftResponses={draftHumanInputResponses}
             disabled={disabled}
             busyRequestId={busyHumanInputRequestId}
-            showQuestion={false}
-            onActiveRequestChange={onActiveHumanInputRequestChange}
             onSelectOption={onSelectHumanInputOption}
           />
         ) : null}
