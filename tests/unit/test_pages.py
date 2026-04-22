@@ -2444,6 +2444,34 @@ class CheckoutRedirectTests(TestCase):
         mock_prior_history.assert_not_called()
 
     @tag("batch_pages")
+    @patch("pages.views.logger.warning")
+    @patch("pages.views.evaluate_user_trial_eligibility", side_effect=TypeError("boom"))
+    def test_individual_trial_eligibility_defaults_to_ineligible_when_evaluation_fails(
+        self,
+        mock_trial_eligibility,
+        mock_warning,
+    ):
+        user = get_user_model().objects.create_user(
+            email="trial_eligibility_failure@test.com",
+            password="pw",
+            username="trial_eligibility_failure_user",
+        )
+
+        eligible = page_views._is_individual_trial_eligible(
+            user,
+            capture_source="checkout",
+        )
+
+        self.assertFalse(eligible)
+        mock_trial_eligibility.assert_called_once_with(
+            user,
+            request=None,
+            capture_source="checkout",
+            assessment_source="checkout",
+        )
+        mock_warning.assert_called_once()
+
+    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
     @patch("pages.views.ensure_single_individual_subscription")
