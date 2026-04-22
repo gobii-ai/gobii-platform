@@ -108,10 +108,8 @@ from api.services.tool_settings import (
     invalidate_tool_settings_cache,
 )
 from api.services.web_sessions import start_web_session
-from util.personal_signup_preview import (
-    GENERIC_STARTER_CHARTER,
-    SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK,
-)
+from api.services.signup_preview import is_signup_preview_processing_paused
+from util.personal_signup_preview import GENERIC_STARTER_CHARTER
 from tests.utils.token_usage import make_completion_response
 
 User = get_user_model()
@@ -511,12 +509,19 @@ class PromptContextBuilderTests(TestCase):
             system_content,
         )
 
-    def test_first_run_prompt_includes_signup_preview_override_without_changing_charter(self):
+    def test_planning_preview_prompt_excludes_signup_preview_handoff(self):
         self.agent.charter = GENERIC_STARTER_CHARTER
         self.agent.preferred_contact_endpoint = self.external_endpoint
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(
-            update_fields=["charter", "preferred_contact_endpoint", "signup_preview_state", "updated_at"]
+            update_fields=[
+                "charter",
+                "preferred_contact_endpoint",
+                "signup_preview_state",
+                "planning_state",
+                "updated_at",
+            ]
         )
 
         with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
@@ -526,11 +531,63 @@ class PromptContextBuilderTests(TestCase):
         system_message = next((m for m in context if m["role"] == "system"), None)
 
         self.assertIsNotNone(system_message)
-        self.assertIn(SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK, system_message["content"])
-        self.assertIn("Contact channel: email", system_message["content"])
+        self.assertIn("## Planning Mode", system_message["content"])
+        self.assertIn("## REQUIRED: First-Run Welcome", system_message["content"])
+        self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
+        self.assertNotIn("## Signup Preview Handoff", system_message["content"])
+        self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
+        self.assertNotIn("limited preview", system_message["content"])
         self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
             m for m in context if m["role"] == "user"
         )["content"])
+
+    def test_signup_preview_handoff_prompt_runs_after_planning_without_first_run(self):
+        self.agent.charter = GENERIC_STARTER_CHARTER
+        self.agent.preferred_contact_endpoint = self.external_endpoint
+        for planning_state in (
+            PersistentAgent.PlanningState.COMPLETED,
+            PersistentAgent.PlanningState.SKIPPED,
+        ):
+            with self.subTest(planning_state=planning_state):
+                self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+                self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+                self.agent.save(
+                    update_fields=[
+                        "charter",
+                        "preferred_contact_endpoint",
+                        "signup_preview_state",
+                        "planning_state",
+                        "updated_at",
+                    ]
+                )
+                PersistentAgentMessage.objects.create(
+                    owner_agent=self.agent,
+                    from_endpoint=self.endpoint,
+                    to_endpoint=self.external_endpoint,
+                    is_outbound=True,
+                    body=f"Planning welcome before {planning_state}",
+                )
+                self.agent.planning_state = planning_state
+                self.agent.save(update_fields=["planning_state", "updated_at"])
+
+                with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+                     patch('api.agent.core.prompt_context.ensure_comms_compacted'):
+                    context, _, _ = build_prompt_context(self.agent, is_first_run=False)
+
+                system_message = next((m for m in context if m["role"] == "system"), None)
+
+                self.assertIsNotNone(system_message)
+                system_content = system_message["content"]
+                self.assertIn("## Signup Preview Handoff", system_content)
+                self.assertIn("Contact channel: email", system_content)
+                self.assertIn("the plan is ready", system_content)
+                self.assertIn("after they finish signup", system_content)
+                self.assertNotIn("## Planning Mode", system_content)
+                self.assertNotIn("## REQUIRED: First-Run Welcome", system_content)
+                self.assertNotIn("## Then sqlite_batch: charter + kanban cards + everything else", system_content)
+                self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
+                    m for m in context if m["role"] == "user"
+                )["content"])
 
     def test_unified_history_uses_collaborator_name_for_web_sender(self):
         self.user.first_name = "Will"
@@ -3546,6 +3603,18 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(executed_batch.abort_after_execution)
         self.assertEqual(mock_execute_prepared_tool_call.call_count, 1)
+
+    def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["signup_preview_state", "planning_state", "updated_at"])
+
+        self.assertFalse(is_signup_preview_processing_paused(self.agent))
+
+        self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        self.assertTrue(is_signup_preview_processing_paused(self.agent))
 
 
 @tag("batch_event_processing")

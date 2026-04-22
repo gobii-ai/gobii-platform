@@ -20,28 +20,6 @@ SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE = (
 )
 
 
-SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK = """
-## Signup Preview First-Run Override
-
-This user has not completed signup yet and this run is a limited preview.
-Users can complete signup by starting a free trial.
-
-- Keep your first message lightweight, useful, and easy to reply to.
-- Introduce yourself briefly and confidently.
-- Help the user get oriented quickly.
-- Ask 2 or 3 concise clarifying questions about the kind of work they want help with.
-- Offer a few concrete examples of useful things you can do next.
-- Encourage the user to complete signup so you can continue.
-- Do not overwhelm the user with a long onboarding speech.
-
-## Override For This First Run
-
-- Your first action must still be sending the welcome message.
-- For this preview first run, do not call sqlite_batch or any other tool in the same response.
-- After sending that first helpful message, stop. Processing will pause until signup is completed.
-""".strip()
-
-
 @dataclass(frozen=True)
 class PersonalSignupPreviewConfig:
     current_context_is_personal: bool

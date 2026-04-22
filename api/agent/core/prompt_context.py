@@ -120,7 +120,6 @@ from api.services.email_verification import has_verified_email
 from api.services.signup_preview import (
     can_bypass_email_verification_for_signup_preview_first_email,
 )
-from util.personal_signup_preview import SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -4022,6 +4021,21 @@ def _get_planning_mode_prompt_block() -> str:
     )
 
 
+def _get_signup_preview_handoff_prompt_block(welcome_target: _FirstRunWelcomeTarget) -> str:
+    return (
+        "## Signup Preview Handoff\n\n"
+        "This user has not completed signup yet and this agent is still in a limited preview. "
+        "Planning Mode is no longer active, so do not ask more planning questions and do not start deliverable work.\n\n"
+        "Your next action must be sending one concise message to the user.\n\n"
+        f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
+        f"Call {welcome_target.send_tool_name} and tell the user that the plan is ready, "
+        "you are ready to start work from that plan, and you can begin after they finish signup. "
+        "Mention that they can complete signup by starting a free trial.\n\n"
+        "After sending that message, stop. Do not call sqlite_batch, create kanban cards, execute research, "
+        "or produce deliverables in this run; processing will pause until signup is completed.\n"
+    )
+
+
 def _get_system_instruction(
     agent: PersistentAgent,
     *,
@@ -4841,6 +4855,16 @@ def _get_system_instruction(
     if planning_mode_active:
         base_prompt += "\n\n" + _get_planning_mode_prompt_block()
 
+    signup_preview_handoff_active = (
+        not planning_mode_active
+        and getattr(agent, "signup_preview_state", None)
+        == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+    )
+    if signup_preview_handoff_active:
+        welcome_target = _get_first_run_welcome_target(agent)
+        if welcome_target is not None:
+            return base_prompt + "\n\n" + _get_signup_preview_handoff_prompt_block(welcome_target)
+
     if is_first_run and not _has_first_run_welcome_contact(agent):
         if planning_mode_active and implied_send_active:
             display_name = implied_send_context.get("display_name") if implied_send_context else "the user"
@@ -4861,15 +4885,6 @@ def _get_system_instruction(
         if welcome_target is not None:
             channel = welcome_target.channel
             address = welcome_target.address
-            signup_preview_first_run = (
-                getattr(agent, "signup_preview_state", None)
-                == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
-            )
-            signup_preview_instruction = (
-                f"\n{SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK}\n\n"
-                if signup_preview_first_run
-                else ""
-            )
             if planning_mode_active:
                 welcome_instruction = (
                     "## REQUIRED: First-Run Welcome\n\n"
@@ -4878,7 +4893,6 @@ def _get_system_instruction(
                     f"Before request_human_input, sqlite_batch, or any other planning tool, call {welcome_target.send_tool_name} "
                     "with a brief welcome message. Introduce yourself by first name, acknowledge what they asked for, "
                     "and explain that you will first clarify the plan.\n\n"
-                    f"{signup_preview_instruction}"
                     "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
                     "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
                     "until planning is completed or skipped.\n"
@@ -4892,7 +4906,6 @@ def _get_system_instruction(
                 "## REQUIRED: Your very first action must be sending a welcome message\n\n"
                 f"Before ANY tool calls, you MUST call {welcome_target.send_tool_name} to introduce yourself to the user.\n"
                 "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
-                f"{signup_preview_instruction}"
 
                 "## Then sqlite_batch: charter + kanban cards + everything else\n\n"
 

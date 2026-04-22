@@ -839,6 +839,7 @@ export function AgentChatLayout({
   const previewActionsDisabledReason = previewActionsDisabled
     ? 'Finish signup to manage settings and collaborate.'
     : null
+  const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
 
@@ -1107,7 +1108,7 @@ export function AgentChatLayout({
           </button>
 
           {/* Composer at bottom of flex layout */}
-          {planningState === 'planning' && (spawnIntentLoading || showSignupPreviewPanel) ? (
+          {planningState === 'planning' && (spawnIntentLoading || effectiveShowSignupPreviewPanel) ? (
             <PlanningModeStrip
               canManageAgent={canManageAgent}
               onSkipPlanning={onSkipPlanning}
@@ -1124,7 +1125,7 @@ export function AgentChatLayout({
                 </div>
               </div>
             </div>
-          ) : showSignupPreviewPanel ? (
+          ) : effectiveShowSignupPreviewPanel ? (
             <AgentSignupPreviewPanel
               status={signupPreviewState}
               agentId={agentId}
