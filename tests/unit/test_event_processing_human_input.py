@@ -89,8 +89,8 @@ class EventProcessingHumanInputTests(TestCase):
             "requests_count": 1,
             "target_channel": "web",
             "target_address": "web://user/1/agent/1",
-            "relay_mode": "panel_only",
-            "relay_payload": {"kind": "panel"},
+            "web_chat_visible": True,
+            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
             "auto_sleep_ok": True,
         }
         mock_completion.return_value = (
@@ -109,11 +109,65 @@ class EventProcessingHumanInputTests(TestCase):
         )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_request_human_input")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_request_human_input_will_continue_true_keeps_processing(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_request_human_input,
+        mock_send_chat_message,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+            1000,
+            None,
+        )
+        request_id = str(uuid.uuid4())
+        mock_request_human_input.return_value = {
+            "status": "ok",
+            "request_id": request_id,
+            "request_ids": [request_id],
+            "requests_count": 1,
+            "target_channel": "web",
+            "target_address": "web://user/1/agent/1",
+            "web_chat_visible": True,
+            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "auto_sleep_ok": True,
+        }
+        first_response = self._tool_completion(
+            "request_human_input",
+            '{"question": "What should I do next?", "will_continue_work": true}',
+        )
+        second_response = self._tool_completion(
+            "send_chat_message",
+            '{"body": "I will keep planning.", "will_continue_work": false}',
+        )
+        mock_completion.side_effect = [
+            (first_response, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
+            (second_response, {"prompt_tokens": 8, "completion_tokens": 4, "total_tokens": 12, "model": "m", "provider": "p"}),
+        ]
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        mock_request_human_input.assert_called_once()
+        mock_send_chat_message.assert_called_once()
+        self.assertEqual(
+            list(PersistentAgentToolCall.objects.order_by("step__created_at").values_list("tool_name", flat=True)),
+            ["request_human_input", "send_chat_message"],
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_request_human_input")
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_request_human_input_external_request_requires_followup_send(
+    def test_request_human_input_external_request_can_stop_without_followup_send(
         self,
         mock_completion,
         mock_build_prompt,
@@ -134,21 +188,85 @@ class EventProcessingHumanInputTests(TestCase):
             "requests_count": 1,
             "target_channel": "email",
             "target_address": "person@example.com",
-            "relay_mode": "explicit_send_required",
-            "relay_payload": {
-                "kind": "send_email",
-                "tool_name": "send_email",
-                "to_address": "person@example.com",
-                "subject": "Quick question: What should I do next?",
-                "mobile_first_html": "<p>What should I do next?</p>",
-                "body_text": "What should I do next?",
+            "web_chat_visible": True,
+            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "next_message_suggestion": {
+                "channel": "email",
+                "address": "person@example.com",
+                "send_tool": "send_email",
+                "instruction": "Include the question in your next email.",
+                "questions": [{"number": 1, "question": "What should I do next?"}],
             },
+            "auto_sleep_ok": True,
         }
 
-        first_response = self._tool_completion("request_human_input", '{"question": "What should I do next?"}')
+        first_response = self._tool_completion(
+            "request_human_input",
+            '{"question": "What should I do next?", "will_continue_work": false}',
+        )
+        mock_completion.return_value = (
+            first_response,
+            {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"},
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 1)
+        mock_request_human_input.assert_called_once_with(
+            self.agent,
+            {"question": "What should I do next?", "will_continue_work": False},
+        )
+        mock_send_email.assert_not_called()
+        self.assertEqual(
+            list(PersistentAgentToolCall.objects.order_by("step__created_at").values_list("tool_name", flat=True)),
+            ["request_human_input"],
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_request_human_input")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_request_human_input_external_will_continue_true_allows_normal_send(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_request_human_input,
+        mock_send_email,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+            1000,
+            None,
+        )
+        request_id = str(uuid.uuid4())
+        mock_request_human_input.return_value = {
+            "status": "ok",
+            "request_id": request_id,
+            "request_ids": [request_id],
+            "requests_count": 1,
+            "target_channel": "email",
+            "target_address": "person@example.com",
+            "web_chat_visible": True,
+            "requests": [{"request_id": request_id, "question": "What should I do next?", "options": []}],
+            "next_message_suggestion": {
+                "channel": "email",
+                "address": "person@example.com",
+                "send_tool": "send_email",
+                "instruction": "Include the question in your next email.",
+                "questions": [{"number": 1, "question": "What should I do next?"}],
+            },
+            "auto_sleep_ok": True,
+        }
+        first_response = self._tool_completion(
+            "request_human_input",
+            '{"question": "What should I do next?", "will_continue_work": true}',
+        )
         second_response = self._tool_completion(
             "send_email",
-            '{"to_address": "person@example.com", "subject": "Quick question: What should I do next?", "mobile_first_html": "<p>What should I do next?</p>", "will_continue_work": false}',
+            '{"to_address": "person@example.com", "subject": "Quick question", "mobile_first_html": "<p>What should I do next?</p>", "will_continue_work": false}',
         )
         mock_completion.side_effect = [
             (first_response, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
@@ -159,7 +277,10 @@ class EventProcessingHumanInputTests(TestCase):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertEqual(mock_completion.call_count, 2)
-        mock_request_human_input.assert_called_once()
+        mock_request_human_input.assert_called_once_with(
+            self.agent,
+            {"question": "What should I do next?", "will_continue_work": True},
+        )
         mock_send_email.assert_called_once()
         self.assertEqual(
             list(PersistentAgentToolCall.objects.order_by("step__created_at").values_list("tool_name", flat=True)),

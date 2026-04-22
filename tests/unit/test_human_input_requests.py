@@ -7,16 +7,19 @@ from django.test import Client, TestCase, override_settings, tag
 import litellm
 
 from api.agent.comms.human_input_requests import (
+    attach_originating_step_from_result,
     create_human_input_request,
     list_pending_human_input_requests,
     resolve_human_input_request_for_message,
 )
 from api.agent.core.prompt_context import _get_recent_human_input_responses_block
 from console.agent_chat.timeline import serialize_step_entry
+from console.agent_chat.pending_actions import list_pending_action_requests
 from api.agent.tools.request_human_input import (
     execute_request_human_input,
     get_request_human_input_tool,
 )
+from api.agent.tools.runtime_execution_context import tool_execution_context
 from api.models import (
     AgentCollaborator,
     BrowserUseAgent,
@@ -29,6 +32,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentStep,
     UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
@@ -287,11 +291,23 @@ class HumanInputRequestTests(TestCase):
     def test_tool_definition_allows_optional_options(self):
         tool = get_request_human_input_tool()
         function = tool["function"]
+        description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
+        self.assertIn("always appears in the web chat composer panel", description)
+        self.assertIn("does not send email or SMS by itself", description)
+        self.assertIn("same tool-call batch as request_human_input", description)
+        self.assertIn("already include the questions", description)
+        self.assertIn("Do not send a bare notification", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertIn("recipient", function["parameters"]["properties"])
+        self.assertIn("will_continue_work", function["parameters"]["properties"])
+        self.assertIn(
+            "use true when you will send an email/SMS containing these questions",
+            function["parameters"]["properties"]["will_continue_work"]["description"],
+        )
+        self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
             ["question"],
@@ -312,9 +328,12 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["requests_count"], 1)
         self.assertEqual(result["target_channel"], CommsChannel.WEB)
         self.assertEqual(result["target_address"], self.user_address)
-        self.assertEqual(result["relay_mode"], "panel_only")
+        self.assertTrue(result["web_chat_visible"])
         self.assertTrue(result["auto_sleep_ok"])
-        self.assertEqual(result["relay_payload"]["kind"], "panel")
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        self.assertNotIn("next_message_suggestion", result)
+        self.assertEqual(result["requests"][0]["question"], "What should I tell the team?")
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(
             request_obj.input_mode,
@@ -324,6 +343,22 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(request_obj.recipient_channel, "")
         self.assertEqual(request_obj.recipient_address, "")
         self.assertIsNone(request_obj.requested_message_id)
+
+    def test_execute_request_human_input_will_continue_true_keeps_panel_request_active(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "What should I tell the team?",
+                "options": [],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        self.assertNotIn("auto_sleep_ok", result)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(
@@ -361,8 +396,14 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["request_id"], result["request_ids"][0])
         self.assertEqual(len(result["request_ids"]), 2)
         self.assertEqual(result["requests_count"], 2)
-        self.assertEqual(result["relay_mode"], "panel_only")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
         self.assertTrue(result["auto_sleep_ok"])
+        self.assertEqual(
+            [request["question"] for request in result["requests"]],
+            ["What should happen first?", "What should happen second?"],
+        )
         self.assertEqual(
             PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(),
             2,
@@ -372,6 +413,81 @@ class HumanInputRequestTests(TestCase):
                 agent=self.agent,
                 requested_message__isnull=False,
             ).exists()
+        )
+
+    def test_execute_request_human_input_decodes_escaped_unicode_text(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "question": "Which delivery format should I use? \\ud83d\\udce6",
+                        "options": [
+                            {
+                                "title": "Weekly Email Digest \\ud83d\\udce7",
+                                "description": "Send one weekly summary \\u2014 not daily alerts.",
+                            },
+                        ],
+                    },
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(
+            result["requests"][0]["question"],
+            "Which delivery format should I use? 📦",
+        )
+        self.assertEqual(
+            result["requests"][0]["options"][0]["title"],
+            "Weekly Email Digest 📧",
+        )
+        self.assertEqual(
+            result["requests"][0]["options"][0]["description"],
+            "Send one weekly summary — not daily alerts.",
+        )
+        self.assertEqual(result["requests"][0]["options"][0]["key"], "weekly_email_digest")
+        self.assertNotIn("\\ud83d", json.dumps(result, ensure_ascii=False))
+        request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
+        self.assertEqual(request_obj.question, "Which delivery format should I use? 📦")
+        self.assertEqual(request_obj.options_json[0]["title"], "Weekly Email Digest 📧")
+        self.assertEqual(request_obj.options_json[0]["description"], "Send one weekly summary — not daily alerts.")
+        self.assertEqual(request_obj.options_json[0]["key"], "weekly_email_digest")
+
+    def test_execute_request_human_input_uses_current_tool_step_for_batch(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Pending request_human_input",
+            credits_cost=0,
+        )
+
+        with tool_execution_context(step_id=str(step.id)):
+            result = execute_request_human_input(
+                self.agent,
+                {
+                    "requests": [
+                        {"question": "What should happen first?"},
+                        {"question": "What should happen second?"},
+                    ],
+                },
+            )
+
+        self.assertEqual(result["status"], "ok")
+        request_objects = list(
+            PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
+        )
+        self.assertEqual(len(request_objects), 2)
+        self.assertTrue(all(request_obj.originating_step_id == step.id for request_obj in request_objects))
+        pending_requests = list_pending_human_input_requests(self.agent)
+        self.assertEqual({request["batchId"] for request in pending_requests}, {str(step.id)})
+        self.assertEqual(
+            sorted(request["batchPosition"] for request in pending_requests),
+            [1, 2],
+        )
+        self.assertEqual(
+            sorted(request["batchSize"] for request in pending_requests),
+            [2, 2],
         )
 
     def test_execute_request_human_input_targets_explicit_recipient(self):
@@ -396,11 +512,13 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["target_channel"], CommsChannel.EMAIL)
         self.assertEqual(result["target_address"], collaborator.email)
-        self.assertEqual(result["relay_mode"], "explicit_send_required")
-        self.assertFalse(result.get("auto_sleep_ok", False))
-        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
-        self.assertEqual(result["relay_payload"]["to_address"], collaborator.email)
-        self.assertIn("Who should review this?", result["relay_payload"]["mobile_first_html"])
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("auto_sleep_ok", result)
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
+        self.assertEqual(result["next_message_suggestion"]["address"], collaborator.email)
+        self.assertIn("Who should review this?", result["next_message_suggestion"]["questions"][0]["question"])
         request_obj = PersistentAgentHumanInputRequest.objects.get(id=result["request_id"])
         self.assertEqual(request_obj.conversation.channel, CommsChannel.EMAIL)
         self.assertEqual(request_obj.conversation.address, collaborator.email)
@@ -418,19 +536,30 @@ class HumanInputRequestTests(TestCase):
                     "address": self.user.email,
                 },
                 "requests": [
-                    {"question": "What should happen first?"},
-                    {"question": "What should happen second?"},
+                    {
+                        "question": "What should happen first?",
+                        "options": [{"title": "Ship", "description": "Move now."}],
+                    },
+                    {
+                        "question": "What should happen second?",
+                        "options": [{"title": "Wait", "description": "Pause for context."}],
+                    },
                 ],
             },
         )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["requests_count"], 2)
-        self.assertEqual(result["relay_mode"], "explicit_send_required")
-        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
-        self.assertIn("What should happen first?", result["relay_payload"]["body_text"])
-        self.assertIn("What should happen second?", result["relay_payload"]["body_text"])
-        self.assertIn("1. <your answer>", result["relay_payload"]["body_text"])
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
+        self.assertEqual(
+            [question["question"] for question in result["next_message_suggestion"]["questions"]],
+            ["What should happen first?", "What should happen second?"],
+        )
+        self.assertEqual(result["requests"][0]["options"][0]["title"], "Ship")
+        self.assertEqual(result["requests"][1]["options"][0]["title"], "Wait")
         request_objects = list(
             PersistentAgentHumanInputRequest.objects.filter(id__in=result["request_ids"]).order_by("created_at")
         )
@@ -470,8 +599,10 @@ class HumanInputRequestTests(TestCase):
         self.assertTrue(result["partial_success"])
         self.assertEqual(len(result["request_ids"]), 1)
         self.assertEqual(result["request_id"], result["request_ids"][0])
-        self.assertEqual(result["relay_mode"], "explicit_send_required")
-        self.assertEqual(result["relay_payload"]["tool_name"], "send_email")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
         self.assertIn("Created 1 of 2 human input requests", result["message"])
         self.assertIn("Database is unavailable.", result["message"])
         self.assertEqual(
@@ -479,7 +610,7 @@ class HumanInputRequestTests(TestCase):
             1,
         )
 
-    def test_create_human_input_request_renders_email_options(self):
+    def test_create_human_input_request_returns_email_notification_suggestion(self):
         email_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.EMAIL,
@@ -512,19 +643,26 @@ class HumanInputRequestTests(TestCase):
             ],
         )
 
-        params = result["relay_payload"]
-        self.assertEqual(result["relay_mode"], "explicit_send_required")
-        self.assertEqual(params["to_address"], "person@example.com")
-        self.assertIn("Quick question: How should I send this?", params["subject"])
-        self.assertIn("Reply with the option number, the option title, or your own words.", params["mobile_first_html"])
-        self.assertIn("Short summary", params["mobile_first_html"])
-        self.assertIn("Detailed memo", params["mobile_first_html"])
-        self.assertNotIn("Ref:", params["mobile_first_html"])
+        self.assertEqual(result["target_channel"], CommsChannel.EMAIL)
+        self.assertEqual(result["target_address"], "person@example.com")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        suggestion = result["next_message_suggestion"]
+        self.assertEqual(suggestion["channel"], CommsChannel.EMAIL)
+        self.assertEqual(suggestion["address"], "person@example.com")
+        self.assertEqual(suggestion["send_tool"], "send_email")
+        self.assertIn("normal email message", suggestion["instruction"])
+        self.assertIn("same tool-call batch", suggestion["instruction"])
+        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
+        self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
+        self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
+        self.assertEqual(result["requests"][0]["options"][1]["title"], "Detailed memo")
         self.assertIsNone(
             PersistentAgentHumanInputRequest.objects.get(id=result["request_id"]).requested_message_id
         )
 
-    def test_create_human_input_request_renders_sms_without_reference(self):
+    def test_create_human_input_request_returns_sms_notification_suggestion(self):
         sms_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.SMS,
@@ -554,10 +692,20 @@ class HumanInputRequestTests(TestCase):
             raw_options=[{"title": "Short summary", "description": "A concise update."}],
         )
 
-        params = result["relay_payload"]
-        self.assertIn("How should I send this?", params["body"])
-        self.assertNotIn("Ref:", params["body"])
-        self.assertIn("Reply with the option number, the option title, or your own words.", params["body"])
+        self.assertEqual(result["target_channel"], CommsChannel.SMS)
+        self.assertEqual(result["target_address"], "+15555550199")
+        self.assertTrue(result["web_chat_visible"])
+        self.assertNotIn("relay_mode", result)
+        self.assertNotIn("relay_payload", result)
+        suggestion = result["next_message_suggestion"]
+        self.assertEqual(suggestion["channel"], CommsChannel.SMS)
+        self.assertEqual(suggestion["address"], "+15555550199")
+        self.assertEqual(suggestion["send_tool"], "send_sms")
+        self.assertIn("normal sms message", suggestion["instruction"])
+        self.assertIn("same tool-call batch", suggestion["instruction"])
+        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
+        self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
+        self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
 
     def test_resolve_request_by_option_number(self):
         request_obj = self._create_request(
@@ -1543,8 +1691,6 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(self.request_obj.selected_option_key, "ship")
 
     def test_batch_response_endpoint_submits_group_once(self):
-        from api.models import PersistentAgentStep
-
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             description="Collect multiple answers",
@@ -1588,6 +1734,7 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(response.status_code, 201)
         payload = response.json()
         self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
         self.assertEqual(
             payload["event"]["message"]["bodyText"],
             "Question: What should I do first?\n"
@@ -1605,6 +1752,179 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(second_request.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(second_request.free_text, "Follow up with a summary.")
         self.assertEqual(first_request.raw_reply_message_id, second_request.raw_reply_message_id)
+        reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
+        self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.conversation.address, self.user_address)
+        self.assertEqual(reply_message.from_endpoint.address, self.user_address)
+        self.assertEqual(reply_message.to_endpoint.address, self.agent_address)
+
+    def test_console_batch_response_to_email_request_records_web_reply(self):
+        email_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent@example.com",
+        )
+        email_user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        email_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        requested_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=email_agent_endpoint,
+            to_endpoint=email_user_endpoint,
+            conversation=email_conversation,
+            owner_agent=self.agent,
+            body="Please answer these questions.",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect email answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=email_conversation,
+            originating_step=step,
+            requested_message=requested_message,
+            question="How many candidates?",
+            options_json=[
+                {"key": "large", "title": "Large Batch", "description": "Find many candidates."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.EMAIL,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=email_conversation,
+            originating_step=step,
+            requested_message=requested_message,
+            question="What format?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.EMAIL,
+        )
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/human-input-requests/respond-batch/",
+            data=json.dumps(
+                {
+                    "responses": [
+                        {"request_id": str(first_request.id), "selected_option_key": "large"},
+                        {"request_id": str(second_request.id), "free_text": "Spreadsheet"},
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["event"]["message"]["channel"], CommsChannel.WEB)
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        reply_message = PersistentAgentMessage.objects.get(id=first_request.raw_reply_message_id)
+        self.assertEqual(reply_message.id, second_request.raw_reply_message_id)
+        self.assertEqual(reply_message.conversation.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.conversation.address, self.user_address)
+        self.assertEqual(reply_message.from_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.from_endpoint.address, self.user_address)
+        self.assertEqual(reply_message.to_endpoint.channel, CommsChannel.WEB)
+        self.assertEqual(reply_message.to_endpoint.address, self.agent_address)
+        self.assertEqual(first_request.requested_via_channel, CommsChannel.EMAIL)
+        self.assertEqual(second_request.requested_via_channel, CommsChannel.EMAIL)
+
+    def test_pending_action_payload_groups_human_input_batches(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        actions = list_pending_action_requests(self.agent, self.user)
+        batch_action = next(action for action in actions if action["id"] == f"human_input:{step.id}")
+
+        self.assertEqual(batch_action["kind"], "human_input")
+        self.assertEqual(batch_action["count"], 2)
+        self.assertEqual(
+            [request["id"] for request in batch_action["requests"]],
+            [str(first_request.id), str(second_request.id)],
+        )
+        self.assertEqual(
+            [request["batchPosition"] for request in batch_action["requests"]],
+            [1, 2],
+        )
+
+    def test_attach_originating_step_emits_corrected_batch_update(self):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        with patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates") as mock_emit:
+            with self.captureOnCommitCallbacks(execute=True):
+                attach_originating_step_from_result(
+                    step,
+                    {"request_ids": [str(first_request.id), str(second_request.id)]},
+                )
+
+        first_request.refresh_from_db()
+        second_request.refresh_from_db()
+        self.assertEqual(first_request.originating_step_id, step.id)
+        self.assertEqual(second_request.originating_step_id, step.id)
+        mock_emit.assert_called_once_with(self.agent.id)
+
+        actions = list_pending_action_requests(self.agent, self.user)
+        batch_action = next(action for action in actions if action["id"] == f"human_input:{step.id}")
+        self.assertEqual(batch_action["count"], 2)
+        self.assertEqual(
+            [request["id"] for request in batch_action["requests"]],
+            [str(first_request.id), str(second_request.id)],
+        )
 
     def test_timeline_pending_requests_clear_after_cross_channel_resolution(self):
         resolve_human_input_request_for_message(

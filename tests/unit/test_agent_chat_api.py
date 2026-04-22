@@ -462,6 +462,62 @@ class AgentChatAPITests(TestCase):
         )
 
     @tag("batch_agent_chat")
+    @patch("api.services.signup_preview.Analytics.track_event")
+    def test_outbound_planning_message_does_not_transition_signup_preview_pause(self, mock_track_event):
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["signup_preview_state", "planning_state", "updated_at"])
+
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                conversation=self.conversation,
+                body="Welcome. Let's plan first.",
+                owner_agent=self.agent,
+            )
+
+        self.agent.refresh_from_db()
+        self.assertEqual(
+            self.agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
+        )
+        mock_track_event.assert_not_called()
+
+    @tag("batch_agent_chat")
+    @patch("api.services.signup_preview.Analytics.track_event")
+    def test_post_planning_preview_handoff_transitions_signup_preview_pause(self, mock_track_event):
+        self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["signup_preview_state", "planning_state", "updated_at"])
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                conversation=self.conversation,
+                body="Welcome. Let's plan first.",
+                owner_agent=self.agent,
+            )
+
+        self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                conversation=self.conversation,
+                body="The plan is ready. Finish signup to start.",
+                owner_agent=self.agent,
+            )
+
+        self.agent.refresh_from_db()
+        self.assertEqual(
+            self.agent.signup_preview_state,
+            PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
+        )
+        mock_track_event.assert_called_once()
+
+    @tag("batch_agent_chat")
     def test_quick_create_ignores_unsupported_tier_selection(self):
         response = self.client.post(
             "/console/api/agents/create/",

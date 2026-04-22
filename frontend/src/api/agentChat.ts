@@ -8,7 +8,7 @@ import type {
   RequestedSecret,
   TimelineEvent,
 } from '../types/agentChat'
-import type { SignupPreviewState } from '../types/agentRoster'
+import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { InsightsResponse } from '../types/insight'
 import { jsonFetch, jsonRequest } from './http'
 
@@ -36,6 +36,7 @@ export type TimelineResponse = {
   agent_name?: string | null
   agent_avatar_url?: string | null
   signup_preview_state?: SignupPreviewState | null
+  planning_state?: PlanningState | null
   pending_human_input_requests?: PendingHumanInputRequest[]
   pending_action_requests?: PendingActionRequest[]
 }
@@ -418,6 +419,12 @@ export type HumanInputResponseResult = {
   pendingActionRequests: PendingActionRequest[]
 }
 
+export type PlanningSkipResult = {
+  planningState: PlanningState
+  pendingHumanInputRequests: PendingHumanInputRequest[]
+  pendingActionRequests: PendingActionRequest[]
+}
+
 export type HumanInputBatchResponsePayload = {
   responses: Array<
     | { request_id: string; selected_option_key: string; free_text?: never }
@@ -463,6 +470,24 @@ export async function respondToHumanInputRequestsBatch(
   })
   return {
     event: response.event,
+    pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
+  }
+}
+
+export async function skipAgentPlanning(agentId: string): Promise<PlanningSkipResult> {
+  const url = `/console/api/agents/${agentId}/planning/skip/`
+  const response = await jsonFetch<{
+    planning_state?: PlanningState | null
+    pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
+  }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  return {
+    planningState: response.planning_state ?? 'skipped',
     pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
     pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
   }
@@ -549,6 +574,7 @@ export type ProcessingStatusResponse = {
   processing_active: boolean
   processing_snapshot?: ProcessingSnapshot
   signup_preview_state?: SignupPreviewState | null
+  planning_state?: PlanningState | null
 }
 
 export type StopAgentResponse = {

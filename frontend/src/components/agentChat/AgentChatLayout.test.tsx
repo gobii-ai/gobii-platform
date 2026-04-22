@@ -14,7 +14,7 @@ vi.mock('./TypingIndicator', () => ({
 }))
 
 vi.mock('./AgentComposer', () => ({
-  AgentComposer: () => null,
+  AgentComposer: () => <div data-testid="agent-composer" />,
 }))
 
 vi.mock('./TimelineVirtualItem', () => ({
@@ -208,5 +208,21 @@ describe('AgentChatLayout upgrade modal gating', () => {
       'data-status',
       'awaiting_signup_completion',
     )
+    expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
+  })
+
+  it('renders the composer instead of the signup preview panel while planning', () => {
+    render(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        events={[]}
+        showSignupPreviewPanel
+        signupPreviewState="awaiting_first_reply_pause"
+        planningState="planning"
+      />,
+    )
+
+    expect(screen.queryByTestId('signup-preview-panel')).not.toBeInTheDocument()
+    expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
   })
 })

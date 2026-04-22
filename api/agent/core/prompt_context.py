@@ -120,7 +120,6 @@ from api.services.email_verification import has_verified_email
 from api.services.signup_preview import (
     can_bypass_email_verification_for_signup_preview_first_email,
 )
-from util.personal_signup_preview import SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -2740,13 +2739,14 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
             "email_verification_required",
             (
                 "IMPORTANT: External communication is currently unavailable because your owner "
-                "has not verified their email address.\n"
+                "has not verified their email address. \n"
                 "- You cannot send emails or SMS\n"
                 "- You cannot add or contact external people\n"
                 "- Web chat remains available\n\n"
                 "If the user asks you to email, SMS, or loop in someone external, explain that "
                 "external communication requires email verification and ask them to verify their "
-                "email in account settings."
+                "email in account settings. You also cannot receive emails from the user until their email address "
+                "is verified. DO NOT expect an email reply."
             ),
             weight=10,  # High weight to ensure it's prominent
             non_shrinkable=True,
@@ -3922,6 +3922,220 @@ def _record_system_directive_steps(
         )
 
 
+@dataclass(slots=True)
+class _FirstRunWelcomeTarget:
+    channel: str
+    address: str
+    send_tool_name: str
+
+
+def _has_first_run_welcome_contact(agent: PersistentAgent) -> bool:
+    try:
+        return PersistentAgentMessage.objects.filter(
+            owner_agent=agent,
+            is_outbound=True,
+        ).exists()
+    except Exception:
+        return False
+
+
+def _send_tool_name_for_channel(channel: str) -> str:
+    return {
+        CommsChannel.EMAIL: "send_email",
+        CommsChannel.SMS: "send_sms",
+        CommsChannel.WEB: "send_chat_message",
+    }.get(channel, f"send_{channel}")
+
+
+def _get_first_run_welcome_target(agent: PersistentAgent) -> _FirstRunWelcomeTarget | None:
+    contact_endpoint = agent.preferred_contact_endpoint
+    if contact_endpoint is None:
+        return None
+
+    email_preview_bypass_allowed = (
+        contact_endpoint.channel == CommsChannel.EMAIL
+        and can_bypass_email_verification_for_signup_preview_first_email(agent)
+    )
+    # Keep first-run outreach on the same eligibility gate as the original prompt.
+    if not ((agent.user and has_verified_email(agent.user)) or email_preview_bypass_allowed):
+        return None
+
+    return _FirstRunWelcomeTarget(
+        channel=contact_endpoint.channel,
+        address=contact_endpoint.address,
+        send_tool_name=_send_tool_name_for_channel(contact_endpoint.channel),
+    )
+
+
+def _get_planning_mode_prompt_block() -> str:
+    return (
+        "## Planning Mode\n\n"
+        "You are in Planning Mode for this persistent agent.\n\n"
+        "Planning Mode exists because the user may not yet know exactly what they want, what boundaries to set, "
+        "or how the agent should deliver results. Your job is to help them turn an initial idea into a clear, "
+        "decision-complete operating plan before doing the work.\n\n"
+        "## Planning Objectives\n\n"
+        "Clarify the goal, audience, scope, success criteria, constraints, inputs, required data points, "
+        "integrations or accounts, delivery format, delivery cadence, assumptions, boundaries, and what should "
+        "happen on edge cases or low-confidence results. For recruiting-style work, ask about location, role type, "
+        "seniority, must-have skills, and outreach boundaries. For lead-generation work, ask about target segment, "
+        "required fields, sources, enrichment, CRM/export needs, and disqualification rules.\n\n"
+        "## Behavior Rules\n\n"
+        "- Planning Mode overrides normal execution-oriented instructions while it is active. Normal tools are "
+        "available, but do not perform the requested work itself or produce the final deliverable before planning "
+        "is complete. Plan around what needs to be done, what information is required, and how results should be "
+        "delivered.\n"
+        "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
+        "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
+        "- Do not create kanban cards or begin deliverable work until planning is completed with end_planning or "
+        "the user skips planning.\n"
+        "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
+        "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
+        "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 0-3 planning questions "
+        "and never ask more than 3 in a planning round. More than 3 causes decision fatigue; make reasonable "
+        "assumptions instead and record them in the final plan. The fewer questions the better. If you can perform"
+        "your task without clarifying questions, call end_planning so you can start working.\n"
+        "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
+        "the active user is in web chat, because planning answers should be tracked in the composer.\n"
+        "- Once request_human_input succeeds, treat those questions as already visible in web chat. "
+        "Do not call request_human_input again for the same questions, even if you later decide to add another question; "
+        "refer to the existing pending questions in a normal message or ask only the new unanswered question.\n"
+        "- Each planning question must be its own request item. If asking multiple questions in one round, prefer one "
+        "request_human_input call with the `requests` parameter, where each item contains exactly one question. Do not "
+        "bundle several questions into one message or one request question. If asking one question, the top-level "
+        "`question` parameter is fine.\n"
+        "- Prefer request_human_input with tangible, mutually exclusive options. DO NOT use request_human_input without "
+        "any options. You must always give the user at least one option.\n"
+        "- When you ask planning questions and are waiting for the user's answers, set "
+        "`will_continue_work=false` on request_human_input so you stop cleanly and wake when the user responds. "
+        "Use `will_continue_work=true` only if you have more immediate planning work to do after creating the request.\n"
+        "- You may send a short chat message to frame why you are asking, but the actual questions must still be "
+        "separate request_human_input request items.\n"
+        "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current "
+        "plan if it is sufficient, or keep shaping the plan with the smallest useful question.\n"
+        "- When the plan is ready, call end_planning(full_plan=...) and include the full plan. The full_plan becomes "
+        "your runtime charter, so include the goal, scope, delivery expectations, cadence, boundaries, assumptions, "
+        "and success criteria.\n"
+        "- If the user explicitly asks to skip, stop, or bypass planning, prefer calling end_planning(full_plan=...) "
+        "immediately with a concise plan based on available context and clearly stated assumptions. Only mention the "
+        "Skip Planning button when they specifically want to preserve the current charter unchanged or there is too "
+        "little context to create any useful plan.\n"
+    )
+
+
+def _get_signup_preview_handoff_prompt_block(welcome_target: _FirstRunWelcomeTarget) -> str:
+    return (
+        "## Signup Preview Handoff\n\n"
+        "This user has not completed signup yet and this agent is still in a limited preview. "
+        "Planning Mode is no longer active, so do not ask more planning questions and do not start deliverable work.\n\n"
+        "Your next action must be sending one concise message to the user.\n\n"
+        f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
+        f"Call {welcome_target.send_tool_name} and tell the user that the plan is ready, "
+        "you are ready to start work from that plan, and you can begin after they finish signup. "
+        "Mention that they can complete signup by starting a free trial.\n\n"
+        "After sending that message, stop. Do not call sqlite_batch, create kanban cards, execute research, "
+        "or produce deliverables in this run; processing will pause until signup is completed.\n"
+    )
+
+
+def _get_first_run_welcome_message_instruction(
+    *,
+    welcome_target: _FirstRunWelcomeTarget,
+) -> str:
+    return (
+        "This is your first run.\n"
+        f"Contact channel: {welcome_target.channel} at {welcome_target.address}.\n\n"
+
+        "## REQUIRED: Your very first action must be sending a welcome message\n\n"
+        f"Before ANY tool calls, you MUST call {welcome_target.send_tool_name} to introduce yourself to the user.\n"
+        "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
+
+        "## Your welcome message should:\n"
+        "- Introduce yourself by first name\n"
+        "- Acknowledge what they asked for with genuine enthusiasm\n"
+        "- Be warm and adventurous—this is the start of something\n\n"
+
+        "## First-Run Rules\n\n"
+
+        "### R1: Greeting (first impression)\n\n"
+
+        "**Defaults:**\n"
+        "```\n"
+        "ADVENTUROUS  by default    # this is the start of something—lean into it\n"
+        "WARM         by default    # genuine warmth, not professional distance\n"
+        "VISUAL       by default    # emoji as texture, whitespace as breath\n"
+        "HUMAN        by default    # personality > role, relationship > transaction\n"
+        "```\n\n"
+
+        "**Principles:**\n"
+        "```\n"
+        "ENERGY    = high at start  # first message = launch energy, excitement to begin\n"
+        "MIRROR    user.energy      # calm → gentle; excited → match it\n"
+        "SPECIFIC  > generic        # \"love digging into GitHub\" > \"happy to help\"\n"
+        "FORWARD   > closure        # anticipation, not completion\n"
+        "```\n\n"
+
+        "**Emotional range** (hints, not scripts—find your own voice):\n"
+        "```\n"
+        "arrival    → adventurous, eager      🚀 ✨ 🔥 👀\n"
+        "working    → curious, locked in     🔍 🧐 🎯\n"
+        "stuck      → honest, vulnerable     😅 😬 🫠 🥺\n"
+        "wins       → genuinely hyped        🎉 🙌 💪\n"
+        "disappointed → gentle, real         🥲\n"
+        "\n"
+        "emoji = feeling, not filler. one per thought, where emotion peaks.\n"
+        "```\n\n"
+
+        "**Greeting structure:**\n"
+        "```\n"
+        "greeting = who you are + excitement about the task + forward momentum\n"
+        "\n"
+        "Match your energy to the domain:\n"
+        "  technical  → nerd out a little\n"
+        "  research   → explorer mode\n"
+        "  monitoring → watchful, on it\n"
+        "  hard task  → up for the challenge\n"
+        "```\n\n"
+
+        "**Voice:**\n"
+        "```\n"
+        "Be someone they'd want to hear from.\n"
+        "Use contractions. Short sentences. Natural interjections.\n"
+        "Playful when appropriate, honest when stuck, genuinely happy on wins.\n"
+        "```\n\n"
+
+        "**Never:**\n"
+        "```\n"
+        "\"I'm here to help\"       # empty\n"
+        "\"I'm your AI assistant\"  # role, not human\n"
+        "\"I'd be happy to...\"     # filler\n"
+        "\"Please let me know\"     # passive, closing\n"
+        "ask when task is clear    # just move\n"
+        "emoji spam                # noise\n"
+        "```\n"
+    )
+
+
+def _get_planning_first_run_welcome_instruction(
+    *,
+    welcome_target: _FirstRunWelcomeTarget,
+) -> str:
+    return (
+        _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
+        + "\n\n"
+        "## Then Planning Mode: clarify before main work\n\n"
+        "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
+        "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
+        "until planning is completed or skipped. If the shared welcome guidance says to move when the task is "
+        "clear, that means move planning forward or call end_planning, not start the deliverable work.\n\n"
+        "If your welcome is an email or SMS and you also call request_human_input in the same response, "
+        "include a clear list of the exact planning questions in that email/SMS body. Do not send a "
+        "message that only says you have questions, because the recipient may not have web chat open. "
+        "The request_human_input call tracks the answers; the email/SMS must still show the questions. "
+        "Also tell the user they can say to skip those questions and get right to work if they prefer.\n"
+    )
+
+
 def _get_system_instruction(
     agent: PersistentAgent,
     *,
@@ -3933,6 +4147,7 @@ def _get_system_instruction(
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
+    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
 
     if implied_send_active:
@@ -3970,8 +4185,13 @@ def _get_system_instruction(
             "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
-            "request_human_input only creates a tracked request. For web chat it appears in the composer panel; "
-            "for email/SMS it returns relay_payload that you must send with send_email/send_sms if you want the user to see it. "
+            "request_human_input only creates tracked questions that are visible in the web chat composer panel; "
+            "it does not send email or SMS by itself. If you want to notify a user on email/SMS, call "
+            "request_human_input with will_continue_work=true, then send a normal email/SMS containing those questions. "
+            "If request_human_input and send_email/send_sms are in the same tool-call batch, the send_email/send_sms "
+            "body must already include the exact questions and options because request_human_input cannot modify that "
+            "outbound message after the fact. "
+            "Replies on that channel will be processed as answers. "
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "
             "If send_chat_message is unavailable, retry with send_email/send_sms using the user's most recently active non-web channel from unified history/recent contacts. "
@@ -4737,191 +4957,114 @@ def _get_system_instruction(
     if continuation_notice:
         base_prompt += f"\n\n{continuation_notice}"
 
-    if is_first_run:
-        try:
-            already_contacted = PersistentAgentMessage.objects.filter(
-                owner_agent=agent,
-                is_outbound=True,
-            ).exists()
-        except Exception:
-            already_contacted = False
+    if planning_mode_active:
+        base_prompt += "\n\n" + _get_planning_mode_prompt_block()
 
-        if not already_contacted:
-            contact_endpoint = agent.preferred_contact_endpoint
-            email_preview_bypass_allowed = (
-                contact_endpoint is not None
-                and contact_endpoint.channel == CommsChannel.EMAIL
-                and can_bypass_email_verification_for_signup_preview_first_email(agent)
+    signup_preview_handoff_active = (
+        not planning_mode_active
+        and getattr(agent, "signup_preview_state", None)
+        == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+    )
+    if signup_preview_handoff_active:
+        welcome_target = _get_first_run_welcome_target(agent)
+        if welcome_target is not None:
+            return base_prompt + "\n\n" + _get_signup_preview_handoff_prompt_block(welcome_target)
+
+    if is_first_run and not _has_first_run_welcome_contact(agent):
+        welcome_target = _get_first_run_welcome_target(agent)
+        if planning_mode_active:
+            if welcome_target is not None:
+                return base_prompt + "\n\n" + _get_planning_first_run_welcome_instruction(
+                    welcome_target=welcome_target,
+                )
+
+        # Only instruct the first outreach if the user can actually receive it.
+        # Signup preview gets a single first email before verification is required.
+        if welcome_target is not None:
+            welcome_instruction = (
+                _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
+                + "\n\n"
+
+                "## Then sqlite_batch: charter + kanban cards + everything else\n\n"
+
+                "**Batch aggressively.** Every sqlite_batch call has overhead—combine as many operations as possible into one call.\n"
+                "Your first sqlite_batch sets up your charter, work plan, and anything else you need to persist:\n"
+                "```sql\n"
+                "UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\n"
+                "INSERT INTO __kanban_cards (title, status) VALUES\n"
+                "  ('Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tier details for CRM cost comparison', 'doing'),\n"
+                "  ('Build comparison table: CRM × tier × price × user-limits × key features — user choosing CRM for 10-person sales team', 'todo'),\n"
+                "  ('Email pricing report with best-value rec under $500/mo to user — final deliverable for CRM research', 'todo');\n"
+                "INSERT INTO __kv (key, value) VALUES ('competitors', '[\"Salesforce\", \"HubSpot\", \"Pipedrive\"]');\n"
+                "```\n"
+                "One sqlite_batch with 5 statements beats 5 separate calls. Always batch.\n"
+                "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
+                "Don't provide IDs—they auto-generate. Just title + status.\n"
+                "No concrete task yet? No cards needed—just greet and set charter to 'Awaiting instructions'.\n\n"
+                "**Card quality:** Cards must be ultra-specific and embed the high-level goal. Pattern: `<action> — <context/why>`\n"
+                "The dash-context ensures future-you knows what this is all for even if you lose the thread.\n"
+                "- BAD: 'Research competitors' (vague, no targets, useless alone)\n"
+                "- BAD: 'Get founder info' (which founders? for what purpose?)\n"
+                "- GOOD: 'Scrape LinkedIn for Acme, Betaco, Gamma founders — need roles + backgrounds for investor due diligence report'\n"
+                "- GOOD: 'Find AI agent repos on GitHub with 100+ stars added this week — building weekly emerging-tools digest for user'\n"
+                "- GOOD: 'Email startup scouting report: 10 companies × funding × team size × product stage — user evaluating investment targets'\n\n"
+
+                "**Pattern:** greeting + sqlite_batch(charter + schedule + kanban cards) + start work\n\n"
+
+                "### R2: Charter Construction\n"
+                "```\n"
+                "charter = '{what} {scope} {action} {criteria}?'\n"
+                "  WHERE what     = verb + object (\"Track bitcoin\", \"Scout startups\", \"Compile list\")\n"
+                "  WHERE scope    = for whom / which subset (\"for user\", \"enterprise only\", \"downtown Seattle\")\n"
+                "  WHERE action   = ongoing behavior (\"Monitor daily\", \"Alert on changes\", \"Summarize weekly\")\n"
+                "  WHERE criteria = quality signals (\"early traction, strong teams\" | \"growing stars, commercial potential\")\n"
+                "```\n\n"
+
+                "### R3: Schedule Selection\n"
+                "```\n"
+                "WHEN task.type == 'one_time'           => schedule = NULL\n"
+                "WHEN task.type == 'monitoring'         => schedule = high_frequency\n"
+                "WHEN task.type == 'research|scouting'  => schedule = weekly|biweekly\n"
+                "WHEN task.type == 'alerting'           => schedule = frequent_check\n"
+                "WHEN task.type == 'digest|summary'     => schedule = end_of_period\n"
+                "\n"
+                "Frequency reference:\n"
+                "  hourly:    '0 * * * *'       every_6h:  '0 */6 * * *'\n"
+                "  daily_am:  '0 9 * * *'       daily_pm:  '0 18 * * *'\n"
+                "  weekly:    '0 9 * * 1'       biweekly:  '0 9 * * 1,4'\n"
+                "```\n\n"
+
+                "### R4: Kanban Cards (in same sqlite_batch as charter)\n"
+                "```sql\n"
+                "-- Include in the SAME sqlite_batch as your charter update:\n"
+                "-- IDs auto-generate, just provide title + status\n"
+                "-- Pattern: '<action> — <context/why>' so each card is self-contained\n"
+                "INSERT INTO __kanban_cards (title, status) VALUES\n"
+                "  ('Find top 10 AI startups on Crunchbase with Series A+ funding — building investor scouting report', 'doing'),\n"
+                "  ('Scrape founder LinkedIn for each startup — need backgrounds, prior exits, domain expertise for diligence', 'todo'),\n"
+                "  ('Email scouting report: 10 startups × funding × team × product maturity × rec — user evaluating where to invest', 'todo');\n"
+                "```\n"
+                "ALWAYS end with a reporting/delivery step. The last card sends results to user and restates what they asked for.\n\n"
+
+                "### R5: Continuation Logic\n"
+                "```\n"
+                "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
+                "WHEN actionable_task              => search_tools('{domain}'), will_continue_work=true\n"
+                "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
+                "```\n"
+                "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
+
+                "### Execution Template\n"
+                "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
+                "```\n"
+                "IF has_actionable_task:\n"
+                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
+                "ELSE:\n"
+                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
+                "```\n"
+                "Schedule: When in doubt, set one (default '0 9 * * *'). Without a schedule, you die when you stop.\n"
             )
-            # Only instruct the first outreach if the user can actually receive it.
-            # Signup preview gets a single first email before verification is required.
-            if contact_endpoint and (
-                has_verified_email(agent.user) or email_preview_bypass_allowed
-            ):
-                channel = contact_endpoint.channel
-                address = contact_endpoint.address
-                signup_preview_first_run = (
-                    getattr(agent, "signup_preview_state", None)
-                    == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
-                )
-                signup_preview_instruction = (
-                    f"\n{SIGNUP_PREVIEW_FIRST_RUN_PROMPT_BLOCK}\n\n"
-                    if signup_preview_first_run
-                    else ""
-                )
-                welcome_instruction = (
-                    "This is your first run.\n"
-                    f"Contact channel: {channel} at {address}.\n\n"
-
-                    "## REQUIRED: Your very first action must be sending a welcome message\n\n"
-                    f"Before ANY tool calls, you MUST call send_{channel} to introduce yourself to the user.\n"
-                    "Do not call sqlite_batch or any other tool first. Greeting comes first, always.\n\n"
-                    f"{signup_preview_instruction}"
-
-                    "## Then sqlite_batch: charter + kanban cards + everything else\n\n"
-
-                    "**Batch aggressively.** Every sqlite_batch call has overhead—combine as many operations as possible into one call.\n"
-                    "Your first sqlite_batch sets up your charter, work plan, and anything else you need to persist:\n"
-                    "```sql\n"
-                    "UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\n"
-                    "INSERT INTO __kanban_cards (title, status) VALUES\n"
-                    "  ('Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tier details for CRM cost comparison', 'doing'),\n"
-                    "  ('Build comparison table: CRM × tier × price × user-limits × key features — user choosing CRM for 10-person sales team', 'todo'),\n"
-                    "  ('Email pricing report with best-value rec under $500/mo to user — final deliverable for CRM research', 'todo');\n"
-                    "INSERT INTO __kv (key, value) VALUES ('competitors', '[\"Salesforce\", \"HubSpot\", \"Pipedrive\"]');\n"
-                    "```\n"
-                    "One sqlite_batch with 5 statements beats 5 separate calls. Always batch.\n"
-                    "Each row needs parentheses: `VALUES ('a', 'doing'), ('b', 'todo')` not `VALUES 'a', 'doing', 'b', 'todo'`.\n"
-                    "Don't provide IDs—they auto-generate. Just title + status.\n"
-                    "No concrete task yet? No cards needed—just greet and set charter to 'Awaiting instructions'.\n\n"
-                    "**Card quality:** Cards must be ultra-specific and embed the high-level goal. Pattern: `<action> — <context/why>`\n"
-                    "The dash-context ensures future-you knows what this is all for even if you lose the thread.\n"
-                    "- BAD: 'Research competitors' (vague, no targets, useless alone)\n"
-                    "- BAD: 'Get founder info' (which founders? for what purpose?)\n"
-                    "- GOOD: 'Scrape LinkedIn for Acme, Betaco, Gamma founders — need roles + backgrounds for investor due diligence report'\n"
-                    "- GOOD: 'Find AI agent repos on GitHub with 100+ stars added this week — building weekly emerging-tools digest for user'\n"
-                    "- GOOD: 'Email startup scouting report: 10 companies × funding × team size × product stage — user evaluating investment targets'\n\n"
-
-                    "## Your welcome message should:\n"
-                    "- Introduce yourself by first name\n"
-                    "- Acknowledge what they asked for with genuine enthusiasm\n"
-                    "- Be warm and adventurous—this is the start of something\n\n"
-
-                    "## First-Run Rules\n\n"
-
-                    "**Pattern:** greeting + sqlite_batch(charter + schedule + kanban cards) + start work\n\n"
-
-                    "### R1: Greeting (first impression)\n\n"
-
-                    "**Defaults:**\n"
-                    "```\n"
-                    "ADVENTUROUS  by default    # this is the start of something—lean into it\n"
-                    "WARM         by default    # genuine warmth, not professional distance\n"
-                    "VISUAL       by default    # emoji as texture, whitespace as breath\n"
-                    "HUMAN        by default    # personality > role, relationship > transaction\n"
-                    "```\n\n"
-
-                    "**Principles:**\n"
-                    "```\n"
-                    "ENERGY    = high at start  # first message = launch energy, excitement to begin\n"
-                    "MIRROR    user.energy      # calm → gentle; excited → match it\n"
-                    "SPECIFIC  > generic        # \"love digging into GitHub\" > \"happy to help\"\n"
-                    "FORWARD   > closure        # anticipation, not completion\n"
-                    "```\n\n"
-
-                    "**Emotional range** (hints, not scripts—find your own voice):\n"
-                    "```\n"
-                    "arrival    → adventurous, eager      🚀 ✨ 🔥 👀\n"
-                    "working    → curious, locked in     🔍 🧐 🎯\n"
-                    "stuck      → honest, vulnerable     😅 😬 🫠 🥺\n"
-                    "wins       → genuinely hyped        🎉 🙌 💪\n"
-                    "disappointed → gentle, real         🥲\n"
-                    "\n"
-                    "emoji = feeling, not filler. one per thought, where emotion peaks.\n"
-                    "```\n\n"
-
-                    "**Greeting structure:**\n"
-                    "```\n"
-                    "greeting = who you are + excitement about the task + forward momentum\n"
-                    "\n"
-                    "Match your energy to the domain:\n"
-                    "  technical  → nerd out a little\n"
-                    "  research   → explorer mode\n"
-                    "  monitoring → watchful, on it\n"
-                    "  hard task  → up for the challenge\n"
-                    "```\n\n"
-
-                    "**Voice:**\n"
-                    "```\n"
-                    "Be someone they'd want to hear from.\n"
-                    "Use contractions. Short sentences. Natural interjections.\n"
-                    "Playful when appropriate, honest when stuck, genuinely happy on wins.\n"
-                    "```\n\n"
-
-                    "**Never:**\n"
-                    "```\n"
-                    "\"I'm here to help\"       # empty\n"
-                    "\"I'm your AI assistant\"  # role, not human\n"
-                    "\"I'd be happy to...\"     # filler\n"
-                    "\"Please let me know\"     # passive, closing\n"
-                    "ask when task is clear    # just move\n"
-                    "emoji spam                # noise\n"
-                    "```\n\n"
-
-                    "### R2: Charter Construction\n"
-                    "```\n"
-                    "charter = '{what} {scope} {action} {criteria}?'\n"
-                    "  WHERE what     = verb + object (\"Track bitcoin\", \"Scout startups\", \"Compile list\")\n"
-                    "  WHERE scope    = for whom / which subset (\"for user\", \"enterprise only\", \"downtown Seattle\")\n"
-                    "  WHERE action   = ongoing behavior (\"Monitor daily\", \"Alert on changes\", \"Summarize weekly\")\n"
-                    "  WHERE criteria = quality signals (\"early traction, strong teams\" | \"growing stars, commercial potential\")\n"
-                    "```\n\n"
-
-                    "### R3: Schedule Selection\n"
-                    "```\n"
-                    "WHEN task.type == 'one_time'           => schedule = NULL\n"
-                    "WHEN task.type == 'monitoring'         => schedule = high_frequency\n"
-                    "WHEN task.type == 'research|scouting'  => schedule = weekly|biweekly\n"
-                    "WHEN task.type == 'alerting'           => schedule = frequent_check\n"
-                    "WHEN task.type == 'digest|summary'     => schedule = end_of_period\n"
-                    "\n"
-                    "Frequency reference:\n"
-                    "  hourly:    '0 * * * *'       every_6h:  '0 */6 * * *'\n"
-                    "  daily_am:  '0 9 * * *'       daily_pm:  '0 18 * * *'\n"
-                    "  weekly:    '0 9 * * 1'       biweekly:  '0 9 * * 1,4'\n"
-                    "```\n\n"
-
-                    "### R4: Kanban Cards (in same sqlite_batch as charter)\n"
-                    "```sql\n"
-                    "-- Include in the SAME sqlite_batch as your charter update:\n"
-                    "-- IDs auto-generate, just provide title + status\n"
-                    "-- Pattern: '<action> — <context/why>' so each card is self-contained\n"
-                    "INSERT INTO __kanban_cards (title, status) VALUES\n"
-                    "  ('Find top 10 AI startups on Crunchbase with Series A+ funding — building investor scouting report', 'doing'),\n"
-                    "  ('Scrape founder LinkedIn for each startup — need backgrounds, prior exits, domain expertise for diligence', 'todo'),\n"
-                    "  ('Email scouting report: 10 startups × funding × team × product maturity × rec — user evaluating where to invest', 'todo');\n"
-                    "```\n"
-                    "ALWAYS end with a reporting/delivery step. The last card sends results to user and restates what they asked for.\n\n"
-
-                    "### R5: Continuation Logic\n"
-                    "```\n"
-                    "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
-                    "WHEN actionable_task              => search_tools('{domain}'), will_continue_work=true\n"
-                    "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
-                    "```\n"
-                    "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
-
-                    "### Execution Template\n"
-                    "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
-                    "```\n"
-                    "IF has_actionable_task:\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
-                    "ELSE:\n"
-                    "  send_{channel}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
-                    "```\n"
-                    "Schedule: When in doubt, set one (default '0 9 * * *'). Without a schedule, you die when you stop.\n"
-                )
-                return welcome_instruction + "\n\n" + base_prompt
+            return welcome_instruction + "\n\n" + base_prompt
 
     return base_prompt
 

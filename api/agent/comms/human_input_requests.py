@@ -9,9 +9,9 @@ from typing import Any
 
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-from django.utils.html import escape
 from django.utils.text import slugify
 
+from api.agent.core.processing_flags import bump_human_inbound_generation
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
@@ -24,17 +24,18 @@ from api.models import (
     PersistentAgentConversationParticipant,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
+    PersistentAgentStep,
     build_web_agent_address,
+    build_web_user_address,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.text_sanitizer import normalize_llm_output
 
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
-HUMAN_INPUT_RELAY_MODE_PANEL_ONLY = "panel_only"
-HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED = "explicit_send_required"
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,13 @@ class PreparedHumanInputResponse:
 
 
 @dataclass(slots=True)
+class HumanInputResponseTarget:
+    conversation: PersistentAgentConversation
+    human_endpoint: PersistentAgentCommsEndpoint
+    agent_endpoint: PersistentAgentCommsEndpoint
+
+
+@dataclass(slots=True)
 class ResolvedHumanInputResponse:
     request: PersistentAgentHumanInputRequest
     selected_option_key: str
@@ -83,41 +91,8 @@ def _coerce_string(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _truncate(text: str, limit: int) -> str:
-    text = text.strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _build_option_line(option: dict[str, Any], *, index: int, compact: bool) -> str:
-    title = _coerce_string(option.get("title"))
-    description = _coerce_string(option.get("description"))
-    line = f"{index}. {title}"
-    if description:
-        detail = _truncate(description, 72) if compact else description
-        line += f" - {detail}"
-    return line
-
-
-def _build_request_lines(
-    request_obj: PersistentAgentHumanInputRequest,
-    *,
-    compact: bool,
-    question_number: int | None = None,
-    option_indent: str = "",
-) -> list[str]:
-    question_prefix = f"{question_number}. " if question_number is not None else ""
-    lines = [f"{question_prefix}{request_obj.question.strip()}"]
-    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-    if options:
-        for index, option in enumerate(options, start=1):
-            lines.append(f"{option_indent}{_build_option_line(option, index=index, compact=compact)}")
-        reply_hint = "Reply with the option number, the option title, or your own words."
-    else:
-        reply_hint = "Reply in your own words."
-    lines.append(f"{option_indent}{reply_hint}".rstrip())
-    return lines
+def _normalize_human_input_text(value: Any) -> str:
+    return normalize_llm_output(str(value or "")).strip()
 
 
 def _get_or_create_endpoint(
@@ -153,6 +128,30 @@ def _ensure_conversation_participants(
     )
 
 
+def _get_or_create_conversation(
+    *,
+    channel: str,
+    address: str,
+    owner_agent: PersistentAgent | None = None,
+) -> PersistentAgentConversation:
+    conversation = (
+        PersistentAgentConversation.objects.filter(channel=channel, address=address)
+        .order_by("id")
+        .first()
+    )
+    if conversation is None:
+        return PersistentAgentConversation.objects.create(
+            channel=channel,
+            address=address,
+            owner_agent=owner_agent,
+        )
+
+    if owner_agent is not None and conversation.owner_agent_id is None:
+        conversation.owner_agent = owner_agent
+        conversation.save(update_fields=["owner_agent"])
+    return conversation
+
+
 def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     if not raw_options:
         return []
@@ -160,8 +159,8 @@ def build_option_payloads(raw_options: list[dict[str, Any]] | None) -> list[dict
     options: list[dict[str, str]] = []
     used_keys: set[str] = set()
     for index, raw_option in enumerate(raw_options[:MAX_OPTION_COUNT], start=1):
-        title = _coerce_string(raw_option.get("title"))
-        description = _coerce_string(raw_option.get("description"))
+        title = _normalize_human_input_text(raw_option.get("title"))
+        description = _normalize_human_input_text(raw_option.get("description"))
         base_key = slugify(title).replace("-", "_") if title else ""
         candidate = base_key or f"option_{index}"
         suffix = 2
@@ -321,138 +320,53 @@ def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | Non
     return None
 
 
-def _render_prompt_text(
+def _serialize_request_summary(
     request_obj: PersistentAgentHumanInputRequest,
     *,
-    compact: bool,
-) -> str:
-    return "\n".join(_build_request_lines(request_obj, compact=compact))
+    position: int,
+) -> dict[str, Any]:
+    return {
+        "request_id": str(request_obj.id),
+        "question": request_obj.question,
+        "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
+        "input_mode": request_obj.input_mode,
+        "position": position,
+    }
 
 
-def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
-    parts = [f"<p>{escape(request_obj.question)}</p>"]
-    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-    if options:
-        parts.append("<ol>")
-        for option in options:
-            title = escape(_coerce_string(option.get("title")))
-            description = escape(_coerce_string(option.get("description")))
-            if description:
-                parts.append(f"<li><strong>{title}</strong><br>{description}</li>")
-            else:
-                parts.append(f"<li><strong>{title}</strong></li>")
-        parts.append("</ol>")
-        parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
-    else:
-        parts.append("<p>Reply in your own words.</p>")
-    return "".join(parts)
-
-
-def _render_batch_prompt_text(
-    request_objects: list[PersistentAgentHumanInputRequest],
-    *,
-    compact: bool,
-) -> str:
-    lines = [
-        "Please answer each question below.",
-        "Reply with one answer per line using the matching question number, for example:",
-        "1. <your answer>",
-        "2. <your answer>",
-    ]
-    for index, request_obj in enumerate(request_objects, start=1):
-        lines.append("")
-        lines.extend(
-            _build_request_lines(
-                request_obj,
-                compact=compact,
-                question_number=index,
-                option_indent="   ",
-            )
-        )
-    return "\n".join(lines)
-
-
-def _render_batch_prompt_html(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
-    parts = [
-        "<p>Please answer each question below.</p>",
-        "<p>Reply with one answer per line using the matching question number, for example:<br>1. &lt;your answer&gt;<br>2. &lt;your answer&gt;</p>",
-        "<ol>",
-    ]
-    for request_obj in request_objects:
-        parts.append(f"<li><p>{escape(request_obj.question)}</p>")
-        options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-        if options:
-            parts.append("<ol>")
-            for option in options:
-                title = escape(_coerce_string(option.get("title")))
-                description = escape(_coerce_string(option.get("description")))
-                if description:
-                    parts.append(f"<li><strong>{title}</strong><br>{description}</li>")
-                else:
-                    parts.append(f"<li><strong>{title}</strong></li>")
-            parts.append("</ol>")
-            parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
-        else:
-            parts.append("<p>Reply in your own words.</p>")
-        parts.append("</li>")
-    parts.append("</ol>")
-    return "".join(parts)
-
-
-def _build_email_subject(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
-    if len(request_objects) == 1:
-        return _truncate(f"Quick question: {request_objects[0].question}", 120)
-
-    first_question = _coerce_string(request_objects[0].question)
-    remaining_count = max(0, len(request_objects) - 1)
-    suffix = f" (+{remaining_count} more)" if remaining_count else ""
-    return _truncate(f"Quick questions: {first_question}{suffix}", 120)
-
-
-def _build_relay_payload(
+def _build_next_message_suggestion(
     request_objects: list[PersistentAgentHumanInputRequest],
     target: HumanInputTarget,
-) -> tuple[str, dict[str, Any]]:
-    ordered_requests = _order_requests_for_batch(request_objects)
+) -> dict[str, Any] | None:
     if target.channel == CommsChannel.WEB:
-        return HUMAN_INPUT_RELAY_MODE_PANEL_ONLY, {
-            "kind": "panel",
-        }
+        return None
 
-    if target.channel == CommsChannel.EMAIL:
-        body_text = (
-            _render_prompt_text(ordered_requests[0], compact=False)
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_text(ordered_requests, compact=False)
-        )
-        mobile_first_html = (
-            _render_prompt_html(ordered_requests[0])
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_html(ordered_requests)
-        )
-        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
-            "kind": "send_email",
-            "tool_name": "send_email",
-            "to_address": target.address,
-            "subject": _build_email_subject(ordered_requests),
-            "mobile_first_html": mobile_first_html,
-            "body_text": body_text,
-        }
+    send_tool = {
+        CommsChannel.EMAIL: "send_email",
+        CommsChannel.SMS: "send_sms",
+    }.get(target.channel)
+    if send_tool is None:
+        return None
 
-    if target.channel == CommsChannel.SMS:
-        body = (
-            _render_prompt_text(ordered_requests[0], compact=True)
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_text(ordered_requests, compact=True)
-        )
-        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
-            "kind": "send_sms",
-            "tool_name": "send_sms",
-            "to_number": target.address,
-            "body": body,
-        }
-
-    raise ValueError(f"Unsupported channel '{target.channel}' for human input requests.")
+    return {
+        "channel": target.channel,
+        "address": target.address,
+        "send_tool": send_tool,
+        "instruction": (
+            f"Include these questions in your next normal {target.channel} message to {target.address}. "
+            f"If you already sent or are sending a {target.channel} message in the same tool-call batch, "
+            "that message must include the questions because request_human_input cannot inject them into "
+            f"another tool call. The user may not be actively viewing the web chat. Do not call request_human_input again "
+            "for the same questions. The user's reply on that channel will be processed as answers."
+        ),
+        "questions": [
+            {
+                "number": index,
+                "question": request_obj.question,
+            }
+            for index, request_obj in enumerate(request_objects, start=1)
+        ],
+    }
 
 
 def _build_request_result(
@@ -464,27 +378,16 @@ def _build_request_result(
     partial_success: bool = False,
 ) -> dict[str, Any]:
     ordered_requests = _order_requests_for_batch(request_objects)
-    relay_mode, relay_payload = _build_relay_payload(ordered_requests, target)
     request_ids = [str(request_obj.id) for request_obj in ordered_requests]
     request_count = len(request_ids)
+    next_message_suggestion = _build_next_message_suggestion(ordered_requests, target)
 
     if message is None:
-        if relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
-            message = (
-                "Created 1 human input request. It is visible in the web chat composer panel."
-                if request_count == 1
-                else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
-            )
-        else:
-            tool_name = relay_payload.get("tool_name") or "send tool"
-            message = (
-                f"Created 1 human input request for {target.channel}. Use {tool_name} with relay_payload to deliver it."
-                if request_count == 1
-                else (
-                    f"Created {request_count} human input requests for {target.channel}. "
-                    f"Use {tool_name} with relay_payload to deliver them."
-                )
-            )
+        message = (
+            "Created 1 human input request. It is visible in the web chat composer panel."
+            if request_count == 1
+            else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
+        )
 
     result = {
         "status": status,
@@ -494,12 +397,17 @@ def _build_request_result(
         "requests_count": request_count,
         "target_channel": target.channel,
         "target_address": target.address,
-        "relay_mode": relay_mode,
-        "relay_payload": relay_payload,
+        "web_chat_visible": True,
+        "requests": [
+            _serialize_request_summary(request_obj, position=index)
+            for index, request_obj in enumerate(ordered_requests, start=1)
+        ],
     }
+    if next_message_suggestion is not None:
+        result["next_message_suggestion"] = next_message_suggestion
     if partial_success:
         result["partial_success"] = True
-    if status == "ok" and relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
+    if status == "ok" and target.channel == CommsChannel.WEB:
         result["auto_sleep_ok"] = True
     return result
 
@@ -593,7 +501,9 @@ def _create_human_input_request_for_target(
     question: str,
     raw_options: list[dict[str, Any]] | None,
     recipient: HumanInputRecipient | None = None,
+    originating_step_id: str | None = None,
 ) -> tuple[PersistentAgentHumanInputRequest | None, dict[str, Any] | None]:
+    normalized_question = _normalize_human_input_text(question)
     options = build_option_payloads(raw_options)
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
@@ -604,7 +514,8 @@ def _create_human_input_request_for_target(
         request_obj = PersistentAgentHumanInputRequest.objects.create(
             agent=agent,
             conversation=target.conversation,
-            question=question,
+            originating_step_id=originating_step_id,
+            question=normalized_question,
             options_json=options,
             input_mode=input_mode,
             recipient_channel=recipient.channel if recipient else "",
@@ -623,6 +534,18 @@ def _create_human_input_request_for_target(
         }
 
     return request_obj, None
+
+
+def _get_current_originating_step_id(agent: PersistentAgent) -> str | None:
+    from api.agent.tools.runtime_execution_context import get_tool_execution_context
+
+    context = get_tool_execution_context()
+    step_id = getattr(context, "step_id", None)
+    if not step_id:
+        return None
+    if not PersistentAgentStep.objects.filter(id=step_id, agent=agent).exists():
+        return None
+    return str(step_id)
 
 
 def create_human_input_request(
@@ -654,6 +577,7 @@ def create_human_input_request(
         question=question,
         raw_options=raw_options,
         recipient=normalized_recipient,
+        originating_step_id=_get_current_originating_step_id(agent),
     )
     if create_error:
         return create_error
@@ -687,45 +611,58 @@ def create_human_input_requests_batch(
                 "message": "No eligible human conversation is available to request input from.",
             }
 
+    originating_step_id = _get_current_originating_step_id(agent)
+
+    def _create_requests() -> dict[str, Any] | None:
+        for request in requests:
+            request_obj, create_error = _create_human_input_request_for_target(
+                agent,
+                target,
+                question=_coerce_string(request.get("question")),
+                raw_options=request.get("options"),
+                recipient=normalized_recipient,
+                originating_step_id=originating_step_id,
+            )
+            if create_error:
+                if created_requests:
+                    failure_message = _coerce_string(create_error.get("message")) or "A later request failed to be created."
+                    return _build_request_result(
+                        created_requests,
+                        target,
+                        status="error",
+                        message=(
+                            f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed. "
+                            f"{failure_message}"
+                        ),
+                        partial_success=True,
+                    )
+                return create_error
+            if request_obj is None:
+                if created_requests:
+                    return _build_request_result(
+                        created_requests,
+                        target,
+                        status="error",
+                        message=(
+                            f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed."
+                        ),
+                        partial_success=True,
+                    )
+                return {
+                    "status": "error",
+                    "message": "Failed to create human input request batch.",
+                }
+            created_requests.append(request_obj)
+        return None
+
     created_requests: list[PersistentAgentHumanInputRequest] = []
-    for request in requests:
-        request_obj, create_error = _create_human_input_request_for_target(
-            agent,
-            target,
-            question=_coerce_string(request.get("question")),
-            raw_options=request.get("options"),
-            recipient=normalized_recipient,
-        )
-        if create_error:
-            if created_requests:
-                failure_message = _coerce_string(create_error.get("message")) or "A later request failed to be created."
-                return _build_request_result(
-                    created_requests,
-                    target,
-                    status="error",
-                    message=(
-                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed. "
-                        f"{failure_message}"
-                    ),
-                    partial_success=True,
-                )
-            return create_error
-        if request_obj is None:
-            if created_requests:
-                return _build_request_result(
-                    created_requests,
-                    target,
-                    status="error",
-                    message=(
-                        f"Created {len(created_requests)} of {len(requests)} human input requests before a later request failed."
-                    ),
-                    partial_success=True,
-                )
-            return {
-                "status": "error",
-                "message": "Failed to create human input request batch.",
-            }
-        created_requests.append(request_obj)
+    if originating_step_id:
+        with transaction.atomic():
+            error_result = _create_requests()
+    else:
+        error_result = _create_requests()
+    if error_result:
+        return error_result
 
     return _build_request_result(created_requests, target)
 
@@ -736,10 +673,30 @@ def attach_originating_step_from_result(step, result: dict[str, Any] | None) -> 
     request_ids = _request_ids_from_result(result)
     if not request_ids:
         return
-    PersistentAgentHumanInputRequest.objects.filter(
+    updated_count = PersistentAgentHumanInputRequest.objects.filter(
         id__in=request_ids,
         originating_step__isnull=True,
     ).update(originating_step=step, updated_at=timezone.now())
+    if updated_count:
+        agent_id = step.agent_id
+        transaction.on_commit(lambda: _emit_pending_human_input_updates(agent_id))
+
+
+def _emit_pending_human_input_updates(agent_id) -> None:
+    if not agent_id:
+        return
+    from console.agent_chat.signals import (
+        emit_pending_action_requests_update,
+        emit_pending_human_input_requests_update,
+    )
+
+    try:
+        agent = PersistentAgent.objects.get(id=agent_id)
+    except PersistentAgent.DoesNotExist:
+        return
+
+    emit_pending_human_input_requests_update(agent)
+    emit_pending_action_requests_update(agent)
 
 
 def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInputRequest) -> dict[str, Any]:
@@ -1674,6 +1631,60 @@ def _resolve_agent_recipient_address(request_obj: PersistentAgentHumanInputReque
     )
 
 
+def _build_console_response_target(
+    agent: PersistentAgent,
+    actor_user_id: int | str | None,
+) -> HumanInputResponseTarget | None:
+    if actor_user_id is None:
+        return None
+    try:
+        user_id = int(actor_user_id)
+    except (TypeError, ValueError):
+        return None
+
+    human_address = build_web_user_address(user_id, agent.id)
+    agent_address = build_web_agent_address(agent.id)
+    conversation = _get_or_create_conversation(
+        channel=CommsChannel.WEB,
+        address=human_address,
+        owner_agent=agent,
+    )
+    human_endpoint = _get_or_create_endpoint(channel=CommsChannel.WEB, address=human_address)
+    agent_endpoint = _get_or_create_endpoint(
+        channel=CommsChannel.WEB,
+        address=agent_address,
+        owner_agent=agent,
+    )
+    return HumanInputResponseTarget(
+        conversation=conversation,
+        human_endpoint=human_endpoint,
+        agent_endpoint=agent_endpoint,
+    )
+
+
+def _build_request_conversation_response_target(
+    request_obj: PersistentAgentHumanInputRequest,
+) -> HumanInputResponseTarget:
+    recipient_address = _resolve_agent_recipient_address(request_obj)
+    if not recipient_address:
+        raise ValueError("Request is missing the agent recipient endpoint.")
+
+    human_endpoint = _get_or_create_endpoint(
+        channel=request_obj.conversation.channel,
+        address=request_obj.conversation.address,
+    )
+    agent_endpoint = _get_or_create_endpoint(
+        channel=request_obj.conversation.channel,
+        address=recipient_address,
+        owner_agent=request_obj.agent,
+    )
+    return HumanInputResponseTarget(
+        conversation=request_obj.conversation,
+        human_endpoint=human_endpoint,
+        agent_endpoint=agent_endpoint,
+    )
+
+
 def _build_batch_response_body(prepared_responses: list[PreparedHumanInputResponse]) -> str:
     lines: list[str] = []
     for index, prepared in enumerate(prepared_responses, start=1):
@@ -1733,9 +1744,9 @@ def submit_human_input_responses_batch(
     ):
         raise ValueError("Batch responses must belong to the same conversation and channel.")
 
-    recipient_address = _resolve_agent_recipient_address(first_request)
-    if not recipient_address:
-        raise ValueError("Request is missing the agent recipient endpoint.")
+    response_target = _build_console_response_target(agent, actor_user_id)
+    if response_target is None:
+        response_target = _build_request_conversation_response_target(first_request)
 
     body = (
         prepared_responses[0].body
@@ -1777,22 +1788,17 @@ def submit_human_input_responses_batch(
     analytics_user_id = str(actor_user_id or agent.user_id)
 
     with transaction.atomic():
-        human_endpoint = _get_or_create_endpoint(
-            channel=first_request.conversation.channel,
-            address=first_request.conversation.address,
+        _ensure_conversation_participants(
+            response_target.conversation,
+            response_target.human_endpoint,
+            response_target.agent_endpoint,
         )
-        agent_endpoint = _get_or_create_endpoint(
-            channel=first_request.conversation.channel,
-            address=recipient_address,
-            owner_agent=agent,
-        )
-        _ensure_conversation_participants(first_request.conversation, human_endpoint, agent_endpoint)
 
         message = PersistentAgentMessage.objects.create(
             is_outbound=False,
-            from_endpoint=human_endpoint,
-            to_endpoint=agent_endpoint,
-            conversation=first_request.conversation,
+            from_endpoint=response_target.human_endpoint,
+            to_endpoint=response_target.agent_endpoint,
+            conversation=response_target.conversation,
             owner_agent=agent,
             body=body,
             raw_payload=raw_payload,
@@ -1823,10 +1829,14 @@ def submit_human_input_responses_batch(
                 ]
             )
 
-        transaction.on_commit(
-            lambda: __import__("api.agent.tasks", fromlist=["process_agent_events_task"])
-            .process_agent_events_task.delay(str(agent.id))
-        )
+        def _queue_processing() -> None:
+            inbound_generation = bump_human_inbound_generation(agent.id)
+            __import__("api.agent.tasks", fromlist=["process_agent_events_task"]).process_agent_events_task.delay(
+                str(agent.id),
+                inbound_generation=inbound_generation,
+            )
+
+        transaction.on_commit(_queue_processing)
         transaction.on_commit(
             lambda: Analytics.track_event(
                 user_id=analytics_user_id,

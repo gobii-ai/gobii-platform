@@ -10,6 +10,20 @@ from api.agent.comms.human_input_requests import (
 from api.models import CommsChannel, PersistentAgent
 
 
+def _coerce_optional_bool(raw: Any) -> bool | None:
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        normalized = raw.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return None
+
+
 def get_request_human_input_tool() -> dict[str, Any]:
     """Return the human input request tool definition."""
 
@@ -68,8 +82,14 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "Create a tracked human-input request when you need the human to pick an option, "
                 "answer a question, or provide open-ended feedback. If you pass options, the user "
                 "can choose one OR reply in their own words. If you omit options, the user will "
-                "reply with free text only. For web chat, the request appears in the console composer panel. "
-                "For email or SMS, this tool returns relay_payload guidance that you must send with send_email or send_sms. "
+                "reply with free text only. The request always appears in the web chat composer panel. "
+                "This tool does not send email or SMS by itself. If the target is email or SMS and you want "
+                "to notify that channel, call this tool with will_continue_work=true and send a normal "
+                "email or SMS that includes the exact question(s) and options. If you call send_email or "
+                "send_sms in the same tool-call batch as request_human_input, that outbound message must "
+                "already include the questions because this tool cannot inject them into another tool call. "
+                "Do not send a bare notification like 'please answer the questions'; the recipient may not "
+                "have web chat open. The user's reply on that channel will be processed as answers. "
                 "Keep questions concise and make sure it is only the question without extra fluff."
             ),
             "parameters": {
@@ -102,7 +122,16 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         ),
                         **recipient_schema,
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": (
+                            "REQUIRED. true = you'll take another action in the same response or after creating this request; "
+                            "use true when you will send an email/SMS containing these questions. "
+                            "false = you're waiting for the user's answer and should stop after the request is visible/delivered."
+                        ),
+                    },
                 },
+                "required": ["will_continue_work"],
             },
         },
     }
@@ -176,6 +205,7 @@ def _normalize_recipient(raw_recipient: Any) -> tuple[dict[str, str] | None, dic
 def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
     """Create one or more tracked human input requests."""
 
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     recipient, recipient_error = _normalize_recipient(params.get("recipient"))
     if recipient_error:
         return recipient_error
@@ -211,7 +241,10 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 }
             )
 
-        return create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
+        result = create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
+        if will_continue_work is True:
+            result.pop("auto_sleep_ok", None)
+        return result
 
     question = str(params.get("question") or "").strip()
     if not question:
@@ -224,9 +257,12 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     if error:
         return error
 
-    return create_human_input_request(
+    result = create_human_input_request(
         agent,
         question=question,
         raw_options=options or [],
         recipient=recipient,
     )
+    if will_continue_work is True:
+        result.pop("auto_sleep_ok", None)
+    return result

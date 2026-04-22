@@ -27,6 +27,7 @@ from console.api_views import (
     AgentMessageCreateAPIView,
     AgentHumanInputRequestBatchResponseAPIView,
     AgentHumanInputRequestResponseAPIView,
+    AgentPlanningSkipAPIView,
     AgentContactRequestResolveAPIView,
     AgentChatRosterAPIView,
     AgentQuickCreateAPIView,
@@ -351,6 +352,7 @@ urlpatterns = [
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
+    path("console/api/agents/<uuid:agent_id>/planning/skip/", AgentPlanningSkipAPIView.as_view(), name="console_agent_planning_skip"),
     path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
     path(
         "console/api/agents/<uuid:agent_id>/human-input-requests/respond-batch/",

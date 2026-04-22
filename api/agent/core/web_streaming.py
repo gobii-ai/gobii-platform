@@ -107,6 +107,13 @@ class WebStreamBroadcaster:
             self._send({"stream_id": self.stream_id, "status": "done"})
         self._finished = True
 
+    def cancel(self) -> None:
+        if self._finished:
+            return
+        if self._started:
+            self._send({"stream_id": self.stream_id, "status": "canceled"})
+        self._finished = True
+
     def _should_flush(self) -> bool:
         if not self._reasoning_buffer and not self._content_buffer:
             return False

@@ -80,6 +80,15 @@ export function truncate(value: string, max = 60): string {
   return `${value.slice(0, max - 1)}…`
 }
 
+function buildTrailingPreview(value: string, max = 96): string {
+  const normalized = value.replace(/\s+/g, ' ').trim()
+  if (!normalized) return ''
+  const preview = normalized.length >= max
+    ? normalized.slice(0, max - 1).trimEnd()
+    : normalized
+  return `${preview}…`
+}
+
 export function coerceString(value: unknown): string | null {
   if (typeof value === 'string' && value.trim().length > 0) {
     return value
@@ -282,6 +291,22 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
         charterText,
         caption: charterText ? truncate(charterText, 48) : entry.caption ?? 'Assignment updated',
         separateFromPreview: true,
+      }
+    },
+  },
+  {
+    name: 'end_planning',
+    label: 'Planning completed',
+    icon: ClipboardList,
+    iconBgClass: 'bg-emerald-100',
+    iconColorClass: 'text-emerald-700',
+    detailKind: 'endPlanning',
+    derive(_entry, parameters) {
+      const fullPlan = coerceString(parameters?.full_plan)
+      return {
+        charterText: fullPlan,
+        caption: fullPlan ? buildTrailingPreview(fullPlan) : null,
+        summary: null,
       }
     },
   },
@@ -605,13 +630,19 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const result = parseResultObject(entry.result)
       const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
       const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
+      const resultRequests = Array.isArray(result?.['requests']) ? result?.['requests'] as unknown[] : []
+      const resultRequestIds = Array.isArray(result?.['request_ids']) ? result?.['request_ids'] as unknown[] : []
       const requestQuestions = batchRequests
         .map((request) => (request && typeof request === 'object' ? coerceString((request as Record<string, unknown>)['question']) : null))
         .filter((value): value is string => Boolean(value))
       const questions = requestQuestions.length ? requestQuestions : (question ? [question] : [])
+      const resultCount = coerceNumber(result?.['requests_count'])
+      const derivedQuestionCount = resultCount ?? (resultRequests.length || resultRequestIds.length || questions.length || 1)
+      const questionCount = Math.max(1, Math.trunc(derivedQuestionCount))
       const caption = questions[0] ? truncate(questions[0], 72) : null
 
       return {
+        label: `Asked ${questionCount} Question${questionCount === 1 ? '' : 's'}`,
         caption: caption ?? entry.caption ?? 'Human input request',
         summary: null,
       }

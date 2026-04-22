@@ -6,6 +6,7 @@ import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
+import { PlanningModeStrip } from './PlanningModeStrip'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -14,6 +15,7 @@ import { track, AnalyticsEvent } from '../../util/analytics'
 import { formatBytes } from '../../util/formatBytes'
 import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
+import type { PlanningState } from '../../types/agentRoster'
 
 // Detect if user is on macOS
 function isMacOS(): boolean {
@@ -103,6 +105,12 @@ type HumanInputComposerBatchResponse = {
   responses: HumanInputComposerResponse[]
 }
 
+function hasHumanInputComposerResponse(
+  response: HumanInputComposerResponse | undefined,
+): response is HumanInputComposerResponse {
+  return Boolean(response?.selectedOptionKey || response?.freeText?.trim())
+}
+
 type HumanInputBatchAnalyticsProperties = {
   agent_id: string
   agent_name: string | null
@@ -139,6 +147,9 @@ type AgentComposerProps = {
   agentName?: string | null
   onSubmit?: (message: string, attachments?: File[]) => void | Promise<void>
   pendingActionRequests?: PendingActionRequest[]
+  planningState?: PlanningState
+  onSkipPlanning?: () => void | Promise<void>
+  skipPlanningBusy?: boolean
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
@@ -198,6 +209,9 @@ export const AgentComposer = memo(function AgentComposer({
   agentName = null,
   onSubmit,
   pendingActionRequests = [],
+  planningState = 'skipped',
+  onSkipPlanning,
+  skipPlanningBusy = false,
   onRespondHumanInput,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
@@ -309,8 +323,9 @@ export const AgentComposer = memo(function AgentComposer({
   const showPipedreamAppsControl = Boolean(
     canManageAgent && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
   )
+  const isPlanningMode = planningState === 'planning'
   const isStopping = Boolean(isProcessing && stopProcessingRequested)
-  const showStopProcessing = Boolean(isProcessing && !isStopping && agentId && canManageAgent && onStopProcessing)
+  const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
   const handleIntelligenceUpsell = useCallback(async () => {
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
@@ -684,7 +699,7 @@ export const AgentComposer = memo(function AgentComposer({
     }
 
     if (batchRequests.length > 1) {
-      const nextUnanswered = batchRequests.find((candidate) => !nextDrafts[candidate.id])
+      const nextUnanswered = batchRequests.find((candidate) => !hasHumanInputComposerResponse(nextDrafts[candidate.id]))
       if (nextUnanswered) {
         const nextPendingAction = pendingActionRequests.find((candidate) => (
           candidate.kind === 'human_input'
@@ -706,7 +721,11 @@ export const AgentComposer = memo(function AgentComposer({
       if (batchRequests.length > 1) {
         const responses = batchRequests
           .map((candidate) => nextDrafts[candidate.id])
-          .filter((candidate): candidate is HumanInputComposerResponse => Boolean(candidate))
+          .filter(hasHumanInputComposerResponse)
+        if (responses.length !== batchRequests.length) {
+          setDraftHumanInputResponses(nextDrafts)
+          return true
+        }
         await onRespondHumanInput({
           batchId: request.batchId,
           responses,
@@ -1012,6 +1031,7 @@ export const AgentComposer = memo(function AgentComposer({
   // Show the panel when processing OR when there are insights to display
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
   const taskCount = processingTasks.length
+  const showPlanningStrip = isPlanningMode
 
   return (
     <div
@@ -1048,8 +1068,8 @@ export const AgentComposer = memo(function AgentComposer({
                 <>
                   <Sparkles className="composer-working-indicator" aria-hidden="true" />
                   <span className="composer-working-status">
-                    <strong>{agentFirstName}</strong> is {isStopping ? 'stopping' : 'working'}
-                    <span className="composer-working-ellipsis" aria-label="working">
+                    <strong>{agentFirstName}</strong> is {isStopping ? 'stopping' : isPlanningMode ? 'planning' : 'working'}
+                    <span className="composer-working-ellipsis" aria-label={isPlanningMode ? 'planning' : 'working'}>
                       <span className="composer-working-dot" />
                       <span className="composer-working-dot" />
                       <span className="composer-working-dot" />
@@ -1135,6 +1155,15 @@ export const AgentComposer = memo(function AgentComposer({
               </div>
             ) : null}
           </div>
+        ) : null}
+
+        {showPlanningStrip ? (
+          <PlanningModeStrip
+            canManageAgent={canManageAgent}
+            onSkipPlanning={onSkipPlanning}
+            skipPlanningBusy={skipPlanningBusy}
+            className="border-t border-sky-100"
+          />
         ) : null}
 
         {pendingActionRequests.length > 0 ? (

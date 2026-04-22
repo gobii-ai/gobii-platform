@@ -5,6 +5,11 @@ export type SignupPreviewState =
   | 'awaiting_first_reply_pause'
   | 'awaiting_signup_completion'
 
+export type PlanningState =
+  | 'planning'
+  | 'completed'
+  | 'skipped'
+
 export type AgentRosterEntry = {
   id: string
   name: string
@@ -24,4 +29,5 @@ export type AgentRosterEntry = {
   email?: string | null
   sms?: string | null
   signupPreviewState?: SignupPreviewState | null
+  planningState?: PlanningState | null
 }

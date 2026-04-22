@@ -8,6 +8,7 @@ from .database_enabler import execute_enable_database
 from .email_sender import execute_send_email
 from .file_str_replace import execute_file_str_replace
 from .peer_dm import execute_send_agent_message
+from .planning import execute_end_planning
 from .request_contact_permission import execute_request_contact_permission
 from .request_human_input import execute_request_human_input
 from .schedule_updater import execute_update_schedule
@@ -76,5 +77,9 @@ def execute_runtime_tool_call(
         return result, updated_tools
     if tool_name == "file_str_replace":
         return execute_file_str_replace(agent, exec_params), updated_tools
+    if tool_name == "end_planning":
+        result = execute_end_planning(agent, exec_params)
+        updated_tools = _refresh_agent_tools(agent)
+        return result, updated_tools
 
     return execute_enabled_tool(agent, tool_name, exec_params), updated_tools

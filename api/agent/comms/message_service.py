@@ -25,6 +25,7 @@ from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
 from django.templatetags.static import static
 from django.utils import timezone
+from api.agent.core.processing_flags import bump_human_inbound_generation
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
 
 from ...models import (
@@ -976,13 +977,18 @@ def ingest_inbound_message(
             # current sender and skip processing for this inbound attempt.
             should_skip_processing = False
             pause_state = {"paused": False, "reason": "", "paused_at": None}
+            is_inbound_webhook = (
+                channel_val == CommsChannel.OTHER
+                and isinstance(parsed.raw_payload, dict)
+                and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
+            )
+            is_interrupting_human_input = channel_val in {
+                CommsChannel.WEB,
+                CommsChannel.EMAIL,
+                CommsChannel.SMS,
+            }
 
             try:
-                is_inbound_webhook = (
-                    channel_val == CommsChannel.OTHER
-                    and isinstance(parsed.raw_payload, dict)
-                    and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
-                )
                 if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):
                     owner = resolve_agent_owner(agent_obj)
                     pause_state = get_owner_execution_pause_state(owner)
@@ -1222,11 +1228,17 @@ def ingest_inbound_message(
                     )
 
             def _trigger_processing() -> None:
+                inbound_generation = None
+                if is_interrupting_human_input:
+                    inbound_generation = bump_human_inbound_generation(owner_id)
                 if should_skip_processing:
                     return
                 from api.agent.tasks import process_agent_events_task
                 # Top-level trigger: no budget context provided
-                process_agent_events_task.delay(str(owner_id))
+                if inbound_generation is None:
+                    process_agent_events_task.delay(str(owner_id))
+                else:
+                    process_agent_events_task.delay(str(owner_id), inbound_generation=inbound_generation)
 
             has_attachments = message.attachments.exists()
             message_id = str(message.id)
@@ -1246,8 +1258,7 @@ def ingest_inbound_message(
             else:
                 if has_attachments:
                     enqueue_import_after_commit(message_id)
-                if not should_skip_processing:
-                    transaction.on_commit(_trigger_processing)
+                transaction.on_commit(_trigger_processing)
 
         return InboundMessageInfo(message=message)
 
@@ -1373,7 +1384,12 @@ def inject_internal_web_message(
         if not trigger_processing:
             return
         from api.agent.tasks import process_agent_events_task
-        process_agent_events_task.delay(str(agent.id), eval_run_id=eval_run_id)
+        inbound_generation = bump_human_inbound_generation(agent.id)
+        process_agent_events_task.delay(
+            str(agent.id),
+            eval_run_id=eval_run_id,
+            inbound_generation=inbound_generation,
+        )
 
     if attachments:
         message_id = str(message.id)

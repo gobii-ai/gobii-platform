@@ -110,6 +110,25 @@ export function UpdateCharterDetail({ entry }: ToolDetailProps) {
   )
 }
 
+export function EndPlanningDetail({ entry }: ToolDetailProps) {
+  const plan =
+    entry.charterText ||
+    (entry.parameters?.full_plan as string | undefined)
+  const planMarkdown = isNonEmptyString(plan) ? plan : null
+
+  if (!planMarkdown) {
+    return <></>
+  }
+
+  return (
+    <div className="space-y-4 text-sm text-slate-600">
+      <Section title="Finalized Plan">
+        <MarkdownViewer content={planMarkdown} className="prose prose-sm max-w-none" />
+      </Section>
+    </div>
+  )
+}
+
 export function McpToolDetail({ entry }: ToolDetailProps) {
   const {
     parameters,

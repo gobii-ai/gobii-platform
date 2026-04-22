@@ -87,6 +87,7 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
         "mini_description": agent.mini_description or "",
         "short_description": agent.short_description or "",
         "signup_preview_state": agent.signup_preview_state,
+        "planning_state": agent.planning_state,
         "timestamp": timezone.now().isoformat(),
     }
     if processing_active is not None:
@@ -95,6 +96,32 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
         _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID[str(agent.id)] = normalized_processing_active
     for user_id in _resolve_profile_listener_user_ids(agent):
         _send(user_profile_group_name(user_id), "agent_profile_event", payload)
+
+
+def emit_agent_planning_state_update(
+    agent: PersistentAgent,
+    *,
+    include_pending_actions: bool = False,
+) -> None:
+    """Best-effort planning-state realtime update for chat/profile clients."""
+    try:
+        emit_agent_profile_update(agent)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast planning profile update for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+    if not include_pending_actions:
+        return
+    try:
+        emit_pending_action_requests_update(agent)
+    except Exception:
+        logger.debug(
+            "Failed to broadcast planning pending-action update for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
 
 
 def _emit_processing_profile_update_if_changed(agent: PersistentAgent, processing_active: bool) -> None:

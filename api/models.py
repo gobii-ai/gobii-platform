@@ -6190,6 +6190,27 @@ class PersistentAgent(models.Model):
             "Used to pause limited preview agents until signup is completed."
         ),
     )
+    class PlanningState(models.TextChoices):
+        PLANNING = "planning", "Planning"
+        COMPLETED = "completed", "Completed"
+        SKIPPED = "skipped", "Skipped"
+
+    planning_state = models.CharField(
+        max_length=16,
+        choices=PlanningState.choices,
+        default=PlanningState.SKIPPED,
+        db_index=True,
+        help_text="Planning lifecycle state for prompt-led agent setup.",
+    )
+    planning_plan = models.TextField(
+        blank=True,
+        help_text="Final plan captured when planning mode completes.",
+    )
+    planning_completed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Timestamp when planning mode was completed through end_planning.",
+    )
     # NOTE: Enabled MCP tools are now tracked in PersistentAgentEnabledTool.
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

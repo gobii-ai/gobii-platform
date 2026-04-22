@@ -17,6 +17,8 @@ _HEARTBEAT_KEY_TEMPLATE = "agent-event-processing:heartbeat:{agent_id}"
 _DEFAULT_HEARTBEAT_TTL_SECONDS = 600
 _STOP_REQUESTED_KEY_TEMPLATE = "agent-event-processing:stop-requested:{agent_id}"
 _DEFAULT_STOP_REQUESTED_TTL_SECONDS = 3600
+_HUMAN_INBOUND_GENERATION_KEY_TEMPLATE = "agent-event-processing:human-inbound-generation:{agent_id}"
+_HUMAN_INBOUND_CONSUMED_GENERATION_KEY_TEMPLATE = "agent-event-processing:human-inbound-consumed-generation:{agent_id}"
 _QUEUED_AGENT_SET_KEY = "agent-event-processing:index:queued"
 _HEARTBEAT_AGENT_SET_KEY = "agent-event-processing:index:heartbeat"
 _LOCKED_AGENT_SET_KEY = "agent-event-processing:index:locked"
@@ -44,6 +46,14 @@ def _heartbeat_key(agent_id: Union[str, UUID]) -> str:
 
 def _stop_requested_key(agent_id: Union[str, UUID]) -> str:
     return _STOP_REQUESTED_KEY_TEMPLATE.format(agent_id=agent_id)
+
+
+def _human_inbound_generation_key(agent_id: Union[str, UUID]) -> str:
+    return _HUMAN_INBOUND_GENERATION_KEY_TEMPLATE.format(agent_id=agent_id)
+
+
+def _human_inbound_consumed_generation_key(agent_id: Union[str, UUID]) -> str:
+    return _HUMAN_INBOUND_CONSUMED_GENERATION_KEY_TEMPLATE.format(agent_id=agent_id)
 
 
 def processing_lock_storage_keys(agent_id: Union[str, UUID]) -> tuple[str, str]:
@@ -137,6 +147,98 @@ def clear_processing_queued_flag(agent_id: Union[str, UUID], *, client=None) -> 
         redis_client.srem(_QUEUED_AGENT_SET_KEY, str(agent_id))
     except Exception:
         logger.exception("Failed to clear processing queued flag for agent %s", agent_id)
+
+
+def _coerce_generation(value: Any) -> int:
+    if value is None:
+        return 0
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "ignore")
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+def bump_human_inbound_generation(
+    agent_id: Union[str, UUID],
+    *,
+    ttl: int = _DEFAULT_QUEUE_TTL_SECONDS,
+    client=None,
+) -> int:
+    """Increment and return the generation for human-authored inbound messages."""
+    try:
+        redis_client = client or get_redis_client()
+        key = _human_inbound_generation_key(agent_id)
+        generation = int(redis_client.incr(key))
+        if ttl > 0:
+            redis_client.expire(key, ttl)
+        return generation
+    except Exception:
+        logger.exception("Failed to bump human inbound generation for agent %s", agent_id)
+        return 0
+
+
+def get_human_inbound_generation(agent_id: Union[str, UUID], *, client=None) -> int:
+    """Return the latest human-inbound generation for the agent."""
+    try:
+        redis_client = client or get_redis_client()
+        return _coerce_generation(redis_client.get(_human_inbound_generation_key(agent_id)))
+    except Exception:
+        logger.exception("Failed to read human inbound generation for agent %s", agent_id)
+        return 0
+
+
+def get_consumed_human_inbound_generation(agent_id: Union[str, UUID], *, client=None) -> int:
+    """Return the latest human-inbound generation accepted by the orchestrator."""
+    try:
+        redis_client = client or get_redis_client()
+        return _coerce_generation(redis_client.get(_human_inbound_consumed_generation_key(agent_id)))
+    except Exception:
+        logger.exception("Failed to read consumed human inbound generation for agent %s", agent_id)
+        return 0
+
+
+def mark_human_inbound_generation_consumed(
+    agent_id: Union[str, UUID],
+    generation: int | str | None,
+    *,
+    ttl: int = _DEFAULT_QUEUE_TTL_SECONDS,
+    client=None,
+) -> int:
+    """Record that the orchestrator accepted a prompt at this generation."""
+    parsed_generation = _coerce_generation(generation)
+    if parsed_generation <= 0:
+        return 0
+
+    try:
+        redis_client = client or get_redis_client()
+        key = _human_inbound_consumed_generation_key(agent_id)
+        previous = _coerce_generation(redis_client.get(key))
+        next_generation = max(previous, parsed_generation)
+        redis_client.set(key, str(next_generation))
+        if ttl > 0:
+            redis_client.expire(key, ttl)
+        return next_generation
+    except Exception:
+        logger.exception("Failed to mark human inbound generation consumed for agent %s", agent_id)
+        return parsed_generation
+
+
+def is_human_inbound_generation_consumed(
+    agent_id: Union[str, UUID],
+    generation: int | str | None,
+    *,
+    client=None,
+) -> bool:
+    """Return True when a queued human-inbound task is redundant."""
+    parsed_generation = _coerce_generation(generation)
+    if parsed_generation <= 0:
+        return False
+
+    current = get_human_inbound_generation(agent_id, client=client)
+    consumed = get_consumed_human_inbound_generation(agent_id, client=client)
+    return consumed >= parsed_generation and current <= consumed
 
 
 def clear_processing_work_state(agent_id: Union[str, UUID], client=None) -> None:
@@ -384,6 +486,15 @@ def is_agent_pending(agent_id: Union[str, UUID], client=None) -> bool:
     except Exception:
         logger.exception("Failed to check pending processing for agent %s", agent_id)
         return False
+
+
+def remove_pending_agent(agent_id: Union[str, UUID], client=None) -> None:
+    """Remove an agent from the pending processing set."""
+    try:
+        redis_client = client or get_redis_client()
+        redis_client.srem(_PENDING_SET_KEY, str(agent_id))
+    except Exception:
+        logger.exception("Failed to remove pending processing for agent %s", agent_id)
 
 
 def pop_pending_agents(

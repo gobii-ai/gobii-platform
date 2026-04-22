@@ -11,7 +11,7 @@ import type {
   TimelineEvent,
 } from '../types/agentChat'
 import type { InsightEvent } from '../types/insight'
-import type { SignupPreviewState } from '../types/agentRoster'
+import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { INSIGHT_TIMING } from '../types/insight'
 import { sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
@@ -301,6 +301,7 @@ export type AgentChatState = {
   agentName: string | null
   agentAvatarUrl: string | null
   signupPreviewState: SignupPreviewState
+  planningState: PlanningState
   // Insight state
   insights: InsightEvent[]
   currentInsightIndex: number
@@ -318,6 +319,7 @@ export type AgentChatState = {
       agentAvatarUrl?: string | null
       processingActive?: boolean
       signupPreviewState?: SignupPreviewState | null
+      planningState?: PlanningState | null
     },
   ) => void
   refreshProcessing: () => Promise<void>
@@ -332,6 +334,7 @@ export type AgentChatState = {
     agentColorHex?: string | null
     agentAvatarUrl?: string | null
     signupPreviewState?: SignupPreviewState | null
+    planningState?: PlanningState | null
   }) => void
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
@@ -365,6 +368,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   agentName: null,
   agentAvatarUrl: null,
   signupPreviewState: 'none',
+  planningState: 'skipped',
   // Insight state
   insights: [],
   currentInsightIndex: 0,
@@ -380,7 +384,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const providedName = options?.agentName ?? null
     const providedAvatarUrl = options?.agentAvatarUrl ?? null
     const providedSignupPreviewState = options?.signupPreviewState ?? null
+    const providedPlanningState = options?.planningState ?? null
     const hasProvidedSignupPreviewState = Object.prototype.hasOwnProperty.call(options ?? {}, 'signupPreviewState')
+    const hasProvidedPlanningState = Object.prototype.hasOwnProperty.call(options ?? {}, 'planningState')
     const hasProvidedProcessingActive = Object.prototype.hasOwnProperty.call(options ?? {}, 'processingActive')
     const providedProcessingActive = hasProvidedProcessingActive ? Boolean(options?.processingActive) : false
     const reuseExisting = get().agentId === agentId
@@ -418,6 +424,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       signupPreviewState: reuseExisting
         ? (hasProvidedSignupPreviewState ? (providedSignupPreviewState ?? 'none') : get().signupPreviewState)
         : (providedSignupPreviewState ?? 'none'),
+      planningState: reuseExisting
+        ? (hasProvidedPlanningState ? (providedPlanningState ?? 'skipped') : get().planningState)
+        : (providedPlanningState ?? 'skipped'),
       // Reset insight state only when switching to a different agent
       ...(reuseExisting ? {} : {
         insights: [],
@@ -436,7 +445,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const agentId = get().agentId
     if (!agentId) return
     try {
-      const { processing_active, processing_snapshot, signup_preview_state } = await fetchProcessingStatus(agentId)
+      const { processing_active, processing_snapshot, signup_preview_state, planning_state } = await fetchProcessingStatus(agentId)
       const snapshot = normalizeProcessingUpdate(processing_snapshot ?? { active: processing_active, webTasks: [] })
       set((state) => {
         let processingStartedAt = state.processingStartedAt
@@ -452,6 +461,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           nextScheduledAt: resolveNextScheduledAt(snapshot, state.nextScheduledAt),
           awaitingResponse: snapshot.active ? false : state.awaitingResponse,
           signupPreviewState: signup_preview_state ?? state.signupPreviewState,
+          planningState: planning_state ?? state.planningState,
         }
       })
     } catch (error) {
@@ -583,10 +593,24 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     const isStart = payload.status === 'start'
     const isDone = payload.status === 'done'
     const isDelta = payload.status === 'delta'
+    const isCanceled = payload.status === 'canceled'
     const now = Date.now()
     let shouldInvalidateQuery = false
 
     set((state) => {
+      if (isCanceled) {
+        if (state.streaming?.streamId && state.streaming.streamId !== payload.stream_id) {
+          return state
+        }
+        return {
+          streaming: null,
+          streamingClearOnDone: false,
+          streamingLastUpdatedAt: now,
+          awaitingResponse: state.awaitingResponse,
+          processingStartedAt: state.processingStartedAt,
+        }
+      }
+
       const existingStream = state.streaming
       let isNewStream = false
       let base: StreamState
@@ -737,8 +761,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const hasColor = Object.prototype.hasOwnProperty.call(update, 'agentColorHex')
       const hasAvatar = Object.prototype.hasOwnProperty.call(update, 'agentAvatarUrl')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(update, 'signupPreviewState')
+      const hasPlanningState = Object.prototype.hasOwnProperty.call(update, 'planningState')
 
-      if (!hasName && !hasColor && !hasAvatar && !hasSignupPreviewState) {
+      if (!hasName && !hasColor && !hasAvatar && !hasSignupPreviewState && !hasPlanningState) {
         return state
       }
 
@@ -754,6 +779,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
           : {}),
         ...(hasAvatar ? { agentAvatarUrl: update.agentAvatarUrl ?? null } : {}),
         ...(hasSignupPreviewState ? { signupPreviewState: update.signupPreviewState ?? 'none' } : {}),
+        ...(hasPlanningState ? { planningState: update.planningState ?? 'skipped' } : {}),
       }
     })
   },

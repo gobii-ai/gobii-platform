@@ -73,12 +73,10 @@ def can_bypass_email_verification_for_signup_preview_first_email(
 def is_signup_preview_first_reply_window(agent: PersistentAgent | None) -> bool:
     if agent is None:
         return False
-    if getattr(agent, "signup_preview_state", None) != PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE:
-        return False
-    return not PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        is_outbound=True,
-    ).exists()
+    return (
+        getattr(agent, "signup_preview_state", None)
+        == PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE
+    )
 
 
 def can_bypass_task_credit_for_signup_preview(agent: PersistentAgent | None) -> bool:
@@ -231,6 +229,8 @@ def _resume_signup_preview_agents_if_user_eligible(
 def is_signup_preview_processing_paused(agent: PersistentAgent | None) -> bool:
     if agent is None:
         return False
+    if getattr(agent, "planning_state", None) == PersistentAgent.PlanningState.PLANNING:
+        return False
     return (
         getattr(agent, "signup_preview_state", None)
         == PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
@@ -242,7 +242,9 @@ def transition_agent_to_signup_preview_waiting(agent_id) -> bool:
         PersistentAgent.objects.filter(
             id=agent_id,
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_FIRST_REPLY_PAUSE,
-        ).update(
+        )
+        .exclude(planning_state=PersistentAgent.PlanningState.PLANNING)
+        .update(
             signup_preview_state=PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION,
         )
     )
