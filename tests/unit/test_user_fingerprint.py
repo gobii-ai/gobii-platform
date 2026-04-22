@@ -14,6 +14,15 @@ from api.services.trial_abuse import (
 )
 from api.services.user_fingerprint import (
     enqueue_user_fingerprint_visit_refresh,
+    get_fp_bot,
+    get_fp_country,
+    get_fp_high_activity,
+    get_fp_proxy,
+    get_fp_suspect_score,
+    get_fp_tampering,
+    get_fp_tor,
+    get_fp_vpn,
+    get_latest_user_fingerprint_visit,
     refresh_user_fingerprint_visit,
     stage_user_fingerprint_visit,
 )
@@ -506,6 +515,112 @@ class UserFingerprintVisitTests(TestCase):
         self.assertEqual(visit.fetch_status, UserFingerprintVisitFetchStatusChoices.FAILED)
         self.assertEqual(visit.error_message, "bad timestamp")
         retry_mock.assert_not_called()
+
+    def test_fp_helpers_return_none_without_succeeded_visit(self):
+        user = self._create_user("fingerprint-no-success@example.com")
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-pending",
+            fingerprint_visitor_id="visitor-123",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.PENDING,
+        )
+
+        self.assertIsNone(get_fp_suspect_score(user))
+        self.assertIsNone(get_fp_country(user))
+        self.assertIsNone(get_fp_vpn(user))
+        self.assertIsNone(get_fp_tor(user))
+        self.assertIsNone(get_fp_proxy(user))
+        self.assertIsNone(get_fp_tampering(user))
+        self.assertIsNone(get_fp_high_activity(user))
+        self.assertIsNone(get_fp_bot(user))
+
+    def test_fp_helpers_use_latest_succeeded_visit(self):
+        user = self._create_user("fingerprint-helper-values@example.com")
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-old",
+            fingerprint_visitor_id="visitor-old",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now() - timedelta(days=1),
+            suspect_score=2.5,
+            country_code="US",
+            vpn=False,
+            tor=True,
+            proxy=False,
+            tampering=False,
+            high_activity_device=True,
+        )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-new",
+            fingerprint_visitor_id="visitor-new",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now(),
+            suspect_score=7.0,
+            country_code="VN",
+            vpn=True,
+            tor=False,
+            proxy=True,
+            tampering=True,
+            high_activity_device=None,
+            bot="not_detected",
+        )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-failed",
+            fingerprint_visitor_id="visitor-failed",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.FAILED,
+            event_timestamp=timezone.now() + timedelta(minutes=5),
+            suspect_score=99.0,
+            country_code="CA",
+            vpn=False,
+            tor=True,
+            proxy=False,
+            tampering=False,
+            high_activity_device=False,
+        )
+
+        self.assertEqual(get_fp_suspect_score(user), 7.0)
+        self.assertEqual(get_fp_country(user), "VN")
+        self.assertTrue(get_fp_vpn(user))
+        self.assertFalse(get_fp_tor(user))
+        self.assertTrue(get_fp_proxy(user))
+        self.assertTrue(get_fp_tampering(user))
+        self.assertIsNone(get_fp_high_activity(user))
+        self.assertEqual(get_fp_bot(user), "not_detected")
+
+    def test_latest_succeeded_visit_uses_fetched_at_when_event_timestamp_is_missing(self):
+        user = self._create_user("fingerprint-helper-null-ts@example.com")
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-old-with-ts",
+            fingerprint_visitor_id="visitor-old-with-ts",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=timezone.now() - timedelta(hours=6),
+            fetched_at=timezone.now() - timedelta(hours=6),
+            country_code="US",
+        )
+        UserFingerprintVisit.objects.create(
+            user=user,
+            source=SIGNAL_SOURCE_SIGNUP,
+            fingerprint_event_id="request-new-no-ts",
+            fingerprint_visitor_id="visitor-new-no-ts",
+            fetch_status=UserFingerprintVisitFetchStatusChoices.SUCCEEDED,
+            event_timestamp=None,
+            fetched_at=timezone.now() - timedelta(hours=1),
+            country_code="VN",
+        )
+
+        visit = get_latest_user_fingerprint_visit(user)
+
+        self.assertIsNotNone(visit)
+        self.assertEqual(visit.fingerprint_event_id, "request-new-no-ts")
+        self.assertEqual(get_fp_country(user), "VN")
 
     def test_fetch_user_fingerprint_visit_task_is_late_acked(self):
         self.assertTrue(fetch_user_fingerprint_visit_task.acks_late)

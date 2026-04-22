@@ -39,9 +39,11 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY,
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     STRIPE_CHECKOUT_FLOW_TYPE_TRIAL,
+    build_checkout_fingerprint_metadata,
     build_checkout_customer_metadata,
     build_checkout_flow_metadata,
     clear_checkout_customer_metadata,
+    clear_checkout_fingerprint_metadata,
 )
 from billing.checkout_context import record_checkout_context
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
@@ -628,6 +630,7 @@ def _set_customer_checkout_context(
     value: float | None,
     currency: str | None,
     checkout_source_url: str | None,
+    extra_metadata: dict[str, str] | None = None,
 ) -> None:
     """Mark the customer with the active checkout context for Radar evaluation."""
     stripe.Customer.modify(
@@ -640,6 +643,7 @@ def _set_customer_checkout_context(
             value=value,
             currency=(currency or "USD").upper(),
             checkout_source_url=checkout_source_url,
+            extra_metadata=extra_metadata,
         ),
         api_key=stripe.api_key,
     )
@@ -678,6 +682,7 @@ def _create_checkout_session_with_customer_context(
     value: float | None,
     currency: str | None,
     checkout_source_url: str | None,
+    extra_customer_metadata: dict[str, str] | None = None,
     checkout_kwargs: dict,
 ):
     """
@@ -697,6 +702,7 @@ def _create_checkout_session_with_customer_context(
             value=value,
             currency=currency,
             checkout_source_url=checkout_source_url,
+            extra_metadata=extra_customer_metadata,
         )
         customer_checkout_context_set = True
     except stripe.error.StripeError as exc:
@@ -1948,11 +1954,17 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             if include_trial
             else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
         )
+        fingerprint_metadata = build_checkout_fingerprint_metadata(user) if include_trial else None
         checkout_metadata = build_checkout_flow_metadata(
             base_metadata,
             flow_type=flow_type,
+            extra_metadata=fingerprint_metadata,
         )
-        subscription_data = {"metadata": checkout_metadata}
+        subscription_metadata = build_checkout_flow_metadata(
+            base_metadata,
+            flow_type=flow_type,
+        )
+        subscription_data = {"metadata": subscription_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
@@ -1988,6 +2000,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             checkout_source_url=base_metadata.get("checkout_source_url"),
+            extra_customer_metadata=(
+                build_checkout_fingerprint_metadata(user, customer_context=True)
+                if include_trial
+                else clear_checkout_fingerprint_metadata(customer_context=True)
+            ),
             checkout_kwargs=checkout_kwargs,
         )
         # Webhook-based AddPaymentInfo is authoritative so we only send once a
@@ -2136,11 +2153,17 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             if include_trial
             else STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE
         )
+        fingerprint_metadata = build_checkout_fingerprint_metadata(user) if include_trial else None
         checkout_metadata = build_checkout_flow_metadata(
             base_metadata,
             flow_type=flow_type,
+            extra_metadata=fingerprint_metadata,
         )
-        subscription_data = {"metadata": checkout_metadata}
+        subscription_metadata = build_checkout_flow_metadata(
+            base_metadata,
+            flow_type=flow_type,
+        )
+        subscription_data = {"metadata": subscription_metadata}
         if include_trial:
             subscription_data["trial_period_days"] = trial_days
 
@@ -2174,6 +2197,11 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             value=price,
             currency=price_currency,
             checkout_source_url=base_metadata.get("checkout_source_url"),
+            extra_customer_metadata=(
+                build_checkout_fingerprint_metadata(user, customer_context=True)
+                if include_trial
+                else clear_checkout_fingerprint_metadata(customer_context=True)
+            ),
             checkout_kwargs=checkout_kwargs,
         )
         # Webhook-based AddPaymentInfo is authoritative so we only send once a

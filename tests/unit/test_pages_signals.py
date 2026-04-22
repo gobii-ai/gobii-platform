@@ -37,6 +37,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY,
     STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY,
+    clear_checkout_customer_metadata,
 )
 from pages.signals import (
     handle_checkout_session_event,
@@ -747,15 +748,7 @@ class CheckoutSessionSignalTests(TestCase):
         mock_customer_retrieve.assert_called_once_with("cus_trial_complete", api_key="sk_test")
         mock_customer_modify.assert_called_once_with(
             "cus_trial_complete",
-            metadata={
-                STRIPE_CHECKOUT_CUSTOMER_CURRENCY_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_FLOW_TYPE_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_EVENT_ID_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_PLAN_LABEL_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_PLAN_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_SOURCE_URL_META_KEY: "",
-                STRIPE_CHECKOUT_CUSTOMER_VALUE_META_KEY: "",
-            },
+            metadata=clear_checkout_customer_metadata(),
             api_key="sk_test",
         )
 
