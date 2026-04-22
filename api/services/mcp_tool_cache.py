@@ -9,7 +9,7 @@ from config.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
 
-CACHE_KEY_VERSION = 1
+CACHE_KEY_VERSION = 2
 CACHE_TTL_SECONDS = 60 * 60
 CACHE_PREFIX = f"mcp:tools:v{CACHE_KEY_VERSION}"
 

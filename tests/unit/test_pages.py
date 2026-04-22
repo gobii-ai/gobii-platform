@@ -275,7 +275,7 @@ class HomePageTests(TestCase):
             scope=MCPServerConfig.Scope.PLATFORM,
             name="pipedream",
             display_name="Pipedream",
-            url="https://remote.mcp.pipedream.net",
+            url="https://remote.mcp.pipedream.net/v3",
             is_active=True,
             prefetch_apps=["slack"],
         )

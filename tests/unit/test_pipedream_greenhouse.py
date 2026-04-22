@@ -24,7 +24,7 @@ def _get_or_create_pipedream_config():
         "description": "Test Pipedream server",
         "command": "",
         "command_args": [],
-        "url": "https://remote.mcp.pipedream.net",
+        "url": "https://remote.mcp.pipedream.net/v3",
         "prefetch_apps": [],
         "metadata": {},
         "is_active": True,
@@ -159,7 +159,7 @@ class PipedreamGreenhouseConnectTests(TestCase):
 
         # Act
         with patch.object(mgr, "_select_agent_proxy_url", return_value=(None, None)):
-            res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"instruction": "x"})
+            res = mgr.execute_mcp_tool(agent, "greenhouse-create-candidate", {"name": "x"})
 
         # Assert
         self.assertEqual(res.get("status"), "action_required")
@@ -191,7 +191,7 @@ class PipedreamGreenhouseDiscoveryTests(TestCase):
 
         # Intercept _pd_build_headers to assert app_slug
         seen_app = {}
-        def fake_headers(mode, app_slug, external_user_id, conversation_id):
+        def fake_headers(app_slug, external_user_id, conversation_id):
             seen_app['app'] = app_slug
             return {"Authorization": "Bearer x", "x-pd-app-slug": app_slug or ""}
 

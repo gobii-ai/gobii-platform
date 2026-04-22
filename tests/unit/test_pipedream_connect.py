@@ -56,7 +56,7 @@ def _setup_pipedream_tool(mgr, agent, description="desc"):
     mgr._initialized = True
     mgr._tools_cache = {str(config.id): [tool]}
     mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
-    cache_key = f"{agent.id}:google_sheets:sub-agent"
+    cache_key = f"{agent.id}:google_sheets"
     client_mock = MagicMock()
     client_mock.transport = MagicMock(headers={})
     mgr._pd_agent_clients[cache_key] = client_mock
@@ -74,6 +74,19 @@ def _setup_pipedream_tool(mgr, agent, description="desc"):
 class PipedreamConnectHelperTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
+
+    def test_pipedream_headers_do_not_request_sub_agent_mode(self):
+        mgr = MCPToolManager()
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
+
+        headers = mgr._pd_build_headers(
+            app_slug="google_sheets",
+            external_user_id="agent-id",
+            conversation_id="conversation-id",
+        )
+
+        self.assertEqual(headers["x-pd-app-slug"], "google_sheets")
+        self.assertNotIn("x-pd-tool-mode", headers)
 
     @patch("api.integrations.pipedream_connect.requests.post")
     @patch("api.integrations.pipedream_connect.get_mcp_manager")
@@ -227,7 +240,7 @@ class PipedreamManagerConnectLinkTests(TestCase):
         mock_create.return_value = (fake_session, "https://example.com/connect?token=abc&app=google_sheets")
 
         # Act
-        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"instruction": "x"})
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
 
         # Assert
         self.assertEqual(res.get("status"), "action_required")
@@ -270,7 +283,7 @@ class PipedreamManagerConnectLinkTests(TestCase):
         )
         mock_create.return_value = (expired_session, None)
 
-        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"instruction": "x"})
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
 
         self.assertEqual(res.get("status"), "action_required")
         self.assertIsNone(res.get("connect_url"))
@@ -315,7 +328,7 @@ class PipedreamManagerConnectLinkTests(TestCase):
             status=PipedreamConnectSession.Status.PENDING,
         )
 
-        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"instruction": "x"})
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
 
         self.assertEqual(res.get("status"), "action_required")
         # Now returns JIT URL instead of direct Pipedream URL
