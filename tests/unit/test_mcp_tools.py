@@ -3144,6 +3144,46 @@ class MCPToolFunctionsTests(TestCase):
             if isinstance(entry, dict)
         }
         self.assertIn("http_request", names)
+
+    @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=False)
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_get_enabled_tool_definitions_sanitizes_mcp_array_items(
+        self,
+        mock_get_manager,
+        _mock_custom_available,
+    ):
+        """Enabled MCP tool definitions include required array item schemas."""
+        mock_manager = MagicMock()
+        mock_manager.get_enabled_tools_definitions.return_value = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "mcp_analytics-db_pg_execute_sql",
+                    "description": "Execute SQL",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "sql": {
+                                "type": "object",
+                                "properties": {
+                                    "query": {"type": "string"},
+                                    "params": {"type": "array"},
+                                },
+                            },
+                        },
+                    },
+                },
+            }
+        ]
+        mock_get_manager.return_value = mock_manager
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        tool_def = definitions[0]
+
+        self.assertEqual(
+            tool_def["function"]["parameters"]["properties"]["sql"]["properties"]["params"]["items"],
+            {"type": "string"},
+        )
         
     @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
