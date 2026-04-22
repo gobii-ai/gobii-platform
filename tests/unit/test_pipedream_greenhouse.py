@@ -24,7 +24,7 @@ def _get_or_create_pipedream_config():
         "description": "Test Pipedream server",
         "command": "",
         "command_args": [],
-        "url": "https://remote.mcp.pipedream.net/v3",
+        "url": "https://remote.mcp.pipedream.net",
         "prefetch_apps": [],
         "metadata": {},
         "is_active": True,

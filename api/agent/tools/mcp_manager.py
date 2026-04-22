@@ -114,9 +114,6 @@ BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
 BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 3
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
 
-PIPEDREAM_REMOTE_MCP_URL_V3 = "https://remote.mcp.pipedream.net/v3"
-
-
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(parameters, dict):
         return parameters
@@ -871,10 +868,6 @@ class MCPToolManager:
             if fallback_value:
                 env[key] = fallback_value
 
-        url = cfg.url or None
-        if cfg.name == self.PIPEDREAM_RUNTIME_NAME and url == "https://remote.mcp.pipedream.net":
-            url = PIPEDREAM_REMOTE_MCP_URL_V3
-
         return MCPServerRuntime(
             config_id=str(cfg.id),
             name=cfg.name,
@@ -882,7 +875,7 @@ class MCPToolManager:
             description=cfg.description,
             command=cfg.command or None,
             args=list(cfg.command_args or []),
-            url=url,
+            url=cfg.url or None,
             auth_method=cfg.auth_method,
             env=env,
             headers=headers,

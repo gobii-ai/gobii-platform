@@ -399,7 +399,7 @@ class PipedreamAppsAPITests(TestCase):
             scope=MCPServerConfig.Scope.PLATFORM,
             name="pipedream",
             display_name="Pipedream",
-            url="https://remote.mcp.pipedream.net/v3",
+            url="https://remote.mcp.pipedream.net",
             prefetch_apps=["google_sheets", "google_docs"],
         )
 
@@ -688,7 +688,7 @@ class PipedreamAppEnablementServiceTests(TestCase):
             scope=MCPServerConfig.Scope.PLATFORM,
             name="pipedream",
             display_name="Pipedream",
-            url="https://remote.mcp.pipedream.net/v3",
+            url="https://remote.mcp.pipedream.net",
             prefetch_apps=["google_sheets", "google_docs"],
         )
 

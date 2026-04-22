@@ -51,7 +51,7 @@ def seed_platform_servers(apps, schema_editor):
             'description': 'Access thousands of OAuth integrations via Pipedream Connect',
             'command': '',
             'command_args': [],
-            'url': 'https://remote.mcp.pipedream.net/v3',
+            'url': 'https://remote.mcp.pipedream.net',
             'prefetch_apps': ['google_sheets', 'greenhouse'],
             'metadata': {},
             'env_json_encrypted': _encrypt_dict({}),
