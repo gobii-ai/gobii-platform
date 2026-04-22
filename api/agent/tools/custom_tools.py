@@ -53,6 +53,9 @@ _JSON_SCHEMA_TYPE_NAMES = frozenset({
     "object",
     "string",
 })
+_INFERRED_REQUIRED_PROPERTY_DESCRIPTION = (
+    "Required parameter inferred from schema.required because no explicit property definition was provided."
+)
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
 _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
@@ -328,6 +331,59 @@ def _normalize_json_schema_type_value(value: Any) -> Any:
     return value
 
 
+def _normalize_json_schema_key(key: Any) -> Any:
+    if not isinstance(key, str):
+        return key
+
+    stripped = key.strip()
+    try:
+        parsed = json.loads(stripped)
+    except json.JSONDecodeError:
+        parsed = None
+    if isinstance(parsed, str):
+        return parsed
+
+    if stripped.startswith('"') or stripped.endswith('"'):
+        return stripped.strip('"')
+    return key
+
+
+def _normalize_json_schema_keys(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_normalize_json_schema_keys(item) for item in value]
+
+    if not isinstance(value, dict):
+        return value
+
+    normalized: Dict[Any, Any] = {}
+    for key, item in value.items():
+        normalized_key = _normalize_json_schema_key(key)
+        normalized_item = _normalize_json_schema_keys(item)
+        existing = normalized.get(normalized_key)
+        if isinstance(existing, dict) and isinstance(normalized_item, dict):
+            normalized[normalized_key] = {**existing, **normalized_item}
+        else:
+            normalized[normalized_key] = normalized_item
+    return normalized
+
+
+def _schema_type_includes(schema: Dict[str, Any], schema_type: str) -> bool:
+    value = schema.get("type")
+    if isinstance(value, str):
+        return value == schema_type
+    if isinstance(value, list):
+        return schema_type in value
+    return False
+
+
+def _property_schema_from_value(value: Any) -> Any:
+    if isinstance(value, str):
+        return {"type": "string", "description": value}
+    if isinstance(value, dict):
+        return _normalize_json_schema_node(value)
+    return {"type": "string"}
+
+
 def _normalize_json_schema_node(value: Any) -> Any:
     if isinstance(value, list):
         normalized_items: list[Any] = []
@@ -354,13 +410,15 @@ def _normalize_json_schema_node(value: Any) -> Any:
     properties = schema.get("properties")
     if isinstance(properties, dict):
         schema["properties"] = {
-            key: _normalize_json_schema_node(property_schema)
+            key: _property_schema_from_value(property_schema)
             for key, property_schema in properties.items()
         }
 
     items = schema.get("items")
     if isinstance(items, (dict, list)):
         schema["items"] = _normalize_json_schema_node(items)
+    elif _schema_type_includes(schema, "array"):
+        schema["items"] = {"type": "string"}
 
     additional_properties = schema.get("additionalProperties")
     if isinstance(additional_properties, dict):
@@ -370,6 +428,16 @@ def _normalize_json_schema_node(value: Any) -> Any:
         variants = schema.get(combinator)
         if isinstance(variants, list):
             schema[combinator] = [_normalize_json_schema_node(variant) for variant in variants]
+
+    properties = schema.get("properties")
+    required = schema.get("required")
+    if isinstance(properties, dict) and isinstance(required, list):
+        for required_name in required:
+            if isinstance(required_name, str) and required_name not in properties:
+                properties[required_name] = {
+                    "type": "string",
+                    "description": _INFERRED_REQUIRED_PROPERTY_DESCRIPTION,
+                }
 
     return schema
 
@@ -382,7 +450,7 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
             return None
     if not isinstance(value, dict):
         return None
-    schema = _normalize_json_schema_node(value)
+    schema = _normalize_json_schema_node(_normalize_json_schema_keys(value))
     schema_type = schema.get("type")
     if schema_type in (None, ""):
         schema["type"] = "object"
@@ -412,6 +480,13 @@ def _normalize_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
 
 def normalize_custom_tool_parameters_schema(value: Any) -> Optional[Dict[str, Any]]:
     return _normalize_parameters_schema(value)
+
+
+def sanitize_tool_parameters_schema_for_llm(value: Any) -> Dict[str, Any]:
+    normalized = _normalize_parameters_schema(value)
+    if normalized is None:
+        return {"type": "object", "properties": {}, "required": []}
+    return normalized
 
 
 def _normalize_custom_tool_entrypoint(value: Any) -> Optional[str]:

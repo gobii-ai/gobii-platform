@@ -45,7 +45,7 @@ from .create_video import (
 from .custom_tools import (
     execute_custom_tool,
     is_custom_tools_available_for_agent,
-    normalize_custom_tool_parameters_schema,
+    sanitize_tool_parameters_schema_for_llm,
 )
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
@@ -315,26 +315,24 @@ class ToolCatalogEntry:
 
 
 def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
-    normalized = normalize_custom_tool_parameters_schema(parameters_schema)
-    if normalized is None:
-        return {"type": "object", "properties": {}, "required": []}
+    return sanitize_tool_parameters_schema_for_llm(parameters_schema)
 
-    schema = dict(normalized)
-    properties = dict(schema.get("properties") or {})
-    changed = False
-    for required_name in schema.get("required") or []:
-        if required_name in properties:
-            continue
-        properties[required_name] = {
-            "type": "string",
-            "description": (
-                "Required parameter inferred from schema.required because no explicit property definition was provided."
-            ),
-        }
-        changed = True
-    if changed:
-        schema["properties"] = properties
-    return schema
+
+def _sanitize_tool_definition_for_llm(tool_def: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(tool_def, dict):
+        return tool_def
+
+    function_block = tool_def.get("function")
+    if not isinstance(function_block, dict):
+        return tool_def
+
+    sanitized = dict(tool_def)
+    sanitized_function = dict(function_block)
+    sanitized_function["parameters"] = sanitize_tool_parameters_schema_for_llm(
+        function_block.get("parameters")
+    )
+    sanitized["function"] = sanitized_function
+    return sanitized
 
 
 def get_available_custom_tool_entries(
@@ -899,7 +897,10 @@ def ensure_default_tools_enabled(
 def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]:
     """Return tool definitions for all enabled tools (MCP, built-ins, custom)."""
     manager = _get_manager()
-    definitions = manager.get_enabled_tools_definitions(agent)
+    definitions = [
+        _sanitize_tool_definition_for_llm(definition)
+        for definition in manager.get_enabled_tools_definitions(agent)
+    ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)
         .values_list("tool_full_name", flat=True)
@@ -950,7 +951,7 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
             else None
         )
         if tool_name and tool_name not in existing_names:
-            definitions.append(tool_def)
+            definitions.append(_sanitize_tool_definition_for_llm(tool_def))
             existing_names.add(tool_name)
 
     return definitions

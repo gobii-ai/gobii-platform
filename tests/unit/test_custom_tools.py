@@ -164,7 +164,7 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
-    def test_normalize_custom_tool_parameters_schema_preserves_missing_required_fields(self):
+    def test_normalize_custom_tool_parameters_schema_synthesizes_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(
             {
                 "type": "object",
@@ -183,9 +183,72 @@ class CustomToolsTests(TestCase):
                 "properties": {
                     "result_id": {"type": "string"},
                     "file_path": {"type": "string"},
+                    "result_id flocks": {
+                        "type": "string",
+                        "description": (
+                            "Required parameter inferred from schema.required because no explicit property definition was provided."
+                        ),
+                    },
                 },
                 "required": ["result_id flocks", "file_path"],
             },
+        )
+
+    def test_normalize_custom_tool_parameters_schema_repairs_quoted_properties_key(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "required": ["spreadsheet_id", "worksheet_name"],
+                "properties": {},
+                '"properties"': {
+                    '"spreadsheet_id"': {
+                        "type": "string",
+                        '"description': "The ID of the Google Sheet.",
+                    },
+                    '"worksheet_name"': {
+                        "type": "string",
+                        '"description': "The worksheet name.",
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            schema,
+            {
+                "type": "object",
+                "required": ["spreadsheet_id", "worksheet_name"],
+                "properties": {
+                    "spreadsheet_id": {
+                        "type": "string",
+                        "description": "The ID of the Google Sheet.",
+                    },
+                    "worksheet_name": {
+                        "type": "string",
+                        "description": "The worksheet name.",
+                    },
+                },
+            },
+        )
+
+    def test_normalize_custom_tool_parameters_schema_adds_missing_array_items(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "sql": {
+                        "type": "object",
+                        "properties": {
+                            "params": {"type": "array"},
+                        },
+                    },
+                },
+            }
+        )
+
+        self.assertEqual(
+            schema["properties"]["sql"]["properties"]["params"]["items"],
+            {"type": "string"},
         )
 
     def test_normalize_custom_tool_parameters_schema_canonicalizes_nested_schema_types(self):
