@@ -251,6 +251,54 @@ class CustomToolsTests(TestCase):
             {"type": "string"},
         )
 
+    def test_normalize_custom_tool_parameters_schema_synthesizes_properties_when_missing(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "required": ["spreadsheet_id"],
+            }
+        )
+
+        self.assertEqual(
+            schema["properties"]["spreadsheet_id"],
+            {
+                "type": "string",
+                "description": (
+                    "Required parameter inferred from schema.required because no explicit property definition was provided."
+                ),
+            },
+        )
+
+    def test_normalize_custom_tool_parameters_schema_prefers_dict_on_key_collision(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "spreadsheet_id": {"type": "string"},
+                },
+                '"properties"': "malformed duplicate",
+            }
+        )
+
+        self.assertEqual(
+            schema["properties"],
+            {
+                "spreadsheet_id": {"type": "string"},
+            },
+        )
+
+    def test_normalize_custom_tool_parameters_schema_preserves_boolean_property_schema(self):
+        schema = normalize_custom_tool_parameters_schema(
+            {
+                "type": "object",
+                "properties": {
+                    "disabled": False,
+                },
+            }
+        )
+
+        self.assertIs(schema["properties"]["disabled"], False)
+
     def test_normalize_custom_tool_parameters_schema_canonicalizes_nested_schema_types(self):
         schema = normalize_custom_tool_parameters_schema(
             {

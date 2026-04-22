@@ -362,6 +362,10 @@ def _normalize_json_schema_keys(value: Any) -> Any:
         existing = normalized.get(normalized_key)
         if isinstance(existing, dict) and isinstance(normalized_item, dict):
             normalized[normalized_key] = {**existing, **normalized_item}
+        elif isinstance(existing, dict):
+            continue
+        elif isinstance(normalized_item, dict):
+            normalized[normalized_key] = normalized_item
         else:
             normalized[normalized_key] = normalized_item
     return normalized
@@ -379,6 +383,8 @@ def _schema_type_includes(schema: Dict[str, Any], schema_type: str) -> bool:
 def _property_schema_from_value(value: Any) -> Any:
     if isinstance(value, str):
         return {"type": "string", "description": value}
+    if isinstance(value, bool):
+        return value
     if isinstance(value, dict):
         return _normalize_json_schema_node(value)
     return {"type": "string"}
@@ -431,7 +437,10 @@ def _normalize_json_schema_node(value: Any) -> Any:
 
     properties = schema.get("properties")
     required = schema.get("required")
-    if isinstance(properties, dict) and isinstance(required, list):
+    if isinstance(required, list) and (properties is None or isinstance(properties, dict)):
+        if properties is None:
+            properties = {}
+            schema["properties"] = properties
         for required_name in required:
             if isinstance(required_name, str) and required_name not in properties:
                 properties[required_name] = {
