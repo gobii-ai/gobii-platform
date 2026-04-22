@@ -9,7 +9,6 @@ from typing import Any
 
 from django.db import DatabaseError, transaction
 from django.utils import timezone
-from django.utils.html import escape
 from django.utils.text import slugify
 
 from api.agent.core.processing_flags import bump_human_inbound_generation
@@ -36,8 +35,6 @@ BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<bod
 MAX_OPTION_COUNT = 6
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
-HUMAN_INPUT_RELAY_MODE_PANEL_ONLY = "panel_only"
-HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED = "explicit_send_required"
 
 logger = logging.getLogger(__name__)
 
@@ -91,43 +88,6 @@ class LLMHumanInputMatch:
 
 def _coerce_string(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _truncate(text: str, limit: int) -> str:
-    text = text.strip()
-    if len(text) <= limit:
-        return text
-    return text[: max(0, limit - 3)].rstrip() + "..."
-
-
-def _build_option_line(option: dict[str, Any], *, index: int, compact: bool) -> str:
-    title = _coerce_string(option.get("title"))
-    description = _coerce_string(option.get("description"))
-    line = f"{index}. {title}"
-    if description:
-        detail = _truncate(description, 72) if compact else description
-        line += f" - {detail}"
-    return line
-
-
-def _build_request_lines(
-    request_obj: PersistentAgentHumanInputRequest,
-    *,
-    compact: bool,
-    question_number: int | None = None,
-    option_indent: str = "",
-) -> list[str]:
-    question_prefix = f"{question_number}. " if question_number is not None else ""
-    lines = [f"{question_prefix}{request_obj.question.strip()}"]
-    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-    if options:
-        for index, option in enumerate(options, start=1):
-            lines.append(f"{option_indent}{_build_option_line(option, index=index, compact=compact)}")
-        reply_hint = "Reply with the option number, the option title, or your own words."
-    else:
-        reply_hint = "Reply in your own words."
-    lines.append(f"{option_indent}{reply_hint}".rstrip())
-    return lines
 
 
 def _get_or_create_endpoint(
@@ -355,116 +315,51 @@ def resolve_human_input_target(agent: PersistentAgent) -> HumanInputTarget | Non
     return None
 
 
-def _render_prompt_text(
+def _serialize_request_summary(
     request_obj: PersistentAgentHumanInputRequest,
     *,
-    compact: bool,
-) -> str:
-    return "\n".join(_build_request_lines(request_obj, compact=compact))
+    position: int,
+) -> dict[str, Any]:
+    return {
+        "request_id": str(request_obj.id),
+        "question": request_obj.question,
+        "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
+        "input_mode": request_obj.input_mode,
+        "position": position,
+    }
 
 
-def _render_prompt_html(request_obj: PersistentAgentHumanInputRequest) -> str:
-    parts = [f"<p>{escape(request_obj.question)}</p>"]
-    options = request_obj.options_json if isinstance(request_obj.options_json, list) else []
-    if options:
-        parts.append("<ol>")
-        for option in options:
-            title = escape(_coerce_string(option.get("title")))
-            description = escape(_coerce_string(option.get("description")))
-            if description:
-                parts.append(f"<li><strong>{title}</strong><br>{description}</li>")
-            else:
-                parts.append(f"<li><strong>{title}</strong></li>")
-        parts.append("</ol>")
-        parts.append("<p>Reply with the option number, the option title, or your own words.</p>")
-    else:
-        parts.append("<p>Reply in your own words.</p>")
-    return "".join(parts)
-
-
-def _render_batch_prompt_text(
-    request_objects: list[PersistentAgentHumanInputRequest],
-    *,
-    compact: bool,
-) -> str:
-    lines = [
-        "Please answer each question below.",
-        "Reply with one answer per line using the matching question number, for example:",
-        "1. <your answer>",
-        "2. <your answer>",
-    ]
-    for index, request_obj in enumerate(request_objects, start=1):
-        lines.append("")
-        lines.append(f"{index}. {request_obj.question.strip()}")
-    return "\n".join(lines)
-
-
-def _render_batch_prompt_html(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
-    parts = [
-        "<p>Please answer each question below.</p>",
-        "<p>Reply with one answer per line using the matching question number, for example:<br>1. &lt;your answer&gt;<br>2. &lt;your answer&gt;</p>",
-        "<ol>",
-    ]
-    for request_obj in request_objects:
-        parts.append(f"<li>{escape(request_obj.question)}</li>")
-    parts.append("</ol>")
-    return "".join(parts)
-
-
-def _build_email_subject(request_objects: list[PersistentAgentHumanInputRequest]) -> str:
-    if len(request_objects) == 1:
-        return _truncate(f"Quick question: {request_objects[0].question}", 120)
-
-    first_question = _coerce_string(request_objects[0].question)
-    remaining_count = max(0, len(request_objects) - 1)
-    suffix = f" (+{remaining_count} more)" if remaining_count else ""
-    return _truncate(f"Quick questions: {first_question}{suffix}", 120)
-
-
-def _build_relay_payload(
+def _build_next_message_suggestion(
     request_objects: list[PersistentAgentHumanInputRequest],
     target: HumanInputTarget,
-) -> tuple[str, dict[str, Any]]:
-    ordered_requests = _order_requests_for_batch(request_objects)
+) -> dict[str, Any] | None:
     if target.channel == CommsChannel.WEB:
-        return HUMAN_INPUT_RELAY_MODE_PANEL_ONLY, {
-            "kind": "panel",
-        }
+        return None
 
-    if target.channel == CommsChannel.EMAIL:
-        body_text = (
-            _render_prompt_text(ordered_requests[0], compact=False)
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_text(ordered_requests, compact=False)
-        )
-        mobile_first_html = (
-            _render_prompt_html(ordered_requests[0])
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_html(ordered_requests)
-        )
-        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
-            "kind": "send_email",
-            "tool_name": "send_email",
-            "to_address": target.address,
-            "subject": _build_email_subject(ordered_requests),
-            "mobile_first_html": mobile_first_html,
-            "body_text": body_text,
-        }
+    send_tool = {
+        CommsChannel.EMAIL: "send_email",
+        CommsChannel.SMS: "send_sms",
+    }.get(target.channel)
+    if send_tool is None:
+        return None
 
-    if target.channel == CommsChannel.SMS:
-        body = (
-            _render_prompt_text(ordered_requests[0], compact=True)
-            if len(ordered_requests) == 1
-            else _render_batch_prompt_text(ordered_requests, compact=True)
-        )
-        return HUMAN_INPUT_RELAY_MODE_EXPLICIT_SEND_REQUIRED, {
-            "kind": "send_sms",
-            "tool_name": "send_sms",
-            "to_number": target.address,
-            "body": body,
-        }
-
-    raise ValueError(f"Unsupported channel '{target.channel}' for human input requests.")
+    return {
+        "channel": target.channel,
+        "address": target.address,
+        "send_tool": send_tool,
+        "instruction": (
+            f"Include these questions in your next normal {target.channel} message to {target.address}. "
+            f"The user may not be actively viewing the web chat. Do not call request_human_input again "
+            "for the same questions. The user's reply on that channel will be processed as answers."
+        ),
+        "questions": [
+            {
+                "number": index,
+                "question": request_obj.question,
+            }
+            for index, request_obj in enumerate(request_objects, start=1)
+        ],
+    }
 
 
 def _build_request_result(
@@ -476,27 +371,16 @@ def _build_request_result(
     partial_success: bool = False,
 ) -> dict[str, Any]:
     ordered_requests = _order_requests_for_batch(request_objects)
-    relay_mode, relay_payload = _build_relay_payload(ordered_requests, target)
     request_ids = [str(request_obj.id) for request_obj in ordered_requests]
     request_count = len(request_ids)
+    next_message_suggestion = _build_next_message_suggestion(ordered_requests, target)
 
     if message is None:
-        if relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
-            message = (
-                "Created 1 human input request. It is visible in the web chat composer panel."
-                if request_count == 1
-                else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
-            )
-        else:
-            tool_name = relay_payload.get("tool_name") or "send tool"
-            message = (
-                f"Created 1 human input request for {target.channel}. Use {tool_name} with relay_payload to deliver it."
-                if request_count == 1
-                else (
-                    f"Created {request_count} human input requests for {target.channel}. "
-                    f"Use {tool_name} with relay_payload to deliver them."
-                )
-            )
+        message = (
+            "Created 1 human input request. It is visible in the web chat composer panel."
+            if request_count == 1
+            else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
+        )
 
     result = {
         "status": status,
@@ -506,12 +390,13 @@ def _build_request_result(
         "requests_count": request_count,
         "target_channel": target.channel,
         "target_address": target.address,
-        "relay_mode": relay_mode,
-        "relay_payload": relay_payload,
+        "web_chat_visible": True
     }
+    if next_message_suggestion is not None:
+        result["next_message_suggestion"] = next_message_suggestion
     if partial_success:
         result["partial_success"] = True
-    if status == "ok" and relay_mode == HUMAN_INPUT_RELAY_MODE_PANEL_ONLY:
+    if status == "ok" and target.channel == CommsChannel.WEB:
         result["auto_sleep_ok"] = True
     return result
 
