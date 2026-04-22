@@ -532,7 +532,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn("## Planning Mode", system_message["content"])
-        self.assertIn("## REQUIRED: First-Run Welcome", system_message["content"])
+        self.assertIn("## REQUIRED: Your very first action must be sending a welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])

@@ -100,6 +100,7 @@ class PersistentAgentPlanningModeTests(TestCase):
             self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
 
     def test_planning_prompt_is_inserted_before_first_run_welcome(self):
+        self._set_email_welcome_target()
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
@@ -113,10 +114,16 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Your charter is a living document.", prompt)
         self.assertIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("## Planning Mode", prompt)
-        self.assertIn("REQUIRED: First-Run Welcome", prompt)
-        self.assertIn("Start your response with a brief welcome message to Matt", prompt)
-        self.assertIn("before asking planning questions or calling tools", prompt)
+        self.assertIn("REQUIRED: Your very first action must be sending a welcome message", prompt)
+        self.assertIn(f"Contact channel: email at {self.user.email}", prompt)
+        self.assertIn("MUST call send_email to introduce yourself", prompt)
+        self.assertIn("Greeting comes first, always.", prompt)
+        self.assertIn("Be warm and adventurous", prompt)
+        self.assertIn("### R1: Greeting (first impression)", prompt)
+        self.assertIn("## Then Planning Mode: clarify before main work", prompt)
+        self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("After the welcome, continue Planning Mode", prompt)
+        self.assertIn("move planning forward or call end_planning, not start the deliverable work", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("Skip Planning", prompt)
         self.assertIn("`requests` parameter", prompt)
@@ -134,7 +141,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         normal_prompt_index = prompt.index("You are a persistent AI agent.")
         planning_index = prompt.index("## Planning Mode")
-        welcome_index = prompt.index("## REQUIRED: First-Run Welcome")
+        welcome_index = prompt.index("## REQUIRED: Your very first action must be sending a welcome message")
         self.assertLess(normal_prompt_index, planning_index)
         self.assertLess(planning_index, welcome_index)
 
