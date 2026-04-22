@@ -6,11 +6,13 @@ from typing import Optional
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.http import HttpRequest
 from django.utils.crypto import get_random_string
 
 from agent_namer import AgentNameGenerator
 from agents.services import PretrainedWorkerTemplateService, AgentService
 
+from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
 from api.agent.core.llm_config import resolve_intelligence_tier_for_owner
 from api.agent.avatar import maybe_schedule_agent_avatar
 from api.agent.short_description import (
@@ -33,6 +35,7 @@ from api.services.daily_credit_limits import (
     get_tier_credit_multiplier,
 )
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from util.waffle_flags import is_waffle_flag_active
 
 
 logger = logging.getLogger(__name__)
@@ -55,6 +58,14 @@ class PersistentAgentProvisioningService:
 
     DEFAULT_MAX_NAME_ATTEMPTS = 10
     NAME_ERROR_KEY = "name"
+
+    @staticmethod
+    def _default_planning_state(user) -> str:
+        request = HttpRequest()
+        request.user = user
+        if is_waffle_flag_active(PERSISTENT_AGENT_PLANNING_MODE, request, default=False):
+            return PersistentAgent.PlanningState.PLANNING
+        return PersistentAgent.PlanningState.SKIPPED
 
     @classmethod
     def generate_unique_name(cls, user, *, max_attempts: int | None = None) -> str:
@@ -140,7 +151,7 @@ class PersistentAgentProvisioningService:
                 is_active=is_active,
                 preferred_contact_endpoint=preferred_contact_endpoint,
                 preferred_llm_tier=computed_tier,
-                planning_state=planning_state or PersistentAgent.PlanningState.PLANNING,
+                planning_state=planning_state or cls._default_planning_state(user),
             )
 
             if life_state:
