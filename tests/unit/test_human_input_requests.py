@@ -295,12 +295,18 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("always appears in the web chat composer panel", description)
         self.assertIn("does not send email or SMS by itself", description)
-        self.assertIn("ask only the new unanswered question", description)
+        self.assertIn("same tool-call batch as request_human_input", description)
+        self.assertIn("already include the questions", description)
+        self.assertIn("Do not send a bare notification", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
+        self.assertIn(
+            "use true when you will send an email/SMS containing these questions",
+            function["parameters"]["properties"]["will_continue_work"]["description"],
+        )
         self.assertEqual(function["parameters"]["required"], ["will_continue_work"])
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["required"],
@@ -467,7 +473,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["target_channel"], CommsChannel.EMAIL)
         self.assertEqual(result["target_address"], collaborator.email)
         self.assertTrue(result["web_chat_visible"])
-        self.assertTrue(result["auto_sleep_ok"])
+        self.assertNotIn("auto_sleep_ok", result)
         self.assertNotIn("relay_mode", result)
         self.assertNotIn("relay_payload", result)
         self.assertEqual(result["next_message_suggestion"]["send_tool"], "send_email")
@@ -607,6 +613,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(suggestion["address"], "person@example.com")
         self.assertEqual(suggestion["send_tool"], "send_email")
         self.assertIn("normal email message", suggestion["instruction"])
+        self.assertIn("same tool-call batch", suggestion["instruction"])
+        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
         self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
         self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
         self.assertEqual(result["requests"][0]["options"][1]["title"], "Detailed memo")
@@ -654,6 +662,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(suggestion["address"], "+15555550199")
         self.assertEqual(suggestion["send_tool"], "send_sms")
         self.assertIn("normal sms message", suggestion["instruction"])
+        self.assertIn("same tool-call batch", suggestion["instruction"])
+        self.assertIn("cannot inject them into another tool call", suggestion["instruction"])
         self.assertIn("How should I send this?", suggestion["questions"][0]["question"])
         self.assertEqual(result["requests"][0]["options"][0]["title"], "Short summary")
 

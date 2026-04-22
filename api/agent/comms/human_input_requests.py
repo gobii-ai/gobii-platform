@@ -349,7 +349,9 @@ def _build_next_message_suggestion(
         "send_tool": send_tool,
         "instruction": (
             f"Include these questions in your next normal {target.channel} message to {target.address}. "
-            f"The user may not be actively viewing the web chat. Do not call request_human_input again "
+            f"If you already sent or are sending a {target.channel} message in the same tool-call batch, "
+            "that message must include the questions because request_human_input cannot inject them into "
+            f"another tool call. The user may not be actively viewing the web chat. Do not call request_human_input again "
             "for the same questions. The user's reply on that channel will be processed as answers."
         ),
         "questions": [
@@ -390,7 +392,11 @@ def _build_request_result(
         "requests_count": request_count,
         "target_channel": target.channel,
         "target_address": target.address,
-        "web_chat_visible": True
+        "web_chat_visible": True,
+        "requests": [
+            _serialize_request_summary(request_obj, position=index)
+            for index, request_obj in enumerate(ordered_requests, start=1)
+        ],
     }
     if next_message_suggestion is not None:
         result["next_message_suggestion"] = next_message_suggestion

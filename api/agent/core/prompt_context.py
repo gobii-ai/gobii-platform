@@ -3991,7 +3991,7 @@ def _get_planning_mode_prompt_block() -> str:
         "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 1-3 planning questions "
-        "and never ask more than 5 in a planning round. More than 5 causes decision fatigue; make reasonable "
+        "and never ask more than 3 in a planning round. More than 3 causes decision fatigue; make reasonable "
         "assumptions instead and record them in the final plan.\n"
         "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
         "the active user is in web chat, because planning answers should be tracked in the composer.\n"
@@ -4125,7 +4125,12 @@ def _get_planning_first_run_welcome_instruction(
         "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
         "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
         "until planning is completed or skipped. If the shared welcome guidance says to move when the task is "
-        "clear, that means move planning forward or call end_planning, not start the deliverable work.\n"
+        "clear, that means move planning forward or call end_planning, not start the deliverable work.\n\n"
+        "If your welcome is an email or SMS and you also call request_human_input in the same response, "
+        "include a clear list of the exact planning questions in that email/SMS body. Do not send a "
+        "message that only says you have questions, because the recipient may not have web chat open. "
+        "The request_human_input call tracks the answers; the email/SMS must still show the questions. "
+        "Also tell the user they can say to skip those questions and get right to work if they prefer.\n"
     )
 
 
@@ -4181,6 +4186,9 @@ def _get_system_instruction(
             "request_human_input only creates tracked questions that are visible in the web chat composer panel; "
             "it does not send email or SMS by itself. If you want to notify a user on email/SMS, call "
             "request_human_input with will_continue_work=true, then send a normal email/SMS containing those questions. "
+            "If request_human_input and send_email/send_sms are in the same tool-call batch, the send_email/send_sms "
+            "body must already include the exact questions and options because request_human_input cannot modify that "
+            "outbound message after the fact. "
             "Replies on that channel will be processed as answers. "
             "Use send_chat_message for web chat - it broadcasts to all active web chat users for this agent (owners and collaborators) regardless of send address, "
             "and send_email/send_sms/send_agent_message for other channels. "

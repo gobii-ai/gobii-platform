@@ -84,10 +84,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "can choose one OR reply in their own words. If you omit options, the user will "
                 "reply with free text only. The request always appears in the web chat composer panel. "
                 "This tool does not send email or SMS by itself. If the target is email or SMS and you want "
-                "to notify that channel, call this tool with will_continue_work=true, then send a normal "
-                "email or SMS that includes the created question(s). The user's reply on that channel will "
-                "be processed as answers. A successful request may already be visible to the user; do not call this tool "
-                "again for the same question. If you need another detail, ask only the new unanswered question. "
+                "to notify that channel, call this tool with will_continue_work=true and send a normal "
+                "email or SMS that includes the exact question(s) and options. If you call send_email or "
+                "send_sms in the same tool-call batch as request_human_input, that outbound message must "
+                "already include the questions because this tool cannot inject them into another tool call. "
+                "Do not send a bare notification like 'please answer the questions'; the recipient may not "
+                "have web chat open. The user's reply on that channel will be processed as answers. "
                 "Keep questions concise and make sure it is only the question without extra fluff."
             ),
             "parameters": {
@@ -123,7 +125,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. true = you'll take another action after creating this request; "
+                            "REQUIRED. true = you'll take another action in the same response or after creating this request; "
+                            "use true when you will send an email/SMS containing these questions. "
                             "false = you're waiting for the user's answer and should stop after the request is visible/delivered."
                         ),
                     },
