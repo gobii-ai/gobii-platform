@@ -630,13 +630,19 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
       const result = parseResultObject(entry.result)
       const question = coerceString(parameters?.['question']) || coerceString(result?.['question'])
       const batchRequests = Array.isArray(parameters?.['requests']) ? parameters?.['requests'] as unknown[] : []
+      const resultRequests = Array.isArray(result?.['requests']) ? result?.['requests'] as unknown[] : []
+      const resultRequestIds = Array.isArray(result?.['request_ids']) ? result?.['request_ids'] as unknown[] : []
       const requestQuestions = batchRequests
         .map((request) => (request && typeof request === 'object' ? coerceString((request as Record<string, unknown>)['question']) : null))
         .filter((value): value is string => Boolean(value))
       const questions = requestQuestions.length ? requestQuestions : (question ? [question] : [])
+      const resultCount = coerceNumber(result?.['requests_count'])
+      const derivedQuestionCount = resultCount ?? (resultRequests.length || resultRequestIds.length || questions.length || 1)
+      const questionCount = Math.max(1, Math.trunc(derivedQuestionCount))
       const caption = questions[0] ? truncate(questions[0], 72) : null
 
       return {
+        label: `Asked ${questionCount} Question${questionCount === 1 ? '' : 's'}`,
         caption: caption ?? entry.caption ?? 'Human input request',
         summary: null,
       }
