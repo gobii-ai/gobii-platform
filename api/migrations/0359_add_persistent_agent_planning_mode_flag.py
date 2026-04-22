@@ -10,7 +10,7 @@ def add_flag(apps, schema_editor):
         return
     Flag.objects.create(
         name=FLAG_NAME,
-        everyone=None,
+        everyone=True,
         percent=0,
         superusers=False,
         staff=False,

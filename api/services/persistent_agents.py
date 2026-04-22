@@ -63,7 +63,7 @@ class PersistentAgentProvisioningService:
     def _default_planning_state(user) -> str:
         request = HttpRequest()
         request.user = user
-        if is_waffle_flag_active(PERSISTENT_AGENT_PLANNING_MODE, request, default=False):
+        if is_waffle_flag_active(PERSISTENT_AGENT_PLANNING_MODE, request, default=True):
             return PersistentAgent.PlanningState.PLANNING
         return PersistentAgent.PlanningState.SKIPPED
 

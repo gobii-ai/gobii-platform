@@ -60,26 +60,26 @@ class PersistentAgentPlanningModeTests(TestCase):
             primary=True,
         )
 
-    def test_direct_agents_and_provisioning_default_skipped_when_flag_off(self):
+    def test_direct_agents_default_skipped_but_provisioning_starts_planning_by_default(self):
         self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
 
         result = PersistentAgentProvisioningService.provision(
             user=self.user,
-            name="Provisioned Nonplanning Agent",
+            name="Provisioned Planning Agent",
             charter="Research product leads",
         )
 
-        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
 
-    def test_provisioning_starts_planning_when_flag_on(self):
-        with override_flag(PERSISTENT_AGENT_PLANNING_MODE, active=True):
+    def test_provisioning_skips_planning_when_flag_off(self):
+        with override_flag(PERSISTENT_AGENT_PLANNING_MODE, active=False):
             result = PersistentAgentProvisioningService.provision(
                 user=self.user,
-                name="Provisioned Planning Agent",
+                name="Provisioned Nonplanning Agent",
                 charter="Research product leads",
             )
 
-        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
+        self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
 
     def test_explicit_planning_state_overrides_planning_flag(self):
         with override_flag(PERSISTENT_AGENT_PLANNING_MODE, active=True):
