@@ -3550,7 +3550,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page" data-processing={isProcessing ? 'true' : 'false'}>
+    <div className="agent-chat-page agent-chat-page--framed" data-processing={isProcessing ? 'true' : 'false'}>
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
       ) : null}
