@@ -92,7 +92,7 @@ class TokenUsageTrackingTest(TestCase):
             )
         }
         
-        with patch('api.agent.core.event_processing.litellm.completion') as mock_completion:
+        with patch('api.agent.core.llm_utils.litellm.completion') as mock_completion:
             mock_completion.return_value = mock_response
             
             # Call the function
@@ -220,7 +220,7 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(completion.billing_plan, "startup")
         self.assertTrue(completion.billing_is_trial)
 
-    @patch("api.agent.core.event_processing.litellm.get_model_info")
+    @patch("api.agent.core.token_usage.litellm.get_model_info")
     def test_cost_fields_populated_from_litellm(self, mock_get_model_info):
         """_completion_with_failover should include cost breakdown when pricing exists."""
         mock_get_model_info.return_value = {
@@ -242,7 +242,7 @@ class TokenUsageTrackingTest(TestCase):
             )
         }
 
-        with patch("api.agent.core.event_processing.litellm.completion") as mock_completion:
+        with patch("api.agent.core.llm_utils.litellm.completion") as mock_completion:
             mock_completion.return_value = mock_response
             response, token_usage = _completion_with_failover(
                 messages=[{"role": "user", "content": "Cost please"}],
@@ -259,7 +259,7 @@ class TokenUsageTrackingTest(TestCase):
         self.assertEqual(token_usage["total_cost"], Decimal("0.000375"))
         mock_get_model_info.assert_called()
 
-    @patch("api.agent.core.event_processing.litellm.get_model_info")
+    @patch("api.agent.core.token_usage.litellm.get_model_info")
     def test_cost_fields_handle_non_numeric_usage(self, mock_get_model_info):
         """Token usage values that aren't numeric (e.g. MagicMocks) should not crash cost calc."""
         mock_get_model_info.return_value = {
@@ -275,7 +275,7 @@ class TokenUsageTrackingTest(TestCase):
         # Leave prompt/completion tokens as MagicMocks (default) to mimic upstream tests
         mock_response.model_extra = {"usage": usage}
 
-        with patch("api.agent.core.event_processing.litellm.completion") as mock_completion:
+        with patch("api.agent.core.llm_utils.litellm.completion") as mock_completion:
             mock_completion.return_value = mock_response
             response, token_usage = _completion_with_failover(
                 messages=[{"role": "user", "content": "Hi"}],
