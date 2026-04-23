@@ -548,7 +548,7 @@ def apply_tier_credit_multiplier(
     return scaled.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
-def get_agent_baseline_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
+def get_agent_baseline_llm_tier(agent: Any) -> AgentLLMTier:
     """Return the saved effective tier without any runtime override applied."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
@@ -588,7 +588,7 @@ def get_agent_llm_tier(
 ) -> AgentLLMTier:
     """Return the effective runtime tier, including any per-run override."""
 
-    baseline_tier = get_agent_baseline_llm_tier(agent, is_first_loop=is_first_loop)
+    baseline_tier = get_agent_baseline_llm_tier(agent)
     if not use_runtime_override:
         return baseline_tier
 
