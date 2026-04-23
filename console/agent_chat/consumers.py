@@ -116,13 +116,6 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
 class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     """Realtime channel for persistent agent updates with a session-level connection."""
 
-    user = None
-    session = None
-    active_agent_id: str | None = None
-    subscriptions: dict[str, AgentChatSubscription]
-    user_group_name: str | None = None
-    profile_group_name: str | None = None
-
     async def connect(self):
         self.active_agent_id = None
         self.subscriptions = {}
@@ -300,10 +293,12 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             await self._remove_subscription(agent_id)
 
     async def _remove_subscription(self, agent_id: str) -> None:
-        if self.channel_layer is None:
-            return
         subscription = self.subscriptions.pop(agent_id, None)
         if subscription is None:
+            return
+        if self.active_agent_id == agent_id:
+            self.active_agent_id = None
+        if self.channel_layer is None:
             return
         if subscription.group_name:
             try:
@@ -315,8 +310,6 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
                 await self.channel_layer.group_discard(subscription.user_group_name, self.channel_name)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("AgentChatSessionConsumer failed removing channel from group: %s", exc)
-        if self.active_agent_id == agent_id:
-            self.active_agent_id = None
 
     async def _send_agent_event(self, event_type: str, event) -> None:
         agent_id = self._extract_agent_id(event)

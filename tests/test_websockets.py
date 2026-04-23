@@ -9,7 +9,7 @@ from channels.layers import get_channel_layer
 from channels.testing import WebsocketCommunicator
 from django.test import SimpleTestCase, override_settings, tag
 
-from console.agent_chat.consumers import AgentChatSessionConsumer
+from console.agent_chat.consumers import AgentChatSessionConsumer, AgentChatSubscription
 from config.asgi import application
 
 CHANNEL_LAYER_SETTINGS = {
@@ -171,6 +171,22 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
             new=_allow_subscription,
         ):
             async_to_sync(_run)()
+
+    def test_remove_subscription_clears_state_without_channel_layer(self) -> None:
+        consumer = AgentChatSessionConsumer()
+        consumer.channel_layer = None
+        consumer.subscriptions = {
+            "agent-a": AgentChatSubscription(
+                group_name="agent-chat-agent-a",
+                user_group_name="agent-chat-agent-a-user-123",
+            )
+        }
+        consumer.active_agent_id = "agent-a"
+
+        async_to_sync(consumer._remove_subscription)("agent-a")
+
+        self.assertEqual(consumer.subscriptions, {})
+        self.assertIsNone(consumer.active_agent_id)
 
     def test_rejects_anonymous_user(self) -> None:
         async def _run():
