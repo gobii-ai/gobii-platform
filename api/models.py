@@ -6320,16 +6320,25 @@ class PersistentAgent(models.Model):
             return None
         return self.get_avatar_version_for_name(file_field.name)
 
+    def get_avatar_thumbnail_version(self) -> str | None:
+        file_field = self.avatar
+        if not self.has_avatar:
+            return None
+        version_parts = [file_field.name]
+        if self.updated_at:
+            version_parts.append(self.updated_at.isoformat())
+        return self.get_avatar_version_for_name(":".join(version_parts))
+
     @staticmethod
     def get_avatar_version_for_name(avatar_name: str | None) -> str | None:
         if not avatar_name:
             return None
         return hashlib.sha256(avatar_name.encode("utf-8")).hexdigest()[:12]
 
-    def _get_avatar_proxy_url(self, route_name: str) -> str | None:
+    def _get_avatar_proxy_url(self, route_name: str, version: str | None = None) -> str | None:
         if not self.has_avatar or not self.pk:
             return None
-        version = self.get_avatar_version()
+        version = version or self.get_avatar_version()
         try:
             from django.urls import reverse, NoReverseMatch
             base_url = reverse(route_name, kwargs={"pk": self.pk})
@@ -6357,7 +6366,10 @@ class PersistentAgent(models.Model):
 
     def get_avatar_thumbnail_url(self) -> str | None:
         """Return a URL for the cached live-chat avatar thumbnail, if set."""
-        thumbnail_url = self._get_avatar_proxy_url("agent_avatar_thumbnail")
+        thumbnail_url = self._get_avatar_proxy_url(
+            "agent_avatar_thumbnail",
+            version=self.get_avatar_thumbnail_version(),
+        )
         if thumbnail_url:
             return thumbnail_url
         return self.get_avatar_url()

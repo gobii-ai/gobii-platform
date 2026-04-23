@@ -1,5 +1,6 @@
 import io
 import tempfile
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -7,6 +8,7 @@ from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 
 from api.models import BrowserUseAgent, PersistentAgent
@@ -79,7 +81,7 @@ class AgentAvatarThumbnailTests(TestCase):
             self.assertLessEqual(image.width, AGENT_AVATAR_THUMBNAIL_SIZE)
             self.assertLessEqual(image.height, AGENT_AVATAR_THUMBNAIL_SIZE)
 
-        thumbnail_name = _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_version())
+        thumbnail_name = _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_thumbnail_version())
         self.assertTrue(default_storage.exists(thumbnail_name))
 
         with patch("console.views.Image.open", side_effect=AssertionError("thumbnail regenerated")):
@@ -88,6 +90,22 @@ class AgentAvatarThumbnailTests(TestCase):
         self.assertEqual(cached_response.status_code, 200)
         self.assertEqual(cached_response["Content-Type"], "image/png")
         self.assertTrue(_response_bytes(cached_response))
+
+    def test_thumbnail_url_and_cache_key_change_when_avatar_timestamp_changes(self):
+        self._save_avatar()
+        original_avatar_name = self.agent.avatar.name
+        original_url = self.agent.get_avatar_thumbnail_url()
+        original_thumbnail_name = _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_thumbnail_version())
+
+        PersistentAgent.objects.filter(id=self.agent.id).update(updated_at=timezone.now() + timedelta(minutes=1))
+        self.agent.refresh_from_db()
+
+        self.assertEqual(self.agent.avatar.name, original_avatar_name)
+        self.assertNotEqual(self.agent.get_avatar_thumbnail_url(), original_url)
+        self.assertNotEqual(
+            _agent_avatar_thumbnail_name(self.agent.id, self.agent.get_avatar_thumbnail_version()),
+            original_thumbnail_name,
+        )
 
     def test_thumbnail_endpoint_returns_404_without_avatar(self):
         response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))

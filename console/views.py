@@ -5241,6 +5241,12 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
         try:
             with transaction.atomic():
                 old_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
+                old_avatar_thumbnail_version = agent.get_avatar_thumbnail_version() if old_avatar_name else None
+                old_avatar_thumbnail_name = (
+                    _agent_avatar_thumbnail_name(agent.id, old_avatar_thumbnail_version)
+                    if old_avatar_thumbnail_version
+                    else None
+                )
                 avatar_changed = False
 
                 # Track which fields changed
@@ -5435,9 +5441,8 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                     new_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
                     if old_avatar_name and old_avatar_name != new_avatar_name:
                         transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
-                        old_thumbnail_name = _agent_avatar_thumbnail_name_for_avatar_name(agent.id, old_avatar_name)
-                        if old_thumbnail_name:
-                            transaction.on_commit(lambda name=old_thumbnail_name: default_storage.delete(name))
+                    if old_avatar_thumbnail_name:
+                        transaction.on_commit(lambda name=old_avatar_thumbnail_name: default_storage.delete(name))
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
@@ -6224,13 +6229,6 @@ def _agent_avatar_thumbnail_name(agent_id: Any, avatar_version: str) -> str:
     return f"agent_avatar_thumbnails/{agent_id}/{avatar_version}.png"
 
 
-def _agent_avatar_thumbnail_name_for_avatar_name(agent_id: Any, avatar_name: str | None) -> str | None:
-    avatar_version = PersistentAgent.get_avatar_version_for_name(avatar_name)
-    if not avatar_version:
-        return None
-    return _agent_avatar_thumbnail_name(agent_id, avatar_version)
-
-
 class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     model = PersistentAgent
     context_object_name = "agent"
@@ -6280,7 +6278,8 @@ class AgentAvatarThumbnailProxyView(AgentAvatarProxyView):
         if not avatar_version:
             raise Http404("Avatar not found.")
 
-        thumbnail_name = _agent_avatar_thumbnail_name(agent.id, avatar_version)
+        thumbnail_version = agent.get_avatar_thumbnail_version() or avatar_version
+        thumbnail_name = _agent_avatar_thumbnail_name(agent.id, thumbnail_version)
         if not default_storage.exists(thumbnail_name):
             self._generate_thumbnail(storage, original_name, thumbnail_name)
 
