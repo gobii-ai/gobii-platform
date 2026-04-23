@@ -1,3 +1,4 @@
+import io
 import json
 import mimetypes
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -5,6 +6,7 @@ from typing import Any
 
 import stripe
 from django.template.loader import render_to_string
+from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.core.files.uploadedfile import UploadedFile
 from django.core.mail import send_mail
@@ -39,6 +41,8 @@ from django.middleware.csrf import get_token
 from datetime import timedelta, datetime, timezone as dt_timezone
 from functools import cached_property, wraps
 import uuid
+
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from agents.services import AgentService, PretrainedWorkerTemplateService
 from config.socialaccount_adapter import (
@@ -5431,6 +5435,9 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                     new_avatar_name = agent.avatar.name if getattr(agent, "avatar", None) else None
                     if old_avatar_name and old_avatar_name != new_avatar_name:
                         transaction.on_commit(lambda name=old_avatar_name: default_storage.delete(name))
+                        old_thumbnail_name = _agent_avatar_thumbnail_name_for_avatar_name(agent.id, old_avatar_name)
+                        if old_thumbnail_name:
+                            transaction.on_commit(lambda name=old_thumbnail_name: default_storage.delete(name))
         except Exception as e:
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
@@ -6209,6 +6216,21 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         return HttpResponseNotAllowed(['GET'])
 
 
+AGENT_AVATAR_THUMBNAIL_SIZE = 128
+AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE = "image/png"
+
+
+def _agent_avatar_thumbnail_name(agent_id: Any, avatar_version: str) -> str:
+    return f"agent_avatar_thumbnails/{agent_id}/{avatar_version}.png"
+
+
+def _agent_avatar_thumbnail_name_for_avatar_name(agent_id: Any, avatar_name: str | None) -> str | None:
+    avatar_version = PersistentAgent.get_avatar_version_for_name(avatar_name)
+    if not avatar_version:
+        return None
+    return _agent_avatar_thumbnail_name(agent_id, avatar_version)
+
+
 class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     model = PersistentAgent
     context_object_name = "agent"
@@ -6238,6 +6260,60 @@ class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView)
         if encoding:
             response["Content-Encoding"] = encoding
         return response
+
+
+class AgentAvatarThumbnailProxyView(AgentAvatarProxyView):
+    """Serve a cached live-chat-sized avatar thumbnail behind the same access checks."""
+
+    def get(self, request, *args, **kwargs):
+        agent = self.get_object()
+        file_field = getattr(agent, "avatar", None)
+        if not file_field or not getattr(file_field, "name", None):
+            raise Http404("Avatar not found.")
+
+        storage = file_field.storage
+        original_name = file_field.name
+        if hasattr(storage, "exists") and not storage.exists(original_name):
+            raise Http404("Avatar not found.")
+
+        avatar_version = agent.get_avatar_version()
+        if not avatar_version:
+            raise Http404("Avatar not found.")
+
+        thumbnail_name = _agent_avatar_thumbnail_name(agent.id, avatar_version)
+        if not default_storage.exists(thumbnail_name):
+            self._generate_thumbnail(storage, original_name, thumbnail_name)
+
+        try:
+            file_handle = default_storage.open(thumbnail_name, "rb")
+        except (FileNotFoundError, OSError):
+            raise Http404("Avatar thumbnail not found.")
+
+        response = FileResponse(file_handle, content_type=AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE)
+        response["Cache-Control"] = "private, max-age=86400"
+        return response
+
+    def _generate_thumbnail(self, storage, original_name: str, thumbnail_name: str) -> None:
+        try:
+            with storage.open(original_name, "rb") as original_file:
+                with Image.open(original_file) as image:
+                    image = ImageOps.exif_transpose(image)
+                    thumbnail = ImageOps.fit(
+                        image,
+                        (AGENT_AVATAR_THUMBNAIL_SIZE, AGENT_AVATAR_THUMBNAIL_SIZE),
+                        method=Image.Resampling.LANCZOS,
+                    )
+                    output = io.BytesIO()
+                    thumbnail.convert("RGBA").save(output, format="PNG", optimize=True)
+        except (FileNotFoundError, OSError, UnidentifiedImageError):
+            raise Http404("Avatar not found.")
+
+        saved_name = default_storage.save(thumbnail_name, ContentFile(output.getvalue()))
+        if saved_name != thumbnail_name:
+            try:
+                default_storage.delete(saved_name)
+            except OSError:
+                pass
 
 
 class AgentAllowlistView(LoginRequiredMixin, TemplateView):
