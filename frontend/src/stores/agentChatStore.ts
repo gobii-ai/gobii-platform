@@ -13,7 +13,7 @@ import type {
 import type { InsightEvent } from '../types/insight'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { INSIGHT_TIMING } from '../types/insight'
-import { sendAgentMessage, fetchProcessingStatus, fetchAgentInsights } from '../api/agentChat'
+import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
 import { normalizeHexColor, DEFAULT_CHAT_COLOR_HEX } from '../util/color'
 import { mergeTimelineEvents, normalizeTimelineEvent } from './agentChatTimeline'
 import {
@@ -34,10 +34,6 @@ export function setTimelineQueryClient(client: QueryClient) {
 const EMPTY_PROCESSING_SNAPSHOT: ProcessingSnapshot = { active: false, webTasks: [], nextScheduledAt: null }
 
 type ProcessingUpdateInput = boolean | Partial<ProcessingSnapshot> | null | undefined
-type InsightsFetchInFlight = {
-  agentId: string
-  promise: Promise<void>
-}
 
 function coerceProcessingSnapshot(snapshot: Partial<ProcessingSnapshot> | null | undefined): ProcessingSnapshot {
   if (!snapshot) {
@@ -305,8 +301,6 @@ export type AgentChatState = {
   // Insight state
   insights: InsightEvent[]
   currentInsightIndex: number
-  insightsFetchedAt: number | null
-  insightsFetchInFlight: InsightsFetchInFlight | null
   insightRotationTimer: ReturnType<typeof setTimeout> | null
   insightProcessingStartedAt: number | null
   dismissedInsightIds: Set<string>
@@ -340,7 +334,7 @@ export type AgentChatState = {
   suppressAutoScrollPin: (durationMs?: number) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
   // Insight actions
-  fetchInsights: () => Promise<void>
+  setInsightsForAgent: (agentId: string, insights: InsightEvent[]) => void
   startInsightRotation: () => void
   stopInsightRotation: () => void
   dismissInsight: (insightId: string) => void
@@ -372,8 +366,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   // Insight state
   insights: [],
   currentInsightIndex: 0,
-  insightsFetchedAt: null,
-  insightsFetchInFlight: null,
   insightRotationTimer: null,
   insightProcessingStartedAt: null,
   dismissedInsightIds: new Set(),
@@ -431,8 +423,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       ...(reuseExisting ? {} : {
         insights: [],
         currentInsightIndex: 0,
-        insightsFetchedAt: null,
-        insightsFetchInFlight: null,
         insightRotationTimer: null,
         insightProcessingStartedAt: null,
         dismissedInsightIds: new Set(),
@@ -822,53 +812,14 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   },
 
   // Insight actions
-  async fetchInsights() {
-    const agentId = get().agentId
-    if (!agentId) return
-
-    const now = Date.now()
-    const fetchedAt = get().insightsFetchedAt
-    if (fetchedAt && now - fetchedAt < 5 * 60 * 1000) {
+  setInsightsForAgent(agentId, insights) {
+    if (get().agentId !== agentId) {
       return
     }
-
-    const inFlight = get().insightsFetchInFlight
-    if (inFlight && inFlight.agentId === agentId) {
-      return inFlight.promise
-    }
-
-    const requestStartedAt = now
-    let requestPromise: Promise<void> | null = null
-    const runFetchInsights = async () => {
-      try {
-        const response = await fetchAgentInsights(agentId)
-        if (get().agentId !== agentId) {
-          return
-        }
-        set({
-          insights: response.insights,
-          insightsFetchedAt: requestStartedAt,
-          currentInsightIndex: 0,
-        })
-      } catch (error) {
-        console.error('Failed to fetch insights:', error)
-      } finally {
-        const currentInFlight = get().insightsFetchInFlight
-        if (currentInFlight && currentInFlight.agentId === agentId && currentInFlight.promise === requestPromise) {
-          set({ insightsFetchInFlight: null })
-        }
-      }
-    }
-    requestPromise = runFetchInsights()
-
     set({
-      insightsFetchInFlight: {
-        agentId,
-        promise: requestPromise,
-      },
+      insights,
+      currentInsightIndex: 0,
     })
-
-    return requestPromise
   },
 
   startInsightRotation() {
@@ -881,8 +832,6 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       insightProcessingStartedAt: Date.now(),
       insightsPaused: false,
     })
-
-    void get().fetchInsights()
 
     const rotate = () => {
       const current = get()

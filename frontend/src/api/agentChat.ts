@@ -650,9 +650,12 @@ export function endAgentWebSession(
   return postWebSession(agentId, 'end', { session_key: sessionKey }, { keepalive })
 }
 
-export async function fetchAgentInsights(agentId: string): Promise<InsightsResponse> {
+export async function fetchAgentInsights(
+  agentId: string,
+  params: { signal?: AbortSignal } = {},
+): Promise<InsightsResponse> {
   const url = `/console/api/agents/${agentId}/insights/`
-  return jsonFetch<InsightsResponse>(url)
+  return jsonFetch<InsightsResponse>(url, params.signal ? { signal: params.signal } : {})
 }
 
 export async function fetchAgentSuggestions(

@@ -36,6 +36,7 @@ import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
+import { useAgentInsights } from '../hooks/useAgentInsights'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
@@ -878,15 +879,13 @@ export function AgentChatPage({
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
-  const fetchInsights = useAgentChatStore((state) => state.fetchInsights)
+  const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
   const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
   const setInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
   const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
   const insights = useAgentChatStore((state) => state.insights)
-  const insightsFetchedAt = useAgentChatStore((state) => state.insightsFetchedAt)
-  const insightsFetchInFlight = useAgentChatStore((state) => state.insightsFetchInFlight)
   const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
   const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
   const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
@@ -2112,6 +2111,7 @@ export function AgentChatPage({
   const [skipPlanningBusy, setSkipPlanningBusy] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
+  const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
   const [idleInsightsPending, setIdleInsightsPending] = useState(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
@@ -2889,6 +2889,16 @@ export function AgentChatPage({
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
+  const insightsQueryEnabled = Boolean(
+    activeAgentId
+    && allowAgentRefresh
+    && !isNewAgent
+    && !isCollaboratorOnly
+    && !showSignupPreviewPanel,
+  )
+  const insightsQuery = useAgentInsights(activeAgentId, {
+    enabled: insightsQueryEnabled && (isProcessing || idleInsightsAgentId === activeAgentId),
+  })
   useEffect(() => {
     if (!isProcessing) {
       setStopProcessingRequested(false)
@@ -2905,22 +2915,22 @@ export function AgentChatPage({
     }
   }, [isProcessing, startInsightRotation, stopInsightRotation])
   useEffect(() => {
-    if (!activeAgentId || !allowAgentRefresh || isNewAgent || isProcessing) {
-      setIdleInsightsPending(false)
-      return () => undefined
+    if (!activeAgentId || storeAgentId !== activeAgentId || !insightsQuery.data) {
+      return
     }
-    if (insightsFetchedAt || insightsFetchInFlight?.agentId === activeAgentId) {
+    setInsightsForAgent(activeAgentId, insightsQuery.data.insights)
+  }, [activeAgentId, insightsQuery.data, insightsQuery.dataUpdatedAt, setInsightsForAgent, storeAgentId])
+  useEffect(() => {
+    setIdleInsightsAgentId(null)
+    const hasFreshInsights = Boolean(insightsQuery.data && !insightsQuery.isStale)
+    if (!activeAgentId || !insightsQueryEnabled || isProcessing || hasFreshInsights) {
       setIdleInsightsPending(false)
       return () => undefined
     }
     setIdleInsightsPending(true)
     const timeout = window.setTimeout(() => {
       if (activeAgentIdRef.current === activeAgentId) {
-        void fetchInsights().finally(() => {
-          if (activeAgentIdRef.current === activeAgentId) {
-            setIdleInsightsPending(false)
-          }
-        })
+        setIdleInsightsAgentId(activeAgentId)
       }
     }, INSIGHTS_IDLE_FETCH_DELAY_MS)
     return () => {
@@ -2929,13 +2939,17 @@ export function AgentChatPage({
     }
   }, [
     activeAgentId,
-    allowAgentRefresh,
-    fetchInsights,
-    insightsFetchedAt,
-    insightsFetchInFlight?.agentId,
-    isNewAgent,
+    insightsQuery.data,
+    insightsQuery.isStale,
+    insightsQueryEnabled,
     isProcessing,
   ])
+  useEffect(() => {
+    if (idleInsightsAgentId !== activeAgentId || insightsQuery.isFetching) {
+      return
+    }
+    setIdleInsightsPending(false)
+  }, [activeAgentId, idleInsightsAgentId, insightsQuery.isFetching])
 
   // Get available insights (filtered for dismissed)
   const availableInsights = useMemo(() => {
@@ -2974,7 +2988,7 @@ export function AgentChatPage({
     !isNewAgent
     && !isCollaboratorOnly
     && !showSignupPreviewPanel
-    && (idleInsightsPending || insightsFetchInFlight?.agentId === activeAgentId)
+    && (idleInsightsPending || insightsQuery.isFetching)
     && hydratedInsights.length === 0,
   )
 
