@@ -17,6 +17,7 @@ type UseConsoleContextSwitcherOptions = {
 
 type UseConsoleContextSwitcherResult = {
   data: ConsoleContextData | null
+  resolvedForAgentId?: string
   isLoading: boolean
   isSwitching: boolean
   error: string | null
@@ -31,11 +32,13 @@ export function useConsoleContextSwitcher({
   persistSession = true,
 }: UseConsoleContextSwitcherOptions): UseConsoleContextSwitcherResult {
   const [data, setData] = useState<ConsoleContextData | null>(null)
+  const [resolvedForAgentId, setResolvedForAgentId] = useState<string | undefined>(undefined)
   const [isLoading, setIsLoading] = useState(false)
   const [isSwitching, setIsSwitching] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const mountedRef = useRef(true)
   const requestIdRef = useRef(0)
+  const dataRef = useRef<ConsoleContextData | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -44,19 +47,31 @@ export function useConsoleContextSwitcher({
     }
   }, [])
 
+  useEffect(() => {
+    dataRef.current = data
+  }, [data])
+
   const refresh = useCallback(async () => {
     if (!enabled) {
       return
     }
+    if (!forAgentId && dataRef.current) {
+      setResolvedForAgentId(undefined)
+      setIsLoading(false)
+      setError(null)
+      return
+    }
     const requestId = ++requestIdRef.current
+    const requestForAgentId = forAgentId
     setIsLoading(true)
     setError(null)
     try {
-      const payload = await fetchConsoleContext({ forAgentId })
+      const payload = await fetchConsoleContext({ forAgentId: requestForAgentId })
       if (!mountedRef.current || requestId !== requestIdRef.current) {
         return
       }
       setData(payload)
+      setResolvedForAgentId(requestForAgentId)
       setIsLoading(false)
       const stored = readStoredConsoleContext()
       if (
@@ -73,6 +88,7 @@ export function useConsoleContextSwitcher({
       }
       console.error('Failed to load context switcher data:', err)
       setError('Unable to load workspace contexts.')
+      setResolvedForAgentId(undefined)
       setIsLoading(false)
     }
   }, [enabled, forAgentId])
@@ -97,6 +113,7 @@ export function useConsoleContextSwitcher({
           return
         }
         setData((prev) => (prev ? { ...prev, context: updated } : prev))
+        setResolvedForAgentId(forAgentId)
         storeConsoleContext(updated)
         onSwitched?.(updated)
       } catch (err) {
@@ -113,11 +130,12 @@ export function useConsoleContextSwitcher({
         }
       }
     },
-    [data, isSwitching, onSwitched, persistSession],
+    [data, forAgentId, isSwitching, onSwitched, persistSession],
   )
 
   return {
     data,
+    resolvedForAgentId,
     isLoading,
     isSwitching,
     error,

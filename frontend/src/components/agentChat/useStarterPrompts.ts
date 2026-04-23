@@ -8,6 +8,7 @@ import {
 } from './StarterPromptSuggestions'
 
 const EMPTY_PROMPTS: StarterPrompt[] = []
+const STARTER_PROMPT_FETCH_DELAY_MS = 350
 
 type UseStarterPromptsParams = {
   agentId?: string | null
@@ -81,9 +82,9 @@ export function useStarterPrompts({
     }
 
     const controller = new AbortController()
+    setStarterPromptsLoading(true)
+    setBackendPrompts(null)
     const run = async () => {
-      setStarterPromptsLoading(true)
-      setBackendPrompts(null)
       try {
         const payload = await fetchAgentSuggestions(agentId, {
           promptCount,
@@ -116,8 +117,13 @@ export function useStarterPrompts({
       }
     }
 
-    void run()
-    return () => controller.abort()
+    const timeout = window.setTimeout(() => {
+      void run()
+    }, STARTER_PROMPT_FETCH_DELAY_MS)
+    return () => {
+      window.clearTimeout(timeout)
+      controller.abort()
+    }
   }, [agentId, canRequestSuggestions, idleRefreshNonce, promptCount])
 
   const starterPrompts = useMemo(() => backendPrompts ?? EMPTY_PROMPTS, [backendPrompts])

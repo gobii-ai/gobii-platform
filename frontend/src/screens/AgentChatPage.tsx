@@ -74,6 +74,7 @@ const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
+const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -753,6 +754,14 @@ export function AgentChatPage({
   } | null>(null)
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
+  const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const locallySelectedAgentIdsRef = useRef<Set<string>>(new Set())
+  const selectedFromCurrentRoster = Boolean(activeAgentId && locallySelectedAgentIdsRef.current.has(activeAgentId))
+  const contextLookupAgentId = isNewAgent || isSelectionView
+    ? undefined
+    : selectedFromCurrentRoster
+      ? undefined
+      : routeAgentId ?? activeAgentId ?? undefined
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
@@ -770,25 +779,33 @@ export function AgentChatPage({
 
   const {
     data: contextData,
+    resolvedForAgentId: contextResolvedForAgentId,
+    isLoading: contextLoading,
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
   } = useConsoleContextSwitcher({
     enabled: true,
-    forAgentId: routeAgentId ?? undefined,
+    forAgentId: contextLookupAgentId,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
-  const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
-  const contextReady = Boolean(effectiveContext)
+  const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId
+  const contextReady = (
+    Boolean(effectiveContext)
+    && contextMatchesAgent
+    && (!contextLoading || !contextLookupAgentId)
+    && !contextSwitching
+    && !contextError
+  )
   const agentContextReady = contextReady
-  const liveAgentId = contextSwitching || !agentContextReady ? null : activeAgentId
+  const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
@@ -868,6 +885,8 @@ export function AgentChatPage({
   const setInsightsPaused = useAgentChatStore((state) => state.setInsightsPaused)
   const setCurrentInsightIndex = useAgentChatStore((state) => state.setCurrentInsightIndex)
   const insights = useAgentChatStore((state) => state.insights)
+  const insightsFetchedAt = useAgentChatStore((state) => state.insightsFetchedAt)
+  const insightsFetchInFlight = useAgentChatStore((state) => state.insightsFetchInFlight)
   const currentInsightIndex = useAgentChatStore((state) => state.currentInsightIndex)
   const dismissedInsightIds = useAgentChatStore((state) => state.dismissedInsightIds)
   const insightsPaused = useAgentChatStore((state) => state.insightsPaused)
@@ -1236,13 +1255,13 @@ export function AgentChatPage({
   })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
-  const rosterQueryAgentId = routeAgentId ?? undefined
+  const rosterQueryAgentId = contextLookupAgentId
   const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
   const rosterRefreshIntervalMs = hasPendingAvatarTracking
     ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
     : ROSTER_REFRESH_INTERVAL_MS
   const rosterQuery = useAgentRoster({
-    enabled: true,
+    enabled: contextReady,
     contextKey: rosterContextKey,
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
@@ -1946,8 +1965,7 @@ export function AgentChatPage({
   ])
 
   const rosterContextMismatch = Boolean(
-    !routeAgentId
-      && effectiveContext
+    effectiveContext
       && rosterQuery.data?.context
       && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
   )
@@ -1975,7 +1993,6 @@ export function AgentChatPage({
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
-    void fetchInsights()
   }, [
     activeAgentId,
     activeRosterMeta?.planningState,
@@ -1983,7 +2000,6 @@ export function AgentChatPage({
     agentAvatarUrl,
     agentColor,
     agentName,
-    fetchInsights,
     setAgentId,
     agentContextReady,
   ])
@@ -2096,6 +2112,7 @@ export function AgentChatPage({
   const [skipPlanningBusy, setSkipPlanningBusy] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
+  const [idleInsightsPending, setIdleInsightsPending] = useState(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
@@ -2583,6 +2600,7 @@ export function AgentChatPage({
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       }
+      locallySelectedAgentIdsRef.current.add(agent.id)
       setSwitchingAgentId(agent.id)
       setActiveAgentId(agent.id)
       const nextPath = buildAgentChatPath(window.location.pathname, agent.id)
@@ -2886,6 +2904,38 @@ export function AgentChatPage({
       stopInsightRotation()
     }
   }, [isProcessing, startInsightRotation, stopInsightRotation])
+  useEffect(() => {
+    if (!activeAgentId || !allowAgentRefresh || isNewAgent || isProcessing) {
+      setIdleInsightsPending(false)
+      return () => undefined
+    }
+    if (insightsFetchedAt || insightsFetchInFlight?.agentId === activeAgentId) {
+      setIdleInsightsPending(false)
+      return () => undefined
+    }
+    setIdleInsightsPending(true)
+    const timeout = window.setTimeout(() => {
+      if (activeAgentIdRef.current === activeAgentId) {
+        void fetchInsights().finally(() => {
+          if (activeAgentIdRef.current === activeAgentId) {
+            setIdleInsightsPending(false)
+          }
+        })
+      }
+    }, INSIGHTS_IDLE_FETCH_DELAY_MS)
+    return () => {
+      window.clearTimeout(timeout)
+      setIdleInsightsPending(false)
+    }
+  }, [
+    activeAgentId,
+    allowAgentRefresh,
+    fetchInsights,
+    insightsFetchedAt,
+    insightsFetchInFlight?.agentId,
+    isNewAgent,
+    isProcessing,
+  ])
 
   // Get available insights (filtered for dismissed)
   const availableInsights = useMemo(() => {
@@ -2920,6 +2970,13 @@ export function AgentChatPage({
       }
     })
   }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
+  const insightsLoading = Boolean(
+    !isNewAgent
+    && !isCollaboratorOnly
+    && !showSignupPreviewPanel
+    && (idleInsightsPending || insightsFetchInFlight?.agentId === activeAgentId)
+    && hydratedInsights.length === 0,
+  )
 
   useEffect(() => {
     if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
@@ -3618,7 +3675,7 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         sidebarBillingUrl={billingManageUrl}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
-        sidebarCreditsResetOn={usageSummary?.period.resetOn ?? null}
+        sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
@@ -3698,6 +3755,7 @@ export function AgentChatPage({
         loadingNewer={timelineLoadingNewer}
         initialLoading={initialLoading}
         insights={isNewAgent ? [] : hydratedInsights}
+        insightsLoading={insightsLoading}
         currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
         onInsightIndexChange={setCurrentInsightIndex}

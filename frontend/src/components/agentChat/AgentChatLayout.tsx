@@ -168,6 +168,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   awaitingResponse?: boolean
   streaming?: StreamState | null
   insights?: InsightEvent[]
+  insightsLoading?: boolean
   currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
   onInsightIndexChange?: (index: number) => void
@@ -314,6 +315,7 @@ export function AgentChatLayout({
   loadingNewer = false,
   initialLoading = false,
   insights,
+  insightsLoading = false,
   currentInsightIndex,
   onDismissInsight,
   onInsightIndexChange,
@@ -1185,6 +1187,7 @@ export function AgentChatLayout({
               insightsPanelExpandedPreference={insightsPanelExpandedPreference}
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insights={insights}
+              insightsLoading={insightsLoading}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}
               onInsightIndexChange={onInsightIndexChange}

@@ -91,8 +91,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const bannerRef = useRef<HTMLDivElement | null>(null)
   const [animate, setAnimate] = useState(false)
   const hasAnimatedRef = useRef(false)
-  const prevDoneRef = useRef<number | null>(null)
-  const [justCompleted, setJustCompleted] = useState(false)
 
   // Subscription state
   const {
@@ -157,22 +155,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     }
   }, [kanbanSnapshot?.doneCount, kanbanSnapshot?.todoCount, kanbanSnapshot?.doingCount, animate])
 
-  // Detect task completion for celebration
-  useEffect(() => {
-    if (kanbanSnapshot && prevDoneRef.current !== null && kanbanSnapshot.doneCount > prevDoneRef.current) {
-      setJustCompleted(true)
-      const timer = setTimeout(() => setJustCompleted(false), 1200)
-      return () => clearTimeout(timer)
-    }
-    prevDoneRef.current = kanbanSnapshot?.doneCount ?? null
-  }, [kanbanSnapshot?.doneCount])
-
   const hasKanban = kanbanSnapshot && (kanbanSnapshot.todoCount + kanbanSnapshot.doingCount + kanbanSnapshot.doneCount) > 0
-  const totalTasks = hasKanban ? kanbanSnapshot.todoCount + kanbanSnapshot.doingCount + kanbanSnapshot.doneCount : 0
-  const doneTasks = hasKanban ? kanbanSnapshot.doneCount : 0
   const currentTask = hasKanban && kanbanSnapshot.doingTitles.length > 0 ? kanbanSnapshot.doingTitles[0] : null
-  const isAllComplete = hasKanban && doneTasks === totalTasks
-  const percentage = totalTasks > 0 ? (doneTasks / totalTasks) * 100 : 0
   const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
@@ -234,7 +218,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   return (
     <div className={shellClass} ref={bannerRef}>
       <div
-        className={`banner ${hasKanban ? 'banner--with-progress' : ''} ${isAllComplete ? 'banner--complete' : ''} ${justCompleted ? 'banner--celebrating' : ''}`}
+        className="banner"
         style={{ '--banner-accent': accentColor } as React.CSSProperties}
       >
         {/* Left: Avatar + Info */}
@@ -282,38 +266,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                 <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
                 <span className="banner-task-title">{currentTask}</span>
               </div>
-            ) : hasKanban && isAllComplete ? (
-              <div className="banner-task banner-task--complete">
-                <Check size={12} className="banner-task-check" strokeWidth={2.5} />
-                <span className="banner-task-title">All tasks complete</span>
-              </div>
             ) : null}
           </div>
         </div>
-
-        {/* Center: Progress */}
-        {hasKanban ? (
-          <div className={`banner-center ${animate ? 'banner-center--animate' : ''}`}>
-            <div className="banner-progress-wrapper">
-              <div className="banner-progress-bar">
-                <div
-                  className={`banner-progress-fill ${isAllComplete ? 'banner-progress-fill--complete' : ''} ${justCompleted ? 'banner-progress-fill--pop' : ''}`}
-                  style={{
-                    width: `${percentage}%`,
-                    background: isAllComplete
-                      ? 'linear-gradient(90deg, #10b981, #34d399)'
-                      : `linear-gradient(90deg, ${accentColor}, color-mix(in srgb, ${accentColor} 70%, #a855f7))`,
-                  }}
-                />
-              </div>
-              <div className="banner-progress-count">
-                <span className={`banner-progress-done ${justCompleted ? 'banner-progress-done--pop' : ''}`}>{doneTasks}</span>
-                <span className="banner-progress-sep">/</span>
-                <span className="banner-progress-total">{totalTasks}</span>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         {/* Right: Upgrade button + Close button */}
         <div className="banner-right">
@@ -461,9 +416,6 @@ export const AgentChatBanner = memo(function AgentChatBanner({
             </button>
           ) : null}
         </div>
-
-        {/* Celebration shimmer */}
-        {justCompleted && <div className="banner-shimmer" aria-hidden="true" />}
 
       </div>
       {children ? <div className="banner-secondary">{children}</div> : null}

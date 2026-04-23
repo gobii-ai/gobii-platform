@@ -53,7 +53,7 @@ export type AgentWebSessionSnapshot = {
 
 export async function fetchAgentTimeline(
   agentId: string,
-  params: { cursor?: string | null; direction?: TimelineDirection; limit?: number } = {},
+  params: { cursor?: string | null; direction?: TimelineDirection; limit?: number; signal?: AbortSignal } = {},
 ): Promise<TimelineResponse> {
   const query = new URLSearchParams()
   if (params.cursor) query.set('cursor', params.cursor)
@@ -64,7 +64,7 @@ export async function fetchAgentTimeline(
   const response = await jsonFetch<TimelineResponse & {
     pending_human_input_requests?: unknown[]
     pending_action_requests?: unknown[]
-  }>(url)
+  }>(url, params.signal ? { signal: params.signal } : {})
   return {
     ...response,
     pending_human_input_requests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
