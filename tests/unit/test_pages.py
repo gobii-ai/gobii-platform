@@ -3301,6 +3301,15 @@ class AuthLinkTests(TestCase):
         self.assertIsNotNone(login_form)
         self.assertEqual(login_form["data-analytics-placement"], "auth_modal_login")
         self.assertEqual(login_form["data-analytics-intent"], "log_in")
+        login_button = login_form.select_one("button[data-auth-modal-submit]")
+        self.assertIsNotNone(login_button)
+        self.assertEqual(login_button["aria-busy"], "false")
+        self.assertEqual(login_button.select_one("[data-auth-modal-submit-label]").get_text(strip=True), "Sign in")
+        self.assertEqual(
+            login_button.select_one("[data-auth-modal-submit-pending-label]").get_text(strip=True),
+            "Signing in...",
+        )
+        self.assertIsNotNone(login_button.select_one("[data-auth-modal-submit-spinner]"))
 
         signup_response = self.client.get(
             reverse("account_signup_modal"),
@@ -3324,6 +3333,18 @@ class AuthLinkTests(TestCase):
         self.assertIsNotNone(signup_form)
         self.assertEqual(signup_form["data-analytics-placement"], "auth_modal_signup")
         self.assertEqual(signup_form["data-analytics-intent"], "sign_up")
+        signup_button = signup_form.select_one("button[data-auth-modal-submit]")
+        self.assertIsNotNone(signup_button)
+        self.assertEqual(signup_button["aria-busy"], "false")
+        self.assertEqual(
+            signup_button.select_one("[data-auth-modal-submit-label]").get_text(strip=True),
+            "Create account",
+        )
+        self.assertEqual(
+            signup_button.select_one("[data-auth-modal-submit-pending-label]").get_text(strip=True),
+            "Creating account...",
+        )
+        self.assertIsNotNone(signup_button.select_one("[data-auth-modal-submit-spinner]"))
 
     @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)

@@ -146,10 +146,23 @@
     <button
       type="submit"
       data-turnstile-submit
+      {% if auth_modal %}data-auth-modal-submit aria-busy="false"{% endif %}
       {% if settings.TURNSTILE_ENABLED and form.turnstile %}disabled aria-disabled="true"{% endif %}
       class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
     >
-      Sign in
+      {% if auth_modal %}
+        <span class="inline-flex items-center justify-center gap-2">
+          <span
+            data-auth-modal-submit-spinner
+            class="hidden h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
+            aria-hidden="true"
+          ></span>
+          <span data-auth-modal-submit-label>Sign in</span>
+          <span data-auth-modal-submit-pending-label class="hidden">Signing in...</span>
+        </span>
+      {% else %}
+        Sign in
+      {% endif %}
     </button>
     {% if settings.GOBII_PROPRIETARY_MODE %}
     <p class="mt-4 text-xs text-gray-500 text-center">

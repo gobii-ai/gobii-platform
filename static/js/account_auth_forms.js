@@ -75,6 +75,49 @@
     });
   }
 
+  function getModalSubmitElements(form) {
+    const authRoot = form && typeof form.closest === "function"
+      ? form.closest("[data-account-auth-root]")
+      : null;
+    if (!form || !authRoot || authRoot.dataset.authMode !== "modal") {
+      return null;
+    }
+
+    const button = form.querySelector("[data-auth-modal-submit]");
+    if (!button) {
+      return null;
+    }
+
+    return {
+      button,
+      spinner: button.querySelector("[data-auth-modal-submit-spinner]"),
+      idleLabel: button.querySelector("[data-auth-modal-submit-label]"),
+      pendingLabel: button.querySelector("[data-auth-modal-submit-pending-label]"),
+    };
+  }
+
+  function setModalSubmitPending(form, isPending) {
+    const submitElements = getModalSubmitElements(form);
+    if (!submitElements) {
+      return;
+    }
+
+    const { button, spinner, idleLabel, pendingLabel } = submitElements;
+    button.disabled = isPending;
+    button.setAttribute("aria-busy", isPending ? "true" : "false");
+    button.setAttribute("aria-disabled", isPending ? "true" : "false");
+    if (spinner) {
+      spinner.classList.toggle("hidden", !isPending);
+    }
+    if (idleLabel) {
+      idleLabel.classList.toggle("hidden", isPending);
+    }
+    if (pendingLabel) {
+      pendingLabel.classList.toggle("hidden", !isPending);
+    }
+    form.setAttribute("aria-busy", isPending ? "true" : "false");
+  }
+
   function setFieldValue(authRoot, selector, value) {
     const field = authRoot.querySelector(selector);
     if (field) {
@@ -375,6 +418,7 @@
     if (options && options.submitButtons) {
       setButtonsDisabled(options.submitButtons, false);
     }
+    setModalSubmitPending(form, false);
   }
 
   function submitModalFormWithCleanup(form, options) {
@@ -512,6 +556,7 @@
       });
       form.dataset.clientSignalsPending = "true";
       setButtonsDisabled(submitButtons, true);
+      setModalSubmitPending(form, true);
       controller.readyPromise.finally(() => {
         form.dataset.submitting = "true";
         submitModalFormWithCleanup(form, {
@@ -555,6 +600,7 @@
     activeLoginForm = form;
 
     const config = getRootConfig(authRoot);
+    const submitButtons = getSubmitButtons(form);
     form._gobiiTurnstileState = {
       submitPending: false,
     };
@@ -586,18 +632,27 @@
         submitter: event.submitter || null,
       });
       form.dataset.submitting = "true";
-      submitModalFormWithCleanup(form);
+      setButtonsDisabled(submitButtons, true);
+      setModalSubmitPending(form, true);
+      submitModalFormWithCleanup(form, {
+        submitButtons: submitButtons,
+      });
     });
   }
 
   function finalizeLoginSubmit(form) {
     const config = getRootConfig(form.closest("[data-account-auth-root]"));
     if (config.mode === "modal") {
+      const submitButtons = getSubmitButtons(form);
       trackModalCta(form, {
         submitter: form.querySelector("[data-turnstile-submit]") || null,
       });
       form.dataset.submitting = "true";
-      submitModalFormWithCleanup(form);
+      setButtonsDisabled(submitButtons, true);
+      setModalSubmitPending(form, true);
+      submitModalFormWithCleanup(form, {
+        submitButtons: submitButtons,
+      });
       return;
     }
     form.dataset.submitting = "true";
