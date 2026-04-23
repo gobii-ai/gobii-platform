@@ -3036,30 +3036,6 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
-  const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-  const selectionSidebarProps = {
-    agents: sidebarAgents,
-    favoriteAgentIds,
-    activeAgentId: null,
-    loading: rosterLoading,
-    errorMessage: rosterErrorMessage,
-    onSelectAgent: handleSelectAgent,
-    onToggleAgentFavorite: handleToggleAgentFavorite,
-    onCreateAgent: handleCreateAgent,
-    createAgentDisabledReason,
-    rosterSortMode: agentRosterSortMode,
-    onRosterSortModeChange: handleAgentRosterSortModeChange,
-    defaultCollapsed: selectionSidebarCollapsed,
-    onToggle: setSelectionSidebarCollapsed,
-    contextSwitcher: contextSwitcher ?? undefined,
-  }
-  const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page">
-      <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName}>{content}</main>
-    </div>
-  )
-
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
@@ -3101,7 +3077,7 @@ export function AgentChatPage({
     [queryClient, updateAddons],
   )
 
-  const shouldFetchUsageSummary = Boolean(contextReady && !isSelectionView && (activeAgentId || isNewAgent))
+  const shouldFetchUsageSummary = Boolean(contextReady && (activeAgentId || isNewAgent || isSelectionView))
   const shouldFetchUsageBurnRate = Boolean(contextReady && !isSelectionView && isNewAgent)
   const usageContextKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
@@ -3176,6 +3152,58 @@ export function AgentChatPage({
     bannerBillingStatus?.reason,
     billingManageUrl,
   ])
+  const selectionMainClassName = `agent-chat-main${selectionSidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const selectionSidebarSettings = useMemo(() => ({
+    context: effectiveContext,
+    viewerEmail: viewerEmail ?? null,
+    isProprietaryMode,
+    billingUrl,
+    taskCredits: taskQuota
+      ? {
+          usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
+          remaining: taskQuota.available,
+          resetOn: usageSummary?.period?.resetOn ?? null,
+          unlimited: Boolean(taskQuota.total < 0 || taskQuota.available < 0),
+        }
+      : null,
+  }), [
+    billingUrl,
+    effectiveContext,
+    isProprietaryMode,
+    taskQuota,
+    usageSummary?.metrics.todayCredits?.total,
+    usageSummary?.period?.resetOn,
+    viewerEmail,
+  ])
+  const selectionSidebarProps = {
+    agents: sidebarAgents,
+    favoriteAgentIds,
+    activeAgentId: null,
+    loading: rosterLoading,
+    errorMessage: rosterErrorMessage,
+    onSelectAgent: handleSelectAgent,
+    onToggleAgentFavorite: handleToggleAgentFavorite,
+    onCreateAgent: handleCreateAgent,
+    createAgentDisabledReason,
+    rosterSortMode: agentRosterSortMode,
+    onRosterSortModeChange: handleAgentRosterSortModeChange,
+    defaultCollapsed: selectionSidebarCollapsed,
+    onToggle: setSelectionSidebarCollapsed,
+    contextSwitcher: contextSwitcher ?? undefined,
+    settings: selectionSidebarSettings,
+  }
+  const renderSelectionLayout = (content: ReactNode) => (
+    <div className="agent-chat-page agent-chat-page--framed" data-processing="false">
+      <ChatSidebar {...selectionSidebarProps} />
+      <main className={selectionMainClassName}>
+        <div id="agent-workspace-root">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {content}
+          </div>
+        </div>
+      </main>
+    </div>
+  )
 
   useEffect(() => {
     if (
@@ -3586,7 +3614,7 @@ export function AgentChatPage({
       )
     }
     return renderSelectionLayout(
-      <div className="flex w-full flex-col gap-4 pb-6 pt-0">
+      <div className="flex min-h-full w-full flex-1 flex-col gap-4 pb-6 pt-0">
         {highPriorityBanner ? (
           <HighPriorityBanner
             title={highPriorityBanner.title}
@@ -3597,7 +3625,7 @@ export function AgentChatPage({
             tone={highPriorityBanner.tone}
           />
         ) : null}
-        <div className="mx-auto flex w-full max-w-3xl px-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-1 items-center justify-center px-4">
           <AgentSelectState
             hasAgents={rosterAgents.length > 0}
             onCreateAgent={handleCreateAgent}

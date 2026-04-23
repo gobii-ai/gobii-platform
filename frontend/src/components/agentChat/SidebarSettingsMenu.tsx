@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronDown,
   ClipboardList,
@@ -8,7 +8,7 @@ import {
   Settings,
   UserRound,
 } from 'lucide-react'
-import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
+import { Button, Dialog, Popover } from 'react-aria-components'
 
 import type { ConsoleContext } from '../../api/context'
 
@@ -73,8 +73,37 @@ export function SidebarSettingsMenu({
   variant = 'sidebar',
   collapsed = false,
 }: SidebarSettingsMenuProps) {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+  const popoverRef = useRef<HTMLElement | null>(null)
   const [open, setOpen] = useState(false)
   const [creditsOpen, setCreditsOpen] = useState(false)
+  const handleOpenChange = useCallback((nextOpen: boolean) => {
+    setOpen(nextOpen)
+    if (!nextOpen) {
+      setCreditsOpen(false)
+    }
+  }, [])
+  useEffect(() => {
+    if (!open || typeof document === 'undefined') {
+      return
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) {
+        return
+      }
+      if (triggerRef.current?.contains(target) || popoverRef.current?.contains(target)) {
+        return
+      }
+      handleOpenChange(false)
+    }
+
+    document.addEventListener('pointerdown', handlePointerDown, true)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true)
+    }
+  }, [handleOpenChange, open])
   const identityLabel = useMemo(() => {
     if (context?.type === 'organization') {
       return context.name || 'Organization'
@@ -92,85 +121,92 @@ export function SidebarSettingsMenu({
       className={`sidebar-settings sidebar-settings--${variant}`}
       data-collapsed={collapsed ? 'true' : 'false'}
     >
-      <DialogTrigger isOpen={open} onOpenChange={setOpen}>
-        <Button
-          className="sidebar-settings__trigger"
-          aria-label="Open settings"
-          data-open={open ? 'true' : 'false'}
-        >
-          <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
-          {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
-        </Button>
-        <Popover
-          placement="top"
-          containerPadding={0}
-          className={`sidebar-settings__popover sidebar-settings__popover--${variant}`}
-          data-collapsed={collapsed ? 'true' : 'false'}
-        >
-          <Dialog className="sidebar-settings__menu">
-            <div className="sidebar-settings__identity">
-              <UserRound className="sidebar-settings__identity-icon" aria-hidden="true" />
-              <span className="sidebar-settings__identity-label">{identityLabel}</span>
-            </div>
-            <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+      <Button
+        ref={triggerRef}
+        className="sidebar-settings__trigger"
+        aria-label="Open settings"
+        aria-expanded={open}
+        onPress={() => handleOpenChange(!open)}
+        data-open={open ? 'true' : 'false'}
+      >
+        <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
+        {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
+      </Button>
+      <Popover
+        ref={popoverRef}
+        triggerRef={triggerRef}
+        isOpen={open}
+        onOpenChange={handleOpenChange}
+        shouldCloseOnInteractOutside={() => true}
+        placement="top"
+        containerPadding={0}
+        isNonModal
+        className={`sidebar-settings__popover sidebar-settings__popover--${variant}`}
+        data-collapsed={collapsed ? 'true' : 'false'}
+      >
+        <Dialog className="sidebar-settings__menu" aria-label="Settings menu">
+          <div className="sidebar-settings__identity">
+            <UserRound className="sidebar-settings__identity-icon" aria-hidden="true" />
+            <span className="sidebar-settings__identity-label">{identityLabel}</span>
+          </div>
+          <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
-            <div className="sidebar-settings__links">
-              {canShowBilling ? (
-                <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
-                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Billing</span>
-                </a>
-              ) : null}
-              <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
-                <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
-                <span>Global Secrets</span>
+          <div className="sidebar-settings__links">
+            {canShowBilling ? (
+              <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
+                <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
+                <span>Billing</span>
               </a>
-              <a className="sidebar-settings__link" href={advancedMcpUrl} target="_blank" rel="noreferrer">
-                <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
-                <span>Integrations &amp; MCP</span>
-              </a>
-            </div>
-
-            {canShowTaskCredits ? (
-              <div className="sidebar-settings__credits">
-                <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
-                <button
-                  type="button"
-                  className="sidebar-settings__credits-trigger"
-                  onClick={() => setCreditsOpen((current) => !current)}
-                  aria-expanded={creditsOpen}
-                >
-                  <span className="sidebar-settings__credits-title">
-                    <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
-                    <span>Task Credits Remaining</span>
-                  </span>
-                  <ChevronDown
-                    className="sidebar-settings__credits-chevron"
-                    data-open={creditsOpen ? 'true' : 'false'}
-                    aria-hidden="true"
-                  />
-                </button>
-                {creditsOpen ? (
-                  <dl className="sidebar-settings__credits-list">
-                    <div className="sidebar-settings__credits-row">
-                      <dt>Used Today</dt>
-                      <dd>{formatCreditValue(taskCredits?.usedToday)}</dd>
-                    </div>
-                    <div className="sidebar-settings__credits-row">
-                      <dt>Remaining This Month</dt>
-                      <dd>{remainingLabel}</dd>
-                    </div>
-                    <div className="sidebar-settings__credits-row">
-                      <dt>Resets On</dt>
-                      <dd>{formatDateValue(taskCredits?.resetOn)}</dd>
-                    </div>
-                  </dl>
-                ) : null}
-              </div>
             ) : null}
-          </Dialog>
-        </Popover>
-      </DialogTrigger>
+            <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
+              <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
+              <span>Global Secrets</span>
+            </a>
+            <a className="sidebar-settings__link" href={advancedMcpUrl} target="_blank" rel="noreferrer">
+              <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
+              <span>Integrations &amp; MCP</span>
+            </a>
+          </div>
+
+          {canShowTaskCredits ? (
+            <div className="sidebar-settings__credits">
+              <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+              <button
+                type="button"
+                className="sidebar-settings__credits-trigger"
+                onClick={() => setCreditsOpen((current) => !current)}
+                aria-expanded={creditsOpen}
+              >
+                <span className="sidebar-settings__credits-title">
+                  <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Task Credits Remaining</span>
+                </span>
+                <ChevronDown
+                  className="sidebar-settings__credits-chevron"
+                  data-open={creditsOpen ? 'true' : 'false'}
+                  aria-hidden="true"
+                />
+              </button>
+              {creditsOpen ? (
+                <dl className="sidebar-settings__credits-list">
+                  <div className="sidebar-settings__credits-row">
+                    <dt>Used Today</dt>
+                    <dd>{formatCreditValue(taskCredits?.usedToday)}</dd>
+                  </div>
+                  <div className="sidebar-settings__credits-row">
+                    <dt>Remaining This Month</dt>
+                    <dd>{remainingLabel}</dd>
+                  </div>
+                  <div className="sidebar-settings__credits-row">
+                    <dt>Resets On</dt>
+                    <dd>{formatDateValue(taskCredits?.resetOn)}</dd>
+                  </div>
+                </dl>
+              ) : null}
+            </div>
+          ) : null}
+        </Dialog>
+      </Popover>
     </div>
   )
 }
