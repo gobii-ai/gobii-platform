@@ -350,11 +350,9 @@ def _calculate_credit_totals(
         persistent_filters["agent__organization__isnull"] = True
 
     persistent_steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
-    persistent_agent_id_list = list(persistent_agent_ids)
-    filtered_agent_id_list = list(filtered_agent_ids)
-    if persistent_agent_id_list:
-        persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_id_list)
-    elif filtered_agent_id_list:
+    if persistent_agent_ids:
+        persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_ids)
+    elif filtered_agent_ids:
         persistent_steps_qs = PersistentAgentStep.objects.none()
 
     persistent_credit_agg = persistent_steps_qs.aggregate(

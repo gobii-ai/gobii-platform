@@ -97,6 +97,10 @@ function buildTimelineThinkingStream(event: ThinkingEvent): StreamState {
   }
 }
 
+function shouldTrackRealtimeAnimationCursor(event: TimelineEvent): boolean {
+  return event.kind === 'thinking' || event.kind === 'steps'
+}
+
 
 
 const OPTIMISTIC_MATCH_WINDOW_MS = 120_000
@@ -505,8 +509,9 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set((state) => {
       let pendingEvents = state.pendingEvents
       let awaitingResponse = state.awaitingResponse
-      const realtimeEventCursors = new Set(state.realtimeEventCursors)
-      realtimeEventCursors.add(normalized.cursor)
+      const realtimeEventCursors = shouldTrackRealtimeAnimationCursor(normalized)
+        ? new Set(state.realtimeEventCursors).add(normalized.cursor)
+        : state.realtimeEventCursors
 
       // Remove optimistic matches from both cache and pending events
       if (normalized.kind === 'message' && !normalized.message.isOutbound && normalized.message.status !== 'sending') {
