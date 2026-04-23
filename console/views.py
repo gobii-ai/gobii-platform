@@ -505,7 +505,7 @@ from constants.stripe import (
 )
 from util.waffle_flags import is_waffle_flag_active
 from util.trial_eligibility import (
-    is_trial_decision_allowed,
+    is_user_trial_allowed_by_policy,
     is_user_trial_eligibility_enforcement_enabled,
     is_user_trial_eligibility_enforcement_one_per_user_enabled,
 )
@@ -643,13 +643,24 @@ def _is_checkout_trial_eligible(user, request: HttpRequest | None = None) -> boo
     """Return whether a user can start an individual-plan free trial."""
     if not user or not getattr(user, "pk", None):
         return True
-    if is_user_trial_eligibility_enforcement_one_per_user_enabled(request):
-        return not user_has_prior_individual_history(user)
-    if not is_user_trial_eligibility_enforcement_enabled(request):
-        return True
+    enforcement_enabled = is_user_trial_eligibility_enforcement_enabled(request)
+    one_per_user_enabled = is_user_trial_eligibility_enforcement_one_per_user_enabled(request)
     try:
-        result = evaluate_user_trial_eligibility(user)
-        return is_trial_decision_allowed(result.decision, request=request)
+        decision = None
+        if enforcement_enabled:
+            result = evaluate_user_trial_eligibility(user)
+            decision = result.decision
+        return is_user_trial_allowed_by_policy(
+            enforcement_enabled=enforcement_enabled,
+            one_per_user_enabled=one_per_user_enabled,
+            has_prior_individual_history=(
+                (lambda: user_has_prior_individual_history(user))
+                if one_per_user_enabled
+                else None
+            ),
+            request=request,
+            decision=decision,
+        )
     except (IntegrationDisabledError, stripe.error.StripeError, TypeError, ValueError):
         logger.warning(
             "Failed to resolve trial eligibility for user %s; defaulting to ineligible.",

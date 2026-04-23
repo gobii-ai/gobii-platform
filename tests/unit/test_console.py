@@ -954,6 +954,47 @@ class ConsoleViewsTest(TestCase):
         mock_trial_eligibility.assert_not_called()
 
     @tag("batch_console_agents")
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
+    @patch("console.views.user_has_prior_individual_history", return_value=False)
+    def test_checkout_trial_eligibility_blocks_no_trial_before_one_per_user(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        from console.views import _is_checkout_trial_eligible
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+        ):
+            eligible = _is_checkout_trial_eligible(self.user)
+
+        self.assertFalse(eligible)
+        mock_trial_eligibility.assert_called_once_with(self.user)
+        mock_prior_history.assert_not_called()
+
+    @tag("batch_console_agents")
+    @patch("console.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
+    @patch("console.views.user_has_prior_individual_history", return_value=False)
+    def test_checkout_trial_eligibility_blocks_review_before_one_per_user_when_review_flag_disabled(
+        self,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        from console.views import _is_checkout_trial_eligible
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+            override_flag("user_trial_review_allows_trial", active=False),
+        ):
+            eligible = _is_checkout_trial_eligible(self.user)
+
+        self.assertFalse(eligible)
+        mock_trial_eligibility.assert_called_once_with(self.user)
+        mock_prior_history.assert_not_called()
+
+    @tag("batch_console_agents")
     @patch("console.agent_chat.access.can_user_access_personal_agent_chat", return_value=True)
     @patch("console.views._is_checkout_trial_eligible", return_value=True)
     @patch("console.views.get_stripe_settings")

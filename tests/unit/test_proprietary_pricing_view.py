@@ -455,6 +455,87 @@ class PricingPageCtaCopyTests(TestCase):
         mock_trial_eligibility.assert_not_called()
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
+    @patch("proprietary.views.user_has_prior_individual_history", return_value=False)
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.get_stripe_settings")
+    def test_free_user_pricing_blocks_no_trial_before_one_per_user(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_user_plan,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        user = get_user_model().objects.create_user(
+            username="pricing-no-trial-before-one-per-user@example.com",
+            email="pricing-no-trial-before-one-per-user@example.com",
+            password="pw",
+        )
+        self.client.force_login(user)
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+        ):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Subscribe to Pro")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Subscribe to Scale")
+        mock_trial_eligibility.assert_called_once_with(user)
+        mock_prior_history.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
+    @patch("proprietary.views.user_has_prior_individual_history", return_value=False)
+    @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
+    @patch("proprietary.views.get_stripe_settings")
+    def test_free_user_pricing_blocks_review_before_one_per_user_when_review_flag_disabled(
+        self,
+        mock_get_stripe_settings,
+        _mock_get_user_plan,
+        mock_prior_history,
+        mock_trial_eligibility,
+    ):
+        user = get_user_model().objects.create_user(
+            username="pricing-review-before-one-per-user@example.com",
+            email="pricing-review-before-one-per-user@example.com",
+            password="pw",
+        )
+        self.client.force_login(user)
+
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with (
+            override_flag("user_trial_eligibility_enforcement", active=True),
+            override_flag("user_trial_eligibility_enforcement_one_per_user", active=True),
+            override_flag("user_trial_review_allows_trial", active=False),
+        ):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = {
+            plan["code"]: plan
+            for plan in response.context["pricing_plans"]
+        }
+        self.assertEqual(plans[PlanNames.STARTUP]["cta"], "Subscribe to Pro")
+        self.assertEqual(plans[PlanNames.SCALE]["cta"], "Subscribe to Scale")
+        mock_trial_eligibility.assert_called_once_with(user)
+        mock_prior_history.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
     def test_pricing_page_uses_db_backed_task_credit_amounts(self, mock_get_stripe_settings):
         self._set_monthly_task_credits(PlanNames.STARTUP, 750)

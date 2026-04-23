@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from django.http import HttpRequest
 
 from api.models import UserTrialEligibilityAutoStatusChoices
@@ -60,6 +62,29 @@ def is_trial_decision_allowed(
     if decision == UserTrialEligibilityAutoStatusChoices.REVIEW:
         return is_user_trial_review_allowed(request)
     return False
+
+
+def is_user_trial_allowed_by_policy(
+    *,
+    enforcement_enabled: bool,
+    one_per_user_enabled: bool,
+    has_prior_individual_history: Callable[[], bool] | None = None,
+    request: HttpRequest | None = None,
+    decision: str | None = None,
+) -> bool:
+    """Apply the precedence between stored eligibility decisions and one-per-user mode."""
+    if enforcement_enabled:
+        if decision is None:
+            raise ValueError("decision is required when trial eligibility enforcement is enabled")
+        if not is_trial_decision_allowed(decision, request=request):
+            return False
+    if one_per_user_enabled:
+        if has_prior_individual_history is None:
+            raise ValueError(
+                "has_prior_individual_history is required when one-per-user mode is enabled"
+            )
+        return not has_prior_individual_history()
+    return True
 
 
 def is_start_trial_capi_trial_eligibility_enforcement_enabled(
