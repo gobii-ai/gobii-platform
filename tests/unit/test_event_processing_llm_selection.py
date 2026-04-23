@@ -38,7 +38,7 @@ class TestEventProcessingLLMSelection(TestCase):
         event_processing_module._GEMINI_CACHE_BLOCKLIST.clear()
 
     @patch('api.agent.core.event_processing.get_llm_config_with_failover')
-    @patch('api.agent.core.event_processing.litellm.completion')
+    @patch('api.agent.core.llm_utils.litellm.completion')
     def test_completion_with_failover_uses_preselected_config(self, mock_completion, mock_get_config):
         """_completion_with_failover uses the failover_configs passed to it."""
         # This test ensures that _completion_with_failover does NOT call get_llm_config_with_failover itself.
@@ -60,7 +60,7 @@ class TestEventProcessingLLMSelection(TestCase):
         call_args = mock_completion.call_args
         self.assertEqual(call_args.kwargs['model'], "vertex_ai/gemini-2.5-pro")
 
-    @patch('api.agent.core.event_processing.litellm.completion')
+    @patch('api.agent.core.llm_utils.litellm.completion')
     def test_parallel_tool_calls_flag_is_passed(self, mock_completion):
         """_completion_with_failover passes parallel_tool_calls when endpoint enables it."""
         from unittest.mock import MagicMock

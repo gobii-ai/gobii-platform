@@ -8,6 +8,7 @@ from django.conf import settings
 import litellm
 
 from api.services.system_settings import get_litellm_timeout_seconds
+from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
@@ -245,6 +246,26 @@ def raise_if_invalid_litellm_response(
         )
 
 
+def sanitize_tools_for_llm(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sanitized_tools: list[dict[str, Any]] = []
+    for tool in tools:
+        if not isinstance(tool, dict):
+            sanitized_tools.append(tool)
+            continue
+        function_block = tool.get("function")
+        if not isinstance(function_block, dict):
+            sanitized_tools.append(tool)
+            continue
+        sanitized_tool = dict(tool)
+        sanitized_function = dict(function_block)
+        sanitized_function["parameters"] = sanitize_tool_parameters_schema_for_llm(
+            function_block.get("parameters")
+        )
+        sanitized_tool["function"] = sanitized_function
+        sanitized_tools.append(sanitized_tool)
+    return sanitized_tools
+
+
 def run_completion(
     *,
     model: str,
@@ -301,7 +322,7 @@ def run_completion(
         kwargs["drop_params"] = True
 
     if tools:
-        kwargs["tools"] = tools
+        kwargs["tools"] = sanitize_tools_for_llm(tools)
         if tool_choice_supported:
             kwargs.setdefault("tool_choice", "auto")
     else:
@@ -361,4 +382,5 @@ __all__ = [
     "raise_if_empty_litellm_response",
     "raise_if_invalid_litellm_response",
     "run_completion",
+    "sanitize_tools_for_llm",
 ]

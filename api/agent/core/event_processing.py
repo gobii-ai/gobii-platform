@@ -20,7 +20,6 @@ from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
-import litellm
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
@@ -29,13 +28,6 @@ from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
 from waffle import switch_is_active
-from tenacity import (
-    before_sleep_log,
-    retry,
-    retry_if_exception_type,
-    stop_after_attempt,
-    wait_random_exponential,
-)
 
 from observability import mark_span_failed_with_exception
 from .budget import (
@@ -3105,33 +3097,6 @@ def _filter_preferred_config_for_low_latency(
             )
             return None
     return None
-
-
-@retry(
-    wait=wait_random_exponential(multiplier=1, max=60),
-    stop=stop_after_attempt(3),  # Reduced retries since we have failover
-    retry=retry_if_exception_type(
-        (
-            litellm.RateLimitError,
-            litellm.ServiceUnavailableError,
-            litellm.APIConnectionError,
-            litellm.Timeout,
-            # Note: Internal server errors and generic API errors are now handled by failover
-        )
-    ),
-    before_sleep=before_sleep_log(logger, logging.WARNING),
-    reraise=True,
-)
-def _completion_with_backoff(**kwargs):
-    """
-    Legacy wrapper around litellm.completion with exponential backoff.
-    
-    This is kept for backward compatibility, but _completion_with_failover
-    is preferred for new code as it provides better fault tolerance.
-
-    NOTE: As of 9/9/2025, this seems unused. If use is reinstated, ensure safety_identifier is an argument
-    """
-    return litellm.completion(**kwargs)
 
 
 # --------------------------------------------------------------------------- #
