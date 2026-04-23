@@ -54,24 +54,23 @@ class AgentTierPreferenceTests(TestCase):
             preferred_llm_tier=get_intelligence_tier("standard"),
         )
 
-    def test_first_loop_always_uses_premium(self):
-        """Brand new agents should be routed through premium tier on their first loop."""
+    def test_free_user_first_loop_uses_standard(self):
+        """Brand new free-plan agents use normal plan-clamped tier resolution."""
         tier = get_agent_llm_tier(self.agent, is_first_loop=True)
-        self.assertEqual(tier, AgentLLMTier.PREMIUM)
+        self.assertEqual(tier, AgentLLMTier.STANDARD)
 
-    def test_trial_accounts_pay_standard_multiplier(self):
-        """Premium trial routing should still charge 1× credits."""
-        self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.PREMIUM)
+    def test_free_user_standard_tier_pays_standard_multiplier(self):
+        self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.STANDARD)
         amount = Decimal("1.000")
         discounted = apply_tier_credit_multiplier(self.agent, amount)
         self.assertEqual(discounted, Decimal("1.000"))
 
-    def test_user_quota_standard_blocks_trial_boost(self):
+    def test_user_quota_standard_keeps_free_user_standard(self):
         self.user.quota.max_intelligence_tier = AgentLLMTier.STANDARD.value
         self.user.quota.save(update_fields=["max_intelligence_tier"])
         self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.STANDARD)
 
-    def test_user_quota_standard_blocks_first_loop_trial_boost(self):
+    def test_user_quota_standard_keeps_first_loop_standard(self):
         self.user.quota.max_intelligence_tier = AgentLLMTier.STANDARD.value
         self.user.quota.save(update_fields=["max_intelligence_tier"])
         self.assertEqual(get_agent_llm_tier(self.agent, is_first_loop=True), AgentLLMTier.STANDARD)

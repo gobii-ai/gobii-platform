@@ -10,7 +10,6 @@ The configuration uses a similar pattern to browser use tasks for consistency.
 import os
 import logging
 import random
-from datetime import timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
 from typing import Dict, List, Tuple, Any, Optional
@@ -22,7 +21,6 @@ from django.db import connection
 from django.db.models import Q
 from django.db.utils import DatabaseError
 from django.conf import settings
-from django.utils import timezone
 
 from api.openrouter import get_attribution_headers
 from api.llm.utils import normalize_model_name
@@ -90,7 +88,6 @@ _PAID_PLAN_NAMES = {
     PlanNames.ORG_TEAM,
     PlanSlugs.SCALE,
 }
-_NEW_ACCOUNT_PREMIUM_GRACE_DAYS = getattr(settings, "NEW_ACCOUNT_PREMIUM_GRACE_DAYS", 30)
 
 
 class AgentLLMTier(str, Enum):
@@ -546,57 +543,12 @@ def apply_tier_credit_multiplier(
         return amount
 
     tier = get_agent_llm_tier(agent, use_runtime_override=use_runtime_override)
-    if tier is AgentLLMTier.PREMIUM and _is_trial_discount_eligible(agent):
-        tier = AgentLLMTier.STANDARD
     multiplier = get_credit_multiplier_for_tier(tier)
     scaled = base_amount * multiplier
     return scaled.quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
 
 
-def _within_new_account_premium_window(owner: Any | None) -> bool:
-    """Return True when the owner is within the premium trial window."""
-
-    if owner is None:
-        return False
-    joined = getattr(owner, "date_joined", None)
-    if not joined:
-        return False
-    try:
-        joined_dt = joined
-        if timezone.is_naive(joined_dt):
-            joined_dt = timezone.make_aware(joined_dt, timezone.utc)
-    except Exception:
-        return False
-    try:
-        days = int(_NEW_ACCOUNT_PREMIUM_GRACE_DAYS)  # type: ignore[arg-type]
-    except Exception:
-        days = 0
-    if days <= 0:
-        return False
-    return (timezone.now() - joined_dt) <= timedelta(days=days)
-
-
-def _is_trial_discount_eligible(agent: Any | None) -> bool:
-    """Return True when an agent's premium tier comes from the new-account trial."""
-
-    if agent is None:
-        return False
-    if getattr(agent, "organization_id", None):
-        return False
-    if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
-        return False
-    owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
-    if owner is None:
-        return False
-    try:
-        plan = get_owner_plan(owner)
-    except Exception:
-        plan = None
-    allowed = max_allowed_tier_for_plan(plan, is_organization=False)
-    return allowed == AgentLLMTier.STANDARD and _within_new_account_premium_window(owner)
-
-
-def get_agent_baseline_llm_tier(agent: Any, *, is_first_loop: bool | None = None) -> AgentLLMTier:
+def get_agent_baseline_llm_tier(agent: Any) -> AgentLLMTier:
     """Return the saved effective tier without any runtime override applied."""
 
     if not getattr(settings, "GOBII_PROPRIETARY_MODE", False):
@@ -616,27 +568,14 @@ def get_agent_baseline_llm_tier(agent: Any, *, is_first_loop: bool | None = None
                 exc_info=True,
             )
     is_org_owned = bool(getattr(agent, "organization_id", None))
-    trial_eligible = bool(not is_org_owned and _within_new_account_premium_window(owner))
     allowed_tier = max_allowed_tier_for_plan(plan, is_organization=is_org_owned)
     allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
-    trial_boost_active = trial_eligible and allowed_tier == AgentLLMTier.STANDARD
-    if trial_boost_active:
-        allowed_tier = AgentLLMTier.PREMIUM
-        allowed_tier = apply_user_quota_tier_override(owner, allowed_tier)
-
-    if is_first_loop:
-        if get_user_quota_tier_override(owner) is None:
-            return AgentLLMTier.PREMIUM
-        return _clamp_tier(AgentLLMTier.PREMIUM, allowed_tier)
 
     preferred_value = getattr(agent, "preferred_llm_tier", None)
     if preferred_value:
         preferred = _normalize_tier_value(preferred_value)
     else:
         preferred = default_preferred_tier_for_owner(owner)
-
-    if trial_boost_active and preferred == AgentLLMTier.STANDARD:
-        preferred = AgentLLMTier.PREMIUM
 
     return _clamp_tier(preferred, allowed_tier)
 
@@ -649,7 +588,7 @@ def get_agent_llm_tier(
 ) -> AgentLLMTier:
     """Return the effective runtime tier, including any per-run override."""
 
-    baseline_tier = get_agent_baseline_llm_tier(agent, is_first_loop=is_first_loop)
+    baseline_tier = get_agent_baseline_llm_tier(agent)
     if not use_runtime_override:
         return baseline_tier
 
@@ -1113,7 +1052,8 @@ def get_llm_config_with_failover(
                     Used to select appropriate tier when provider_tiers is None.
         agent: Optional agent instance (or None). When provided (or resolvable via
             agent_id) and running in proprietary mode, premium tiers may be preferred.
-        is_first_loop: Whether this is the first run of the agent (brand-new)
+        is_first_loop: Retained for caller compatibility; first-loop status no
+            longer grants elevated routing.
         routing_profile: Optional LLMRoutingProfile instance. When provided, uses
             this profile's configuration instead of the active profile or legacy config.
         prefer_low_latency: When true, prioritize low-latency endpoints within a tier.
