@@ -71,6 +71,8 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
+  realtimeEventCursors?: Set<string>
+  onRealtimeEventAnimationConsumed?: (cursor: string) => void
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -221,6 +223,8 @@ export function AgentChatLayout({
   events,
   displayEvents,
   statusExpansionTargets,
+  realtimeEventCursors,
+  onRealtimeEventAnimationConsumed,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -1018,6 +1022,8 @@ export function AgentChatLayout({
                     viewerEmail={viewerEmail ?? null}
                     suppressedThinkingCursor={suppressedThinkingCursor}
                     statusExpansionTargets={statusExpansionTargets}
+                    animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
+                    onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
                   />
                 ))}
                 {showScheduledResumeEvent ? (

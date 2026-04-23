@@ -293,6 +293,7 @@ export type AgentChatState = {
   autoScrollPinned: boolean
   autoScrollPinSuppressedUntil: number | null
   pendingEvents: TimelineEvent[]
+  realtimeEventCursors: Set<string>
   agentColorHex: string | null
   agentName: string | null
   agentAvatarUrl: string | null
@@ -333,6 +334,7 @@ export type AgentChatState = {
   setAutoScrollPinned: (pinned: boolean) => void
   suppressAutoScrollPin: (durationMs?: number) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
+  consumeRealtimeEventCursor: (cursor: string) => void
   // Insight actions
   setInsightsForAgent: (agentId: string, insights: InsightEvent[]) => void
   startInsightRotation: () => void
@@ -358,6 +360,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
   autoScrollPinned: true,
   autoScrollPinSuppressedUntil: null,
   pendingEvents: [],
+  realtimeEventCursors: new Set(),
   agentColorHex: null,
   agentName: null,
   agentAvatarUrl: null,
@@ -404,6 +407,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       processingWebTasks: reuseExisting ? get().processingWebTasks : [],
       nextScheduledAt: reuseExisting ? get().nextScheduledAt : null,
       pendingEvents: [],
+      realtimeEventCursors: new Set(),
       autoScrollPinned: true,
       autoScrollPinSuppressedUntil: null,
       streaming: reuseExisting ? get().streaming : null,
@@ -501,6 +505,8 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set((state) => {
       let pendingEvents = state.pendingEvents
       let awaitingResponse = state.awaitingResponse
+      const realtimeEventCursors = new Set(state.realtimeEventCursors)
+      realtimeEventCursors.add(normalized.cursor)
 
       // Remove optimistic matches from both cache and pending events
       if (normalized.kind === 'message' && !normalized.message.isOutbound && normalized.message.status !== 'sending') {
@@ -551,6 +557,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
         const mergedPending = mergeTimelineEvents(pendingEvents, [normalized])
         return {
           pendingEvents: mergedPending,
+          realtimeEventCursors,
           hasUnseenActivity: true,
           streaming: nextStreaming,
           streamingClearOnDone: nextStreamingClearOnDone,
@@ -567,6 +574,7 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
       return {
         pendingEvents: [],
+        realtimeEventCursors,
         streaming: nextStreaming,
         streamingClearOnDone: nextStreamingClearOnDone,
         streamingThinkingCollapsed: nextStreamingThinkingCollapsed,
@@ -809,6 +817,17 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
 
   setStreamingThinkingCollapsed(collapsed) {
     set({ streamingThinkingCollapsed: collapsed })
+  },
+
+  consumeRealtimeEventCursor(cursor) {
+    set((state) => {
+      if (!state.realtimeEventCursors.has(cursor)) {
+        return state
+      }
+      const realtimeEventCursors = new Set(state.realtimeEventCursors)
+      realtimeEventCursors.delete(cursor)
+      return { realtimeEventCursors }
+    })
   },
 
   // Insight actions

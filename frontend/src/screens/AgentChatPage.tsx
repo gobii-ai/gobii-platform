@@ -879,6 +879,8 @@ export function AgentChatPage({
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
+  const realtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
+  const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
   const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
@@ -3741,6 +3743,8 @@ export function AgentChatPage({
         events={timelineEvents}
         displayEvents={displayEvents}
         statusExpansionTargets={statusExpansionTargets}
+        realtimeEventCursors={realtimeEventCursors}
+        onRealtimeEventAnimationConsumed={consumeRealtimeEventCursor}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         showOlderLoadButton={showOlderLoadButton}

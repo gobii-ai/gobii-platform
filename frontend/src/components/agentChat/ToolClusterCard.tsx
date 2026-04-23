@@ -18,6 +18,8 @@ type ToolClusterCardProps = {
   isLatestEvent?: boolean
   suppressedThinkingCursor?: string | null
   statusExpansionTargets?: StatusExpansionTargets
+  animateIncoming?: boolean
+  onIncomingAnimationConsumed?: (cursor: string) => void
 }
 
 export const ToolClusterCard = memo(function ToolClusterCard({
@@ -25,6 +27,8 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   isLatestEvent = false,
   suppressedThinkingCursor,
   statusExpansionTargets,
+  animateIncoming = false,
+  onIncomingAnimationConsumed,
 }: ToolClusterCardProps) {
   const transformed = useMemo(
     () => transformToolCluster(cluster, { suppressedThinkingCursor }),
@@ -198,9 +202,11 @@ export const ToolClusterCard = memo(function ToolClusterCard({
             <ToolClusterLivePreview
               cluster={resolvedTransformed}
               isLatestEvent={isLatestEvent}
+              animateIncoming={animateIncoming}
               previewEntryLimit={previewEntries.length}
               onOpenTimeline={handleToggleCluster}
               onSelectEntry={handlePreviewEntrySelect}
+              onIncomingAnimationConsumed={onIncomingAnimationConsumed}
             />
           </div>
         ) : null}
