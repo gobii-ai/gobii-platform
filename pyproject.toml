@@ -1,6 +1,6 @@
 [project]
 name = "gobii-platform"
-version = "2.14.0"
+version = "2.15.0"
 description = "Platform for browser agents"
 requires-python = ">=3.12"
 
