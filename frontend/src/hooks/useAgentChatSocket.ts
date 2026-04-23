@@ -1,15 +1,19 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 
-import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
 import { scheduleLoginRedirect } from '../api/http'
-import type { ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
-import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
+import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
-import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
+import {
+  findActiveAgentChatSocketId,
+  normalizeAgentChatSocketSubscriptions,
+  syncAgentChatSocketSubscriptions,
+  type AgentChatSocketContextOverride,
+  type AgentChatSocketSubscription,
+} from './agentChatSocketProtocol'
+import { routeAgentChatSocketMessage } from './agentChatSocketMessageRouter'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 15000
@@ -63,13 +67,18 @@ function isPageVisible(): boolean {
 }
 
 export function useAgentChatSocket(
-  agentId: string | null,
+  desiredSubscriptionsInput: AgentChatSocketSubscription[],
   options: {
+    contextOverride?: AgentChatSocketContextOverride
     onCreditEvent?: (payload: Record<string, unknown>) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
   } = {},
 ): AgentChatSocketSnapshot {
   const queryClient = useQueryClient()
+  const desiredSubscriptions = useMemo(
+    () => normalizeAgentChatSocketSubscriptions(desiredSubscriptionsInput),
+    [desiredSubscriptionsInput],
+  )
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
   const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
@@ -104,8 +113,10 @@ export function useAgentChatSocket(
   const pauseReasonRef = useRef<'offline' | null>(null)
   const lastSyncAtRef = useRef(0)
   const lastActivityAtRef = useRef(0)
-  const agentIdRef = useRef<string | null>(agentId)
-  const subscribedAgentIdRef = useRef<string | null>(null)
+  const desiredSubscriptionsRef = useRef<AgentChatSocketSubscription[]>(desiredSubscriptions)
+  const contextOverrideRef = useRef<AgentChatSocketContextOverride>(options.contextOverride)
+  const activeAgentIdRef = useRef<string | null>(findActiveAgentChatSocketId(desiredSubscriptions))
+  const subscribedAgentsRef = useRef<Map<string, AgentChatSocketSubscription['mode']>>(new Map())
   const [snapshot, setSnapshot] = useState<AgentChatSocketSnapshot>({
     status: 'idle',
     lastConnectedAt: null,
@@ -113,8 +124,13 @@ export function useAgentChatSocket(
   })
 
   useEffect(() => {
-    agentIdRef.current = agentId
-  }, [agentId])
+    desiredSubscriptionsRef.current = desiredSubscriptions
+    activeAgentIdRef.current = findActiveAgentChatSocketId(desiredSubscriptions)
+  }, [desiredSubscriptions])
+
+  useEffect(() => {
+    contextOverrideRef.current = options.contextOverride
+  }, [options.contextOverride])
 
   const updateSnapshot = useCallback((updates: Partial<AgentChatSocketSnapshot>) => {
     setSnapshot((current) => ({ ...current, ...updates }))
@@ -200,11 +216,11 @@ export function useAgentChatSocket(
     }
   }, [])
 
-  const syncNow = useCallback(() => {
+  const syncNow = useCallback((mode: 'fast' | 'contiguous' = 'fast') => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       return
     }
-    if (!agentIdRef.current) {
+    if (!desiredSubscriptionsRef.current.length) {
       return
     }
     const now = Date.now()
@@ -213,57 +229,42 @@ export function useAgentChatSocket(
     }
     lastSyncAtRef.current = now
 
-    const agentId = agentIdRef.current
-    const timelineState = queryClient.getQueryState(timelineQueryKey(agentId))
-    if (!timelineState) {
-      return
-    }
-    if (timelineState?.fetchStatus === 'fetching') {
-      return
-    }
-    if (timelineState?.dataUpdatedAt && now - timelineState.dataUpdatedAt < TIMELINE_STALE_TIME_MS) {
-      return
-    }
-
-    void refreshTimelineLatestInCache(queryClient, agentId, { mode: 'fast' })
+    desiredSubscriptionsRef.current.forEach(({ agentId }) => {
+      const timelineState = queryClient.getQueryState(timelineQueryKey(agentId))
+      if (!timelineState) {
+        return
+      }
+      if (timelineState.fetchStatus === 'fetching') {
+        return
+      }
+      if (timelineState.dataUpdatedAt && now - timelineState.dataUpdatedAt < TIMELINE_STALE_TIME_MS) {
+        return
+      }
+      void refreshTimelineLatestInCache(queryClient, agentId, { mode })
+    })
   }, [queryClient])
 
-  const updateSubscription = useCallback((nextAgentId: string | null) => {
+  const applySubscriptions = useCallback((nextSubscriptions: AgentChatSocketSubscription[]) => {
     const socket = socketRef.current
     if (!socket || socket.readyState !== WebSocket.OPEN) {
       return
     }
 
-    const currentAgentId = subscribedAgentIdRef.current
-    if (currentAgentId && currentAgentId !== nextAgentId) {
-      if (!sendSocketMessage({ type: 'unsubscribe', agent_id: currentAgentId })) {
+    syncAgentChatSocketSubscriptions({
+      currentSubscriptions: subscribedAgentsRef.current,
+      desiredSubscriptions: nextSubscriptions,
+      contextOverride: contextOverrideRef.current,
+      sendSocketMessage,
+      handleSendFailure: () => {
         updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket send failed.' })
         socket.close()
-        return
-      }
-      subscribedAgentIdRef.current = null
-    }
-
-    if (!nextAgentId || currentAgentId === nextAgentId) {
-      return
-    }
-
-    const contextOverride = readStoredConsoleContext()
-    const payload: Record<string, unknown> = { type: 'subscribe', agent_id: nextAgentId }
-    if (contextOverride?.type && contextOverride?.id) {
-      payload.context = { type: contextOverride.type, id: contextOverride.id }
-    }
-    if (!sendSocketMessage(payload)) {
-      updateSnapshot({ status: 'reconnecting', lastError: 'WebSocket send failed.' })
-      socket.close()
-      return
-    }
-    subscribedAgentIdRef.current = nextAgentId
+      },
+    })
   }, [sendSocketMessage, updateSnapshot])
 
   useEffect(() => {
-    updateSubscription(agentId)
-  }, [agentId, updateSubscription])
+    applySubscriptions(desiredSubscriptions)
+  }, [applySubscriptions, desiredSubscriptions])
 
   const handleResume = useCallback((reason: PageLifecycleResumeReason) => {
     if (pauseReasonRef.current === 'offline' && reason !== 'online') {
@@ -275,18 +276,19 @@ export function useAgentChatSocket(
     if (existingSocket?.readyState === WebSocket.OPEN) {
       updateSnapshot({ status: 'connected', lastError: null })
       startPingLoop()
-      syncNow()
+      applySubscriptions(desiredSubscriptionsRef.current)
+      syncNow('contiguous')
       return
     }
     if (existingSocket?.readyState === WebSocket.CONNECTING) {
       updateSnapshot({ status: retryRef.current > 0 ? 'reconnecting' : 'connecting', lastError: null })
-      syncNow()
+      syncNow('contiguous')
       return
     }
     updateSnapshot({ status: 'connecting', lastError: null })
     scheduleConnectRef.current(0)
-    syncNow()
-  }, [startPingLoop, syncNow, updateSnapshot])
+    syncNow('contiguous')
+  }, [applySubscriptions, startPingLoop, syncNow, updateSnapshot])
 
   const handleSuspend = useCallback((reason: PageLifecycleSuspendReason) => {
     if (reason === 'offline') {
@@ -331,7 +333,7 @@ export function useAgentChatSocket(
           console.warn('Failed to close agent chat socket', error)
         }
         socketRef.current = null
-        subscribedAgentIdRef.current = null
+        subscribedAgentsRef.current = new Map()
       }
     }
     closeSocketRef.current = closeSocket
@@ -375,10 +377,10 @@ export function useAgentChatSocket(
           lastConnectedAt: Date.now(),
           lastError: null,
         })
-        subscribedAgentIdRef.current = null
-        updateSubscription(agentIdRef.current)
+        subscribedAgentsRef.current = new Map()
+        applySubscriptions(desiredSubscriptionsRef.current)
         startPingLoop()
-        syncNow()
+        syncNow('contiguous')
       }
 
       socket.onmessage = (event) => {
@@ -388,94 +390,28 @@ export function useAgentChatSocket(
         try {
           const payload = JSON.parse(event.data)
           markActivity()
-          if (payload?.type === 'pong') {
-            return
-          }
-          if (payload?.type === 'subscription.error') {
-            const message = typeof payload?.message === 'string' ? payload.message : 'Subscription error.'
-            const payloadAgentId = typeof payload?.agent_id === 'string' ? payload.agent_id : null
-            if (!payloadAgentId || payloadAgentId === agentIdRef.current) {
-              subscribedAgentIdRef.current = null
-              updateSnapshot({ status: 'error', lastError: message })
-              if (isAuthErrorMessage(message)) {
+          const outcome = routeAgentChatSocketMessage({
+            payload,
+            queryClient,
+            activeAgentId: activeAgentIdRef.current,
+            receiveRealtimeEvent: receiveEventRef.current,
+            updateProcessing: updateProcessingRef.current,
+            updateAgentIdentity: updateAgentIdentityRef.current,
+            receiveStreamEvent: receiveStreamRef.current,
+            onCreditEvent: creditEventRef.current,
+            onAgentProfileEvent: profileEventRef.current,
+          })
+          if (outcome.type === 'subscription_error') {
+            if (outcome.agentId) {
+              subscribedAgentsRef.current.delete(outcome.agentId)
+            }
+            if (!outcome.agentId || outcome.agentId === activeAgentIdRef.current) {
+              updateSnapshot({ status: 'error', lastError: outcome.message })
+              if (isAuthErrorMessage(outcome.message)) {
                 scheduleLoginRedirect()
               }
-              syncNow()
+              syncNow('contiguous')
             }
-            return
-          }
-          if (payload?.type === 'timeline.event' && payload.payload) {
-            receiveEventRef.current(payload.payload as TimelineEvent)
-          } else if (payload?.type === 'processing' && payload.payload) {
-            updateProcessingRef.current(payload.payload as Partial<ProcessingSnapshot>)
-          } else if (payload?.type === 'stream.event' && payload.payload) {
-            receiveStreamRef.current(payload.payload)
-          } else if (payload?.type === 'agent.profile' && payload.payload) {
-            const profilePayload = payload.payload as Record<string, unknown>
-            const nextIdentity: {
-              agentId?: string | null
-              agentName?: string | null
-              agentColorHex?: string | null
-              agentAvatarUrl?: string | null
-              signupPreviewState?: SignupPreviewState | null
-              planningState?: PlanningState | null
-            } = {}
-            if (typeof profilePayload.agent_id === 'string') {
-              nextIdentity.agentId = profilePayload.agent_id
-            }
-            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_name')) {
-              nextIdentity.agentName = typeof profilePayload.agent_name === 'string' ? profilePayload.agent_name : null
-            }
-            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_color_hex')) {
-              nextIdentity.agentColorHex = typeof profilePayload.agent_color_hex === 'string' ? profilePayload.agent_color_hex : null
-            }
-            if (Object.prototype.hasOwnProperty.call(profilePayload, 'agent_avatar_url')) {
-              nextIdentity.agentAvatarUrl = typeof profilePayload.agent_avatar_url === 'string' ? profilePayload.agent_avatar_url : null
-            }
-            if (Object.prototype.hasOwnProperty.call(profilePayload, 'signup_preview_state')) {
-              const nextSignupPreviewState = profilePayload.signup_preview_state
-              nextIdentity.signupPreviewState = (
-                nextSignupPreviewState === 'awaiting_first_reply_pause'
-                || nextSignupPreviewState === 'awaiting_signup_completion'
-                || nextSignupPreviewState === 'none'
-              )
-                ? nextSignupPreviewState
-                : null
-            }
-            if (Object.prototype.hasOwnProperty.call(profilePayload, 'planning_state')) {
-              const nextPlanningState = profilePayload.planning_state
-              nextIdentity.planningState = (
-                nextPlanningState === 'planning'
-                || nextPlanningState === 'completed'
-                || nextPlanningState === 'skipped'
-              )
-                ? nextPlanningState
-                : null
-            }
-            updateAgentIdentityRef.current(nextIdentity)
-            profileEventRef.current?.(profilePayload)
-          } else if (payload?.type === 'human_input_requests.updated' && payload.payload) {
-            const rawHumanInputPayload = payload.payload as Record<string, unknown>
-            const payloadAgentId = typeof rawHumanInputPayload.agent_id === 'string' ? rawHumanInputPayload.agent_id : null
-            if (payloadAgentId && payloadAgentId === agentIdRef.current) {
-              replacePendingHumanInputRequestsInCache(
-                queryClient,
-                payloadAgentId,
-                normalizePendingHumanInputRequests(rawHumanInputPayload.pending_human_input_requests),
-              )
-            }
-          } else if (payload?.type === 'pending_action_requests.updated' && payload.payload) {
-            const rawPendingActionPayload = payload.payload as Record<string, unknown>
-            const payloadAgentId = typeof rawPendingActionPayload.agent_id === 'string' ? rawPendingActionPayload.agent_id : null
-            if (payloadAgentId && payloadAgentId === agentIdRef.current) {
-              replacePendingActionRequestsInCache(
-                queryClient,
-                payloadAgentId,
-                normalizePendingActionRequests(rawPendingActionPayload.pending_action_requests),
-              )
-            }
-          } else if (payload?.type === 'credit.event' && payload.payload) {
-            creditEventRef.current?.(payload.payload as Record<string, unknown>)
           }
         } catch (error) {
           console.error('Failed to process websocket message', error)
@@ -491,7 +427,7 @@ export function useAgentChatSocket(
         }
         clearConnectTimeout()
         socketRef.current = null
-        subscribedAgentIdRef.current = null
+        subscribedAgentsRef.current = new Map()
         stopPingLoop()
         if (closingSocketRef.current === socketInstance) {
           closingSocketRef.current = null
@@ -584,7 +520,7 @@ export function useAgentChatSocket(
     stopPingLoop,
     syncNow,
     updateSnapshot,
-    updateSubscription,
+    applySubscriptions,
   ])
 
   return snapshot

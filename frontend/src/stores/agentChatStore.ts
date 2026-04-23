@@ -339,6 +339,7 @@ export type AgentChatState = {
   suppressAutoScrollPin: (durationMs?: number) => void
   setStreamingThinkingCollapsed: (collapsed: boolean) => void
   consumeRealtimeEventCursor: (cursor: string) => void
+  persistPendingEventsToCache: () => void
   // Insight actions
   setInsightsForAgent: (agentId: string, insights: InsightEvent[]) => void
   startInsightRotation: () => void
@@ -832,6 +833,19 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
       const realtimeEventCursors = new Set(state.realtimeEventCursors)
       realtimeEventCursors.delete(cursor)
       return { realtimeEventCursors }
+    })
+  },
+
+  persistPendingEventsToCache() {
+    set((state) => {
+      if (!queryClientRef || !state.agentId || state.pendingEvents.length === 0) {
+        return state
+      }
+      flushPendingEventsToCache(queryClientRef, state.agentId, state.pendingEvents)
+      return {
+        pendingEvents: [],
+        hasUnseenActivity: false,
+      }
     })
   },
 

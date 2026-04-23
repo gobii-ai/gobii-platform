@@ -1184,7 +1184,7 @@ def ingest_inbound_message(
                                         }
                                         async_to_sync(channel_layer.group_send)(
                                             group_name,
-                                            {"type": "credit_event", "payload": payload},
+                                            {"type": "credit_event", "agent_id": str(agent_obj.id), "payload": payload},
                                         )
                                 except Exception:
                                     logging.debug("Failed to send credit_event for agent %s", agent_obj.id, exc_info=True)

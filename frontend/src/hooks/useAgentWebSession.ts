@@ -22,6 +22,9 @@ type StartOptions = {
 type HeartbeatOptions = {
   isVisible?: boolean
 }
+type UseAgentWebSessionOptions = {
+  keepAliveWhenHidden?: boolean
+}
 
 function describeError(error: unknown): string {
   if (error instanceof HttpError) {
@@ -83,7 +86,7 @@ function isPageActive(): boolean {
   return true
 }
 
-export function useAgentWebSession(agentId: string | null) {
+export function useAgentWebSession(agentId: string | null, options: UseAgentWebSessionOptions = {}) {
   const [session, setSession] = useState<AgentWebSessionSnapshot | null>(null)
   const [status, setStatus] = useState<WebSessionStatus>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -97,6 +100,7 @@ export function useAgentWebSession(agentId: string | null) {
   const startRetryAttemptsRef = useRef(0)
   const requestIdRef = useRef(0)
   const idleTriggeredRef = useRef(false)
+  const keepAliveWhenHiddenRef = useRef(Boolean(options.keepAliveWhenHidden))
 
   useEffect(() => {
     agentIdRef.current = agentId
@@ -105,6 +109,10 @@ export function useAgentWebSession(agentId: string | null) {
   useEffect(() => {
     snapshotRef.current = session
   }, [session])
+
+  useEffect(() => {
+    keepAliveWhenHiddenRef.current = Boolean(options.keepAliveWhenHidden)
+  }, [options.keepAliveWhenHidden])
 
   useEffect(() => {
     unmountedRef.current = false
@@ -196,9 +204,15 @@ export function useAgentWebSession(agentId: string | null) {
     setSession(next)
     setStatus('active')
     setError(null)
+    const ttlSeconds = requireValidTtlSeconds(next)
+    clearIdleTimeout()
+    if (keepAliveWhenHiddenRef.current) {
+      scheduleNextHeartbeat(ttlSeconds)
+      return
+    }
     clearHeartbeat()
     scheduleIdleTimeout()
-  }, [clearHeartbeat, scheduleIdleTimeout])
+  }, [clearHeartbeat, clearIdleTimeout, scheduleIdleTimeout, scheduleNextHeartbeat])
 
   const clearSessionToIdle = useCallback((errorMessage: string | null = null) => {
     snapshotRef.current = null
@@ -311,6 +325,10 @@ export function useAgentWebSession(agentId: string | null) {
     const currentAgentId = agentIdRef.current
     const snapshot = snapshotRef.current
     if (!currentAgentId || !snapshot) {
+      if (currentAgentId && keepAliveWhenHiddenRef.current) {
+        void performStartRef.current({ isVisible: false })
+        return
+      }
       scheduleIdleTimeout()
       return
     }
@@ -348,6 +366,22 @@ export function useAgentWebSession(agentId: string | null) {
       scheduleIdleTimeout()
     }
   }, [applyHiddenSession, clearHeartbeat, clearSessionToIdle, scheduleIdleTimeout])
+
+  useEffect(() => {
+    if (typeof document === 'undefined' || document.visibilityState === 'visible') {
+      return
+    }
+    if (!agentIdRef.current || !snapshotRef.current) {
+      return
+    }
+    if (keepAliveWhenHiddenRef.current) {
+      clearIdleTimeout()
+      void performHeartbeatRef.current({ isVisible: false })
+      return
+    }
+    clearHeartbeat()
+    scheduleIdleTimeout()
+  }, [clearHeartbeat, clearIdleTimeout, options.keepAliveWhenHidden, scheduleIdleTimeout])
 
   useEffect(() => {
     performHeartbeatRef.current = performHeartbeat
