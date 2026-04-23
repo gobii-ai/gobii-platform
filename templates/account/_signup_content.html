@@ -113,8 +113,24 @@
       </div>
     {% endif %}
 
-    <button type="submit" class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white hover:bg-blue-700">
-      {% trans "Create account" %}
+    <button
+      type="submit"
+      {% if auth_modal %}data-auth-modal-submit aria-busy="false"{% endif %}
+      class="w-full rounded-lg bg-blue-600 py-3 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {% if auth_modal %}
+        <span class="inline-flex items-center justify-center gap-2">
+          <span
+            data-auth-modal-submit-spinner
+            class="hidden h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white"
+            aria-hidden="true"
+          ></span>
+          <span data-auth-modal-submit-label>{% trans "Create account" %}</span>
+          <span data-auth-modal-submit-pending-label class="hidden">{% trans "Creating account..." %}</span>
+        </span>
+      {% else %}
+        {% trans "Create account" %}
+      {% endif %}
     </button>
     {% if settings.GOBII_PROPRIETARY_MODE %}
     <p class="mt-4 text-xs text-gray-500 text-center">
