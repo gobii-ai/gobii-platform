@@ -48,6 +48,45 @@ class RunCompletionReasoningTests(TestCase):
         self.assertNotIn("allow_implied_send", kwargs)
 
     @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_tools_are_sanitized_before_litellm_call(self, mock_completion):
+        mock_completion.return_value = make_completion_response(content="ok")
+
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "mcp_analytics-db_pg_execute_sql",
+                        "description": "Execute SQL",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "sql": {
+                                    "type": "object",
+                                    "properties": {
+                                        "query": {"type": "string"},
+                                        "params": {"type": "array"},
+                                    },
+                                },
+                            },
+                        },
+                    },
+                }
+            ],
+        )
+
+        _, kwargs = mock_completion.call_args
+        params_schema = kwargs["tools"][0]["function"]["parameters"]
+        self.assertEqual(
+            params_schema["properties"]["sql"]["properties"]["params"]["items"],
+            {"type": "string"},
+        )
+
+    @tag("batch_event_llm")
     @override_settings(LITELLM_TIMEOUT_SECONDS=321)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_timeout_defaults_to_settings_value(self, mock_completion):
