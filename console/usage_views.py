@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta
 import uuid
 from decimal import Decimal, InvalidOperation
 from typing import Any, Iterable, Optional
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -21,6 +22,7 @@ from api.models import (
     Organization,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    UserPreference,
 )
 from api.agent.core.llm_config import get_credit_multiplier_for_tier
 from api.services.burn_rate_snapshots import (
@@ -279,6 +281,14 @@ def _build_agent_filter(actual_agent_ids: Iterable[uuid.UUID], include_api: bool
     return combined
 
 
+def _resolve_usage_timezone(user) -> ZoneInfo:
+    timezone_name = UserPreference.resolve_user_timezone(user)
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
 def _per_task_credit_expression() -> Case:
     zero_decimal = Value(Decimal("0"), output_field=DecimalField(max_digits=20, decimal_places=6))
     return Case(
@@ -289,6 +299,68 @@ def _per_task_credit_expression() -> Case:
         default=Coalesce(F("credits_cost"), zero_decimal),
         output_field=DecimalField(max_digits=20, decimal_places=6),
     )
+
+
+def _calculate_credit_totals(
+    *,
+    user,
+    organization: Organization | None,
+    start_dt: datetime,
+    end_dt: datetime,
+    actual_agent_ids: Iterable[uuid.UUID],
+    include_api: bool,
+    persistent_agent_ids: Iterable[uuid.UUID],
+    filtered_agent_ids: Iterable[str],
+) -> tuple[dict[str, Decimal], Decimal]:
+    task_filters: dict[str, object] = {
+        "is_deleted": False,
+        "created_at__gte": start_dt,
+        "created_at__lte": end_dt,
+    }
+    if organization is not None:
+        task_filters["organization"] = organization
+    else:
+        task_filters["user"] = user
+        task_filters["organization__isnull"] = True
+
+    tasks_qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**task_filters))
+    agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
+    if agent_filter_q is not None:
+        tasks_qs = tasks_qs.filter(agent_filter_q)
+
+    zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+    status_credit_totals: dict[str, Decimal] = {
+        status: DECIMAL_ZERO for status in BrowserUseAgentTask.StatusChoices.values
+    }
+    credit_annotation = Coalesce(Sum(_per_task_credit_expression()), zero_value)
+    for row in tasks_qs.values("status").annotate(total=credit_annotation):
+        status = row.get("status")
+        if status is None:
+            continue
+        status_credit_totals[status] = row.get("total") or DECIMAL_ZERO
+
+    persistent_filters: dict[str, object] = {
+        "created_at__gte": start_dt,
+        "created_at__lte": end_dt,
+    }
+    if organization is not None:
+        persistent_filters["agent__organization"] = organization
+    else:
+        persistent_filters["agent__user"] = user
+        persistent_filters["agent__organization__isnull"] = True
+
+    persistent_steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
+    if persistent_agent_ids:
+        persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_ids)
+    elif filtered_agent_ids:
+        persistent_steps_qs = PersistentAgentStep.objects.none()
+
+    persistent_credit_agg = persistent_steps_qs.aggregate(
+        total=Coalesce(Sum("credits_cost"), zero_value),
+    )
+    persistent_credit_total = persistent_credit_agg.get("total") or DECIMAL_ZERO
+
+    return status_credit_totals, persistent_credit_total
 
 
 def _resolve_agent_selection(
@@ -338,21 +410,9 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
         else:
             period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
 
-        tz = timezone.get_current_timezone()
-        period_start_dt = timezone.make_aware(datetime.combine(period_start, time.min), tz)
-        period_end_dt = timezone.make_aware(datetime.combine(period_end, time.max), tz)
-
-        filters = {
-            "is_deleted": False,
-            "created_at__gte": period_start_dt,
-            "created_at__lte": period_end_dt,
-        }
-
-        if organization is not None:
-            filters["organization"] = organization
-        else:
-            filters["user"] = request.user
-            filters["organization__isnull"] = True
+        tz = _resolve_usage_timezone(request.user)
+        period_start_dt = datetime.combine(period_start, time.min, tzinfo=tz)
+        period_end_dt = datetime.combine(period_end, time.max, tzinfo=tz)
 
         (
             filtered_agent_ids,
@@ -362,44 +422,31 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             persistent_agent_ids,
         ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
 
-        tasks_qs = _exclude_eval_browser_tasks(BrowserUseAgentTask.objects.filter(**filters))
-        agent_filter_q = _build_agent_filter(actual_agent_ids, include_api)
-        if agent_filter_q is not None:
-            tasks_qs = tasks_qs.filter(agent_filter_q)
-
-        zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
-        status_credit_totals: dict[str, Decimal] = {
-            status: DECIMAL_ZERO for status in BrowserUseAgentTask.StatusChoices.values
-        }
-        credit_annotation = Coalesce(Sum(_per_task_credit_expression()), zero_value)
-        for row in tasks_qs.values("status").annotate(total=credit_annotation):
-            status = row.get("status")
-            if status is None:
-                continue
-            status_credit_totals[status] = row.get("total") or DECIMAL_ZERO
-
+        status_credit_totals, persistent_credit_total = _calculate_credit_totals(
+            user=request.user,
+            organization=organization,
+            start_dt=period_start_dt,
+            end_dt=period_end_dt,
+            actual_agent_ids=actual_agent_ids,
+            include_api=include_api,
+            persistent_agent_ids=persistent_agent_ids,
+            filtered_agent_ids=filtered_agent_ids,
+        )
         task_credit_total = sum(status_credit_totals.values(), DECIMAL_ZERO)
 
-        persistent_filters = {
-            "created_at__gte": period_start_dt,
-            "created_at__lte": period_end_dt,
-        }
-        if organization is not None:
-            persistent_filters["agent__organization"] = organization
-        else:
-            persistent_filters["agent__user"] = request.user
-            persistent_filters["agent__organization__isnull"] = True
-
-        persistent_steps_qs = _exclude_eval_persistent_steps(PersistentAgentStep.objects.filter(**persistent_filters))
-        if persistent_agent_ids:
-            persistent_steps_qs = persistent_steps_qs.filter(agent_id__in=persistent_agent_ids)
-        elif filtered_agent_ids:
-            persistent_steps_qs = PersistentAgentStep.objects.none()
-
-        persistent_credit_agg = persistent_steps_qs.aggregate(
-            total=Coalesce(Sum("credits_cost"), zero_value),
+        now_local = timezone.now().astimezone(tz)
+        today_start_dt = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+        today_status_credit_totals, today_persistent_credit_total = _calculate_credit_totals(
+            user=request.user,
+            organization=organization,
+            start_dt=today_start_dt,
+            end_dt=now_local,
+            actual_agent_ids=actual_agent_ids,
+            include_api=include_api,
+            persistent_agent_ids=persistent_agent_ids,
+            filtered_agent_ids=filtered_agent_ids,
         )
-        persistent_credit_total = persistent_credit_agg.get("total") or DECIMAL_ZERO
+        today_credit_total = sum(today_status_credit_totals.values(), DECIMAL_ZERO) + today_persistent_credit_total
 
         combined_total = task_credit_total + persistent_credit_total
         completed_credit = status_credit_totals.get(BrowserUseAgentTask.StatusChoices.COMPLETED, DECIMAL_ZERO)
@@ -420,8 +467,9 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             "period": {
                 "start": period_start.isoformat(),
                 "end": period_end.isoformat(),
+                "resetOn": (period_end + timedelta(days=1)).isoformat(),
                 "label": _format_period_label(period_start, period_end),
-                "timezone": timezone.get_current_timezone_name(),
+                "timezone": tz.key,
             },
             "context": {
                 "type": owner_context_type,
@@ -439,6 +487,10 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                 },
                 "credits": {
                     "total": float(total_credits),
+                    "unit": "credits",
+                },
+                "todayCredits": {
+                    "total": float(today_credit_total),
                     "unit": "credits",
                 },
                 "quota": quota_payload,

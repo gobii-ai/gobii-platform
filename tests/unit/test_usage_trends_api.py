@@ -1,5 +1,6 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag, override_settings
@@ -15,9 +16,11 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
     TaskCredit,
+    UserPreference,
 )
 from constants.grant_types import GrantTypeChoices
 from console.usage_views import API_AGENT_ID
+from billing.services import BillingService
 from tasks.services import TaskCreditService
 
 
@@ -750,6 +753,68 @@ class UsageSummaryAPITests(TestCase):
             browser_use_agent=self.org_agent,
         )
         _grant_task_credits(organization=self.organization)
+
+    def test_summary_includes_reset_date(self):
+        period_start, period_end = BillingService.get_current_billing_period_for_owner(self.user)
+
+        response = self.client.get(reverse("console_usage_summary"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["period"]["start"], period_start.isoformat())
+        self.assertEqual(payload["period"]["end"], period_end.isoformat())
+        self.assertEqual(payload["period"]["resetOn"], (period_end + timedelta(days=1)).isoformat())
+
+    def test_summary_today_credits_respects_persisted_user_timezone(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {UserPreference.KEY_USER_TIMEZONE: "America/Los_Angeles"},
+        )
+        fixed_now = datetime(2024, 5, 2, 10, 0, 0, tzinfo=dt_timezone.utc)
+        included_task = BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("1.5"),
+        )
+        BrowserUseAgentTask.objects.filter(pk=included_task.pk).update(
+            created_at=datetime(2024, 5, 2, 8, 0, 0, tzinfo=dt_timezone.utc),
+        )
+        excluded_task = BrowserUseAgentTask.objects.create(
+            user=self.user,
+            agent=self.agent_primary,
+            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            credits_cost=Decimal("7.0"),
+        )
+        BrowserUseAgentTask.objects.filter(pk=excluded_task.pk).update(
+            created_at=datetime(2024, 5, 2, 6, 30, 0, tzinfo=dt_timezone.utc),
+        )
+
+        with patch("console.usage_views.timezone.now", return_value=fixed_now):
+            response = self.client.get(reverse("console_usage_summary"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["period"]["timezone"], "America/Los_Angeles")
+        self.assertAlmostEqual(payload["metrics"]["todayCredits"]["total"], 1.5)
+
+    def test_org_summary_includes_org_quota_and_reset_date(self):
+        period_start, period_end = BillingService.get_current_billing_period_for_owner(self.organization)
+
+        response = self.client.get(
+            reverse("console_usage_summary"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.organization.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["context"]["type"], "organization")
+        self.assertEqual(payload["period"]["start"], period_start.isoformat())
+        self.assertEqual(payload["period"]["end"], period_end.isoformat())
+        self.assertEqual(payload["period"]["resetOn"], (period_end + timedelta(days=1)).isoformat())
+        self.assertAlmostEqual(payload["metrics"]["quota"]["total"], 25.0)
+        self.assertAlmostEqual(payload["metrics"]["quota"]["available"], 25.0)
 
     def test_agent_filter_limits_summary(self):
         now = timezone.now()

@@ -17,6 +17,8 @@ import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
 
+const DEFAULT_INSIGHT_BACKGROUND = 'linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%)'
+
 // Detect if user is on macOS
 function isMacOS(): boolean {
   if (typeof navigator === 'undefined') return false
@@ -89,7 +91,7 @@ function getInsightBackground(insight: InsightEvent): string {
     return 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%)'
   }
   if (insight.insightType === 'agent_setup') {
-    return 'linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%)'
+    return DEFAULT_INSIGHT_BACKGROUND
   }
   return 'transparent'
 }
@@ -176,6 +178,7 @@ type AgentComposerProps = {
   isProcessing?: boolean
   processingTasks?: ProcessingWebTask[]
   insights?: InsightEvent[]
+  insightsLoading?: boolean
   currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
   onInsightIndexChange?: (index: number) => void
@@ -228,6 +231,7 @@ export const AgentComposer = memo(function AgentComposer({
   isProcessing = false,
   processingTasks = [],
   insights = [],
+  insightsLoading = false,
   currentInsightIndex = 0,
   onDismissInsight,
   onInsightIndexChange,
@@ -1029,7 +1033,7 @@ export const AgentComposer = memo(function AgentComposer({
   }, [addAttachments, disabled, isSending])
 
   // Show the panel when processing OR when there are insights to display
-  const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights)
+  const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights || insightsLoading)
   const taskCount = processingTasks.length
   const showPlanningStrip = isPlanningMode
 
@@ -1048,7 +1052,11 @@ export const AgentComposer = memo(function AgentComposer({
           <div
             className="composer-working-panel"
             data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
-            style={currentInsight ? { background: getInsightBackground(currentInsight) } : undefined}
+            style={
+              currentInsight || insightsLoading
+                ? { background: currentInsight ? getInsightBackground(currentInsight) : DEFAULT_INSIGHT_BACKGROUND }
+                : undefined
+            }
           >
             {/* Header row - clickable to toggle, with tabs and chevron */}
             <div
@@ -1122,6 +1130,14 @@ export const AgentComposer = memo(function AgentComposer({
                     })}
                   </div>
                 </div>
+              ) : insightsLoading ? (
+                <div className="composer-insight-tabs composer-insight-tabs--loading" aria-hidden="true">
+                  <div className="composer-insight-tabs-scroll">
+                    <span className="composer-insight-tab-placeholder composer-insight-tab-placeholder--active" />
+                    <span className="composer-insight-tab-placeholder" />
+                    <span className="composer-insight-tab-placeholder composer-insight-tab-placeholder--short" />
+                  </div>
+                </div>
               ) : null}
 
               <span className="composer-working-toggle">
@@ -1134,13 +1150,17 @@ export const AgentComposer = memo(function AgentComposer({
             </div>
 
             {/* Expanded content */}
-            {resolvedWorkingExpanded && hasInsights ? (
+            {resolvedWorkingExpanded && (hasInsights || insightsLoading) ? (
               <div
                 className="composer-working-content"
                 onMouseEnter={handleInsightMouseEnter}
                 onMouseLeave={handleInsightMouseLeave}
               >
-                <div className="composer-working-insight" key={currentInsight?.insightId}>
+                <div
+                  className="composer-working-insight"
+                  data-loading={!currentInsight && insightsLoading ? 'true' : 'false'}
+                  key={currentInsight?.insightId ?? 'insights-loading'}
+                >
                   {currentInsight ? (
                     <InsightEventCard
                       insight={currentInsight}
@@ -1150,7 +1170,14 @@ export const AgentComposer = memo(function AgentComposer({
                       collaborateDisabledReason={collaborateDisabledReason}
                       onBlockedCollaborate={onBlockedCollaborate}
                     />
-                  ) : null}
+                  ) : (
+                    <div className="composer-working-insight-skeleton" aria-hidden="true">
+                      <span className="composer-working-insight-skeleton__eyebrow" />
+                      <span className="composer-working-insight-skeleton__title" />
+                      <span className="composer-working-insight-skeleton__line" />
+                      <span className="composer-working-insight-skeleton__line composer-working-insight-skeleton__line--short" />
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}

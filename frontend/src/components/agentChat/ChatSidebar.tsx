@@ -7,6 +7,7 @@ import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
+import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 
 const SEARCH_THRESHOLD = 6
 
@@ -27,6 +28,7 @@ type ChatSidebarProps = {
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
+  settings?: SidebarSettingsInfo
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -46,6 +48,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   rosterSortMode = 'recent',
   onRosterSortModeChange,
   contextSwitcher,
+  settings,
 }: ChatSidebarProps) {
   const [collapsed, setCollapsed] = useState(defaultCollapsed)
   const [isMobile, setIsMobile] = useState(() => {
@@ -312,6 +315,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               })
             )}
           </div>
+          {settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
         </AgentChatMobileSheet>
       </>
     )
@@ -492,6 +496,13 @@ export const ChatSidebar = memo(function ChatSidebar({
             )}
           </div>
         </div>
+        {settings ? (
+          <SidebarSettingsMenu
+            {...settings}
+            variant="sidebar"
+            collapsed={collapsed}
+          />
+        ) : null}
       </div>
     </aside>
   )

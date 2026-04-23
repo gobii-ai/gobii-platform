@@ -11,6 +11,7 @@ import type {
   UsageAgentLeaderboardQueryInput,
   UsageAgentLeaderboardResponse,
 } from './types'
+import { jsonFetch } from '../../api/http'
 
 export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: AbortSignal): Promise<UsageSummaryResponse> => {
   const search = new URLSearchParams()
@@ -30,19 +31,10 @@ export const fetchUsageSummary = async (params: UsageSummaryQueryInput, signal: 
   }
 
   const suffix = search.toString()
-  const response = await fetch(`/console/api/usage/summary/${suffix ? `?${suffix}` : ''}`, {
+  return jsonFetch<UsageSummaryResponse>(`/console/api/usage/summary/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage summary request failed (${response.status})`)
-  }
-
-  return response.json()
 }
 
 export const fetchUsageBurnRate = async (params: UsageBurnRateQueryInput, signal: AbortSignal): Promise<UsageBurnRateResponse> => {
@@ -57,19 +49,10 @@ export const fetchUsageBurnRate = async (params: UsageBurnRateQueryInput, signal
   }
 
   const suffix = search.toString()
-  const response = await fetch(`/console/api/usage/burn-rate/${suffix ? `?${suffix}` : ''}`, {
+  return jsonFetch<UsageBurnRateResponse>(`/console/api/usage/burn-rate/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage burn rate request failed (${response.status})`)
-  }
-
-  return response.json()
 }
 
 export const fetchUsageTrends = async (params: UsageTrendQueryInput, signal: AbortSignal): Promise<UsageTrendResponse> => {
@@ -90,35 +73,17 @@ export const fetchUsageTrends = async (params: UsageTrendQueryInput, signal: Abo
     })
   }
 
-  const response = await fetch(`/console/api/usage/trends/?${search.toString()}`, {
+  return jsonFetch<UsageTrendResponse>(`/console/api/usage/trends/?${search.toString()}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage trends request failed (${response.status})`)
-  }
-
-  return response.json()
 }
 
 export const fetchUsageAgents = async (signal: AbortSignal): Promise<UsageAgentsResponse> => {
-  const response = await fetch('/console/api/usage/agents/', {
+  return jsonFetch<UsageAgentsResponse>('/console/api/usage/agents/', {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage agents request failed (${response.status})`)
-  }
-
-  return response.json()
 }
 
 export const fetchUsageToolBreakdown = async (
@@ -142,19 +107,10 @@ export const fetchUsageToolBreakdown = async (
   }
 
   const suffix = search.toString()
-  const response = await fetch(`/console/api/usage/tools/${suffix ? `?${suffix}` : ''}`, {
+  return jsonFetch<UsageToolBreakdownResponse>(`/console/api/usage/tools/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage tools request failed (${response.status})`)
-  }
-
-  return response.json()
 }
 
 export const fetchUsageAgentLeaderboard = async (
@@ -178,17 +134,8 @@ export const fetchUsageAgentLeaderboard = async (
   }
 
   const suffix = search.toString()
-  const response = await fetch(`/console/api/usage/agents/leaderboard/${suffix ? `?${suffix}` : ''}`, {
+  return jsonFetch<UsageAgentLeaderboardResponse>(`/console/api/usage/agents/leaderboard/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
-    headers: {
-      Accept: 'application/json',
-    },
     signal,
   })
-
-  if (!response.ok) {
-    throw new Error(`Usage agent leaderboard request failed (${response.status})`)
-  }
-
-  return response.json()
 }

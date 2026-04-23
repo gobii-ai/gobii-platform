@@ -71,6 +71,8 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
 type AgentChatLayoutProps = AgentTimelineProps & {
   displayEvents?: SimplifiedTimelineItem[]
   statusExpansionTargets?: StatusExpansionTargets
+  realtimeEventCursors?: Set<string>
+  onRealtimeEventAnimationConsumed?: (cursor: string) => void
   agentId?: string | null
   agentColorHex?: string | null
   agentAvatarUrl?: string | null
@@ -104,6 +106,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
+  sidebarBillingUrl?: string | null
+  sidebarTodayCreditsUsed?: number | null
+  sidebarCreditsResetOn?: string | null
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
@@ -165,6 +170,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   awaitingResponse?: boolean
   streaming?: StreamState | null
   insights?: InsightEvent[]
+  insightsLoading?: boolean
   currentInsightIndex?: number
   onDismissInsight?: (insightId: string) => void
   onInsightIndexChange?: (index: number) => void
@@ -217,6 +223,8 @@ export function AgentChatLayout({
   events,
   displayEvents,
   statusExpansionTargets,
+  realtimeEventCursors,
+  onRealtimeEventAnimationConsumed,
   agentId,
   agentColorHex,
   agentAvatarUrl,
@@ -250,6 +258,9 @@ export function AgentChatLayout({
   onInsightsPanelExpandedPreferenceChange,
   contextSwitcher,
   currentContext = null,
+  sidebarBillingUrl = null,
+  sidebarTodayCreditsUsed = null,
+  sidebarCreditsResetOn = null,
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
@@ -308,6 +319,7 @@ export function AgentChatLayout({
   loadingNewer = false,
   initialLoading = false,
   insights,
+  insightsLoading = false,
   currentInsightIndex,
   onDismissInsight,
   onInsightIndexChange,
@@ -842,6 +854,28 @@ export function AgentChatLayout({
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const sidebarSettings = useMemo(() => ({
+    context: currentContext,
+    viewerEmail: viewerEmail ?? null,
+    isProprietaryMode,
+    billingUrl: sidebarBillingUrl,
+    taskCredits: taskQuota
+      ? {
+          usedToday: sidebarTodayCreditsUsed,
+          remaining: taskQuota.available,
+          resetOn: sidebarCreditsResetOn,
+          unlimited: Boolean(taskQuota.total < 0 || taskQuota.available < 0),
+        }
+      : null,
+  }), [
+    currentContext,
+    isProprietaryMode,
+    sidebarBillingUrl,
+    sidebarCreditsResetOn,
+    sidebarTodayCreditsUsed,
+    taskQuota,
+    viewerEmail,
+  ])
 
   return (
     <>
@@ -862,6 +896,7 @@ export function AgentChatLayout({
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
+        settings={sidebarSettings}
       />
 	      {showBanner && (
 	        <AgentChatBanner
@@ -987,6 +1022,8 @@ export function AgentChatLayout({
                     viewerEmail={viewerEmail ?? null}
                     suppressedThinkingCursor={suppressedThinkingCursor}
                     statusExpansionTargets={statusExpansionTargets}
+                    animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
+                    onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
                   />
                 ))}
                 {showScheduledResumeEvent ? (
@@ -1156,6 +1193,7 @@ export function AgentChatLayout({
               insightsPanelExpandedPreference={insightsPanelExpandedPreference}
               onInsightsPanelExpandedPreferenceChange={onInsightsPanelExpandedPreferenceChange}
               insights={insights}
+              insightsLoading={insightsLoading}
               currentInsightIndex={currentInsightIndex}
               onDismissInsight={onDismissInsight}
               onInsightIndexChange={onInsightIndexChange}

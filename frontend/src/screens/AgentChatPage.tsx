@@ -36,6 +36,7 @@ import { useAgentWebSession } from '../hooks/useAgentWebSession'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
+import { useAgentInsights } from '../hooks/useAgentInsights'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
@@ -74,6 +75,7 @@ const ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS = 90_000
 const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
+const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -753,6 +755,14 @@ export function AgentChatPage({
   } | null>(null)
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
+  const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
+  const locallySelectedAgentIdsRef = useRef<Set<string>>(new Set())
+  const selectedFromCurrentRoster = Boolean(activeAgentId && locallySelectedAgentIdsRef.current.has(activeAgentId))
+  const contextLookupAgentId = isNewAgent || isSelectionView
+    ? undefined
+    : selectedFromCurrentRoster
+      ? undefined
+      : routeAgentId ?? activeAgentId ?? undefined
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
@@ -770,25 +780,33 @@ export function AgentChatPage({
 
   const {
     data: contextData,
+    resolvedForAgentId: contextResolvedForAgentId,
+    isLoading: contextLoading,
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
   } = useConsoleContextSwitcher({
     enabled: true,
-    forAgentId: routeAgentId ?? undefined,
+    forAgentId: contextLookupAgentId,
     onSwitched: handleContextSwitched,
     persistSession: persistContextSession,
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
   const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
-  const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
-  const contextReady = Boolean(effectiveContext)
+  const contextMatchesAgent = !contextLookupAgentId || contextResolvedForAgentId === contextLookupAgentId
+  const contextReady = (
+    Boolean(effectiveContext)
+    && contextMatchesAgent
+    && (!contextLoading || !contextLookupAgentId)
+    && !contextSwitching
+    && !contextError
+  )
   const agentContextReady = contextReady
-  const liveAgentId = contextSwitching || !agentContextReady ? null : activeAgentId
+  const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
     setActiveAgentId(agentId ?? null)
@@ -861,7 +879,9 @@ export function AgentChatPage({
   const streamingLastUpdatedAt = useAgentChatStore((state) => state.streamingLastUpdatedAt)
   const finalizeStreaming = useAgentChatStore((state) => state.finalizeStreaming)
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
-  const fetchInsights = useAgentChatStore((state) => state.fetchInsights)
+  const realtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
+  const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
+  const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
   const dismissInsight = useAgentChatStore((state) => state.dismissInsight)
@@ -1236,13 +1256,13 @@ export function AgentChatPage({
   })
   const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
-  const rosterQueryAgentId = routeAgentId ?? undefined
+  const rosterQueryAgentId = contextLookupAgentId
   const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
   const rosterRefreshIntervalMs = hasPendingAvatarTracking
     ? ROSTER_PENDING_AVATAR_REFRESH_INTERVAL_MS
     : ROSTER_REFRESH_INTERVAL_MS
   const rosterQuery = useAgentRoster({
-    enabled: true,
+    enabled: contextReady,
     contextKey: rosterContextKey,
     forAgentId: rosterQueryAgentId,
     refetchIntervalMs: rosterRefreshIntervalMs,
@@ -1946,8 +1966,7 @@ export function AgentChatPage({
   ])
 
   const rosterContextMismatch = Boolean(
-    !routeAgentId
-      && effectiveContext
+    effectiveContext
       && rosterQuery.data?.context
       && !sameConsoleContext(rosterQuery.data.context, effectiveContext),
   )
@@ -1975,7 +1994,6 @@ export function AgentChatPage({
       signupPreviewState: resolvedPendingMeta?.signupPreviewState ?? activeRosterSignupPreviewState,
       planningState: resolvedPendingMeta?.planningState ?? activeRosterPlanningState,
     })
-    void fetchInsights()
   }, [
     activeAgentId,
     activeRosterMeta?.planningState,
@@ -1983,7 +2001,6 @@ export function AgentChatPage({
     agentAvatarUrl,
     agentColor,
     agentName,
-    fetchInsights,
     setAgentId,
     agentContextReady,
   ])
@@ -2096,6 +2113,8 @@ export function AgentChatPage({
   const [skipPlanningBusy, setSkipPlanningBusy] = useState(false)
   const [spawnIntent, setSpawnIntent] = useState<AgentSpawnIntent | null>(null)
   const [spawnIntentStatus, setSpawnIntentStatus] = useState<SpawnIntentStatus>('idle')
+  const [idleInsightsAgentId, setIdleInsightsAgentId] = useState<string | null>(null)
+  const [idleInsightsPending, setIdleInsightsPending] = useState(false)
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
@@ -2583,6 +2602,7 @@ export function AgentChatPage({
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
       }
+      locallySelectedAgentIdsRef.current.add(agent.id)
       setSwitchingAgentId(agent.id)
       setActiveAgentId(agent.id)
       const nextPath = buildAgentChatPath(window.location.pathname, agent.id)
@@ -2871,6 +2891,16 @@ export function AgentChatPage({
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
+  const insightsQueryEnabled = Boolean(
+    activeAgentId
+    && allowAgentRefresh
+    && !isNewAgent
+    && !isCollaboratorOnly
+    && !showSignupPreviewPanel,
+  )
+  const insightsQuery = useAgentInsights(activeAgentId, {
+    enabled: insightsQueryEnabled && (isProcessing || idleInsightsAgentId === activeAgentId),
+  })
   useEffect(() => {
     if (!isProcessing) {
       setStopProcessingRequested(false)
@@ -2886,6 +2916,42 @@ export function AgentChatPage({
       stopInsightRotation()
     }
   }, [isProcessing, startInsightRotation, stopInsightRotation])
+  useEffect(() => {
+    if (!activeAgentId || storeAgentId !== activeAgentId || !insightsQuery.data) {
+      return
+    }
+    setInsightsForAgent(activeAgentId, insightsQuery.data.insights)
+  }, [activeAgentId, insightsQuery.data, insightsQuery.dataUpdatedAt, setInsightsForAgent, storeAgentId])
+  useEffect(() => {
+    setIdleInsightsAgentId(null)
+    const hasFreshInsights = Boolean(insightsQuery.data && !insightsQuery.isStale)
+    if (!activeAgentId || !insightsQueryEnabled || isProcessing || hasFreshInsights) {
+      setIdleInsightsPending(false)
+      return () => undefined
+    }
+    setIdleInsightsPending(true)
+    const timeout = window.setTimeout(() => {
+      if (activeAgentIdRef.current === activeAgentId) {
+        setIdleInsightsAgentId(activeAgentId)
+      }
+    }, INSIGHTS_IDLE_FETCH_DELAY_MS)
+    return () => {
+      window.clearTimeout(timeout)
+      setIdleInsightsPending(false)
+    }
+  }, [
+    activeAgentId,
+    insightsQuery.data,
+    insightsQuery.isStale,
+    insightsQueryEnabled,
+    isProcessing,
+  ])
+  useEffect(() => {
+    if (idleInsightsAgentId !== activeAgentId || insightsQuery.isFetching) {
+      return
+    }
+    setIdleInsightsPending(false)
+  }, [activeAgentId, idleInsightsAgentId, insightsQuery.isFetching])
 
   // Get available insights (filtered for dismissed)
   const availableInsights = useMemo(() => {
@@ -2920,6 +2986,13 @@ export function AgentChatPage({
       }
     })
   }, [availableInsights, resolvedAgentEmail, resolvedAgentSms])
+  const insightsLoading = Boolean(
+    !isNewAgent
+    && !isCollaboratorOnly
+    && !showSignupPreviewPanel
+    && (idleInsightsPending || insightsQuery.isFetching)
+    && hydratedInsights.length === 0,
+  )
 
   useEffect(() => {
     if (!allowAgentRefresh || !timelineStreaming || timelineStreaming.done) {
@@ -2963,30 +3036,6 @@ export function AgentChatPage({
     streamingLastUpdatedAt,
   ])
 
-  const selectionMainClassName = `has-sidebar${selectionSidebarCollapsed ? ' has-sidebar--collapsed' : ''}`
-  const selectionSidebarProps = {
-    agents: sidebarAgents,
-    favoriteAgentIds,
-    activeAgentId: null,
-    loading: rosterLoading,
-    errorMessage: rosterErrorMessage,
-    onSelectAgent: handleSelectAgent,
-    onToggleAgentFavorite: handleToggleAgentFavorite,
-    onCreateAgent: handleCreateAgent,
-    createAgentDisabledReason,
-    rosterSortMode: agentRosterSortMode,
-    onRosterSortModeChange: handleAgentRosterSortModeChange,
-    defaultCollapsed: selectionSidebarCollapsed,
-    onToggle: setSelectionSidebarCollapsed,
-    contextSwitcher: contextSwitcher ?? undefined,
-  }
-  const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page">
-      <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName}>{content}</main>
-    </div>
-  )
-
   const canManageDailyCredits = Boolean(activeAgentId && !isNewAgent)
   const dailyCreditsInfo = canManageDailyCredits ? quickSettingsPayload?.settings?.dailyCredits ?? null : null
   const dailyCreditsStatus = canManageDailyCredits ? quickSettingsPayload?.status?.dailyCredits ?? null : null
@@ -3028,7 +3077,7 @@ export function AgentChatPage({
     [queryClient, updateAddons],
   )
 
-  const shouldFetchUsageSummary = Boolean(contextReady && !isSelectionView && (activeAgentId || isNewAgent))
+  const shouldFetchUsageSummary = Boolean(contextReady && (activeAgentId || isNewAgent || isSelectionView))
   const shouldFetchUsageBurnRate = Boolean(contextReady && !isSelectionView && isNewAgent)
   const usageContextKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
@@ -3103,6 +3152,58 @@ export function AgentChatPage({
     bannerBillingStatus?.reason,
     billingManageUrl,
   ])
+  const selectionMainClassName = `agent-chat-main${selectionSidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const selectionSidebarSettings = useMemo(() => ({
+    context: effectiveContext,
+    viewerEmail: viewerEmail ?? null,
+    isProprietaryMode,
+    billingUrl,
+    taskCredits: taskQuota
+      ? {
+          usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
+          remaining: taskQuota.available,
+          resetOn: usageSummary?.period?.resetOn ?? null,
+          unlimited: Boolean(taskQuota.total < 0 || taskQuota.available < 0),
+        }
+      : null,
+  }), [
+    billingUrl,
+    effectiveContext,
+    isProprietaryMode,
+    taskQuota,
+    usageSummary?.metrics.todayCredits?.total,
+    usageSummary?.period?.resetOn,
+    viewerEmail,
+  ])
+  const selectionSidebarProps = {
+    agents: sidebarAgents,
+    favoriteAgentIds,
+    activeAgentId: null,
+    loading: rosterLoading,
+    errorMessage: rosterErrorMessage,
+    onSelectAgent: handleSelectAgent,
+    onToggleAgentFavorite: handleToggleAgentFavorite,
+    onCreateAgent: handleCreateAgent,
+    createAgentDisabledReason,
+    rosterSortMode: agentRosterSortMode,
+    onRosterSortModeChange: handleAgentRosterSortModeChange,
+    defaultCollapsed: selectionSidebarCollapsed,
+    onToggle: setSelectionSidebarCollapsed,
+    contextSwitcher: contextSwitcher ?? undefined,
+    settings: selectionSidebarSettings,
+  }
+  const renderSelectionLayout = (content: ReactNode) => (
+    <div className="agent-chat-page agent-chat-page--framed" data-processing="false">
+      <ChatSidebar {...selectionSidebarProps} />
+      <main className={selectionMainClassName}>
+        <div id="agent-workspace-root">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+            {content}
+          </div>
+        </div>
+      </main>
+    </div>
+  )
 
   useEffect(() => {
     if (
@@ -3513,7 +3614,7 @@ export function AgentChatPage({
       )
     }
     return renderSelectionLayout(
-      <div className="flex w-full flex-col gap-4 pb-6 pt-0">
+      <div className="flex min-h-full w-full flex-1 flex-col gap-4 pb-6 pt-0">
         {highPriorityBanner ? (
           <HighPriorityBanner
             title={highPriorityBanner.title}
@@ -3524,7 +3625,7 @@ export function AgentChatPage({
             tone={highPriorityBanner.tone}
           />
         ) : null}
-        <div className="mx-auto flex w-full max-w-3xl px-4">
+        <div className="mx-auto flex w-full max-w-3xl flex-1 items-center justify-center px-4">
           <AgentSelectState
             hasAgents={rosterAgents.length > 0}
             onCreateAgent={handleCreateAgent}
@@ -3550,7 +3651,7 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page" data-processing={isProcessing ? 'true' : 'false'}>
+    <div className="agent-chat-page agent-chat-page--framed" data-processing={isProcessing ? 'true' : 'false'}>
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
       ) : null}
@@ -3616,6 +3717,9 @@ export function AgentChatPage({
         onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
         contextSwitcher={contextSwitcher ?? undefined}
         currentContext={effectiveContext}
+        sidebarBillingUrl={billingManageUrl}
+        sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
+        sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
@@ -3667,6 +3771,8 @@ export function AgentChatPage({
         events={timelineEvents}
         displayEvents={displayEvents}
         statusExpansionTargets={statusExpansionTargets}
+        realtimeEventCursors={realtimeEventCursors}
+        onRealtimeEventAnimationConsumed={consumeRealtimeEventCursor}
         hasMoreOlder={timelineHasMoreOlder}
         hasMoreNewer={timelineHasMoreNewer}
         showOlderLoadButton={showOlderLoadButton}
@@ -3695,6 +3801,7 @@ export function AgentChatPage({
         loadingNewer={timelineLoadingNewer}
         initialLoading={initialLoading}
         insights={isNewAgent ? [] : hydratedInsights}
+        insightsLoading={insightsLoading}
         currentInsightIndex={currentInsightIndex}
         onDismissInsight={dismissInsight}
         onInsightIndexChange={setCurrentInsightIndex}

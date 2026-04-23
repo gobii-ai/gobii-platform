@@ -19,6 +19,8 @@ type TimelineVirtualItemProps = {
   viewerEmail?: string | null
   suppressedThinkingCursor?: string | null
   statusExpansionTargets?: StatusExpansionTargets
+  animateIncoming?: boolean
+  onIncomingAnimationConsumed?: (cursor: string) => void
 }
 
 export const TimelineVirtualItem = memo(function TimelineVirtualItem({
@@ -31,6 +33,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   viewerEmail,
   suppressedThinkingCursor,
   statusExpansionTargets,
+  animateIncoming = false,
+  onIncomingAnimationConsumed,
 }: TimelineVirtualItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
@@ -65,6 +69,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
         isLatestEvent={isLatestEvent}
         suppressedThinkingCursor={suppressedThinkingCursor}
         statusExpansionTargets={statusExpansionTargets}
+        animateIncoming={animateIncoming}
+        onIncomingAnimationConsumed={onIncomingAnimationConsumed}
       />
     )
   }
@@ -89,6 +95,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
         isLatestEvent={isLatestEvent}
         suppressedThinkingCursor={suppressedThinkingCursor}
         statusExpansionTargets={statusExpansionTargets}
+        animateIncoming={animateIncoming}
+        onIncomingAnimationConsumed={onIncomingAnimationConsumed}
       />
     )
   }
@@ -98,6 +106,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
       isLatestEvent={isLatestEvent}
       suppressedThinkingCursor={suppressedThinkingCursor}
       statusExpansionTargets={statusExpansionTargets}
+      animateIncoming={animateIncoming}
+      onIncomingAnimationConsumed={onIncomingAnimationConsumed}
     />
   )
 })

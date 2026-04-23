@@ -9,6 +9,7 @@ import { useAgentChatStore } from '../stores/agentChatStore'
 import { refreshTimelineLatestInCache, replacePendingActionRequestsInCache, replacePendingHumanInputRequestsInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { readStoredConsoleContext } from '../util/consoleContextStorage'
+import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
 
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 15000
@@ -73,7 +74,6 @@ export function useAgentChatSocket(
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
   const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
-  const refreshProcessingRef = useRef(useAgentChatStore.getState().refreshProcessing)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
 
@@ -83,7 +83,6 @@ export function useAgentChatSocket(
       updateProcessingRef.current = state.updateProcessing
       updateAgentIdentityRef.current = state.updateAgentIdentity
       receiveStreamRef.current = state.receiveStreamEvent
-      refreshProcessingRef.current = state.refreshProcessing
     }),
   [])
 
@@ -213,8 +212,20 @@ export function useAgentChatSocket(
       return
     }
     lastSyncAtRef.current = now
-    void refreshTimelineLatestInCache(queryClient, agentIdRef.current, { mode: 'fast' })
-    void refreshProcessingRef.current()
+
+    const agentId = agentIdRef.current
+    const timelineState = queryClient.getQueryState(timelineQueryKey(agentId))
+    if (!timelineState) {
+      return
+    }
+    if (timelineState?.fetchStatus === 'fetching') {
+      return
+    }
+    if (timelineState?.dataUpdatedAt && now - timelineState.dataUpdatedAt < TIMELINE_STALE_TIME_MS) {
+      return
+    }
+
+    void refreshTimelineLatestInCache(queryClient, agentId, { mode: 'fast' })
   }, [queryClient])
 
   const updateSubscription = useCallback((nextAgentId: string | null) => {

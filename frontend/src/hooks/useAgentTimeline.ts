@@ -5,6 +5,7 @@ import type { TimelineEvent } from '../types/agentChat'
 import { mergeTimelineEvents, prepareTimelineEvents } from '../stores/agentChatTimeline'
 
 export const TIMELINE_PAGE_SIZE = 100
+export const TIMELINE_STALE_TIME_MS = 60_000
 
 export type TimelinePage = {
   events: TimelineEvent[]
@@ -36,7 +37,7 @@ export function timelineQueryKey(agentId: string | null) {
 export function useAgentTimeline(agentId: string | null, options?: { enabled?: boolean }) {
   return useInfiniteQuery<TimelinePage, Error, InfiniteData<TimelinePage>, ReturnType<typeof timelineQueryKey>, PageParam | undefined>({
     queryKey: timelineQueryKey(agentId),
-    queryFn: async ({ pageParam }) => {
+    queryFn: async ({ pageParam, signal }) => {
       if (!agentId) {
         throw new Error('No agentId')
       }
@@ -44,17 +45,17 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       const direction = pageParam?.direction ?? 'initial'
 
       if (direction === 'initial') {
-        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE })
+        const response = await fetchAgentTimeline(agentId, { direction: 'initial', limit: TIMELINE_PAGE_SIZE, signal })
         return timelineResponseToPage(response)
       }
 
       if (direction === 'older' && 'cursor' in pageParam!) {
-        const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE })
+        const response = await fetchAgentTimeline(agentId, { direction: 'older', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal })
         return timelineResponseToPage(response)
       }
 
       if (direction === 'newer' && 'cursor' in pageParam!) {
-        const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE })
+        const response = await fetchAgentTimeline(agentId, { direction: 'newer', cursor: pageParam.cursor, limit: TIMELINE_PAGE_SIZE, signal })
         return timelineResponseToPage(response)
       }
 
@@ -74,7 +75,7 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       return { direction: 'newer' as const, cursor: lastPage.newestCursor }
     },
     enabled: Boolean(agentId) && (options?.enabled !== false),
-    staleTime: 60_000,
+    staleTime: TIMELINE_STALE_TIME_MS,
     refetchOnWindowFocus: false,
   })
 }

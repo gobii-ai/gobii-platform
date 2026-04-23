@@ -1,13 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const { fetchAgentInsightsMock } = vi.hoisted(() => ({
-  fetchAgentInsightsMock: vi.fn(),
-}))
-
 vi.mock('../api/agentChat', () => ({
   sendAgentMessage: vi.fn(),
   fetchProcessingStatus: vi.fn(),
-  fetchAgentInsights: fetchAgentInsightsMock,
 }))
 
 import { useAgentChatStore } from './agentChatStore'
@@ -30,77 +25,34 @@ function makeInsight(insightId: string, title: string) {
   }
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void
-  let reject!: (reason?: unknown) => void
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res
-    reject = rej
-  })
-  return { promise, resolve, reject }
-}
-
 const initialState = useAgentChatStore.getState()
 
-describe('agentChatStore insight fetching', () => {
+describe('agentChatStore insight state', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     useAgentChatStore.setState(initialState, true)
   })
 
-  it('dedupes concurrent insight fetches for the same agent', async () => {
-    const pending = deferred<{ insights: ReturnType<typeof makeInsight>[]; refreshAfterSeconds: number }>()
-    fetchAgentInsightsMock.mockReturnValueOnce(pending.promise)
-
+  it('applies insight query results for the current agent', () => {
     useAgentChatStore.getState().setAgentId('agent-1')
-
-    const first = useAgentChatStore.getState().fetchInsights()
-    const second = useAgentChatStore.getState().fetchInsights()
-
-    expect(fetchAgentInsightsMock).toHaveBeenCalledTimes(1)
-
-    pending.resolve({
-      insights: [makeInsight('insight-1', 'First insight')],
-      refreshAfterSeconds: 300,
-    })
-
-    await Promise.all([first, second])
+    useAgentChatStore.getState().setInsightsForAgent('agent-1', [makeInsight('insight-1', 'First insight')])
 
     const state = useAgentChatStore.getState()
     expect(state.insights).toEqual([makeInsight('insight-1', 'First insight')])
-    expect(state.insightsFetchInFlight).toBeNull()
+    expect(state.currentInsightIndex).toBe(0)
   })
 
-  it('ignores stale insight responses after switching agents', async () => {
-    const firstPending = deferred<{ insights: ReturnType<typeof makeInsight>[]; refreshAfterSeconds: number }>()
-    const secondPending = deferred<{ insights: ReturnType<typeof makeInsight>[]; refreshAfterSeconds: number }>()
-    fetchAgentInsightsMock
-      .mockReturnValueOnce(firstPending.promise)
-      .mockReturnValueOnce(secondPending.promise)
-
+  it('ignores stale insight results after switching agents', () => {
     useAgentChatStore.getState().setAgentId('agent-1')
-    const first = useAgentChatStore.getState().fetchInsights()
-
     useAgentChatStore.getState().setAgentId('agent-2')
-    const second = useAgentChatStore.getState().fetchInsights()
-
-    firstPending.resolve({
-      insights: [makeInsight('stale-insight', 'Stale insight')],
-      refreshAfterSeconds: 300,
-    })
-    await first
+    useAgentChatStore.getState().setInsightsForAgent('agent-1', [makeInsight('stale-insight', 'Stale insight')])
 
     expect(useAgentChatStore.getState().insights).toEqual([])
 
-    secondPending.resolve({
-      insights: [makeInsight('fresh-insight', 'Fresh insight')],
-      refreshAfterSeconds: 300,
-    })
-    await second
+    useAgentChatStore.getState().setInsightsForAgent('agent-2', [makeInsight('fresh-insight', 'Fresh insight')])
 
     const state = useAgentChatStore.getState()
     expect(state.insights).toEqual([makeInsight('fresh-insight', 'Fresh insight')])
     expect(state.agentId).toBe('agent-2')
-    expect(state.insightsFetchInFlight).toBeNull()
   })
 })

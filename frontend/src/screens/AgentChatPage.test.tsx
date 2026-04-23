@@ -63,7 +63,7 @@ const {
     receiveRealtimeEvent: vi.fn(),
     finalizeStreaming: vi.fn(),
     refreshProcessing: vi.fn(),
-    fetchInsights: vi.fn(),
+    setInsightsForAgent: vi.fn(),
     startInsightRotation: vi.fn(),
     stopInsightRotation: vi.fn(),
     dismissInsight: vi.fn(),
@@ -239,6 +239,15 @@ vi.mock('../hooks/useAgentAddons', () => ({
     refetch: vi.fn(),
     updateAddons: vi.fn(),
     updating: false,
+  })),
+}))
+
+vi.mock('../hooks/useAgentInsights', () => ({
+  useAgentInsights: vi.fn(() => ({
+    data: undefined,
+    dataUpdatedAt: 0,
+    isFetching: false,
+    isStale: false,
   })),
 }))
 

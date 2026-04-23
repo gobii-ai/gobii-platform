@@ -13,9 +13,11 @@ import { parseToolSearchResult } from './tooling/searchUtils'
 type ToolClusterLivePreviewProps = {
   cluster: ToolClusterTransform
   isLatestEvent: boolean
+  animateIncoming?: boolean
   previewEntryLimit?: number
   onOpenTimeline: () => void
   onSelectEntry: (entry: ToolEntryDisplay) => void
+  onIncomingAnimationConsumed?: (cursor: string) => void
 }
 
 type PreviewEntry = {
@@ -1040,14 +1042,17 @@ function derivePreviewState(activeEntry: ToolEntryDisplay | null, hasActiveProce
 export function ToolClusterLivePreview({
   cluster,
   isLatestEvent,
+  animateIncoming = false,
   previewEntryLimit = MAX_PREVIEW_ENTRIES,
   onOpenTimeline,
   onSelectEntry,
+  onIncomingAnimationConsumed,
 }: ToolClusterLivePreviewProps) {
   const reduceMotion = useReducedMotion()
+  const shouldAnimateIncoming = !reduceMotion && animateIncoming
   const processingActive = useAgentChatStore((state) => state.processingActive)
   const [newEntryIds, setNewEntryIds] = useState<string[]>([])
-  const previousEntryIdsRef = useRef<string[]>([])
+  const previousEntryIdsRef = useRef<string[] | null>(null)
   const newEntryTimeoutRef = useRef<number | null>(null)
   const previewableEntries = useMemo(
     () => cluster.entries.filter((entry) => !entry.separateFromPreview),
@@ -1085,13 +1090,34 @@ export function ToolClusterLivePreview({
   useEffect(() => {
     const currentEntryIds = previewableEntries.map((entry) => entry.id)
     const previousEntryIds = previousEntryIdsRef.current
+    if (previousEntryIds === null) {
+      previousEntryIdsRef.current = currentEntryIds
+      if (animateIncoming) {
+        setNewEntryIds(currentEntryIds.slice(-previewEntryLimit))
+      }
+      return
+    }
+
     const addedEntryIds = currentEntryIds.filter((id) => !previousEntryIds.includes(id))
-    if (addedEntryIds.length > 0 || (pendingCount > 0 && hasActiveProcessing)) {
-      setNewEntryIds(addedEntryIds.slice(-previewEntryLimit))
+    if (animateIncoming && (addedEntryIds.length > 0 || (pendingCount > 0 && hasActiveProcessing))) {
+      setNewEntryIds((addedEntryIds.length ? addedEntryIds : currentEntryIds).slice(-previewEntryLimit))
     }
 
     previousEntryIdsRef.current = currentEntryIds
-  }, [hasActiveProcessing, pendingCount, previewEntryLimit, previewableEntries])
+  }, [animateIncoming, hasActiveProcessing, pendingCount, previewEntryLimit, previewableEntries])
+
+  useEffect(() => {
+    if (!animateIncoming) {
+      return
+    }
+    const timeout = window.setTimeout(() => {
+      onIncomingAnimationConsumed?.(cluster.cursor)
+    }, 1000)
+    return () => {
+      window.clearTimeout(timeout)
+      onIncomingAnimationConsumed?.(cluster.cursor)
+    }
+  }, [animateIncoming, cluster.cursor, onIncomingAnimationConsumed])
 
   useEffect(() => {
     if (newEntryIds.length === 0) {
@@ -1121,7 +1147,7 @@ export function ToolClusterLivePreview({
     <motion.div
       className="tool-cluster-live-preview"
       data-state={previewState}
-      layout={!reduceMotion}
+      layout={shouldAnimateIncoming}
       transition={reduceMotion ? undefined : { type: 'spring', stiffness: 300, damping: 30 }}
     >
       {hiddenEntryCount > 0 ? (
@@ -1178,16 +1204,16 @@ export function ToolClusterLivePreview({
               return (
                 <motion.div
                   key={`${item.activity.kind}-grid-${entry.id}`}
-                  layout={!reduceMotion}
+                  layout={shouldAnimateIncoming}
                   className="tool-cluster-live-preview__chart-grid"
                   data-count={Math.min(visualEntries.length, 4)}
-                  initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
-                  animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                  initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 3 }}
+                  animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                   exit={reduceMotion ? { opacity: 1 } : { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }}
                   transition={{
-                    duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
+                    duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.28 : 0.1,
                     ease: 'easeOut',
-                    delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
+                    delay: !shouldAnimateIncoming ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                   }}
                 >
                   {visualEntries.map((visualItem, visualIndex) => (
@@ -1196,12 +1222,12 @@ export function ToolClusterLivePreview({
                       type="button"
                       className="tool-cluster-live-preview__chart-thumb"
                       data-single={isSingle ? 'true' : 'false'}
-                      initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 8, scale: 0.96 }}
-                      animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                      initial={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 8, scale: 0.96 }}
+                      animate={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 1, y: 0, scale: 1 }}
                       transition={{
-                        duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.12,
+                        duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.3 : 0.12,
                         ease: [0.22, 1, 0.36, 1],
-                        delay: reduceMotion ? 0 : isLatestEvent ? 0.06 + visualIndex * 0.1 : visualIndex * 0.02,
+                        delay: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.06 + visualIndex * 0.1 : visualIndex * 0.02,
                       }}
                       whileHover={reduceMotion ? undefined : { scale: 1.02, y: -1 }}
                       onClick={() => onSelectEntry(visualItem.entry)}
@@ -1255,7 +1281,7 @@ export function ToolClusterLivePreview({
             return (
               <motion.div
                 key={entry.id}
-                layout={!reduceMotion}
+                layout={shouldAnimateIncoming}
                 className="tool-cluster-live-preview__entry"
                 data-active={isHighlighted ? 'true' : 'false'}
                 data-kind={item.activity.kind}
@@ -1265,13 +1291,13 @@ export function ToolClusterLivePreview({
                 data-profile-card={linkedInProfile ? 'true' : 'false'}
                 role="button"
                 tabIndex={0}
-                initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 3 }}
-                animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 3 }}
+                animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                 exit={reduceMotion ? { opacity: 1 } : { opacity: 0, transition: { duration: 0.12, ease: 'easeOut' } }}
                 transition={{
-                  duration: reduceMotion ? 0.12 : isLatestEvent ? 0.28 : 0.1,
+                  duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.28 : 0.1,
                   ease: 'easeOut',
-                  delay: reduceMotion ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
+                  delay: !shouldAnimateIncoming ? 0 : isLatestEvent ? index * 0.05 : index * 0.015,
                 }}
                 whileHover={reduceMotion ? undefined : { x: 1.5 }}
                 whileTap={reduceMotion ? undefined : { scale: 0.998 }}
@@ -1374,12 +1400,12 @@ export function ToolClusterLivePreview({
                               target="_blank"
                               rel="noopener noreferrer"
                               className="tool-cluster-live-preview__scrape-inline-link"
-                              initial={reduceMotion ? { opacity: 1 } : { opacity: 0, scale: 0.92 }}
-                              animate={reduceMotion ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+                              initial={!shouldAnimateIncoming ? { opacity: 1, scale: 1 } : { opacity: 0, scale: 0.92 }}
+                              animate={!shouldAnimateIncoming ? { opacity: 1, scale: 1 } : { opacity: 1, scale: 1 }}
                               transition={{
-                                duration: reduceMotion ? 0.08 : isLatestEvent ? 0.24 : 0.08,
+                                duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.24 : 0.08,
                                 ease: [0.22, 1, 0.36, 1],
-                                delay: reduceMotion ? 0 : isLatestEvent ? targetIndex * 0.08 : 0,
+                                delay: !shouldAnimateIncoming ? 0 : isLatestEvent ? targetIndex * 0.08 : 0,
                               }}
                               onPointerDown={(event) => event.stopPropagation()}
                               onMouseDown={(event) => event.stopPropagation()}
@@ -1413,12 +1439,12 @@ export function ToolClusterLivePreview({
                     {searchItems.length > 0 && detailText ? (
                       <motion.span
                         className="tool-cluster-live-preview__search-query"
-                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 4 }}
-                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 4 }}
+                        animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                         transition={{
-                          duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                          duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.3 : 0.1,
                           ease: [0.22, 1, 0.36, 1],
-                          delay: reduceMotion ? 0 : isLatestEvent ? 0.06 : 0,
+                          delay: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.06 : 0,
                         }}
                       >
                         <Search className="tool-cluster-live-preview__search-query-icon" aria-hidden="true" />
@@ -1430,8 +1456,8 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-profile-subtitle-${linkedInProfile.subtitle ?? item.activity.label}`}
                           className="tool-cluster-live-preview__entry-caption"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
+                          animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                         >
@@ -1443,8 +1469,8 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-page-title-${visual.pageTitle}`}
                           className="tool-cluster-live-preview__entry-caption"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
+                          animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                         >
@@ -1454,8 +1480,8 @@ export function ToolClusterLivePreview({
                         <motion.span
                           key={`${entry.id}-detail-${detailText}`}
                           className="tool-cluster-live-preview__entry-caption"
-                          initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 2 }}
-                          animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                          initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 2 }}
+                          animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -2 }}
                           transition={{ duration: 0.16, ease: 'easeOut' }}
                         >
@@ -1479,12 +1505,12 @@ export function ToolClusterLivePreview({
                       <motion.li
                         key={`${entry.id}-search-item-${searchItem.url}`}
                         className="tool-cluster-live-preview__search-result-row"
-                        initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
-                        animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0 }}
+                        initial={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 0, y: 6 }}
+                        animate={!shouldAnimateIncoming ? { opacity: 1, y: 0 } : { opacity: 1, y: 0 }}
                         transition={{
-                          duration: reduceMotion ? 0.08 : isLatestEvent ? 0.35 : 0.12,
+                          duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.35 : 0.12,
                           ease: [0.22, 1, 0.36, 1],
-                          delay: reduceMotion ? 0 : isLatestEvent
+                          delay: !shouldAnimateIncoming ? 0 : isLatestEvent
                             ? 0.08 + searchIndex * 0.09
                             : searchIndex * 0.015,
                         }}
@@ -1527,12 +1553,12 @@ export function ToolClusterLivePreview({
                           <motion.div
                             key={`card-${cardIndex}-${info.label}`}
                             className="tool-cluster-live-preview__enabled-tool-card"
-                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
-                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            initial={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
+                            animate={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 1, y: 0, scale: 1 }}
                             transition={{
-                              duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                              duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.3 : 0.1,
                               ease: [0.22, 1, 0.36, 1],
-                              delay: reduceMotion ? 0 : isLatestEvent
+                              delay: !shouldAnimateIncoming ? 0 : isLatestEvent
                                 ? 0.1 + cardIndex * 0.12
                                 : cardIndex * 0.015,
                             }}
@@ -1552,12 +1578,12 @@ export function ToolClusterLivePreview({
                           <motion.div
                             key={`chip-${chip.kind}-${chip.label}`}
                             className="tool-cluster-live-preview__enabled-tool-card"
-                            initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
-                            animate={reduceMotion ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1 }}
+                            initial={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: 10, scale: 0.94 }}
+                            animate={!shouldAnimateIncoming ? { opacity: 1, y: 0, scale: 1 } : { opacity: 1, y: 0, scale: 1 }}
                             transition={{
-                              duration: reduceMotion ? 0.08 : isLatestEvent ? 0.3 : 0.1,
+                              duration: !shouldAnimateIncoming ? 0 : isLatestEvent ? 0.3 : 0.1,
                               ease: [0.22, 1, 0.36, 1],
-                              delay: reduceMotion ? 0 : isLatestEvent
+                              delay: !shouldAnimateIncoming ? 0 : isLatestEvent
                                 ? 0.1 + delayIndex * 0.12
                                 : delayIndex * 0.015,
                             }}
