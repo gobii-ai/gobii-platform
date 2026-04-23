@@ -83,7 +83,7 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
         "agent_id": str(agent.id),
         "agent_name": agent.name or "Agent",
         "agent_color_hex": agent.get_display_color(),
-        "agent_avatar_url": agent.get_avatar_url(),
+        "agent_avatar_url": agent.get_avatar_thumbnail_url(),
         "mini_description": agent.mini_description or "",
         "short_description": agent.short_description or "",
         "signup_preview_state": agent.signup_preview_state,

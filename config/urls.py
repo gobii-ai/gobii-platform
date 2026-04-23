@@ -206,6 +206,7 @@ from console.views import (
     AgentEmailOAuthCallbackPageView,
     PersistentAgentChatShellView,
     AgentAvatarProxyView,
+    AgentAvatarThumbnailProxyView,
     AgentCreateContactView,
     AgentQuickSpawnView,
     AgentDetailView,
@@ -346,6 +347,7 @@ urlpatterns = [
 
     path("console/agents/", PersistentAgentsView.as_view(), name="agents"),
     path("console/agents/<uuid:pk>/chat/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell"),
+    path("console/agents/<uuid:pk>/avatar/thumb/", AgentAvatarThumbnailProxyView.as_view(), name="agent_avatar_thumbnail"),
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("console/api/agents/roster/", AgentChatRosterAPIView.as_view(), name="console_agent_roster"),
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),

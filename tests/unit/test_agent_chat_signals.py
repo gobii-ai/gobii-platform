@@ -297,7 +297,7 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(payload.get("agent_name"), self.agent.name)
         self.assertEqual(payload.get("mini_description"), "")
         self.assertEqual(payload.get("short_description"), "")
-        self.assertIn("/console/agents/", payload.get("agent_avatar_url", ""))
+        self.assertIn("/avatar/thumb/", payload.get("agent_avatar_url", ""))
 
     @tag("batch_agent_chat")
     def test_description_update_emits_agent_profile_event(self):
@@ -390,7 +390,7 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(collaborator_profile_event.get("type"), "agent_profile_event")
         payload = collaborator_profile_event.get("payload", {})
         self.assertEqual(payload.get("agent_id"), str(self.agent.id))
-        self.assertIn("/console/agents/", payload.get("agent_avatar_url", ""))
+        self.assertIn("/avatar/thumb/", payload.get("agent_avatar_url", ""))
 
     @tag("batch_agent_chat")
     def test_human_input_request_save_emits_pending_requests_update(self):

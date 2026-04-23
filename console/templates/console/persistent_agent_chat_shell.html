@@ -12,7 +12,7 @@
        data-agent-id="{{ agent.id }}"
        data-agent-name="{{ agent.name|default:'' }}"
        data-agent-color="{{ agent.get_display_color|default_if_none:'' }}"
-       data-agent-avatar-url="{{ agent.get_avatar_url|default_if_none:'' }}"
+       data-agent-avatar-url="{{ agent.get_avatar_thumbnail_url|default_if_none:'' }}"
        data-agent-email="{{ agent_email }}"
        data-agent-sms="{{ agent_sms }}"
        data-max-chat-upload-size-bytes="{{ max_chat_upload_size_bytes|default_if_none:'' }}"

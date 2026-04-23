@@ -2462,7 +2462,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             {
                 "id": str(agent.id),
                 "name": agent.name or "",
-                "avatar_url": agent.get_avatar_url(),
+                "avatar_url": agent.get_avatar_thumbnail_url(),
                 "display_color_hex": agent.get_display_color(),
                 "is_active": bool(agent.is_active),
                 "mini_description": agent.mini_description or "",
@@ -2958,7 +2958,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
             "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
-            "agent_avatar_url": agent.get_avatar_url(),
+            "agent_avatar_url": agent.get_avatar_thumbnail_url(),
             "signup_preview_state": agent.signup_preview_state,
             "planning_state": agent.planning_state,
             **_pending_action_payload(agent, request.user),
