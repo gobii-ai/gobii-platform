@@ -6099,6 +6099,7 @@
   gap: 0.5rem;
   flex: 1;
   min-height: 0;
+  overflow: hidden;
 }
 
 .chat-sidebar-section-header {
@@ -6149,6 +6150,9 @@
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   padding: 0 0.375rem;
   scrollbar-width: thin;
   scrollbar-color: rgba(167, 139, 250, 0.25) transparent;
