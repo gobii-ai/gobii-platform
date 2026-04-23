@@ -1,7 +1,7 @@
 import type { QueryClient, InfiniteData } from '@tanstack/react-query'
 
-import { fetchAgentTimeline } from '../api/agentChat'
-import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
+import type { PendingActionRequest, PendingHumanInputAction, PendingHumanInputRequest, ProcessingSnapshot, TimelineEvent } from '../types/agentChat'
 import { compareTimelineCursors } from '../util/timelineCursor'
 import { mergeTimelineEvents } from '../stores/agentChatTimeline'
 import {
@@ -136,6 +136,119 @@ export function replacePendingActionRequestsInCache(
       ...old,
       pages,
     }
+  })
+}
+
+function updateLatestTimelineRawInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  updater: (current: TimelineResponse) => TimelineResponse,
+) {
+  const key = timelineQueryKey(agentId)
+  queryClient.setQueryData<InfiniteData<TimelinePage>>(key, (old) => {
+    if (!old?.pages?.length) {
+      return old
+    }
+
+    const pages = [...old.pages]
+    const lastIndex = pages.length - 1
+    const lastPage = pages[lastIndex]
+    const nextRaw = updater(lastPage.raw)
+    if (nextRaw === lastPage.raw) {
+      return old
+    }
+
+    pages[lastIndex] = {
+      ...lastPage,
+      raw: nextRaw,
+    }
+
+    return {
+      ...old,
+      pages,
+    }
+  })
+}
+
+export function replaceProcessingSnapshotInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  processingSnapshot: ProcessingSnapshot,
+) {
+  updateLatestTimelineRawInCache(queryClient, agentId, (current) => ({
+    ...current,
+    processing_active: processingSnapshot.active,
+    processing_snapshot: processingSnapshot,
+  }))
+}
+
+export function updateAgentIdentityInCache(
+  queryClient: QueryClient,
+  agentId: string,
+  payload: Record<string, unknown>,
+) {
+  updateLatestTimelineRawInCache(queryClient, agentId, (current) => {
+    let changed = false
+    const next: TimelineResponse = { ...current }
+
+    if (Object.prototype.hasOwnProperty.call(payload, 'agent_name')) {
+      const agentName = typeof payload.agent_name === 'string' ? payload.agent_name : null
+      if (agentName !== current.agent_name) {
+        next.agent_name = agentName
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'agent_color_hex')) {
+      const agentColorHex = typeof payload.agent_color_hex === 'string' ? payload.agent_color_hex : null
+      if (agentColorHex !== current.agent_color_hex) {
+        next.agent_color_hex = agentColorHex
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'agent_avatar_url')) {
+      const agentAvatarUrl = typeof payload.agent_avatar_url === 'string' ? payload.agent_avatar_url : null
+      if (agentAvatarUrl !== current.agent_avatar_url) {
+        next.agent_avatar_url = agentAvatarUrl
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'signup_preview_state')) {
+      const rawSignupPreviewState = payload.signup_preview_state
+      const signupPreviewState = (
+        rawSignupPreviewState === 'awaiting_first_reply_pause'
+        || rawSignupPreviewState === 'awaiting_signup_completion'
+        || rawSignupPreviewState === 'none'
+      )
+        ? rawSignupPreviewState
+        : null
+      if (signupPreviewState !== (current.signup_preview_state ?? null)) {
+        next.signup_preview_state = signupPreviewState
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'planning_state')) {
+      const rawPlanningState = payload.planning_state
+      const planningState = (
+        rawPlanningState === 'planning'
+        || rawPlanningState === 'completed'
+        || rawPlanningState === 'skipped'
+      )
+        ? rawPlanningState
+        : null
+      if (planningState !== (current.planning_state ?? null)) {
+        next.planning_state = planningState
+        changed = true
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(payload, 'processing_active')) {
+      const processingActive = Boolean(payload.processing_active)
+      if (processingActive !== current.processing_active) {
+        next.processing_active = processingActive
+        changed = true
+      }
+    }
+
+    return changed ? next : current
   })
 }
 

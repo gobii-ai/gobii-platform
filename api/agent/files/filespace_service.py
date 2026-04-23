@@ -500,7 +500,7 @@ def broadcast_message_attachment_update(message_id: str) -> None:
             if channel_layer is not None:
                 async_to_sync(channel_layer.group_send)(
                     f"agent-chat-{agent_id}",
-                    {"type": "timeline_event", "payload": payload},
+                    {"type": "timeline_event", "agent_id": str(agent_id), "payload": payload},
                 )
     except Exception:
         logger.exception("Failed to broadcast chat attachment update for message %s", message_id)

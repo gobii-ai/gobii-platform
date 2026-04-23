@@ -66,12 +66,15 @@ def _group_name(agent_id) -> str:
     return f"agent-chat-{agent_id}"
 
 
-def _send(group: str, message_type: str, payload: dict) -> None:
+def _send(group: str, message_type: str, payload: dict, *, agent_id: str | None = None) -> None:
     channel_layer = get_channel_layer()
     if channel_layer is None:
         logger.debug("Channel layer unavailable; skipping realtime send for group %s", group)
         return
-    async_to_sync(channel_layer.group_send)(group, {"type": message_type, "payload": payload})
+    message = {"type": message_type, "payload": payload}
+    if agent_id:
+        message["agent_id"] = str(agent_id)
+    async_to_sync(channel_layer.group_send)(group, message)
 
 
 def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool | None = None) -> None:
@@ -166,7 +169,7 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
         logger.exception("Failed to serialize tool step %s: %s", getattr(step, "id", None), exc)
         return
 
-    _send(_group_name(step.agent_id), "timeline_event", payload)
+    _send(_group_name(step.agent_id), "timeline_event", payload, agent_id=str(step.agent_id))
     _broadcast_processing(step.agent)
 
 
@@ -186,7 +189,7 @@ def emit_pending_human_input_requests_update(agent: PersistentAgent) -> None:
         "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
         "timestamp": timezone.now().isoformat(),
     }
-    _send(_group_name(agent.id), "human_input_requests_event", payload)
+    _send(_group_name(agent.id), "human_input_requests_event", payload, agent_id=str(agent.id))
 
 
 def emit_pending_action_requests_update(agent: PersistentAgent) -> None:
@@ -277,7 +280,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
         except Exception as exc:  # pragma: no cover - defensive logging
             logger.exception("Failed to serialize agent message %s: %s", message_id, exc)
             return
-        _send(_group_name(owner_agent_id), "timeline_event", payload)
+        _send(_group_name(owner_agent_id), "timeline_event", payload, agent_id=str(owner_agent_id))
         try:
             audit_payload = serialize_message(msg)
             _broadcast_audit_event(str(owner_agent_id), audit_payload)
@@ -422,7 +425,7 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
         try:
             thinking_payload = serialize_thinking_event(instance)
             if thinking_payload:
-                _send(_group_name(instance.agent_id), "timeline_event", thinking_payload)
+                _send(_group_name(instance.agent_id), "timeline_event", thinking_payload, agent_id=str(instance.agent_id))
         except Exception:
             logger.debug("Failed to broadcast thinking event for %s", instance.id, exc_info=True)
     try:
@@ -507,7 +510,7 @@ def broadcast_credit_limit_event(sender, instance: PersistentAgentSystemStep, cr
             "notes": instance.notes,
             "timestamp": step.created_at.isoformat() if step.created_at else None,
         }
-        _send(_group_name(step.agent_id), "credit_event", payload)
+        _send(_group_name(step.agent_id), "credit_event", payload, agent_id=str(step.agent_id))
 
     transaction.on_commit(_on_commit)
 
@@ -545,7 +548,7 @@ def broadcast_processing_state(sender, instance: BrowserUseAgentTask, **kwargs):
 def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
     payload = serialize_processing_snapshot(snapshot)
-    _send(_group_name(agent.id), "processing_event", payload)
+    _send(_group_name(agent.id), "processing_event", payload, agent_id=str(agent.id))
     _emit_processing_profile_update_if_changed(agent, snapshot.active)
     try:
         send_audit_event(
@@ -588,7 +591,7 @@ def broadcast_kanban_changes(agent, changes, snapshot) -> None:
         return
 
     try:
-        _send(_group_name(agent.id), "timeline_event", payload)
+        _send(_group_name(agent.id), "timeline_event", payload, agent_id=str(agent.id))
     except Exception:
         logger.debug(
             "Failed to broadcast kanban changes for agent %s",

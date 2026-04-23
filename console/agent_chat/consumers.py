@@ -1,6 +1,5 @@
-from __future__ import annotations
-
 import logging
+from dataclasses import dataclass
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -11,6 +10,12 @@ from console.agent_chat.realtime import user_profile_group_name, user_stream_gro
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AgentChatSubscription:
+    group_name: str
+    user_group_name: str
 
 
 class AgentChatConsumer(AsyncJsonWebsocketConsumer):
@@ -111,14 +116,12 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
 class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     """Realtime channel for persistent agent updates with a session-level connection."""
 
-    user = None
-    session = None
-    agent_id: str | None = None
-    group_name: str | None = None
-    user_group_name: str | None = None
-    profile_group_name: str | None = None
-
     async def connect(self):
+        self.active_agent_id = None
+        self.subscriptions = {}
+        self.user_group_name = None
+        self.profile_group_name = None
+
         user = self.scope.get("user")
         session = self.scope.get("session")
         if user is None or not getattr(user, "is_authenticated", False):
@@ -128,9 +131,6 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
         self.user = user
         self.session = session
-        self.agent_id = None
-        self.group_name = None
-        self.user_group_name = None
         self.profile_group_name = user_profile_group_name(user.id)
 
         if self.channel_layer is None:
@@ -153,7 +153,7 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, code):
-        await self._clear_subscription()
+        await self._clear_subscriptions()
         if getattr(self, "profile_group_name", None) and self.channel_layer is not None:
             try:
                 await self.channel_layer.group_discard(self.profile_group_name, self.channel_name)
@@ -173,113 +173,160 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
             return
         if message_type == "subscribe":
             agent_id = content.get("agent_id")
+            mode = content.get("mode")
             context_override = content.get("context")
             if context_override is not None and not isinstance(context_override, dict):
                 context_override = None
             if not agent_id:
                 await self.send_json({"type": "subscription.error", "message": "agent_id is required"})
                 return
-            await self._subscribe(str(agent_id), context_override=context_override)
+            if mode not in {"active", "background"}:
+                await self.send_json(
+                    {
+                        "type": "subscription.error",
+                        "agent_id": str(agent_id),
+                        "message": "mode must be active or background",
+                    }
+                )
+                return
+            await self._subscribe(str(agent_id), mode=mode, context_override=context_override)
             return
         if message_type == "unsubscribe":
             agent_id = content.get("agent_id")
             await self._unsubscribe(str(agent_id) if agent_id else None)
 
     async def timeline_event(self, event):
-        await self.send_json({"type": "timeline.event", "payload": event.get("payload")})
+        await self._send_agent_event("timeline.event", event)
 
     async def processing_event(self, event):
-        await self.send_json({"type": "processing", "payload": event.get("payload")})
+        await self._send_agent_event("processing", event)
 
     async def stream_event(self, event):
-        await self.send_json({"type": "stream.event", "payload": event.get("payload")})
+        agent_id = self._extract_agent_id(event)
+        if not agent_id or agent_id != self.active_agent_id:
+            return
+        if agent_id not in self.subscriptions:
+            return
+        await self.send_json({"type": "stream.event", "agent_id": agent_id, "payload": event.get("payload")})
 
     async def credit_event(self, event):
-        await self.send_json({"type": "credit.event", "payload": event.get("payload")})
+        await self._send_agent_event("credit.event", event)
 
     async def agent_profile_event(self, event):
-        await self.send_json({"type": "agent.profile", "payload": event.get("payload")})
+        agent_id = self._extract_agent_id(event)
+        await self.send_json({"type": "agent.profile", "agent_id": agent_id, "payload": event.get("payload")})
 
     async def human_input_requests_event(self, event):
-        await self.send_json({"type": "human_input_requests.updated", "payload": event.get("payload")})
+        await self._send_agent_event("human_input_requests.updated", event)
 
     async def pending_action_requests_event(self, event):
-        await self.send_json({"type": "pending_action_requests.updated", "payload": event.get("payload")})
+        await self._send_agent_event("pending_action_requests.updated", event)
 
-    async def _subscribe(self, agent_id: str, context_override=None) -> None:
-        if self.agent_id == agent_id:
-            return
+    async def _subscribe(self, agent_id: str, *, mode: str, context_override=None) -> None:
+        if agent_id not in self.subscriptions:
+            try:
+                await self._resolve_agent(self.user, self.session, agent_id, context_override=context_override)
+            except PermissionDenied as exc:
+                logger.warning(
+                    "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
+                    self.user,
+                    agent_id,
+                    exc,
+                )
+                await self.send_json(
+                    {
+                        "type": "subscription.error",
+                        "agent_id": agent_id,
+                        "message": "Permission denied for agent subscription.",
+                    }
+                )
+                return
 
-        await self._clear_subscription()
+            subscription = AgentChatSubscription(
+                group_name=f"agent-chat-{agent_id}",
+                user_group_name=user_stream_group_name(agent_id, self.user.id),
+            )
+            try:
+                await self.channel_layer.group_add(subscription.group_name, self.channel_name)
+                await self.channel_layer.group_add(subscription.user_group_name, self.channel_name)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.exception(
+                    "AgentChatSessionConsumer failed to join group; channel layer unavailable (agent=%s): %s",
+                    agent_id,
+                    exc,
+                )
+                await self.send_json(
+                    {
+                        "type": "subscription.error",
+                        "agent_id": agent_id,
+                        "message": "Failed to join agent realtime group.",
+                    }
+                )
+                return
+            self.subscriptions[agent_id] = subscription
 
-        try:
-            await self._resolve_agent(self.user, self.session, agent_id, context_override=context_override)
-        except PermissionDenied as exc:
-            logger.warning(
-                "AgentChatSessionConsumer permission denied for user %s agent %s: %s",
-                self.user,
-                agent_id,
-                exc,
-            )
-            await self.send_json(
-                {
-                    "type": "subscription.error",
-                    "agent_id": agent_id,
-                    "message": "Permission denied for agent subscription.",
-                }
-            )
-            return
-
-        self.agent_id = agent_id
-        self.group_name = f"agent-chat-{agent_id}"
-        self.user_group_name = user_stream_group_name(agent_id, self.user.id)
-        try:
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
-            await self.channel_layer.group_add(self.user_group_name, self.channel_name)
-        except Exception as exc:  # pragma: no cover - defensive logging
-            logger.exception(
-                "AgentChatSessionConsumer failed to join group; channel layer unavailable (agent=%s): %s",
-                agent_id,
-                exc,
-            )
-            await self.send_json(
-                {
-                    "type": "subscription.error",
-                    "agent_id": agent_id,
-                    "message": "Failed to join agent realtime group.",
-                }
-            )
-            await self._clear_subscription()
-            return
+        if mode == "active":
+            self.active_agent_id = agent_id
+        elif self.active_agent_id == agent_id:
+            self.active_agent_id = None
 
         logger.info(
-            "AgentChatSessionConsumer subscribed user=%s agent=%s channel=%s",
+            "AgentChatSessionConsumer subscribed user=%s agent=%s mode=%s channel=%s",
             self.user,
             agent_id,
+            mode,
             self.channel_name,
         )
 
     async def _unsubscribe(self, agent_id: str | None) -> None:
-        if agent_id and self.agent_id and agent_id != self.agent_id:
+        if agent_id is None:
+            await self._clear_subscriptions()
             return
-        await self._clear_subscription()
+        if agent_id not in self.subscriptions:
+            return
+        await self._remove_subscription(agent_id)
 
-    async def _clear_subscription(self) -> None:
+    async def _clear_subscriptions(self) -> None:
         if self.channel_layer is None:
             return
-        if self.group_name:
+        for agent_id in list(self.subscriptions.keys()):
+            await self._remove_subscription(agent_id)
+
+    async def _remove_subscription(self, agent_id: str) -> None:
+        subscription = self.subscriptions.pop(agent_id, None)
+        if subscription is None:
+            return
+        if self.active_agent_id == agent_id:
+            self.active_agent_id = None
+        if self.channel_layer is None:
+            return
+        if subscription.group_name:
             try:
-                await self.channel_layer.group_discard(self.group_name, self.channel_name)
+                await self.channel_layer.group_discard(subscription.group_name, self.channel_name)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("AgentChatSessionConsumer failed removing channel from group: %s", exc)
-        if self.user_group_name:
+        if subscription.user_group_name:
             try:
-                await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
+                await self.channel_layer.group_discard(subscription.user_group_name, self.channel_name)
             except Exception as exc:  # pragma: no cover - defensive logging
                 logger.exception("AgentChatSessionConsumer failed removing channel from group: %s", exc)
-        self.agent_id = None
-        self.group_name = None
-        self.user_group_name = None
+
+    async def _send_agent_event(self, event_type: str, event) -> None:
+        agent_id = self._extract_agent_id(event)
+        if agent_id and agent_id not in self.subscriptions:
+            return
+        await self.send_json({"type": event_type, "agent_id": agent_id, "payload": event.get("payload")})
+
+    def _extract_agent_id(self, event) -> str | None:
+        agent_id = event.get("agent_id")
+        if isinstance(agent_id, str) and agent_id:
+            return agent_id
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            payload_agent_id = payload.get("agent_id")
+            if isinstance(payload_agent_id, str) and payload_agent_id:
+                return payload_agent_id
+        return None
 
     @database_sync_to_async
     def _resolve_agent(self, user, session, agent_id, context_override=None):

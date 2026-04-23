@@ -37,6 +37,7 @@ import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
 import { useAgentInsights } from '../hooks/useAgentInsights'
+import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscriptions'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
 import { useAgentChatStore, setTimelineQueryClient } from '../stores/agentChatStore'
@@ -881,6 +882,7 @@ export function AgentChatPage({
   const refreshProcessing = useAgentChatStore((state) => state.refreshProcessing)
   const realtimeEventCursors = useAgentChatStore((state) => state.realtimeEventCursors)
   const consumeRealtimeEventCursor = useAgentChatStore((state) => state.consumeRealtimeEventCursor)
+  const persistPendingEventsToCache = useAgentChatStore((state) => state.persistPendingEventsToCache)
   const setInsightsForAgent = useAgentChatStore((state) => state.setInsightsForAgent)
   const startInsightRotation = useAgentChatStore((state) => state.startInsightRotation)
   const stopInsightRotation = useAgentChatStore((state) => state.stopInsightRotation)
@@ -895,6 +897,15 @@ export function AgentChatPage({
   const setAutoScrollPinned = useAgentChatStore((state) => state.setAutoScrollPinned)
   const suppressAutoScrollPin = useAgentChatStore((state) => state.suppressAutoScrollPin)
   const autoScrollPinSuppressedUntil = useAgentChatStore((state) => state.autoScrollPinSuppressedUntil)
+  const previousViewedAgentIdRef = useRef<string | null>(activeAgentId)
+
+  useEffect(() => {
+    const previousAgentId = previousViewedAgentIdRef.current
+    if (previousAgentId && previousAgentId !== activeAgentId) {
+      persistPendingEventsToCache()
+    }
+    previousViewedAgentIdRef.current = activeAgentId
+  }, [activeAgentId, persistPendingEventsToCache])
 
   // Derive timeline state from react-query
   const isStoreSynced = storeAgentId === activeAgentId
@@ -1250,11 +1261,9 @@ export function AgentChatPage({
     },
     [queryClient],
   )
-  const socketSnapshot = useAgentChatSocket(liveAgentId, {
-    onCreditEvent: handleCreditEvent,
-    onAgentProfileEvent: handleAgentProfileEvent,
+  const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId, {
+    keepAliveWhenHidden: Boolean(timelineProcessingActive || timelineAwaitingResponse),
   })
-  const { status: sessionStatus, error: sessionError } = useAgentWebSession(liveAgentId)
   const rosterContextKey = effectiveContext ? `${effectiveContext.type}:${effectiveContext.id}` : 'unknown'
   const rosterQueryAgentId = contextLookupAgentId
   const hasPendingAvatarTracking = Object.keys(pendingAvatarTracking).length > 0
@@ -1978,6 +1987,19 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  const desiredSocketSubscriptions = useRecentAgentSubscriptions({
+    activeAgentId,
+    liveAgentId,
+    agentContextReady,
+    contextReady,
+    context: effectiveContext,
+    rosterAgents,
+  })
+  const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
+    contextOverride: contextReady ? effectiveContext : null,
+    onCreditEvent: handleCreditEvent,
+    onAgentProfileEvent: handleAgentProfileEvent,
+  })
   useEffect(() => {
     if (!agentContextReady) return
     if (!activeAgentId) return

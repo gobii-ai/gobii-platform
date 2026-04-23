@@ -23,7 +23,7 @@ def send_stream_event(agent_id: str, user_id: int, payload: dict) -> None:
         return
     async_to_sync(channel_layer.group_send)(
         user_stream_group_name(agent_id, user_id),
-        {"type": "stream_event", "payload": payload},
+        {"type": "stream_event", "agent_id": str(agent_id), "payload": payload},
     )
 
 
@@ -40,5 +40,5 @@ def send_user_group_event(agent_id: str, user_id: int, message_type: str, payloa
         return
     async_to_sync(channel_layer.group_send)(
         user_stream_group_name(agent_id, user_id),
-        {"type": message_type, "payload": payload},
+        {"type": message_type, "agent_id": str(agent_id), "payload": payload},
     )

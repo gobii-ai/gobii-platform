@@ -154,6 +154,7 @@ class AgentChatSignalTests(TestCase):
 
         timeline = self._receive_with_timeout()
         self.assertEqual(timeline.get("type"), "timeline_event")
+        self.assertEqual(timeline.get("agent_id"), str(self.agent.id))
         payload = timeline.get("payload", {})
         self.assertEqual(payload.get("kind"), "steps")
         entries = payload.get("entries", [])
@@ -162,6 +163,7 @@ class AgentChatSignalTests(TestCase):
 
         processing = self._receive_with_timeout()
         self.assertEqual(processing.get("type"), "processing_event")
+        self.assertEqual(processing.get("agent_id"), str(self.agent.id))
         processing_payload = processing.get("payload", {})
         self.assertIn("active", processing_payload)
 
@@ -434,6 +436,7 @@ class AgentChatSignalTests(TestCase):
 
         realtime_event = self._receive_with_timeout()
         self.assertEqual(realtime_event.get("type"), "human_input_requests_event")
+        self.assertEqual(realtime_event.get("agent_id"), str(self.agent.id))
         payload = realtime_event.get("payload", {})
         self.assertEqual(payload.get("agent_id"), str(self.agent.id))
         pending_requests = payload.get("pending_human_input_requests", [])
@@ -486,6 +489,8 @@ class AgentChatSignalTests(TestCase):
 
         self.assertEqual(owner_event.get("type"), "pending_action_requests_event")
         self.assertEqual(collaborator_event.get("type"), "pending_action_requests_event")
+        self.assertEqual(owner_event.get("agent_id"), str(self.agent.id))
+        self.assertEqual(collaborator_event.get("agent_id"), str(self.agent.id))
 
         owner_kinds = [item.get("kind") for item in owner_event.get("payload", {}).get("pending_action_requests", [])]
         collaborator_kinds = [item.get("kind") for item in collaborator_event.get("payload", {}).get("pending_action_requests", [])]
