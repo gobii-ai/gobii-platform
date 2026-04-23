@@ -73,3 +73,38 @@ class SqliteAgentConfigTests(TestCase):
         self.assertFalse(result.errors)
         self.assertIn("charter", result.updated_fields)
         self.assertIn("schedule", result.updated_fields)
+
+    def test_sqlite_agent_config_blocks_schedule_updates_during_planning(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = os.path.join(tmp_dir, "state.db")
+            token = set_sqlite_db_path(db_path)
+            try:
+                snapshot = seed_sqlite_agent_config(self.agent)
+                conn = sqlite3.connect(db_path)
+                try:
+                    conn.execute(
+                        f"""
+                        UPDATE "{AGENT_CONFIG_TABLE}"
+                        SET charter = ?, schedule = ?
+                        WHERE id = 1;
+                        """,
+                        ("Updated planning charter", "0 10 * * *"),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+
+                result = apply_sqlite_agent_config_updates(self.agent, snapshot)
+            finally:
+                reset_sqlite_db_path(token)
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.charter, "Updated planning charter")
+        self.assertEqual(self.agent.schedule, "0 9 * * *")
+        self.assertIn("charter", result.updated_fields)
+        self.assertNotIn("schedule", result.updated_fields)
+        self.assertEqual(len(result.errors), 1)
+        self.assertIn("planning mode", result.errors[0].lower())
