@@ -23,6 +23,7 @@ from ...services.sandbox_compute import (
     track_sandbox_unavailable,
 )
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
+from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
 from .sqlite_batch import get_sqlite_batch_tool, execute_sqlite_batch
@@ -45,7 +46,6 @@ from .create_video import (
 from .custom_tools import (
     execute_custom_tool,
     is_custom_tools_available_for_agent,
-    sanitize_tool_parameters_schema_for_llm,
 )
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command

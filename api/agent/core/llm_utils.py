@@ -8,6 +8,7 @@ from django.conf import settings
 import litellm
 
 from api.services.system_settings import get_litellm_timeout_seconds
+from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
     "supports_temperature",
@@ -246,8 +247,6 @@ def raise_if_invalid_litellm_response(
 
 
 def sanitize_tools_for_llm(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    from api.agent.tools.custom_tools import sanitize_tool_parameters_schema_for_llm
-
     sanitized_tools: list[dict[str, Any]] = []
     for tool in tools:
         if not isinstance(tool, dict):
