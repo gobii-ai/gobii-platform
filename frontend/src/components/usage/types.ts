@@ -10,6 +10,7 @@ export type UsageSummaryResponse = {
   period: {
     start: string
     end: string
+    resetOn?: string
     label: string
     timezone: string
   }
@@ -28,6 +29,10 @@ export type UsageSummaryResponse = {
       cancelled: number
     }
     credits: {
+      total: number
+      unit: string
+    }
+    todayCredits?: {
       total: number
       unit: string
     }

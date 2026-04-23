@@ -3616,6 +3616,9 @@ export function AgentChatPage({
         onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
         contextSwitcher={contextSwitcher ?? undefined}
         currentContext={effectiveContext}
+        sidebarBillingUrl={billingManageUrl}
+        sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
+        sidebarCreditsResetOn={usageSummary?.period.resetOn ?? null}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}

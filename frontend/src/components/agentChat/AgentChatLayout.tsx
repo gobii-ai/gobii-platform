@@ -104,6 +104,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
+  sidebarBillingUrl?: string | null
+  sidebarTodayCreditsUsed?: number | null
+  sidebarCreditsResetOn?: string | null
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
@@ -250,6 +253,9 @@ export function AgentChatLayout({
   onInsightsPanelExpandedPreferenceChange,
   contextSwitcher,
   currentContext = null,
+  sidebarBillingUrl = null,
+  sidebarTodayCreditsUsed = null,
+  sidebarCreditsResetOn = null,
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
@@ -842,6 +848,28 @@ export function AgentChatLayout({
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const sidebarSettings = useMemo(() => ({
+    context: currentContext,
+    viewerEmail: viewerEmail ?? null,
+    isProprietaryMode,
+    billingUrl: sidebarBillingUrl,
+    taskCredits: taskQuota
+      ? {
+          usedToday: sidebarTodayCreditsUsed,
+          remaining: taskQuota.available,
+          resetOn: sidebarCreditsResetOn,
+          unlimited: Boolean(taskQuota.total < 0 || taskQuota.available < 0),
+        }
+      : null,
+  }), [
+    currentContext,
+    isProprietaryMode,
+    sidebarBillingUrl,
+    sidebarCreditsResetOn,
+    sidebarTodayCreditsUsed,
+    taskQuota,
+    viewerEmail,
+  ])
 
   return (
     <>
@@ -862,6 +890,7 @@ export function AgentChatLayout({
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
+        settings={sidebarSettings}
       />
 	      {showBanner && (
 	        <AgentChatBanner
