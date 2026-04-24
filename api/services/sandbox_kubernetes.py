@@ -636,11 +636,10 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
     ) -> Dict[str, Any]:
         request_timeout = timeout or self._proxy_timeout
         url = _sandbox_service_url(self._namespace, service_name, path)
-        last_exc = None
-        for attempt in range(1, _PROXY_POST_MAX_ATTEMPTS + 1):
-            try:
-                with requests.Session() as session:
-                    session.trust_env = False
+        with requests.Session() as session:
+            session.trust_env = False
+            for attempt in range(1, _PROXY_POST_MAX_ATTEMPTS + 1):
+                try:
                     response = session.post(
                         url,
                         json=payload,
@@ -648,37 +647,34 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                         headers={"X-Sandbox-Compute-Token": self._compute_api_token},
                     )
                     response.raise_for_status()
-                break
-            except requests.RequestException as exc:
-                last_exc = exc
-                retryable = _is_transient_proxy_request_error(exc)
-                if not retryable or attempt >= _PROXY_POST_MAX_ATTEMPTS:
-                    logger.warning(
-                        "Sandbox proxy POST failed service=%s path=%s attempt=%s/%s retryable=%s error=%s",
+                    break
+                except requests.RequestException as exc:
+                    retryable = _is_transient_proxy_request_error(exc)
+                    if not retryable or attempt >= _PROXY_POST_MAX_ATTEMPTS:
+                        logger.warning(
+                            "Sandbox proxy POST failed service=%s path=%s attempt=%s/%s retryable=%s error=%s",
+                            service_name,
+                            path,
+                            attempt,
+                            _PROXY_POST_MAX_ATTEMPTS,
+                            retryable,
+                            exc,
+                        )
+                        return {"status": "error", "message": f"Sandbox proxy request failed: {exc}"}
+                    delay = (
+                        _PROXY_POST_RETRY_BASE_DELAY_SECONDS * attempt
+                        + random.uniform(0, _PROXY_POST_RETRY_JITTER_SECONDS)
+                    )
+                    logger.info(
+                        "Retrying sandbox proxy POST service=%s path=%s attempt=%s/%s delay_seconds=%.3f error=%s",
                         service_name,
                         path,
                         attempt,
                         _PROXY_POST_MAX_ATTEMPTS,
-                        retryable,
+                        delay,
                         exc,
                     )
-                    return {"status": "error", "message": f"Sandbox proxy request failed: {exc}"}
-                delay = (
-                    _PROXY_POST_RETRY_BASE_DELAY_SECONDS * attempt
-                    + random.uniform(0, _PROXY_POST_RETRY_JITTER_SECONDS)
-                )
-                logger.info(
-                    "Retrying sandbox proxy POST service=%s path=%s attempt=%s/%s delay_seconds=%.3f error=%s",
-                    service_name,
-                    path,
-                    attempt,
-                    _PROXY_POST_MAX_ATTEMPTS,
-                    delay,
-                    exc,
-                )
-                time.sleep(delay)
-        else:
-            return {"status": "error", "message": f"Sandbox proxy request failed: {last_exc}"}
+                    time.sleep(delay)
         if not response.text:
             return {"status": "error", "message": "Sandbox proxy returned empty response."}
         try:

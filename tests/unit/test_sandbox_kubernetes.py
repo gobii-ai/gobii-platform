@@ -205,7 +205,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         session.__exit__ = Mock(return_value=False)
         session.post.side_effect = [requests.ConnectionError("connection refused"), response]
 
-        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+        with patch(
+            "api.services.sandbox_kubernetes.requests.Session",
+            return_value=session,
+        ) as mock_session, patch(
             "api.services.sandbox_kubernetes.time.sleep",
             return_value=None,
         ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
@@ -216,6 +219,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             )
 
         self.assertEqual(result, {"status": "ok"})
+        mock_session.assert_called_once_with()
         self.assertEqual(session.post.call_count, 2)
 
     def test_proxy_post_returns_error_after_transient_retries_exhausted(self):
@@ -225,7 +229,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         session.__exit__ = Mock(return_value=False)
         session.post.side_effect = requests.ConnectionError("connection refused")
 
-        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+        with patch(
+            "api.services.sandbox_kubernetes.requests.Session",
+            return_value=session,
+        ) as mock_session, patch(
             "api.services.sandbox_kubernetes.time.sleep",
             return_value=None,
         ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
@@ -237,6 +244,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
         self.assertEqual(result.get("status"), "error")
         self.assertIn("connection refused", result.get("message", ""))
+        mock_session.assert_called_once_with()
         self.assertEqual(session.post.call_count, 3)
 
     def test_proxy_post_does_not_retry_non_transient_http_error(self):
@@ -283,7 +291,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         session.__exit__ = Mock(return_value=False)
         session.post.side_effect = [retry_response, ok_response]
 
-        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+        with patch(
+            "api.services.sandbox_kubernetes.requests.Session",
+            return_value=session,
+        ) as mock_session, patch(
             "api.services.sandbox_kubernetes.time.sleep",
             return_value=None,
         ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
@@ -294,6 +305,7 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             )
 
         self.assertEqual(result, {"status": "ok"})
+        mock_session.assert_called_once_with()
         self.assertEqual(session.post.call_count, 2)
 
     def test_ensure_egress_proxy_allows_socks5_upstream(self):
