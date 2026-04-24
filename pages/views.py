@@ -638,6 +638,18 @@ def _emit_checkout_initiated_event(
         logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
 
 
+def _track_redirected_to_checkout_event(*, user, plan_type: str, trial_enabled: bool) -> None:
+    Analytics.track_event(
+        user_id=user.id,
+        event=AnalyticsEvent.REDIRECTED_TO_CHECKOUT,
+        source=AnalyticsSource.WEB,
+        properties={
+            "plan_type": plan_type,
+            "trial_enabled": trial_enabled,
+        },
+    )
+
+
 def _set_customer_checkout_context(
     *,
     customer_id: str,
@@ -2043,6 +2055,11 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         # 3️⃣  No need to sync anything here.  The webhook events
         #     (customer.subscription.created, invoice.paid, etc.)
         #     will hit your handler and use sub.customer.subscriber == user.
+        _track_redirected_to_checkout_event(
+            user=user,
+            plan_type="pro",
+            trial_enabled=include_trial,
+        )
 
         return redirect(session.url)
 
@@ -2236,6 +2253,12 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
         #     event_name="AddPaymentInfo",
         #     post_checkout_redirect_used=post_checkout_redirect_used,
         # )
+
+        _track_redirected_to_checkout_event(
+            user=user,
+            plan_type="scale",
+            trial_enabled=include_trial,
+        )
 
         return redirect(session.url)
 

@@ -70,7 +70,7 @@ from util.onboarding import (
 from util.personal_signup_preview import (
     GENERIC_STARTER_CHARTER,
 )
-from util.analytics import AnalyticsEvent
+from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
 @tag("batch_pages")
@@ -2577,6 +2577,60 @@ class CheckoutRedirectTests(TestCase):
         )
 
     @tag("batch_pages")
+    def test_startup_checkout_tracks_redirected_to_checkout_event(self):
+        user = get_user_model().objects.create_user(
+            email="redirected_startup@test.com",
+            password="pw",
+            username="redirected_startup_user",
+        )
+        self.client.force_login(user)
+
+        with (
+            patch("pages.views.reconcile_user_plan_from_stripe", return_value={}),
+            patch(
+                "pages.views.get_stripe_settings",
+                return_value=SimpleNamespace(
+                    startup_price_id="price_startup",
+                    startup_trial_days=7,
+                ),
+            ),
+            patch(
+                "pages.views.get_or_create_stripe_customer",
+                return_value=SimpleNamespace(id="cus_redirected_startup"),
+            ),
+            patch(
+                "pages.views.Price.objects.get",
+                return_value=MagicMock(unit_amount=12000, currency="usd"),
+            ),
+            patch(
+                "pages.views.ensure_single_individual_subscription",
+                return_value=(None, "absent"),
+            ),
+            patch("pages.views._is_individual_trial_eligible", return_value=True),
+            patch("pages.views._prepare_stripe_or_404"),
+            patch("pages.views._emit_checkout_initiated_event"),
+            patch(
+                "pages.views._create_checkout_session_with_customer_context",
+                return_value=SimpleNamespace(url="https://stripe.test/checkout-startup"),
+            ) as mock_create_checkout,
+            patch("pages.views.Analytics.track_event") as mock_track_event,
+        ):
+            resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+        mock_create_checkout.assert_called_once()
+        mock_track_event.assert_called_once_with(
+            user_id=user.id,
+            event=AnalyticsEvent.REDIRECTED_TO_CHECKOUT,
+            source=AnalyticsSource.WEB,
+            properties={
+                "plan_type": "pro",
+                "trial_enabled": True,
+            },
+        )
+
+    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2755,6 +2809,59 @@ class CheckoutRedirectTests(TestCase):
             value=250.0,
             currency="USD",
             checkout_source_url=kwargs["metadata"]["checkout_source_url"],
+        )
+
+    @tag("batch_pages")
+    def test_scale_checkout_tracks_redirected_to_checkout_event(self):
+        user = get_user_model().objects.create_user(
+            email="redirected_scale@test.com",
+            password="pw",
+            username="redirected_scale_user",
+        )
+        self.client.force_login(user)
+
+        with (
+            patch(
+                "pages.views.get_stripe_settings",
+                return_value=SimpleNamespace(
+                    scale_price_id="price_scale",
+                    scale_trial_days=7,
+                ),
+            ),
+            patch(
+                "pages.views.get_or_create_stripe_customer",
+                return_value=SimpleNamespace(id="cus_redirected_scale"),
+            ),
+            patch(
+                "pages.views.Price.objects.get",
+                return_value=MagicMock(unit_amount=25000, currency="usd"),
+            ),
+            patch(
+                "pages.views._customer_has_price_subscription_with_cache",
+                return_value=(False, []),
+            ),
+            patch("pages.views._is_individual_trial_eligible", return_value=False),
+            patch("pages.views._prepare_stripe_or_404"),
+            patch("pages.views._emit_checkout_initiated_event"),
+            patch(
+                "pages.views._create_checkout_session_with_customer_context",
+                return_value=SimpleNamespace(url="https://stripe.test/checkout-scale"),
+            ) as mock_create_checkout,
+            patch("pages.views.Analytics.track_event") as mock_track_event,
+        ):
+            resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+        mock_create_checkout.assert_called_once()
+        mock_track_event.assert_called_once_with(
+            user_id=user.id,
+            event=AnalyticsEvent.REDIRECTED_TO_CHECKOUT,
+            source=AnalyticsSource.WEB,
+            properties={
+                "plan_type": "scale",
+                "trial_enabled": False,
+            },
         )
 
     @tag("batch_pages")
