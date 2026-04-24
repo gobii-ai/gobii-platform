@@ -219,6 +219,7 @@ class AnalyticsEvent(StrEnum):
     BILLING_PAYMENT_FAILED = 'Billing Payment Failed'
     BILLING_PAYMENT_SUCCEEDED = 'Billing Payment Succeeded'
     PAYMENT_SETUP_INTENT_FAILED = 'Payment SetupIntent Failed'
+    PAYMENT_SETUP_INTENT_SUCCEEDED = 'Payment SetupIntent Succeeded'
     BILLING_TRIAL_STARTED = 'Billing Trial Started'
     BILLING_TRIAL_CONVERTED = 'Billing Trial Converted'
     BILLING_TRIAL_CANCEL_SCHEDULED = 'Billing Trial Cancel Scheduled'

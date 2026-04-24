@@ -1461,7 +1461,7 @@ def _retrieve_setup_intent_data(setup_intent_id: str | None) -> dict[str, Any]:
         )
     except stripe.error.StripeError:
         logger.info(
-            "Unable to retrieve Stripe setup intent %s for failure analytics",
+            "Unable to retrieve Stripe setup intent %s for setup intent analytics",
             setup_intent_id,
             exc_info=True,
         )
@@ -1476,7 +1476,7 @@ def _retrieve_payment_method_data(payment_method_id: str | None) -> dict[str, An
         payment_method = stripe.PaymentMethod.retrieve(payment_method_id)
     except stripe.error.StripeError:
         logger.info(
-            "Unable to retrieve Stripe payment method %s for failure analytics",
+            "Unable to retrieve Stripe payment method %s for setup intent analytics",
             payment_method_id,
             exc_info=True,
         )
@@ -1788,6 +1788,124 @@ def _safe_build_setup_intent_failure_properties(
             payload.get("id"),
         )
         return _build_setup_intent_failure_properties_fallback(payload)
+
+
+def _build_setup_intent_success_properties(
+    payload: Mapping[str, Any],
+    *,
+    allow_stripe_lookup: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    setup_intent_id = _extract_stripe_object_id(payload)
+    setup_intent_data: dict[str, Any] = {}
+
+    payment_method_id = _extract_stripe_object_id(payload.get("payment_method"))
+    payment_method_data = _coerce_metadata_dict(payload.get("payment_method"))
+
+    customer_id_from_payload = _extract_stripe_object_id(payload.get("customer"))
+    payment_method_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+    payment_method_missing_customer = not customer_id_from_payload and not payment_method_customer_id
+
+    if allow_stripe_lookup and setup_intent_id and (payment_method_missing_customer or payment_method_id is None):
+        setup_intent_data = _retrieve_setup_intent_data(setup_intent_id)
+        if payment_method_id is None:
+            payment_method_id = _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "payment_method"))
+        if not payment_method_data:
+            payment_method_data = _coerce_metadata_dict(_get_stripe_data_value(setup_intent_data, "payment_method"))
+
+    setup_intent_customer_id = _extract_stripe_object_id(_get_stripe_data_value(setup_intent_data, "customer"))
+    payment_method_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
+    payment_method_missing_customer = (
+        not customer_id_from_payload
+        and not payment_method_customer_id
+        and not setup_intent_customer_id
+    )
+    if allow_stripe_lookup and payment_method_id and (not payment_method_data or payment_method_missing_customer):
+        retrieved_payment_method_data = _retrieve_payment_method_data(payment_method_id)
+        if retrieved_payment_method_data:
+            payment_method_data = retrieved_payment_method_data
+
+    customer_id = _first_present(
+        customer_id_from_payload,
+        _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer")),
+        setup_intent_customer_id,
+    )
+
+    payment_method_types = payload.get("payment_method_types")
+    fallback_payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        fallback_payment_method_type = payment_method_types[0]
+
+    properties: dict[str, Any] = {
+        "stripe.setup_intent_id": setup_intent_id,
+        "stripe.customer_id": customer_id,
+        "stripe.payment_method_id": payment_method_id,
+        "status": payload.get("status"),
+        "usage": payload.get("usage"),
+        "livemode": bool(payload.get("livemode")),
+    }
+
+    properties.update(
+        _extract_payment_method_analytics_properties(
+            payment_method_data,
+            fallback_type=fallback_payment_method_type,
+        )
+    )
+    if fallback_payment_method_type and "payment_method_type" not in properties:
+        properties["payment_method_type"] = fallback_payment_method_type
+
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("gobii_event_id"):
+        properties["gobii_event_id"] = metadata.get("gobii_event_id")
+
+    properties = {key: value for key, value in properties.items() if value not in (None, "")}
+    return properties, payment_method_data, customer_id
+
+
+def _build_setup_intent_success_properties_fallback(
+    payload: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    payment_method_types = payload.get("payment_method_types")
+    payment_method_type = None
+    if isinstance(payment_method_types, list) and payment_method_types:
+        payment_method_type = payment_method_types[0]
+
+    properties = {
+        "stripe.setup_intent_id": _extract_stripe_object_id(payload),
+        "stripe.customer_id": _extract_stripe_object_id(payload.get("customer")),
+        "stripe.payment_method_id": _extract_stripe_object_id(payload.get("payment_method")),
+        "status": payload.get("status"),
+        "usage": payload.get("usage"),
+        "livemode": bool(payload.get("livemode")),
+        "payment_method_type": payment_method_type,
+    }
+
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    if metadata.get("gobii_event_id"):
+        properties["gobii_event_id"] = metadata.get("gobii_event_id")
+
+    return (
+        {key: value for key, value in properties.items() if value not in (None, "")},
+        {},
+        _extract_stripe_object_id(payload.get("customer")),
+    )
+
+
+def _safe_build_setup_intent_success_properties(
+    payload: Mapping[str, Any],
+    *,
+    allow_stripe_lookup: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any], str | None]:
+    try:
+        return _build_setup_intent_success_properties(
+            payload,
+            allow_stripe_lookup=allow_stripe_lookup,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to build full setup intent success analytics properties for setup intent %s; using fallback payload",
+            payload.get("id"),
+        )
+        return _build_setup_intent_success_properties_fallback(payload)
 
 
 def _get_subscription_items_data(source: Any) -> list:
@@ -2773,13 +2891,14 @@ def handle_setup_intent_succeeded(event, **kwargs):
             logger.warning("Stripe key unavailable; ignoring setup intent succeeded webhook %s", payload.get("id"))
             return
 
-        payment_method_id = _extract_stripe_object_id(payload.get("payment_method"))
-        if not payment_method_id:
-            span.add_event("payment_method_missing")
-            logger.info("Setup intent %s succeeded without a payment method; skipping subscription update", payload.get("id"))
-            return
+        stripe.api_key = stripe_key
 
-        customer_id = _extract_stripe_object_id(payload.get("customer"))
+        properties, payment_method_data, customer_id = _safe_build_setup_intent_success_properties(
+            payload,
+            allow_stripe_lookup=True,
+        )
+        payment_method_id = str(properties.get("stripe.payment_method_id") or "").strip() or None
+
         try:
             bind_setup_intent_checkout_context(
                 customer_id=customer_id,
@@ -2795,8 +2914,12 @@ def handle_setup_intent_succeeded(event, **kwargs):
 
         owner, owner_type, _organization_billing, customer_id = _resolve_setup_intent_owner(
             payload,
+            payment_method_data,
             customer_id=customer_id,
         )
+        customer_id = customer_id or _extract_stripe_object_id(payload.get("customer"))
+        if customer_id and "stripe.customer_id" not in properties:
+            properties["stripe.customer_id"] = customer_id
         if not owner:
             span.add_event("owner_not_found", {"customer.id": customer_id or ""})
             logger.info(
@@ -2811,6 +2934,43 @@ def handle_setup_intent_succeeded(event, **kwargs):
         owner_id = getattr(owner, "id", None)
         if owner_id is not None:
             span.set_attribute("setup_intent.owner.id", str(owner_id))
+
+        actor_user = _resolve_actor_user(owner, owner_type)
+        properties.update(_build_actor_user_properties(actor_user))
+        properties = Analytics.with_org_properties(
+            properties,
+            organization=owner if owner_type == "organization" else None,
+            organization_flag=owner_type == "organization",
+        )
+
+        try:
+            if actor_user and getattr(actor_user, "id", None):
+                identify_traits = _build_analytics_identify_traits(actor_user)
+                if identify_traits:
+                    Analytics.identify(actor_user.id, identify_traits)
+                Analytics.track_event(
+                    user_id=actor_user.id,
+                    event=AnalyticsEvent.PAYMENT_SETUP_INTENT_SUCCEEDED,
+                    source=AnalyticsSource.API,
+                    properties=properties,
+                )
+            else:
+                span.add_event("analytics_skipped_no_actor")
+                logger.info(
+                    "Skipping analytics for setup intent %s: no resolved user context",
+                    payload.get("id"),
+                )
+        except Exception:
+            span.add_event("analytics_failure")
+            logger.exception("Failed to track setup_intent.succeeded for setup intent %s", payload.get("id"))
+
+        if not payment_method_id:
+            span.add_event("payment_method_missing")
+            logger.info(
+                "Setup intent %s succeeded without a payment method; skipping subscription update",
+                payload.get("id"),
+            )
+            return
 
         try:
             _emit_add_payment_info_for_setup_intent(
@@ -2842,8 +3002,6 @@ def handle_setup_intent_succeeded(event, **kwargs):
         if current_default_payment_method == payment_method_id:
             span.add_event("subscription_already_current")
             return
-
-        stripe.api_key = stripe_key
 
         try:
             updated_subscription = stripe.Subscription.modify(
