@@ -3276,6 +3276,12 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         self.track_anonymous_patcher = patch("pages.signals.Analytics.track_event_anonymous")
         self.mock_track_event_anonymous = self.track_anonymous_patcher.start()
         self.addCleanup(self.track_anonymous_patcher.stop)
+        self.retrieve_payment_method_patcher = patch(
+            "pages.signals._retrieve_payment_method_data",
+            return_value={},
+        )
+        self.mock_retrieve_payment_method_data = self.retrieve_payment_method_patcher.start()
+        self.addCleanup(self.retrieve_payment_method_patcher.stop)
 
     def test_setup_intent_succeeded_tracks_user_with_payment_method_details(self):
         payload = _build_setup_intent_payload(
@@ -3403,6 +3409,57 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
         self.assertEqual(props["payment_method_last4"], "4444")
         self.assertEqual(props["payment_method_fingerprint"], "lookupsuccess123")
         self.assertEqual(props["payment_method_funding"], "debit")
+
+    def test_setup_intent_succeeded_fetches_payment_method_details_for_id_only_payload(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_id_only_success",
+            customer_id="cus_setup_user",
+            payment_method="pm_setup_id_only",
+            payment_method_types=["card"],
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        self.mock_retrieve_payment_method_data.return_value = {
+            "id": "pm_setup_id_only",
+            "customer": "cus_setup_user",
+            "type": "card",
+            "billing_details": {
+                "address": {
+                    "country": "US",
+                    "postal_code": "10001",
+                },
+                "email": "setup-success@example.com",
+                "name": "Setup Success",
+            },
+            "card": {
+                "brand": "visa",
+                "fingerprint": "idonlyfingerprint123",
+                "last4": "4242",
+                "funding": "credit",
+                "country": "US",
+            },
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_setup_user", subscriber=self.user),
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=None):
+
+            handle_setup_intent_succeeded(event)
+
+        self.mock_retrieve_payment_method_data.assert_called_once_with("pm_setup_id_only")
+        self.mock_track_event.assert_called_once()
+        props = self.mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["stripe.payment_method_id"], "pm_setup_id_only")
+        self.assertEqual(props["payment_method_type"], "card")
+        self.assertEqual(props["payment_method_brand"], "visa")
+        self.assertEqual(props["payment_method_last4"], "4242")
+        self.assertEqual(props["payment_method_fingerprint"], "idonlyfingerprint123")
+        self.assertEqual(props["payment_method_billing_email"], "setup-success@example.com")
+        self.assertEqual(props["payment_method_billing_postal_code"], "10001")
 
     def test_setup_intent_succeeded_updates_active_subscription_default_payment_method(self):
         payload = _build_setup_intent_payload(

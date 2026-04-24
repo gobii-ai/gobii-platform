@@ -1819,7 +1819,7 @@ def _build_setup_intent_success_properties(
         and not payment_method_customer_id
         and not setup_intent_customer_id
     )
-    if allow_stripe_lookup and payment_method_id and payment_method_missing_customer:
+    if allow_stripe_lookup and payment_method_id and (not payment_method_data or payment_method_missing_customer):
         retrieved_payment_method_data = _retrieve_payment_method_data(payment_method_id)
         if retrieved_payment_method_data:
             payment_method_data = retrieved_payment_method_data
