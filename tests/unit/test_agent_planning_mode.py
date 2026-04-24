@@ -159,6 +159,15 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("already visible in web chat", prompt)
         self.assertIn("refer to the existing pending questions in a normal message", prompt)
         self.assertIn("ask only the new unanswered question", prompt)
+        self.assertIn(
+            "Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use",
+            prompt,
+        )
+        self.assertIn("Treat that existing channel as the default", prompt)
+        self.assertIn(
+            "Do not ask which communication channel to use for planning when this welcome target or other prompt context already gives you a current or preferred channel",
+            prompt,
+        )
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
         self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
         self.assertIn("Do not create kanban cards or begin deliverable work", prompt)
@@ -186,6 +195,10 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Your charter is a living document.", prompt)
         self.assertIn("## Planning Mode", prompt)
         self.assertIn("Resume the pending planning turn.", prompt)
+        self.assertIn(
+            "Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use",
+            prompt,
+        )
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
         self.assertNotIn("You control your schedule. Update __agent_config.schedule via sqlite_batch when needed", prompt)
