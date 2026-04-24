@@ -5,6 +5,7 @@ import time
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Dict, Optional
+from urllib.parse import quote
 
 import requests
 from django.conf import settings
@@ -29,6 +30,8 @@ _SERVICE_ACCOUNT_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 _SANDBOX_SERVICE_PORT = 8080
 _DEFAULT_EGRESS_PROXY_HTTP_PORT = 3128
 _DEFAULT_EGRESS_PROXY_SOCKS_PORT = 1080
+_WORKSPACE_VOLUME_MODE_PVC = "pvc"
+_WORKSPACE_VOLUME_MODE_EMPTYDIR = "emptydir"
 _QUANTITY_RE = re.compile(r"^([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)([A-Za-z]{0,2})$")
 _DECIMAL_SI_MULTIPLIERS = {
     "": Decimal("1"),
@@ -59,6 +62,11 @@ def _required_resource_quantity(setting_name: str, value: Any) -> str:
     return quantity
 
 
+def _optional_resource_quantity(value: Any) -> Optional[str]:
+    quantity = str(value or "").strip()
+    return quantity or None
+
+
 def _build_container_resources(
     *,
     cpu_request: Any,
@@ -69,17 +77,38 @@ def _build_container_resources(
     memory_request_setting: str,
     cpu_limit_setting: str,
     memory_limit_setting: str,
+    ephemeral_storage_request: Any = "",
+    ephemeral_storage_limit: Any = "",
 ) -> Dict[str, Dict[str, str]]:
-    return {
-        "requests": {
-            "cpu": _required_resource_quantity(cpu_request_setting, cpu_request),
-            "memory": _required_resource_quantity(memory_request_setting, memory_request),
-        },
-        "limits": {
-            "cpu": _required_resource_quantity(cpu_limit_setting, cpu_limit),
-            "memory": _required_resource_quantity(memory_limit_setting, memory_limit),
-        },
+    requests = {
+        "cpu": _required_resource_quantity(cpu_request_setting, cpu_request),
+        "memory": _required_resource_quantity(memory_request_setting, memory_request),
     }
+    limits = {
+        "cpu": _required_resource_quantity(cpu_limit_setting, cpu_limit),
+        "memory": _required_resource_quantity(memory_limit_setting, memory_limit),
+    }
+    ephemeral_request = _optional_resource_quantity(ephemeral_storage_request)
+    if ephemeral_request:
+        requests["ephemeral-storage"] = ephemeral_request
+    ephemeral_limit = _optional_resource_quantity(ephemeral_storage_limit)
+    if ephemeral_limit:
+        limits["ephemeral-storage"] = ephemeral_limit
+    return {
+        "requests": requests,
+        "limits": limits,
+    }
+
+
+def _normalize_workspace_volume_mode(value: Any) -> str:
+    mode = str(value or "").strip().lower()
+    if mode in {"", _WORKSPACE_VOLUME_MODE_PVC, "persistentvolumeclaim", "persistent-volume-claim"}:
+        return _WORKSPACE_VOLUME_MODE_PVC
+    if mode in {_WORKSPACE_VOLUME_MODE_EMPTYDIR, "empty-dir", "ephemeral"}:
+        return _WORKSPACE_VOLUME_MODE_EMPTYDIR
+    raise SandboxComputeUnavailable(
+        "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE must be 'pvc' or 'emptydir'."
+    )
 
 
 class KubernetesApiError(RuntimeError):
@@ -161,6 +190,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             memory_request_setting="SANDBOX_COMPUTE_POD_MEMORY_REQUEST",
             cpu_limit_setting="SANDBOX_COMPUTE_POD_CPU_LIMIT",
             memory_limit_setting="SANDBOX_COMPUTE_POD_MEMORY_LIMIT",
+            ephemeral_storage_request=settings.SANDBOX_COMPUTE_POD_EPHEMERAL_STORAGE_REQUEST,
+            ephemeral_storage_limit=settings.SANDBOX_COMPUTE_POD_EPHEMERAL_STORAGE_LIMIT,
         )
         self._egress_proxy_image = get_sandbox_egress_proxy_pod_image()
         self._egress_proxy_port = int(
@@ -194,7 +225,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._service_routable_timeout = int(settings.SANDBOX_COMPUTE_SERVICE_ROUTABLE_TIMEOUT_SECONDS)
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
+        self._workspace_volume_mode = _normalize_workspace_volume_mode(
+            getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE", "pvc")
+        )
+        self._workspace_emptydir_size = getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_EMPTYDIR_SIZE", self._pvc_size)
         self._snapshot_class = getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_CLASS", "")
+        self._snapshot_on_idle_stop = bool(getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_ON_IDLE_STOP", True))
         self._proxy_timeout = int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
         self._mcp_timeout = int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
         self._tool_timeout = int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
@@ -206,6 +242,9 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_POD_IMAGE is required for kubernetes backend.")
         if not self._compute_api_token:
             raise SandboxComputeUnavailable("SANDBOX_COMPUTE_API_TOKEN is required for kubernetes backend.")
+
+    def _uses_pvc_workspace(self) -> bool:
+        return self._workspace_volume_mode == _WORKSPACE_VOLUME_MODE_PVC
 
     def deploy_or_resume(self, agent, session: AgentComputeSession) -> SandboxSessionUpdate:
         pod_name = _pod_name(agent.id)
@@ -227,13 +266,15 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 ".cluster.local",
             )
 
-        snapshot_name = session.workspace_snapshot.k8s_snapshot_name if session.workspace_snapshot else None
-        if snapshot_name and not _resource_exists(self._client, _snapshot_path(self._namespace, snapshot_name)):
-            logger.warning("Snapshot %s not found; provisioning fresh PVC for agent=%s", snapshot_name, agent.id)
-            snapshot_name = None
+        snapshot_name = None
+        if self._uses_pvc_workspace():
+            snapshot_name = session.workspace_snapshot.k8s_snapshot_name if session.workspace_snapshot else None
+            if snapshot_name and not _resource_exists(self._client, _snapshot_path(self._namespace, snapshot_name)):
+                logger.warning("Snapshot %s not found; provisioning fresh PVC for agent=%s", snapshot_name, agent.id)
+                snapshot_name = None
         try:
-            if not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
-                self._create_pvc(pvc_name, snapshot_name=snapshot_name)
+            if self._uses_pvc_workspace() and not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
+                self._create_pvc(pvc_name, agent_id=str(agent.id), snapshot_name=snapshot_name)
             if not _resource_exists(self._client, _service_path(self._namespace, sandbox_service_name)):
                 self._create_service(sandbox_service_name, agent_id=str(agent.id))
 
@@ -252,6 +293,9 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                     pod,
                     image=self._pod_image,
                     resources=self._pod_resources,
+                    workspace_volume_mode=self._workspace_volume_mode,
+                    pvc_name=pvc_name,
+                    emptydir_size_limit=self._workspace_emptydir_size,
                     egress_service_name=egress_service_name,
                     http_proxy_port=self._egress_proxy_service_port,
                     socks_proxy_port=self._egress_proxy_socks_service_port,
@@ -278,11 +322,17 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
 
         if not self._wait_for_pod_ready(pod_name):
+            self._delete_pod(pod_name)
+            self._delete_service(sandbox_service_name)
+            self._delete_egress_proxy(agent)
             return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
         if not self._wait_for_service_routable(
             sandbox_service_name,
             timeout_seconds=self._service_routable_timeout,
         ):
+            self._delete_pod(pod_name)
+            self._delete_service(sandbox_service_name)
+            self._delete_egress_proxy(agent)
             return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
 
         return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING, pod_name=pod_name, namespace=self._namespace)
@@ -402,6 +452,18 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         return self._proxy_post(_sandbox_service_name(agent.id), "/sandbox/compute/sync_filespace", body)
 
     def snapshot_workspace(self, agent, session: AgentComputeSession, *, reason: str) -> Dict[str, Any]:
+        if not self._uses_pvc_workspace():
+            return {
+                "status": "skipped",
+                "message": "Workspace uses emptyDir and is disposable after object-store sync.",
+                "workspace_disposable": True,
+            }
+        if not self._snapshot_on_idle_stop:
+            return {
+                "status": "skipped",
+                "message": "Workspace snapshotting disabled; PVC is disposable after object-store sync.",
+                "workspace_disposable": True,
+            }
         pvc_name = _pvc_name(agent.id)
         if not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
             return {"status": "error", "message": "Workspace PVC not found."}
@@ -448,11 +510,54 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pod_name = session.pod_name or _pod_name(agent.id)
         self._delete_pod(pod_name)
         self._delete_service(_sandbox_service_name(agent.id))
-        self._delete_egress_proxy(agent)
-        if delete_workspace:
+        self._delete_egress_proxy_for_agent_id(agent.id)
+        if delete_workspace and self._uses_pvc_workspace():
             pvc_name = _pvc_name(agent.id)
             self._delete_pvc(pvc_name)
         return SandboxSessionUpdate(state=AgentComputeSession.State.STOPPED, pod_name=pod_name, namespace=self._namespace)
+
+    def delete_agent_resources(
+        self,
+        agent_id: Any,
+        *,
+        delete_workspace: bool,
+        delete_snapshots: bool,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        agent_id_text = str(agent_id)
+        actions: list[Dict[str, Any]] = []
+
+        def _record(kind: str, name: str) -> None:
+            actions.append({"kind": kind, "name": name, "deleted": not dry_run})
+
+        pod_name = _pod_name(agent_id_text)
+        service_name = _sandbox_service_name(agent_id_text)
+        egress_pod_name = _egress_proxy_pod_name(agent_id_text)
+        egress_service_name = _egress_proxy_service_name(agent_id_text)
+
+        _record("Pod", pod_name)
+        _record("Service", service_name)
+        _record("Pod", egress_pod_name)
+        _record("Service", egress_service_name)
+        if not dry_run:
+            self._delete_pod(pod_name)
+            self._delete_service(service_name)
+            self._delete_pod(egress_pod_name)
+            self._delete_service(egress_service_name)
+
+        if delete_workspace:
+            pvc_name = _pvc_name(agent_id_text)
+            _record("PersistentVolumeClaim", pvc_name)
+            if not dry_run:
+                self._delete_pvc(pvc_name)
+
+        if delete_snapshots:
+            for snapshot_name in self._snapshot_names_for_agent(agent_id_text):
+                _record("VolumeSnapshot", snapshot_name)
+                if not dry_run:
+                    self._delete_snapshot(snapshot_name)
+
+        return {"status": "ok", "agent_id": agent_id_text, "actions": actions}
 
     def discover_mcp_tools(
         self,
@@ -607,6 +712,8 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             secret_name=self._pod_secret,
             agent_id=agent_id,
             resources=self._pod_resources,
+            workspace_volume_mode=self._workspace_volume_mode,
+            workspace_emptydir_size_limit=self._workspace_emptydir_size,
             egress_service_name=egress_service_name,
             http_proxy_port=self._egress_proxy_service_port,
             socks_proxy_port=self._egress_proxy_socks_service_port,
@@ -673,10 +780,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         except KubernetesApiError as exc:
             logger.warning("Failed to delete pod %s: %s", pod_name, exc)
 
-    def _create_pvc(self, pvc_name: str, *, snapshot_name: Optional[str]) -> None:
+    def _create_pvc(self, pvc_name: str, *, agent_id: str, snapshot_name: Optional[str]) -> None:
         body = _build_pvc_manifest(
             pvc_name=pvc_name,
             namespace=self._namespace,
+            agent_id=agent_id,
             size=self._pvc_size,
             storage_class=self._pvc_storage_class,
             snapshot_name=snapshot_name,
@@ -700,13 +808,38 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             logger.warning("Failed to delete service %s: %s", service_name, exc)
 
     def _delete_egress_proxy(self, agent) -> None:
-        pod_name = _egress_proxy_pod_name(agent.id)
-        service_name = _egress_proxy_service_name(agent.id)
+        self._delete_egress_proxy_for_agent_id(agent.id)
+
+    def _delete_egress_proxy_for_agent_id(self, agent_id: Any) -> None:
+        pod_name = _egress_proxy_pod_name(agent_id)
+        service_name = _egress_proxy_service_name(agent_id)
         self._delete_pod(pod_name)
         try:
             self._client.request_json("DELETE", _service_path(self._namespace, service_name), allow_404=True)
         except KubernetesApiError as exc:
             logger.warning("Failed to delete egress proxy service %s: %s", service_name, exc)
+
+    def _snapshot_names_for_agent(self, agent_id: str) -> list[str]:
+        selector = f"app=sandbox-compute,agent_id={agent_id}"
+        try:
+            response = self._client.request_json(
+                "GET",
+                _with_label_selector(_snapshot_collection_path(self._namespace), selector),
+            )
+        except KubernetesApiError as exc:
+            logger.warning("Failed to list snapshots for agent=%s: %s", agent_id, exc)
+            return []
+        return [
+            str((item.get("metadata") or {}).get("name"))
+            for item in (response or {}).get("items", [])
+            if isinstance(item, dict) and (item.get("metadata") or {}).get("name")
+        ]
+
+    def _delete_snapshot(self, snapshot_name: str) -> None:
+        try:
+            self._client.request_json("DELETE", _snapshot_path(self._namespace, snapshot_name), allow_404=True)
+        except KubernetesApiError as exc:
+            logger.warning("Failed to delete snapshot %s: %s", snapshot_name, exc)
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
         started_at = time.monotonic()
@@ -935,10 +1068,15 @@ def _snapshot_path(namespace: str, snapshot_name: str) -> str:
     return f"/apis/snapshot.storage.k8s.io/v1/namespaces/{namespace}/volumesnapshots/{snapshot_name}"
 
 
+def _with_label_selector(path: str, selector: str) -> str:
+    return f"{path}?labelSelector={quote(selector, safe='')}"
+
+
 def _build_pvc_manifest(
     *,
     pvc_name: str,
     namespace: str,
+    agent_id: str,
     size: str,
     storage_class: str,
     snapshot_name: Optional[str],
@@ -963,6 +1101,8 @@ def _build_pvc_manifest(
             "namespace": namespace,
             "labels": {
                 "app": "sandbox-compute",
+                "component": "sandbox-workspace",
+                "agent_id": agent_id,
             },
         },
         "spec": spec,
@@ -981,11 +1121,14 @@ def _build_pod_manifest(
     secret_name: str,
     agent_id: str,
     resources: Dict[str, Dict[str, str]],
-    egress_service_name: Optional[str],
-    http_proxy_port: int,
-    socks_proxy_port: int,
-    no_proxy: Optional[str],
+    workspace_volume_mode: str = _WORKSPACE_VOLUME_MODE_PVC,
+    workspace_emptydir_size_limit: str = "",
+    egress_service_name: Optional[str] = None,
+    http_proxy_port: int = _DEFAULT_EGRESS_PROXY_HTTP_PORT,
+    socks_proxy_port: int = _DEFAULT_EGRESS_PROXY_SOCKS_PORT,
+    no_proxy: Optional[str] = None,
 ) -> Dict[str, Any]:
+    workspace_volume_mode = _normalize_workspace_volume_mode(workspace_volume_mode)
     env = [
         {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
         {"name": "SANDBOX_AGENT_WORKSPACE_LAYOUT", "value": "isolated"},
@@ -1042,6 +1185,7 @@ def _build_pod_manifest(
                 "app": "sandbox-compute",
                 "component": "sandbox-agent",
                 "agent_id": agent_id,
+                "workspace_volume_mode": workspace_volume_mode,
             },
         },
         "spec": {
@@ -1055,10 +1199,11 @@ def _build_pod_manifest(
             },
             "containers": [container],
             "volumes": [
-                {
-                    "name": "workspace",
-                    "persistentVolumeClaim": {"claimName": pvc_name},
-                },
+                _build_workspace_volume(
+                    mode=workspace_volume_mode,
+                    pvc_name=pvc_name,
+                    emptydir_size_limit=workspace_emptydir_size_limit,
+                ),
                 {"name": "runtime-cache", "emptyDir": {}},
             ],
         },
@@ -1066,6 +1211,22 @@ def _build_pod_manifest(
     if service_account:
         manifest["spec"]["serviceAccountName"] = service_account
     return manifest
+
+
+def _build_workspace_volume(*, mode: str, pvc_name: str, emptydir_size_limit: str) -> Dict[str, Any]:
+    if mode == _WORKSPACE_VOLUME_MODE_PVC:
+        return {
+            "name": "workspace",
+            "persistentVolumeClaim": {"claimName": pvc_name},
+        }
+    empty_dir: Dict[str, Any] = {}
+    size_limit = str(emptydir_size_limit or "").strip()
+    if size_limit:
+        empty_dir["sizeLimit"] = size_limit
+    return {
+        "name": "workspace",
+        "emptyDir": empty_dir,
+    }
 
 
 def _build_proxy_env(
@@ -1275,6 +1436,9 @@ def _sandbox_pod_matches(
     *,
     image: str,
     resources: Dict[str, Dict[str, str]],
+    workspace_volume_mode: str,
+    pvc_name: str,
+    emptydir_size_limit: str,
     egress_service_name: Optional[str],
     http_proxy_port: int,
     socks_proxy_port: int,
@@ -1307,6 +1471,13 @@ def _sandbox_pod_matches(
         return False
     if env.get("SANDBOX_AGENT_WORKSPACE_LAYOUT", "") != "isolated":
         return False
+    if not _workspace_volume_matches(
+        spec,
+        mode=workspace_volume_mode,
+        pvc_name=pvc_name,
+        emptydir_size_limit=emptydir_size_limit,
+    ):
+        return False
 
     expected_proxy_env = {
         str(entry.get("name")): str(entry.get("value", ""))
@@ -1331,6 +1502,38 @@ def _sandbox_pod_matches(
     if not all(env.get(key, "") == expected_proxy_env.get(key, "") for key in proxy_keys):
         return False
     return _container_resources_match(container, resources)
+
+
+def _workspace_volume_matches(
+    pod_spec: Dict[str, Any],
+    *,
+    mode: str,
+    pvc_name: str,
+    emptydir_size_limit: str,
+) -> bool:
+    mode = _normalize_workspace_volume_mode(mode)
+    volumes = pod_spec.get("volumes") or []
+    volume = next(
+        (
+            entry
+            for entry in volumes
+            if isinstance(entry, dict) and str(entry.get("name", "")).strip() == "workspace"
+        ),
+        None,
+    )
+    if not isinstance(volume, dict):
+        return False
+    if mode == _WORKSPACE_VOLUME_MODE_PVC:
+        claim = volume.get("persistentVolumeClaim") or {}
+        return isinstance(claim, dict) and str(claim.get("claimName", "")).strip() == pvc_name
+
+    empty_dir = volume.get("emptyDir")
+    if not isinstance(empty_dir, dict):
+        return False
+    size_limit = str(emptydir_size_limit or "").strip()
+    if not size_limit:
+        return True
+    return _resource_quantities_match(empty_dir.get("sizeLimit", ""), size_limit)
 
 
 def _container_resources_match(container: Dict[str, Any], expected_resources: Dict[str, Dict[str, str]]) -> bool:

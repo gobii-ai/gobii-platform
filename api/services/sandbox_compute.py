@@ -370,6 +370,16 @@ class SandboxComputeBackend:
     ) -> SandboxSessionUpdate:
         raise NotImplementedError
 
+    def delete_agent_resources(
+        self,
+        agent_id: Any,
+        *,
+        delete_workspace: bool,
+        delete_snapshots: bool,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        raise NotImplementedError
+
     def discover_mcp_tools(
         self,
         server_config_id: str,
@@ -1916,6 +1926,53 @@ class SandboxComputeService:
         )
         return session
 
+    def cleanup_terminal_session(
+        self,
+        session: AgentComputeSession,
+        *,
+        reason: str,
+        delete_workspace: bool,
+        delete_snapshots: bool,
+        force_delete_workspace: bool = False,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        agent = session.agent
+        sync_result: Optional[Dict[str, Any]] = None
+        sync_failed = False
+        if session.pod_name and not dry_run:
+            try:
+                sync_result = self._sync_workspace_push(agent, session)
+                if sync_result and sync_result.get("status") != "ok":
+                    retry_result = self._sync_workspace_push(agent, session)
+                    sync_failed = bool(retry_result and retry_result.get("status") != "ok")
+                    sync_result = retry_result
+            except (RuntimeError, ValueError, SandboxComputeUnavailable) as exc:
+                sync_failed = True
+                sync_result = {"status": "error", "message": str(exc)}
+
+        should_delete_workspace = delete_workspace and (force_delete_workspace or not sync_failed)
+        cleanup_result = self._backend.delete_agent_resources(
+            agent.id,
+            delete_workspace=should_delete_workspace,
+            delete_snapshots=delete_snapshots,
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            session.state = AgentComputeSession.State.STOPPED
+            session.pod_name = ""
+            session.namespace = ""
+            session.lease_expires_at = None
+            session.save(update_fields=["state", "pod_name", "namespace", "lease_expires_at", "updated_at"])
+
+        return {
+            "status": "ok" if not sync_failed else "error",
+            "sync_result": sync_result,
+            "sync_failed": sync_failed,
+            "delete_workspace": should_delete_workspace,
+            "delete_snapshots": delete_snapshots,
+            "cleanup": cleanup_result,
+        }
+
     def idle_stop_session(self, session: AgentComputeSession, *, reason: str = "idle_ttl") -> Dict[str, Any]:
         agent = session.agent
         delete_workspace = False
@@ -1931,7 +1988,8 @@ class SandboxComputeService:
             snapshot_payload = self._backend.snapshot_workspace(agent, session, reason=reason)
             snapshot = self._record_snapshot(agent, snapshot_payload or {})
             snapshot_failed = bool(snapshot_payload and snapshot_payload.get("status") == "error")
-            delete_workspace = snapshot is not None and not sync_failed
+            workspace_disposable = bool(snapshot_payload and snapshot_payload.get("workspace_disposable"))
+            delete_workspace = (snapshot is not None or workspace_disposable) and not sync_failed
 
             update = self._backend.terminate(
                 agent,

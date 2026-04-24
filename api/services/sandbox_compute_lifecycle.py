@@ -1,4 +1,5 @@
 import logging
+from datetime import timedelta
 from typing import Any, Dict, Optional
 
 from django.db import DatabaseError, transaction
@@ -77,4 +78,70 @@ class SandboxComputeScheduler:
             "stopped": stopped,
             "skipped": skipped,
             "errors": errors,
+        }
+
+    def reconcile_terminal_sessions(
+        self,
+        *,
+        limit: int = 50,
+        grace_seconds: int = 900,
+        delete_workspaces: bool = False,
+        delete_snapshots: bool = False,
+        force_delete_workspaces: bool = False,
+        dry_run: bool = False,
+    ) -> Dict[str, Any]:
+        cutoff = timezone.now() - timedelta(seconds=max(grace_seconds, 0))
+        candidates = (
+            AgentComputeSession.objects.select_related("agent")
+            .filter(
+                state__in=[
+                    AgentComputeSession.State.IDLE_STOPPING,
+                    AgentComputeSession.State.STOPPED,
+                    AgentComputeSession.State.ERROR,
+                ],
+                updated_at__lte=cutoff,
+            )
+            .order_by("updated_at")[:limit]
+        )
+
+        scanned = 0
+        cleaned = 0
+        skipped = 0
+        errors = 0
+        results: list[Dict[str, Any]] = []
+
+        for session in candidates:
+            scanned += 1
+            try:
+                result = self._service.cleanup_terminal_session(
+                    session,
+                    reason="terminal_reconcile",
+                    delete_workspace=delete_workspaces,
+                    delete_snapshots=delete_snapshots,
+                    force_delete_workspace=force_delete_workspaces,
+                    dry_run=dry_run,
+                )
+            except (SandboxComputeUnavailable, RuntimeError, ValueError, NotImplementedError) as exc:
+                logger.warning("Sandbox terminal cleanup failed agent=%s: %s", session.agent_id, exc)
+                errors += 1
+                results.append({"agent_id": str(session.agent_id), "status": "error", "message": str(exc)})
+                continue
+
+            result_status = result.get("status")
+            if result_status == "ok":
+                cleaned += 1
+            elif result_status == "skipped":
+                skipped += 1
+            else:
+                errors += 1
+            results.append({"agent_id": str(session.agent_id), **result})
+
+        return {
+            "status": "ok",
+            "scanned": scanned,
+            "cleaned": cleaned,
+            "skipped": skipped,
+            "errors": errors,
+            "dry_run": dry_run,
+            "results": results,
         }

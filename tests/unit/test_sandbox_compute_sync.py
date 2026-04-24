@@ -45,6 +45,9 @@ class _DummyBackend:
         self.run_command_calls: list[dict] = []
         self.mcp_calls: list[dict] = []
         self.tool_calls: list[dict] = []
+        self.snapshot_calls: list[dict] = []
+        self.terminate_calls: list[dict] = []
+        self.delete_resource_calls: list[dict] = []
 
     def deploy_or_resume(self, agent, session):
         self.deploy_calls.append(
@@ -122,6 +125,30 @@ class _DummyBackend:
             }
         )
         return {"status": "ok", "result": {"tool_name": tool_name, "params": params}}
+
+    def snapshot_workspace(self, agent, session, *, reason):
+        self.snapshot_calls.append({"agent_id": str(agent.id), "reason": reason})
+        return {"status": "skipped", "workspace_disposable": True}
+
+    def terminate(self, agent, session, *, reason, delete_workspace=False):
+        self.terminate_calls.append(
+            {
+                "agent_id": str(agent.id),
+                "reason": reason,
+                "delete_workspace": delete_workspace,
+            }
+        )
+        return SandboxSessionUpdate(state=AgentComputeSession.State.STOPPED, pod_name="")
+
+    def delete_agent_resources(self, agent_id, *, delete_workspace, delete_snapshots, dry_run=False):
+        call = {
+            "agent_id": str(agent_id),
+            "delete_workspace": delete_workspace,
+            "delete_snapshots": delete_snapshots,
+            "dry_run": dry_run,
+        }
+        self.delete_resource_calls.append(call)
+        return {"status": "ok", "actions": []}
 
 
 @tag("batch_agent_lifecycle")
@@ -541,6 +568,60 @@ class SandboxComputeSyncTests(TestCase):
         self.assertEqual(result.get("status"), "ok")
         mock_enqueue.assert_called_once_with(self.agent, source="run_command")
         mock_sync.assert_not_called()
+
+    def test_idle_stop_deletes_disposable_workspace_after_successful_sync(self):
+        backend = _DummyBackend()
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            pod_name="sandbox-agent-test",
+        )
+
+        service = SandboxComputeService(backend=backend)
+        result = service.idle_stop_session(session, reason="unit-test")
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(backend.snapshot_calls[0]["reason"], "unit-test")
+        self.assertTrue(backend.terminate_calls[0]["delete_workspace"])
+        session.refresh_from_db()
+        self.assertEqual(session.state, AgentComputeSession.State.STOPPED)
+
+    def test_cleanup_terminal_session_can_force_workspace_delete_after_sync_failure(self):
+        backend = _DummyBackend()
+
+        def _sync_filespace(agent, session, *, direction, payload=None):
+            backend.sync_calls.append(
+                {
+                    "agent_id": str(agent.id),
+                    "direction": direction,
+                    "payload": payload or {},
+                }
+            )
+            return {"status": "error", "message": "pod gone"}
+
+        backend.sync_filespace = _sync_filespace
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.ERROR,
+            pod_name="sandbox-agent-test",
+            namespace="gobii-prod",
+        )
+
+        service = SandboxComputeService(backend=backend)
+        result = service.cleanup_terminal_session(
+            session,
+            reason="unit-test",
+            delete_workspace=True,
+            delete_snapshots=True,
+            force_delete_workspace=True,
+        )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertTrue(result.get("sync_failed"))
+        self.assertTrue(backend.delete_resource_calls[0]["delete_workspace"])
+        self.assertTrue(backend.delete_resource_calls[0]["delete_snapshots"])
+        session.refresh_from_db()
+        self.assertEqual(session.state, AgentComputeSession.State.STOPPED)
 
     def test_run_custom_tool_command_syncs_sqlite_for_remote_backend(self):
         backend = _DummyBackend()

@@ -39,6 +39,9 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._pod_configmap = "sandbox-config"
         backend._pod_secret = "sandbox-secret"
         backend._pod_resources = SANDBOX_POD_RESOURCES
+        backend._workspace_volume_mode = "pvc"
+        backend._workspace_emptydir_size = "1Gi"
+        backend._snapshot_on_idle_stop = True
         backend._egress_proxy_port = 3128
         backend._egress_proxy_service_port = 3128
         backend._egress_proxy_socks_port = 1080
@@ -228,6 +231,12 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
                 "metadata": {"labels": {"proxy_id": "proxy-2"}},
                 "status": {"phase": "Running"},
                 "spec": {
+                    "volumes": [
+                        {
+                            "name": "workspace",
+                            "persistentVolumeClaim": {"claimName": "sandbox-workspace-agent-resource-equivalent"},
+                        },
+                    ],
                     "containers": [
                         {
                             "env": [
@@ -274,6 +283,25 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
         self.assertEqual(result.state, "running")
         backend._create_service.assert_called_once_with("sandbox-agent-agent-svc", agent_id="agent-svc")
+        backend._create_pod.assert_called_once()
+
+    def test_deploy_or_resume_emptydir_skips_pvc_creation(self):
+        backend = self._backend()
+        backend._workspace_volume_mode = "emptydir"
+        agent = SimpleNamespace(id="agent-emptydir")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(return_value=None)
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[False]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        backend._create_pvc.assert_not_called()
+        backend._create_service.assert_called_once_with("sandbox-agent-agent-emptydir", agent_id="agent-emptydir")
         backend._create_pod.assert_called_once()
 
     def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
@@ -362,6 +390,12 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             return_value={
                 "status": {"phase": "Running"},
                 "spec": {
+                    "volumes": [
+                        {
+                            "name": "workspace",
+                            "persistentVolumeClaim": {"claimName": "sandbox-workspace-agent-resource-equivalent"},
+                        },
+                    ],
                     "containers": [
                         {
                             "name": "sandbox-supervisor",
@@ -442,6 +476,12 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             return_value={
                 "status": {"phase": "Running"},
                 "spec": {
+                    "volumes": [
+                        {
+                            "name": "workspace",
+                            "persistentVolumeClaim": {"claimName": "sandbox-workspace-agent-resource-equivalent"},
+                        },
+                    ],
                     "containers": [
                         {
                             "name": "sandbox-supervisor",
@@ -545,6 +585,8 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         SANDBOX_COMPUTE_POD_MEMORY_REQUEST="1536Mi",
         SANDBOX_COMPUTE_POD_CPU_LIMIT="3",
         SANDBOX_COMPUTE_POD_MEMORY_LIMIT="5Gi",
+        SANDBOX_COMPUTE_POD_EPHEMERAL_STORAGE_REQUEST="256Mi",
+        SANDBOX_COMPUTE_POD_EPHEMERAL_STORAGE_LIMIT="1Gi",
     )
     def test_create_pod_passes_configured_resources_to_manifest_builder(self):
         client = Mock()
@@ -576,10 +618,23 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertEqual(
             build_manifest.call_args.kwargs["resources"],
             {
-                "requests": {"cpu": "750m", "memory": "1536Mi"},
-                "limits": {"cpu": "3", "memory": "5Gi"},
+                "requests": {"cpu": "750m", "memory": "1536Mi", "ephemeral-storage": "256Mi"},
+                "limits": {"cpu": "3", "memory": "5Gi", "ephemeral-storage": "1Gi"},
             },
         )
+
+    def test_emptydir_snapshot_reports_disposable_workspace(self):
+        backend = self._backend()
+        backend._workspace_volume_mode = "emptydir"
+
+        result = backend.snapshot_workspace(
+            SimpleNamespace(id="agent-emptydir"),
+            SimpleNamespace(),
+            reason="unit-test",
+        )
+
+        self.assertEqual(result.get("status"), "skipped")
+        self.assertTrue(result.get("workspace_disposable"))
 
     @override_settings(
         SANDBOX_COMPUTE_API_TOKEN="test-token",
@@ -727,6 +782,30 @@ class KubernetesSandboxPodManifestTests(SimpleTestCase):
         )
 
         self.assertEqual(manifest["spec"]["containers"][0]["resources"], SANDBOX_POD_RESOURCES)
+
+    def test_agent_pod_manifest_can_use_emptydir_workspace(self):
+        manifest = _build_pod_manifest(
+            pod_name="sandbox-agent-agent-emptydir",
+            pvc_name="sandbox-workspace-agent-emptydir",
+            namespace="default",
+            image="ghcr.io/example/sandbox:latest",
+            runtime_class="gvisor",
+            service_account="",
+            configmap_name="sandbox-config",
+            secret_name="sandbox-secret",
+            agent_id="agent-emptydir",
+            resources=SANDBOX_POD_RESOURCES,
+            workspace_volume_mode="emptydir",
+            workspace_emptydir_size_limit="1Gi",
+            egress_service_name=None,
+            http_proxy_port=3128,
+            socks_proxy_port=1080,
+            no_proxy=None,
+        )
+
+        workspace = manifest["spec"]["volumes"][0]
+        self.assertEqual(workspace, {"name": "workspace", "emptyDir": {"sizeLimit": "1Gi"}})
+        self.assertEqual(manifest["metadata"]["labels"]["workspace_volume_mode"], "emptydir")
 
     def test_egress_proxy_pod_manifest_disables_service_account_token_automount(self):
         manifest = _build_egress_proxy_pod_manifest(
