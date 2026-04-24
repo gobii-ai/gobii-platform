@@ -1,7 +1,6 @@
 import logging
 import re
 import uuid
-from urllib.parse import urlencode
 
 import djstripe
 from django import forms
@@ -123,6 +122,9 @@ from djstripe.models import Customer, BankAccount, Card
 from djstripe.admin import StripeModelAdmin  # base admin with actions & changelist_view
 
 import zstandard as zstd
+
+SMS_RELEASE_CANDIDATES_SESSION_KEY = "admin_sms_release_candidates_phone_numbers"
+SMS_RELEASE_CANDIDATES_PREFILL_SOURCE = "release_candidates"
 
 # Replace dj-stripe's default registration
 # 2.10.1 has removed some fields we still want to see, but their own admin still references them
@@ -542,12 +544,7 @@ class TaskCreditAdmin(admin.ModelAdmin):
         return custom + urls
 
     def grant_by_plan_view(self, request):
-        from django.template.response import TemplateResponse
-        from django.contrib import messages
-        from django.db import transaction
-        from django.utils import timezone
         from django.apps import apps
-        from constants.plans import PlanNamesChoices
 
         if not request.user.has_perm("api.add_taskcredit"):
             messages.error(request, "You do not have permission to grant task credits.")
@@ -670,10 +667,6 @@ class TaskCreditAdmin(admin.ModelAdmin):
         return TemplateResponse(request, "admin/grant_plan_credits.html", context)
 
     def grant_by_user_ids_view(self, request):
-        from django.template.response import TemplateResponse
-        from django.contrib import messages
-        from django.db import transaction
-        from django.utils import timezone
         from django.apps import apps
 
         if not request.user.has_perm("api.add_taskcredit"):
@@ -700,12 +693,10 @@ class TaskCreditAdmin(admin.ModelAdmin):
             export_csv = form.cleaned_data['export_csv']
 
             # Parse IDs by commas or newlines
-            import re
             ids = [s for s in re.split(r"[\s,]+", raw.strip()) if s]
 
             TaskCredit = apps.get_model("api", "TaskCredit")
             User = get_user_model()
-            from constants.plans import PlanNamesChoices
 
             # ids are integers; invalid tokens are ignored by the filter
             users = list(User.objects.filter(id__in=ids, is_active=True))
@@ -4322,7 +4313,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
                         pass
 
             # Success
-            from django.utils import timezone
             acct.connection_last_ok_at = timezone.now()
             acct.connection_error = ""
             acct.save(update_fields=['connection_last_ok_at', 'connection_error'])
@@ -4382,7 +4372,6 @@ class PersistentAgentCommsEndpointAdmin(admin.ModelAdmin):
         # Attempt IMAP connection
         try:
             import imaplib
-            from django.utils import timezone
             if acct.imap_security == AgentEmailAccount.ImapSecurity.SSL:
                 client = imaplib.IMAP4_SSL(acct.imap_host, int(acct.imap_port or 993), timeout=30)
             else:
@@ -5256,123 +5245,10 @@ class SmsNumberAdmin(admin.ModelAdmin):
         initial = {}
         if request.method != "POST":
             prefilled_numbers = (request.GET.get("phone_numbers") or "").strip()
-            if prefilled_numbers:
-                initial["phone_numbers"] = prefilled_numbers
-
-        form = ReleaseSmsNumbersForm(request.POST or None, initial=initial)
-        if request.method == "POST" and form.is_valid():
-            requested_numbers = form.cleaned_data["phone_numbers"]
-            sms_numbers_by_phone = {
-                sms_number.phone_number: sms_number
-                for sms_number in SmsNumber.objects.filter(phone_number__in=requested_numbers)
-            }
-
-            released_results = []
-            partial_results = []
-            missing_numbers = []
-            validation_errors = []
-            detached_endpoint_total = 0
-
-            for phone_number in requested_numbers:
-                sms_number = sms_numbers_by_phone.get(phone_number)
-                if sms_number is None:
-                    missing_numbers.append(phone_number)
-                    continue
-
-                try:
-                    result = release_sms_number(sms_number)
-                except ValidationError as exc:
-                    validation_errors.append(f"{phone_number}: {'; '.join(exc.messages)}")
-                    continue
-
-                detached_endpoint_total += result.detached_endpoint_count
-                if result.succeeded:
-                    released_results.append(result)
-                else:
-                    partial_results.append(result)
-
-            if released_results:
-                released_numbers = [result.phone_number for result in released_results]
-                messages.success(
-                    request,
-                    f"Released {len(released_results)} SMS number(s) in Twilio: "
-                    f"{self._preview_items(released_numbers)}",
-                )
-
-            if detached_endpoint_total:
-                messages.info(
-                    request,
-                    f"Detached {detached_endpoint_total} SMS endpoint(s) from agents before release.",
-                )
-
-            if partial_results:
-                partial_preview = self._preview_items(
-                    [f"{result.phone_number} ({result.error})" for result in partial_results],
-                    limit=3,
-                    separator="; ",
-                )
-                messages.error(
-                    request,
-                    "Retired locally but failed to release in Twilio for "
-                    f"{len(partial_results)} SMS number(s): {partial_preview}",
-                )
-
-            if missing_numbers:
-                messages.error(
-                    request,
-                    f"Skipped {len(missing_numbers)} number(s) not found in SMS inventory: "
-                    f"{self._preview_items(missing_numbers)}",
-                )
-
-            if validation_errors:
-                messages.error(
-                    request,
-                    f"Could not release {len(validation_errors)} number(s): "
-                    f"{self._preview_items(validation_errors, limit=3, separator=' | ')}",
-                )
-
-            if not any([released_results, partial_results, missing_numbers, validation_errors]):
-                messages.warning(request, "No SMS numbers were released.")
-
-            return HttpResponseRedirect(changelist_url)
-
-        context = dict(
-            self.admin_site.each_context(request),
-            opts=self.model._meta,
-            form=form,
-            title="Release SMS Numbers",
-            changelist_url=changelist_url,
-        )
-
-        return TemplateResponse(request, "admin/smsnumber_release_form.html", context)
-
-    def changelist_view(self, request, extra_context=None):
-        """Inject counts of numbers in use for the change list template."""
-        if extra_context is None:
-            extra_context = {}
-
-        inventory_numbers_qs = SmsNumber.objects.filter(released_at__isnull=True)
-        in_use_numbers_qs = PersistentAgentCommsEndpoint.objects.filter(
-            channel=CommsChannel.SMS,
-        ).values("address")
-
-        extra_context["in_use_count"] = inventory_numbers_qs.filter(
-            phone_number__in=in_use_numbers_qs,
-        ).count()
-        extra_context["inventory_count"] = inventory_numbers_qs.count()
-        extra_context["released_count"] = SmsNumber.objects.filter(released_at__isnull=False).count()
-
-        return super().changelist_view(request, extra_context=extra_context)
-
-    def release_view(self, request):
-        changelist_url = reverse("admin:api_smsnumber_changelist")
-        if not request.user.has_perm("api.change_smsnumber"):
-            messages.error(request, "Permission denied.")
-            return HttpResponseRedirect(changelist_url)
-
-        initial = {}
-        if request.method != "POST":
-            prefilled_numbers = (request.GET.get("phone_numbers") or "").strip()
+            if not prefilled_numbers and request.GET.get("prefill") == SMS_RELEASE_CANDIDATES_PREFILL_SOURCE:
+                prefilled_numbers = (
+                    request.session.get(SMS_RELEASE_CANDIDATES_SESSION_KEY, "")
+                ).strip()
             if prefilled_numbers:
                 initial["phone_numbers"] = prefilled_numbers
 
@@ -5509,9 +5385,12 @@ class SmsNumberAdmin(admin.ModelAdmin):
         suggested_numbers = "\n".join(candidate.phone_number for candidate in candidates)
         release_review_url = ""
         if suggested_numbers:
+            request.session[SMS_RELEASE_CANDIDATES_SESSION_KEY] = suggested_numbers
             release_review_url = (
-                f"{reverse('admin:smsnumber_release')}?{urlencode({'phone_numbers': suggested_numbers})}"
+                f"{reverse('admin:smsnumber_release')}?prefill={SMS_RELEASE_CANDIDATES_PREFILL_SOURCE}"
             )
+        else:
+            request.session.pop(SMS_RELEASE_CANDIDATES_SESSION_KEY, None)
 
         context = dict(
             self.admin_site.each_context(request),
