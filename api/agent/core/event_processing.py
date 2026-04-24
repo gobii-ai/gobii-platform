@@ -4494,6 +4494,7 @@ def _run_agent_loop(
                 current_notice = continuation_notice
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
+                prefer_low_latency = had_deliverable_web_target_at_start
                 prompt_context_result = build_prompt_context(
                     agent,
                     current_iteration=i + 1,
@@ -4503,6 +4504,7 @@ def _run_agent_loop(
                     daily_credit_state=daily_state,
                     continuation_notice=current_notice,
                     routing_profile=routing_profile,
+                    prefer_low_latency=prefer_low_latency,
                     include_metadata=True,
                 )
                 if len(prompt_context_result) == 4:
@@ -4595,23 +4597,24 @@ def _run_agent_loop(
                 )
 
                 # Select provider tiers based on the fitted token count
-                prefer_low_latency = had_deliverable_web_target_at_start
-                try:
-                    failover_configs = get_llm_config_with_failover(
-                        agent_id=str(agent.id),
-                        token_count=fitted_token_count,
-                        agent=agent,
-                        is_first_loop=is_first_run,
-                        routing_profile=routing_profile,
-                        prefer_low_latency=prefer_low_latency,
-                    )
-                except LLMNotConfiguredError:
-                    logger.warning(
-                        "Agent %s loop aborted – LLM configuration missing mid-run.",
-                        agent.id,
-                    )
-                    span.add_event("Agent loop aborted - llm bootstrap required")
-                    break
+                failover_configs = prompt_metadata.get("prompt_failover_configs")
+                if not failover_configs:
+                    try:
+                        failover_configs = get_llm_config_with_failover(
+                            agent_id=str(agent.id),
+                            token_count=fitted_token_count,
+                            agent=agent,
+                            is_first_loop=is_first_run,
+                            routing_profile=routing_profile,
+                            prefer_low_latency=prefer_low_latency,
+                        )
+                    except LLMNotConfiguredError:
+                        logger.warning(
+                            "Agent %s loop aborted – LLM configuration missing mid-run.",
+                            agent.id,
+                        )
+                        span.add_event("Agent loop aborted - llm bootstrap required")
+                        break
 
                 preferred_config = _get_recent_preferred_config(agent=agent, run_sequence_number=run_sequence_number)
                 if prefer_low_latency:

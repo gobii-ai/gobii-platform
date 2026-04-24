@@ -1334,6 +1334,30 @@ class PromptContextBuilderTests(TestCase):
             content,
         )
 
+    def test_prompt_omits_implied_send_when_any_failover_model_disables_it(self):
+        start_web_session(self.agent, self.user)
+        with patch('api.agent.core.prompt_context.ensure_steps_compacted'), \
+             patch('api.agent.core.prompt_context.ensure_comms_compacted'), \
+             patch(
+                 'api.agent.core.prompt_context.get_llm_config_with_failover',
+                 return_value=[
+                     ('endpoint-primary', 'openai/gpt-4o-mini', {'allow_implied_send': True}),
+                     ('endpoint-fallback', 'openai/gpt-4.1-mini', {'allow_implied_send': False}),
+                 ],
+             ):
+            context, _, _, metadata = build_prompt_context(self.agent, include_metadata=True)
+
+        system_message = next((m for m in context if m['role'] == 'system'), None)
+        self.assertIsNotNone(system_message)
+        content = system_message['content']
+        self.assertFalse(metadata["prompt_allows_implied_send"])
+        self.assertEqual(len(metadata["prompt_failover_configs"]), 2)
+        self.assertNotIn("Implied Send", content)
+        self.assertIn(
+            "Text-only replies are not delivered when implied send is unavailable",
+            content,
+        )
+
     def test_tool_call_history_includes_cost_component(self):
         """Tool-call unified history should include a dedicated <cost> component."""
         with patch(

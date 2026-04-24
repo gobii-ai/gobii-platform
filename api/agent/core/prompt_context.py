@@ -149,6 +149,49 @@ def _config_allows_implied_send(params_with_hints: Mapping[str, Any] | None) -> 
         return True
     return bool(params_with_hints.get("allow_implied_send", True))
 
+
+def _safe_get_prompt_failover_configs(
+    agent: PersistentAgent,
+    *,
+    token_count: int,
+    is_first_run: bool,
+    routing_profile: Any,
+    prefer_low_latency: Optional[bool],
+) -> List[Tuple[str, str, dict]]:
+    try:
+        return get_llm_config_with_failover(
+            agent_id=str(agent.id),
+            token_count=token_count,
+            allow_unconfigured=True,
+            agent=agent,
+            is_first_loop=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+    except LLMNotConfiguredError:
+        return []
+    except Exception:
+        return []
+
+
+def _prompt_render_settings_from_failover_configs(
+    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
+) -> Tuple[str, bool]:
+    if not failover_configs:
+        return _AGENT_MODEL, True
+    model = failover_configs[0][1]
+    allow_implied_send = all(
+        _config_allows_implied_send(params_with_hints)
+        for _, _, params_with_hints in failover_configs
+    )
+    return model, allow_implied_send
+
+
+def _prompt_render_signature_from_failover_configs(
+    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
+) -> Tuple[str, bool]:
+    return _prompt_render_settings_from_failover_configs(failover_configs)
+
 SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 _SQLITE_RESULT_ID_RE = re.compile(r"""result_id\s*=\s*['"]([A-Za-z0-9_-]{4,64})['"]""")
 _SQLITE_EMPTY_RESULT_RE = re.compile(r"Query \d+ returned 0 rows\.", re.IGNORECASE)
@@ -2087,8 +2130,7 @@ def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
     ]
     return "Agent email settings:\n- " + "\n- ".join(lines)
 
-@tracer.start_as_current_span("Build Prompt Context")
-def build_prompt_context(
+def _render_prompt_context_once(
     agent: PersistentAgent,
     current_iteration: int = 1,
     max_iterations: Optional[int] = None,
@@ -2097,79 +2139,43 @@ def build_prompt_context(
     daily_credit_state: Optional[dict] = None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
-    include_metadata: bool = False,
-) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
-    """
-    Return a system + user message for the LLM using promptree for token budget management.
-
-    Args:
-        agent: Persistent agent being processed.
-        current_iteration: 1-based iteration counter inside the loop.
-        max_iterations: Maximum iterations allowed for this processing cycle.
-        reasoning_only_streak: Number of consecutive iterations without tool calls.
-        is_first_run: Whether this is the very first processing cycle for the agent.
-        daily_credit_state: Pre-computed daily credit state (optional).
-        continuation_notice: Optional system note to inject for follow-up loops.
-        routing_profile: LLMRoutingProfile instance for eval routing (optional).
-        include_metadata: When true, include prompt capability metadata in the return value.
-
-    Returns:
-        Tuple of (messages, fitted_token_count, prompt_archive_id) where
-        fitted_token_count is the actual token count after promptree fitting for
-        accurate LLM selection and prompt_archive_id references the metadata row
-        for the stored prompt archive (or ``None`` if archiving failed).
-
-        When ``include_metadata`` is true, a fourth item is returned containing
-        prompt capability flags used by the orchestration loop.
-    """
+    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
+    skip_compaction: bool = False,
+    archive_prompt: bool = False,
+    record_span: bool = False,
+) -> tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     max_iterations = _resolve_max_iterations(max_iterations)
 
     span = trace.get_current_span()
-    span.set_attribute("persistent_agent.id", str(agent.id))
+    if record_span:
+        span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
 
-    ensure_steps_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
-        safety_identifier=safety_id,
-    )
-    ensure_comms_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
-        safety_identifier=safety_id,
+    if not skip_compaction:
+        ensure_steps_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
+            safety_identifier=safety_id,
+        )
+        ensure_comms_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
+            safety_identifier=safety_id,
+        )
+
+    model, prompt_allows_implied_send = _prompt_render_settings_from_failover_configs(
+        prompt_failover_configs
     )
 
-    # Get the model being used for accurate token counting
-    # Note: We attempt to read DB-configured tiers with token_count=0 to pick
-    # a primary model; if unavailable, fall back to the reference tokenizer
-    # model so prompt building doesn’t hard-fail during tests or bootstrap.
-    try:
-        failover_configs = get_llm_config_with_failover(
-            agent_id=str(agent.id),
-            token_count=0,
-            allow_unconfigured=True,
-            agent=agent,
-            is_first_loop=is_first_run,
-            routing_profile=routing_profile,
-        )
-    except LLMNotConfiguredError:
-        failover_configs = None
-    except Exception:
-        failover_configs = None
-    model = failover_configs[0][1] if failover_configs else _AGENT_MODEL
-    
     # Create token estimator for the specific model
     token_estimator = _create_token_estimator(model)
-    
+
     # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
 
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
-    prompt_allows_implied_send = _config_allows_implied_send(
-        failover_configs[0][2] if failover_configs else None
-    )
     implied_send_context = _get_implied_send_context(
         agent,
         allow_implied_send=prompt_allows_implied_send,
@@ -2602,55 +2608,165 @@ def build_prompt_context(
     tokens_saved = tokens_before - tokens_after
 
     # Log token usage for monitoring
-    logger.info(
-        f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
-        f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
-        f"budget was {token_budget} tokens)"
-    )
+    if record_span:
+        logger.info(
+            f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
+            f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
+            f"budget was {token_budget} tokens)"
+        )
 
-    archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
-        agent=agent,
-        system_prompt=system_prompt,
-        user_prompt=user_content,
-        tokens_before=tokens_before,
-        tokens_after=tokens_after,
-        tokens_saved=tokens_saved,
-        token_budget=token_budget,
-    )
-    if archive_key:
-        span.set_attribute("prompt.archive_key", archive_key)
-        if archive_raw_bytes is not None:
-            span.set_attribute("prompt.archive_bytes_raw", archive_raw_bytes)
-        if archive_compressed_bytes is not None:
-            span.set_attribute("prompt.archive_bytes_compressed", archive_compressed_bytes)
-    else:
-        span.set_attribute("prompt.archive_key", "")
+    archive_id = None
+    if archive_prompt:
+        archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
+            agent=agent,
+            system_prompt=system_prompt,
+            user_prompt=user_content,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after,
+            tokens_saved=tokens_saved,
+            token_budget=token_budget,
+        )
+        if record_span:
+            if archive_key:
+                span.set_attribute("prompt.archive_key", archive_key)
+                if archive_raw_bytes is not None:
+                    span.set_attribute("prompt.archive_bytes_raw", archive_raw_bytes)
+                if archive_compressed_bytes is not None:
+                    span.set_attribute("prompt.archive_bytes_compressed", archive_compressed_bytes)
+            else:
+                span.set_attribute("prompt.archive_key", "")
 
-    span.set_attribute("prompt.token_budget", token_budget)
-    span.set_attribute("prompt.tokens_before_fitting", tokens_before)
-    span.set_attribute("prompt.tokens_after_fitting", tokens_after)
-    span.set_attribute("prompt.tokens_saved", tokens_saved)
-    span.set_attribute("prompt.model", model)
-    
-    # Log the prompt report for debugging if needed
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
+    if record_span:
+        span.set_attribute("prompt.token_budget", token_budget)
+        span.set_attribute("prompt.tokens_before_fitting", tokens_before)
+        span.set_attribute("prompt.tokens_after_fitting", tokens_after)
+        span.set_attribute("prompt.tokens_saved", tokens_saved)
+        span.set_attribute("prompt.model", model)
 
-    result = (
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
+
+    return (
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
         tokens_after,
         archive_id,
+        {
+            "prompt_allows_implied_send": prompt_allows_implied_send,
+            "prompt_render_signature": _prompt_render_signature_from_failover_configs(
+                prompt_failover_configs
+            ),
+        },
     )
-    if include_metadata:
-        return (
-            *result,
-            {
-                "prompt_allows_implied_send": prompt_allows_implied_send,
-            },
+
+@tracer.start_as_current_span("Build Prompt Context")
+def build_prompt_context(
+    agent: PersistentAgent,
+    current_iteration: int = 1,
+    max_iterations: Optional[int] = None,
+    reasoning_only_streak: int = 0,
+    is_first_run: bool = False,
+    daily_credit_state: Optional[dict] = None,
+    continuation_notice: Optional[str] = None,
+    routing_profile: Any = None,
+    prefer_low_latency: Optional[bool] = None,
+    include_metadata: bool = False,
+) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
+    """
+    Return a system + user message for the LLM using promptree for token budget management.
+
+    Args:
+        agent: Persistent agent being processed.
+        current_iteration: 1-based iteration counter inside the loop.
+        max_iterations: Maximum iterations allowed for this processing cycle.
+        reasoning_only_streak: Number of consecutive iterations without tool calls.
+        is_first_run: Whether this is the very first processing cycle for the agent.
+        daily_credit_state: Pre-computed daily credit state (optional).
+        continuation_notice: Optional system note to inject for follow-up loops.
+        routing_profile: LLMRoutingProfile instance for eval routing (optional).
+        prefer_low_latency: Optional low-latency routing hint used to match the
+            prompt against the same failover set the completion call will use.
+        include_metadata: When true, include prompt capability metadata in the return value.
+
+    Returns:
+        Tuple of (messages, fitted_token_count, prompt_archive_id) where
+        fitted_token_count is the actual token count after promptree fitting for
+        accurate LLM selection and prompt_archive_id references the metadata row
+        for the stored prompt archive (or ``None`` if archiving failed).
+
+        When ``include_metadata`` is true, a fourth item is returned containing
+        prompt capability flags used by the orchestration loop.
+    """
+    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = (
+        _safe_get_prompt_failover_configs(
+            agent,
+            token_count=0,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
         )
+    )
+
+    provisional_result = None
+    max_render_attempts = 3
+    for attempt in range(max_render_attempts):
+        provisional_result = _render_prompt_context_once(
+            agent,
+            current_iteration=current_iteration,
+            max_iterations=max_iterations,
+            reasoning_only_streak=reasoning_only_streak,
+            is_first_run=is_first_run,
+            daily_credit_state=daily_credit_state,
+            continuation_notice=continuation_notice,
+            routing_profile=routing_profile,
+            prompt_failover_configs=prompt_failover_configs,
+            skip_compaction=attempt > 0,
+            archive_prompt=False,
+            record_span=False,
+        )
+        _, fitted_token_count, _, provisional_metadata = provisional_result
+        resolved_failover_configs = _safe_get_prompt_failover_configs(
+            agent,
+            token_count=fitted_token_count,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+        if (
+            _prompt_render_signature_from_failover_configs(resolved_failover_configs)
+            == provisional_metadata["prompt_render_signature"]
+        ):
+            prompt_failover_configs = resolved_failover_configs
+            break
+        prompt_failover_configs = resolved_failover_configs
+    else:
+        logger.warning(
+            "Prompt render config did not stabilize for agent %s after %d attempts; using latest resolved failover signature.",
+            agent.id,
+            max_render_attempts,
+        )
+
+    final_messages, final_tokens, final_archive_id, final_metadata = _render_prompt_context_once(
+        agent,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        reasoning_only_streak=reasoning_only_streak,
+        is_first_run=is_first_run,
+        daily_credit_state=daily_credit_state,
+        continuation_notice=continuation_notice,
+        routing_profile=routing_profile,
+        prompt_failover_configs=prompt_failover_configs,
+        skip_compaction=True,
+        archive_prompt=True,
+        record_span=True,
+    )
+    final_metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
+
+    result = (final_messages, final_tokens, final_archive_id)
+    if include_metadata:
+        return (*result, final_metadata)
     return result
 
 
