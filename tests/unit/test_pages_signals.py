@@ -3267,6 +3267,142 @@ class PaymentSetupIntentSucceededSignalTests(TestCase):
             email="setup-success@example.com",
             password="pw",
         )
+        self.identify_patcher = patch("pages.signals.Analytics.identify")
+        self.mock_identify = self.identify_patcher.start()
+        self.addCleanup(self.identify_patcher.stop)
+        self.track_event_patcher = patch("pages.signals.Analytics.track_event")
+        self.mock_track_event = self.track_event_patcher.start()
+        self.addCleanup(self.track_event_patcher.stop)
+        self.track_anonymous_patcher = patch("pages.signals.Analytics.track_event_anonymous")
+        self.mock_track_event_anonymous = self.track_anonymous_patcher.start()
+        self.addCleanup(self.track_anonymous_patcher.stop)
+
+    def test_setup_intent_succeeded_tracks_user_with_payment_method_details(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_user_success_analytics",
+            customer_id="cus_setup_user",
+            payment_method={
+                "id": "pm_setup_success",
+                "customer": "cus_setup_user",
+                "type": "card",
+                "billing_details": {
+                    "address": {
+                        "country": "US",
+                        "postal_code": "95825",
+                    },
+                    "email": "setup-success@example.com",
+                    "name": "Setup Success",
+                },
+                "card": {
+                    "brand": "visa",
+                    "display_brand": "visa",
+                    "fingerprint": "a1b2c3d4",
+                    "last4": "4242",
+                    "funding": "credit",
+                    "country": "US",
+                },
+            },
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_setup_user", subscriber=self.user),
+            ), \
+            patch("pages.signals.get_active_subscription", return_value=None):
+
+            handle_setup_intent_succeeded(event)
+
+        self.mock_track_event_anonymous.assert_not_called()
+        self.mock_identify.assert_called_once()
+        identify_args = self.mock_identify.call_args.args
+        self.assertEqual(identify_args[0], self.user.id)
+        self.assertEqual(identify_args[1]["email"], self.user.email)
+        self.assertEqual(identify_args[1]["username"], self.user.username)
+        self.mock_track_event.assert_called_once()
+        kwargs = self.mock_track_event.call_args.kwargs
+        self.assertEqual(kwargs["user_id"], self.user.id)
+        self.assertEqual(kwargs["event"], AnalyticsEvent.PAYMENT_SETUP_INTENT_SUCCEEDED)
+        props = kwargs["properties"]
+        self.assertEqual(props["stripe.setup_intent_id"], "seti_user_success_analytics")
+        self.assertEqual(props["stripe.customer_id"], "cus_setup_user")
+        self.assertEqual(props["stripe.payment_method_id"], "pm_setup_success")
+        self.assertEqual(props["payment_method_type"], "card")
+        self.assertEqual(props["payment_method_brand"], "visa")
+        self.assertEqual(props["payment_method_last4"], "4242")
+        self.assertEqual(props["payment_method_fingerprint"], "a1b2c3d4")
+        self.assertEqual(props["payment_method_funding"], "credit")
+        self.assertEqual(props["payment_method_country"], "US")
+        self.assertEqual(props["payment_method_billing_name"], "Setup Success")
+        self.assertEqual(props["payment_method_billing_email"], "setup-success@example.com")
+        self.assertEqual(props["payment_method_billing_country"], "US")
+        self.assertEqual(props["payment_method_billing_postal_code"], "95825")
+        self.assertEqual(props["actor_user_id"], str(self.user.id))
+        self.assertEqual(props["actor_user_email"], self.user.email)
+        self.assertFalse(props["organization"])
+
+    def test_setup_intent_succeeded_fetches_customer_and_payment_method_details_from_stripe(self):
+        payload = _build_setup_intent_payload(
+            setup_intent_id="seti_lookup_success",
+            customer_id=None,
+            payment_method=None,
+            payment_method_types=["card"],
+            status="succeeded",
+        )
+        event = _build_djstripe_event(payload, event_type="setup_intent.succeeded")
+        retrieved_setup_intent = {
+            "id": "seti_lookup_success",
+            "customer": "cus_lookup_success",
+            "payment_method": {
+                "id": "pm_lookup_success",
+                "customer": "cus_lookup_success",
+                "type": "card",
+                "card": {
+                    "brand": "mastercard",
+                    "fingerprint": "lookupsuccess123",
+                    "last4": "4444",
+                    "funding": "debit",
+                    "country": "US",
+                },
+            },
+        }
+
+        with patch("pages.signals.stripe_status", return_value=SimpleNamespace(enabled=True)), \
+            patch("pages.signals.PaymentsHelper.get_stripe_key", return_value="sk_test"), \
+            patch(
+                "pages.signals._get_customer_with_subscriber",
+                return_value=SimpleNamespace(id="cus_lookup_success", subscriber=self.user),
+            ) as mock_get_customer_with_subscriber, \
+            patch("pages.signals.stripe.SetupIntent.retrieve", return_value=retrieved_setup_intent) as mock_setup_intent_retrieve, \
+            patch("pages.signals.stripe.PaymentMethod.retrieve") as mock_payment_method_retrieve, \
+            patch("pages.signals.get_active_subscription", return_value=None):
+
+            handle_setup_intent_succeeded(event)
+
+        self.mock_track_event_anonymous.assert_not_called()
+        self.mock_identify.assert_called_once()
+        identify_args = self.mock_identify.call_args.args
+        self.assertEqual(identify_args[0], self.user.id)
+        self.assertEqual(identify_args[1]["email"], self.user.email)
+        self.assertEqual(identify_args[1]["username"], self.user.username)
+        self.mock_track_event.assert_called_once()
+        mock_get_customer_with_subscriber.assert_called_once_with("cus_lookup_success")
+        mock_setup_intent_retrieve.assert_called_once_with(
+            "seti_lookup_success",
+            expand=["payment_method", "last_setup_error.payment_method"],
+        )
+        mock_payment_method_retrieve.assert_not_called()
+        props = self.mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props["stripe.customer_id"], "cus_lookup_success")
+        self.assertEqual(props["stripe.payment_method_id"], "pm_lookup_success")
+        self.assertEqual(props["payment_method_type"], "card")
+        self.assertEqual(props["payment_method_brand"], "mastercard")
+        self.assertEqual(props["payment_method_last4"], "4444")
+        self.assertEqual(props["payment_method_fingerprint"], "lookupsuccess123")
+        self.assertEqual(props["payment_method_funding"], "debit")
 
     def test_setup_intent_succeeded_updates_active_subscription_default_payment_method(self):
         payload = _build_setup_intent_payload(
