@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import requests
 from django.test import SimpleTestCase, override_settings, tag
 
 from api.services.sandbox_kubernetes import (
@@ -192,6 +193,108 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             session.post.call_args.args[0],
             "http://sandbox-agent-agent-1.default.svc.cluster.local:8080/sandbox/compute/run_command",
         )
+
+    def test_proxy_post_retries_transient_connection_error_then_succeeds(self):
+        backend = self._backend()
+        response = Mock()
+        response.raise_for_status.return_value = None
+        response.text = '{"status": "ok"}'
+        response.json.return_value = {"status": "ok"}
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.post.side_effect = [requests.ConnectionError("connection refused"), response]
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
+            result = backend._proxy_post(
+                "sandbox-agent-agent-1",
+                "/sandbox/compute/sync_filespace",
+                {"agent_id": "agent-1", "direction": "push"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(session.post.call_count, 2)
+
+    def test_proxy_post_returns_error_after_transient_retries_exhausted(self):
+        backend = self._backend()
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.post.side_effect = requests.ConnectionError("connection refused")
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
+            result = backend._proxy_post(
+                "sandbox-agent-agent-1",
+                "/sandbox/compute/sync_filespace",
+                {"agent_id": "agent-1", "direction": "push"},
+            )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("connection refused", result.get("message", ""))
+        self.assertEqual(session.post.call_count, 3)
+
+    def test_proxy_post_does_not_retry_non_transient_http_error(self):
+        backend = self._backend()
+        response = Mock()
+        response.status_code = 401
+        response.raise_for_status.side_effect = requests.HTTPError("401 Client Error", response=response)
+        response.text = "unauthorized"
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.post.return_value = response
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ) as mock_sleep:
+            result = backend._proxy_post(
+                "sandbox-agent-agent-1",
+                "/sandbox/compute/sync_filespace",
+                {"agent_id": "agent-1", "direction": "push"},
+            )
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("401 Client Error", result.get("message", ""))
+        self.assertEqual(session.post.call_count, 1)
+        mock_sleep.assert_not_called()
+
+    def test_proxy_post_retries_transient_http_status_then_succeeds(self):
+        backend = self._backend()
+        retry_response = Mock()
+        retry_response.status_code = 503
+        retry_response.raise_for_status.side_effect = requests.HTTPError(
+            "503 Server Error",
+            response=retry_response,
+        )
+        retry_response.text = "unavailable"
+        ok_response = Mock()
+        ok_response.raise_for_status.return_value = None
+        ok_response.text = '{"status": "ok"}'
+        ok_response.json.return_value = {"status": "ok"}
+        session = Mock()
+        session.__enter__ = Mock(return_value=session)
+        session.__exit__ = Mock(return_value=False)
+        session.post.side_effect = [retry_response, ok_response]
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
+            result = backend._proxy_post(
+                "sandbox-agent-agent-1",
+                "/sandbox/compute/sync_filespace",
+                {"agent_id": "agent-1", "direction": "push"},
+            )
+
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(session.post.call_count, 2)
 
     def test_ensure_egress_proxy_allows_socks5_upstream(self):
         backend = self._backend()

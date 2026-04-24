@@ -11,6 +11,7 @@ from datetime import timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import requests
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.test import TestCase, override_settings, tag
@@ -41,6 +42,7 @@ from api.agent.tools.tool_manager import (
 )
 from api.services.system_skill_profiles import set_default_system_skill_profile, upsert_system_skill_profile_values
 from api.services.sandbox_internal_paths import sandbox_workspace_root_for_agent
+from api.services.sandbox_kubernetes import KubernetesSandboxBackend
 from api.services.sandbox_compute import SandboxComputeService, SandboxSessionUpdate, LocalSandboxBackend
 from api.models import (
     AgentComputeSession,
@@ -1007,6 +1009,61 @@ class CustomToolsTests(TestCase):
             [call["direction"] for call in service._backend.sync_calls],
             ["pull", "push"],
         )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True)
+    @patch("api.services.sandbox_compute._select_proxy_for_session", return_value=None)
+    @patch("api.agent.tools.custom_tools.SandboxComputeService")
+    def test_sync_workspace_source_recovers_from_transient_proxy_connection_error(
+        self,
+        mock_service_cls,
+        _mock_select_proxy,
+        _mock_service_enabled,
+        _mock_tool_enabled,
+    ):
+        class _ReadyKubernetesBackend(KubernetesSandboxBackend):
+            def deploy_or_resume(self, agent, session):
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.RUNNING,
+                    pod_name=f"sandbox-agent-{agent.id}",
+                    namespace="gobii-prod",
+                )
+
+        AgentComputeSession.objects.filter(agent=self.agent).delete()
+        backend = object.__new__(_ReadyKubernetesBackend)
+        backend._namespace = "gobii-prod"
+        backend._compute_api_token = "supervisor-token"
+        backend._proxy_timeout = 30
+        service = SandboxComputeService(backend=backend)
+        mock_service_cls.return_value = service
+
+        pull_response = MagicMock()
+        pull_response.raise_for_status.return_value = None
+        pull_response.text = '{"status": "ok"}'
+        pull_response.json.return_value = {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+        push_response = MagicMock()
+        push_response.raise_for_status.return_value = None
+        push_response.text = '{"status": "ok"}'
+        push_response.json.return_value = {"status": "ok", "changes": []}
+        session = MagicMock()
+        session.__enter__ = MagicMock(return_value=session)
+        session.__exit__ = MagicMock(return_value=False)
+        session.post.side_effect = [
+            pull_response,
+            requests.ConnectionError("connection refused"),
+            push_response,
+        ]
+
+        with patch("api.services.sandbox_kubernetes.requests.Session", return_value=session), patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ), patch("api.services.sandbox_kubernetes.random.uniform", return_value=0):
+            sync_error = _sync_workspace_source(self.agent, "/tools/sync_intercom_waiting.py")
+
+        self.assertIsNone(sync_error)
+        self.assertEqual(session.post.call_count, 3)
+        self.assertIn("/sandbox/compute/sync_filespace", session.post.call_args_list[1].args[0])
+        self.assertIn("/sandbox/compute/sync_filespace", session.post.call_args_list[2].args[0])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
