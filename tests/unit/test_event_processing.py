@@ -46,7 +46,10 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import submit_human_input_responses_batch
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.peer_comm import PeerMessagingService
-from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
+from api.agent.core.internal_reasoning import (
+    INTERNAL_REASONING_PREFIX,
+    build_internal_reasoning_description,
+)
 from api.agent.core.prompt_context import (
     get_agent_tools,
     get_prompt_token_budget,
@@ -1602,6 +1605,70 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
         self.assertIn("Older visible step", content)
         self.assertNotIn("hidden reasoning", content)
+
+    def test_prompt_context_preserves_latest_reasoning_only_completion_when_reasoning_limit_zero(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=5,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        base_time = timezone.now()
+        preserved_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        preserved_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=preserved_completion,
+            description=build_internal_reasoning_description(
+                "preserved reasoning",
+                reasoning_only=True,
+            ),
+        )
+        PersistentAgentStep.objects.filter(pk=preserved_step.pk).update(created_at=base_time)
+
+        tool_completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        filtered_reasoning_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=tool_completion,
+            description=build_internal_reasoning_description("filtered reasoning"),
+        )
+        PersistentAgentStep.objects.filter(pk=filtered_reasoning_step.pk).update(
+            created_at=base_time + timedelta(seconds=1)
+        )
+        tool_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=tool_completion,
+            description="Did a tool-backed follow-up",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=tool_step,
+            tool_name="search_tools",
+            tool_params={"query": "competitors"},
+            result=json.dumps({"status": "ok"}),
+        )
+        PersistentAgentStep.objects.filter(pk=tool_step.pk).update(
+            created_at=base_time + timedelta(seconds=2)
+        )
+
+        for idx in range(5):
+            visible_step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=f"Visible step {idx}",
+            )
+            PersistentAgentStep.objects.filter(pk=visible_step.pk).update(
+                created_at=base_time + timedelta(seconds=idx + 3)
+            )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("preserved reasoning", content)
+        self.assertNotIn("filtered reasoning", content)
 
     def test_mcp_servers_listed_in_prompt(self):
         """Accessible MCP servers should be enumerated in the prompt context."""

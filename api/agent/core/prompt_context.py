@@ -263,12 +263,35 @@ def _get_recent_prompt_history_steps(
             : min(reasoning_limit, visible_limit)
         ]
     )
+    protected_reasoning_step = (
+        base_qs.filter(
+            description__startswith=internal_reasoning.REASONING_ONLY_PREFIX,
+        )
+        .first()
+    )
+    if (
+        protected_reasoning_step is not None
+        and all(step.id != protected_reasoning_step.id for step in reasoning_steps)
+    ):
+        reasoning_steps.append(protected_reasoning_step)
 
-    return sorted(
+    recent_steps = sorted(
         non_reasoning_steps + reasoning_steps,
         key=lambda step: (step.created_at, str(step.id)),
         reverse=True,
     )[:visible_limit]
+    if (
+        protected_reasoning_step is not None
+        and all(step.id != protected_reasoning_step.id for step in recent_steps)
+    ):
+        recent_steps = recent_steps[: max(visible_limit - 1, 0)] + [protected_reasoning_step]
+        recent_steps = sorted(
+            recent_steps,
+            key=lambda step: (step.created_at, str(step.id)),
+            reverse=True,
+        )
+
+    return recent_steps
 
 
 def _get_recent_completed_browser_tasks(
@@ -2083,6 +2106,8 @@ def build_prompt_context(
         prompt capability flags used by the orchestration loop.
     """
     max_iterations = _resolve_max_iterations(max_iterations)
+    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
+    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
 
     span = trace.get_current_span()
     span.set_attribute("persistent_agent.id", str(agent.id))
@@ -2190,14 +2215,14 @@ def build_prompt_context(
     if agent.schedule:
         important_group.section_text(
             "schedule_note",
-            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match.",
+            schedule_fragments.schedule_note_with_schedule,
             weight=1,
             non_shrinkable=True
         )
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
+            schedule_fragments.schedule_note_without_schedule,
             weight=1,
             non_shrinkable=True
         )
@@ -2386,19 +2411,9 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
-    agent_config_note = (
-        f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
-        "(single row, id=1). It resets every LLM call and is applied after tools run. "
-        "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
-        "Clear schedule with schedule=NULL or ''. "
-        "When in doubt, set a schedule (default '0 9 * * *'). "
-        "CRITICAL: Charter/schedule updates are NOT work. "
-        "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
-        "(e.g., quick lookups) until you fetch and report the result."
-    )
     variable_group.section_text(
         "agent_config_note",
-        agent_config_note,
+        schedule_fragments.agent_config_note,
         weight=2,
         non_shrinkable=True,
     )
@@ -3219,6 +3234,8 @@ def _get_work_completion_prompt(
             return None
 
     has_schedule = bool(agent.schedule)
+    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
+    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
 
     # Determine credit pressure
     low_credits = False
@@ -3259,10 +3276,7 @@ def _get_work_completion_prompt(
             "work_rescue_required",
             (
                 f"⚠️ Low credits + unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                "Credits running low. Before stopping:\n"
-                "1. Update cards with current progress (what you've learned)\n"
-                "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-                "This ensures you resume when credits reset."
+                f"{schedule_fragments.work_rescue_note}"
             ),
             8,
         )
@@ -3291,6 +3305,146 @@ def _get_work_completion_prompt(
             ),
             4,
         )
+
+
+@dataclass(frozen=True)
+class _SchedulePromptFragments:
+    agent_config_note: str
+    schedule_note_with_schedule: str
+    schedule_note_without_schedule: str
+    work_rescue_note: str
+    stop_schedule_example: str
+    mid_conversation_schedule_example: str
+    stop_continue_rule: str
+    schedule_control_guidance: str
+    schedule_intro_guidance: str
+    new_job_setup_example: str
+    timing_change_example: str
+    schedule_updates_section: str
+    golden_rule: str
+    first_response_example: str
+    batch_everything_line: str
+    config_update_user_note: str
+    adaptability_guidance: str
+
+
+def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePromptFragments:
+    if planning_mode_active:
+        return _SchedulePromptFragments(
+            agent_config_note=(
+                f"To update your charter, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
+                "(single row, id=1). It resets every LLM call and is applied after tools run. "
+                "Do not update schedule while planning mode is active. Complete or skip planning before changing it. "
+                "CRITICAL: Charter updates are NOT work. "
+                "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
+                "(e.g., quick lookups) until you fetch and report the result."
+            ),
+            schedule_note_with_schedule=(
+                "Planning Mode is active. Keep the current schedule unchanged until planning is completed or skipped."
+            ),
+            schedule_note_without_schedule=(
+                "Planning Mode is active. Leave schedule unset until planning is completed or skipped."
+            ),
+            work_rescue_note=(
+                "Credits running low. Before stopping:\n"
+                "1. Update cards with current progress (what you've learned)\n"
+                "2. Stop cleanly without changing schedule; planning mode blocks schedule updates until planning is complete."
+            ),
+            stop_schedule_example="",
+            mid_conversation_schedule_example="",
+            stop_continue_rule=(
+                "**The rule:** While planning is active, focus on clarifying scope and updating charter notes only; do not change schedule yet.\n"
+            ),
+            schedule_control_guidance=(
+                "Do not update schedule while planning mode is active, even if later prompt sections mention recurring work examples. "
+            ),
+            schedule_intro_guidance="",
+            new_job_setup_example=(
+                "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...' WHERE id=1;\")\n"
+            ),
+            timing_change_example="",
+            schedule_updates_section="",
+            golden_rule=(
+                "**Golden rule**: During planning, capture scope and constraints in the charter, but leave schedule unchanged until planning is complete.\n\n"
+            ),
+            first_response_example=(
+                "- **After planning is complete**, your first execution-oriented sqlite_batch can set charter, schedule, and kanban together: "
+                "`sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+            ),
+            batch_everything_line=(
+                "- Once planning is complete, batch charter + schedule + kanban in one sqlite_batch when you start the work.\n"
+            ),
+            config_update_user_note=(
+                "Inform the user when you update your charter so they can provide corrections. Schedule changes wait until planning is complete. "
+            ),
+            adaptability_guidance=(
+                "Be proactive: as you learn more, refine your charter. Keep shaping the plan until it is ready to execute. "
+            ),
+        )
+
+    return _SchedulePromptFragments(
+        agent_config_note=(
+            f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
+            "(single row, id=1). It resets every LLM call and is applied after tools run. "
+            "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
+            "Clear schedule with schedule=NULL or ''. "
+            "When in doubt, set a schedule (default '0 9 * * *'). "
+            "CRITICAL: Charter/schedule updates are NOT work. "
+            "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
+            "(e.g., quick lookups) until you fetch and report the result."
+        ),
+        schedule_note_with_schedule=(
+            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match."
+        ),
+        schedule_note_without_schedule=(
+            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop."
+        ),
+        work_rescue_note=(
+            "Credits running low. Before stopping:\n"
+            "1. Update cards with current progress (what you've learned)\n"
+            "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
+            "This ensures you resume when credits reset."
+        ),
+        stop_schedule_example=(
+            "- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
+        ),
+        mid_conversation_schedule_example=(
+            "- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
+        ),
+        stop_continue_rule=(
+            "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
+        ),
+        schedule_control_guidance="",
+        schedule_intro_guidance=(
+            "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
+            "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
+            "Ask about timezone if relevant. "
+        ),
+        new_job_setup_example=(
+            "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
+        ),
+        timing_change_example="→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n",
+        schedule_updates_section=(
+            "### Schedule updates:\n"
+            "Update your schedule when timing requirements change:\n"
+            "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
+            "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
+            "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
+        ),
+        golden_rule=(
+            "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
+        ),
+        first_response_example=(
+            "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+        ),
+        batch_everything_line="- Batch everything: charter + schedule + kanban in one sqlite_batch\n",
+        config_update_user_note=(
+            "Inform the user when you update your charter/schedule so they can provide corrections. "
+        ),
+        adaptability_guidance=(
+            "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
+        ),
+    )
 
 
 def add_budget_awareness_sections(
@@ -3758,8 +3912,6 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
-    # MAX_NO_TOOL_STREAK=1, so any no-tool response triggers auto-stop warning
-    urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
             "(1) More work? Include a tool call, or end message with \"CONTINUE_WORK_SIGNAL\" (stripped) "
@@ -3773,7 +3925,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
             "(3) Done? sleep_until_next_trigger."
         )
     return (
-        f"{urgency}Your previous {streak_label} had no tool calls. "
+        f"Your previous {streak_label} had no tool calls. No-tool replies count toward auto-stop, so make the next step decisive. "
         f"Options: {patterns}"
     )
 
@@ -3987,6 +4139,7 @@ def _get_planning_mode_prompt_block() -> str:
         "delivered.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
+        "- Do not update schedule or __agent_config.schedule while Planning Mode is active. Finish or skip planning first, then set timing.\n"
         "- Do not create kanban cards or begin deliverable work until planning is completed with end_planning or "
         "the user skips planning.\n"
         "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
@@ -4148,6 +4301,7 @@ def _get_system_instruction(
     """Return the static system instruction prompt for the agent."""
 
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
+    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
     implied_send_active = implied_send_context is not None
 
     if implied_send_active:
@@ -4237,7 +4391,7 @@ def _get_system_instruction(
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
-        f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
+        f"{schedule_fragments.stop_schedule_example}"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
         "- Research complete, report sent, all work done AND marked done → will_continue_work=false on final tool → STOP.\n\n"
         "**CONTINUE (will_continue_work=true)** — whenever at least one more action remains after this tool call:\n"
@@ -4250,7 +4404,7 @@ def _get_system_instruction(
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
-        f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
+        f"{schedule_fragments.mid_conversation_schedule_example}"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**CRITICAL termination sequence:**\n"
         "1. Send your final report to the user\n"
@@ -4258,7 +4412,7 @@ def _get_system_instruction(
         "3. You're done—no extra turn, no announcement\n\n"
         "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
         "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
-        "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
+        f"{schedule_fragments.stop_continue_rule}"
     )
 
     if implied_send_active:
@@ -4357,9 +4511,8 @@ def _get_system_instruction(
         "Assistant (English): \"The tool reported a permission error. I'll retry with the correct permissions or ask for approval if needed.\"\n\n"
 
         "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
-        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
-        "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
-        "Ask about timezone if relevant. "
+        f"{schedule_fragments.schedule_control_guidance}"
+        f"{schedule_fragments.schedule_intro_guidance}"
 
         "\n\n"
         "## Your Charter: When & How to Update\n\n"
@@ -4381,7 +4534,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
+        f"{schedule_fragments.new_job_setup_example}"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -4406,16 +4559,12 @@ def _get_system_instruction(
         "Before: 'Scout AI startups. Track YC, Product Hunt.'\n"
         "After:  'Track user portfolio stocks. Monitor prices and news.'\n"
         "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track user portfolio stocks. Monitor prices and news.' WHERE id=1;\")\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n"
+        f"{schedule_fragments.timing_change_example}"
         "```\n\n"
 
-        "### Schedule updates:\n"
-        "Update your schedule when timing requirements change:\n"
-        "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
-        "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
-        "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
+        f"{schedule_fragments.schedule_updates_section}"
 
-        "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
+        f"{schedule_fragments.golden_rule}"
 
         "### When to use kanban cards:\n"
         "**USE CARDS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
@@ -4429,18 +4578,18 @@ def _get_system_instruction(
         "- **For multi-step work: create cards.** Complex tasks need tracking to avoid losing your place.\n"
         "- **Cards must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
         "- **Always include a reporting step.** The final card must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
-        "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+        f"{schedule_fragments.first_response_example}"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
         "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` Never INSERT to change status—that creates duplicates.\n"
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
-        "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
+        f"{schedule_fragments.batch_everything_line}"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
         "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done.\n"
         "- **Terminate on final card:** When marking your last card done, use `will_continue_work=false` on that sqlite_batch. This ends your turn immediately—no extra cycle.\n\n"
 
-        "Inform the user when you update your charter/schedule so they can provide corrections. "
+        f"{schedule_fragments.config_update_user_note}"
         "Do not mention other internal maintenance such as kanban bookkeeping or skill creation/update unless the user explicitly asks about it. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
@@ -4894,7 +5043,7 @@ def _get_system_instruction(
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
-        "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
+        f"{schedule_fragments.adaptability_guidance}"
         "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about your limitations. If a task is too ambitious, help the user find a smaller scope where you can genuinely deliver value. "

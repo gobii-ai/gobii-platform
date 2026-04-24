@@ -6,8 +6,9 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
 
-from api.agent.core.prompt_context import _get_system_instruction
+from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.tools.planning import execute_end_planning
+from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import get_static_tool_definitions
 from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
 from api.models import (
@@ -187,6 +188,47 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Resume the pending planning turn.", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
+        self.assertNotIn("You control your schedule. Update __agent_config.schedule via sqlite_batch when needed", prompt)
+        self.assertNotIn("make it weekly", prompt)
+        self.assertNotIn("check every hour", prompt)
+        self.assertIn("Do not update schedule or __agent_config.schedule while Planning Mode is active", prompt)
+        self.assertIn("charter='<what>', schedule='<when>'", prompt)
+
+    def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.schedule = "@daily"
+        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent, is_first_run=False)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+        self.assertNotIn("⚠️ NO SCHEDULE SET.", user_message["content"])
+        self.assertNotIn("UPDATE YOUR SCHEDULE if the timing no longer matches the job", user_message["content"])
+        self.assertIn("Keep the current schedule unchanged until planning is completed or skipped", user_message["content"])
+        self.assertNotIn("To update your charter or schedule", user_message["content"])
+        self.assertIn("Do not update schedule while planning mode is active", user_message["content"])
+        self.assertNotIn("You control your schedule.", system_message["content"])
+        self.assertNotIn("check every hour", system_message["content"])
+        self.assertNotIn("weekly on Fridays", system_message["content"])
+
+    def test_update_schedule_is_blocked_during_planning(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.schedule = "@daily"
+        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
+
+        response = execute_update_schedule(self.agent, {"new_schedule": "0 12 * * *"})
+
+        self.assertEqual(response["status"], "error")
+        self.assertIn("planning mode", response["message"].lower())
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.schedule, "@daily")
 
     def test_non_planning_first_run_keeps_existing_work_prompt(self):
         self._set_email_welcome_target()
@@ -196,6 +238,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("## Then sqlite_batch: charter + kanban cards + everything else", prompt)
         self.assertIn("### Execution Template", prompt)
         self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertIn("charter='<what>', schedule='<when>'", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):

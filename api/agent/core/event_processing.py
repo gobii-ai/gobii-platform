@@ -102,7 +102,7 @@ from .llm_config import (
 from api.agent.events import publish_agent_event, AgentEventType
 from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
 from api.evals.execution import get_current_eval_routing_profile
-from .internal_reasoning import build_internal_reasoning_description
+from . import internal_reasoning
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -198,7 +198,7 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 MAX_AGENT_LOOP_ITERATIONS = 100
-MAX_NO_TOOL_STREAK = 1  # Stop on first no-tool response unless continuation signal present
+MAX_NO_TOOL_STREAK = 5  # Allow short reasoning-only streaks before auto-sleeping
 MAX_ITERATIONS_FOLLOWUP_DELAY_SECONDS = 60
 ARG_LOG_MAX_CHARS = 500
 RESULT_LOG_MAX_CHARS = 500
@@ -4730,17 +4730,18 @@ def _run_agent_loop(
                     completion_obj = _ensure_completion()
                     step_kwargs["completion"] = completion_obj
 
-                def _persist_reasoning_step(reasoning_source: Optional[str]) -> None:
+                def _persist_reasoning_step(reasoning_source: Optional[str]) -> Optional[PersistentAgentStep]:
                     reasoning_text = (reasoning_source or "").strip()
                     if not reasoning_text:
-                        return
+                        return None
                     step_kwargs = {
                         "agent": agent,
-                        "description": build_internal_reasoning_description(reasoning_text),
+                        "description": internal_reasoning.build_internal_reasoning_description(reasoning_text),
                     }
                     _attach_completion(step_kwargs)
                     step = PersistentAgentStep.objects.create(**step_kwargs)
                     _attach_prompt_archive(step)
+                    return step
 
                 def _apply_agent_config_updates() -> bool:
                     config_apply = apply_sqlite_agent_config_updates(agent, config_snapshot)
@@ -4942,7 +4943,7 @@ def _run_agent_loop(
                 if not reasoning_source and not implied_send:
                     reasoning_source = msg_content
 
-                _persist_reasoning_step(reasoning_source)
+                reasoning_step = _persist_reasoning_step(reasoning_source)
 
                 if not tool_calls:
                     if _apply_runtime_updates():
@@ -4971,6 +4972,19 @@ def _run_agent_loop(
                         _mark_accepted_human_generation_consumed()
                         _attempt_cycle_close_for_sleep(agent, budget_ctx)
                         return cumulative_token_usage
+                    if reasoning_step is not None:
+                        try:
+                            reasoning_step.description = internal_reasoning.build_internal_reasoning_description(
+                                reasoning_source,
+                                reasoning_only=True,
+                            )
+                            reasoning_step.save(update_fields=["description"])
+                        except Exception:
+                            logger.debug(
+                                "Failed to mark reasoning-only step for agent %s",
+                                agent.id,
+                                exc_info=True,
+                            )
                     # Message or thinking content but no tools - increment streak.
                     # Thinking-only models (e.g., DeepSeek) put responses in thinking blocks;
                     # don't auto-sleep just because message_text is empty.

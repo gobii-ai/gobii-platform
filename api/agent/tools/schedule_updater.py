@@ -31,6 +31,26 @@ def _too_frequent_message(min_interval_minutes: int) -> str:
     return f"Schedule is too frequent. Minimum interval is {min_minutes} minutes."
 
 
+def _normalize_schedule(value: str | None) -> str | None:
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
+def _planning_mode_schedule_message() -> str:
+    return "Schedule updates are unavailable while planning mode is active. Complete or skip planning first."
+
+
+def _schedule_update_blocked_by_planning(agent, new_schedule: str | None) -> bool:
+    from api.models import PersistentAgent
+
+    return (
+        getattr(agent, "planning_state", None) == PersistentAgent.PlanningState.PLANNING
+        and _normalize_schedule(new_schedule) != _normalize_schedule(getattr(agent, "schedule", None))
+    )
+
+
 def _min_interval_minutes_for_agent(agent) -> int | None:
     """Return the enforced minimum interval in minutes for the agent's owner."""
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
@@ -70,10 +90,7 @@ def execute_update_schedule(agent, params: dict) -> dict:
     Returns:
         Dictionary with status and message
     """
-    new_schedule_str = params.get("new_schedule") or None
-    # Strip whitespace and treat empty strings as None
-    if new_schedule_str is not None:
-        new_schedule_str = new_schedule_str.strip() or None
+    new_schedule_str = _normalize_schedule(params.get("new_schedule"))
     original_schedule = agent.schedule
     will_continue = _should_continue_work(params)
     
@@ -82,6 +99,10 @@ def execute_update_schedule(agent, params: dict) -> dict:
         "Agent %s updating schedule from '%s' to '%s'",
         agent.id, original_schedule or "None", new_schedule_str or "None"
     )
+
+    if _schedule_update_blocked_by_planning(agent, new_schedule_str):
+        logger.warning("Blocked planning-mode schedule update for agent %s", agent.id)
+        return {"status": "error", "message": _planning_mode_schedule_message()}
 
     try:
         if new_schedule_str:
