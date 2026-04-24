@@ -367,3 +367,4 @@ uv run celery -A config worker -l info --pool=threads --concurrency=4
 - Source code is licensed under [MIT](LICENSE).
 - Gobii name and logo are trademarks of Gobii, Inc. See [NOTICE](NOTICE).
 - Proprietary mode and non-MIT components require a commercial agreement with Gobii, Inc.
+

@@ -3,6 +3,16 @@
 {% block object-tools %}
   <ul class="object-tools">
       <li>
+          <a href="{% url 'admin:smsnumber_release_candidates' %}" class="button">
+              Find Release Candidates
+          </a>
+      </li>
+      <li>
+          <a href="{% url 'admin:smsnumber_release' %}" class="button">
+              Release Numbers
+          </a>
+      </li>
+      <li>
           <a href="{% url 'admin:smsnumber_sync' %}" class="button">
               🔄 Sync from Twilio
           </a>
@@ -13,5 +23,6 @@
 
 {% block content_title %}
   {{ block.super }}
-  <p>{{ in_use_count }} of {{ total_count }} SMS Numbers in Use</p>
+  <p>{{ in_use_count }} of {{ inventory_count }} SMS Numbers in Use</p>
+  <p>{{ released_count }} SMS Numbers Released</p>
 {% endblock %}

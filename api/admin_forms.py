@@ -1,14 +1,20 @@
-# admin_forms.py  (optional file)
 import re
+from decimal import Decimal
 
+import phonenumbers
 from django import forms
+from django.contrib.admin.widgets import AdminSplitDateTime
 from django.forms import ModelForm
+from django.utils import timezone
+
+from constants.grant_types import GrantTypeChoices
+from constants.plans import PlanNamesChoices
 from .models import (
-    CommsChannel,
     AgentEmailAccount,
+    CommsChannel,
     LLMProvider,
-    StripeConfig,
     MCPServerConfig,
+    StripeConfig,
     UserFlagDefinition,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -200,12 +206,7 @@ class GlobalAgentSkillImportForm(forms.Form):
         label="Skill JSON file",
         help_text="Upload a JSON file exported from Global Skills admin.",
     )
-import phonenumbers
-from django.utils import timezone
-from decimal import Decimal
-from constants.plans import PlanNamesChoices
-from constants.grant_types import GrantTypeChoices
-from django.contrib.admin.widgets import AdminSplitDateTime
+
 
 class TestSmsForm(forms.Form):
     to      = forms.CharField(label="Destination number")
@@ -218,6 +219,81 @@ class TestSmsForm(forms.Form):
             return phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
         except phonenumbers.NumberParseException:
             raise forms.ValidationError("Not a valid phone number.")
+
+
+class ReleaseSmsNumbersForm(forms.Form):
+    phone_numbers = forms.CharField(
+        label="SMS Numbers",
+        widget=forms.Textarea(
+            attrs={
+                "rows": 8,
+                "placeholder": "Paste one E.164 phone number per line or comma-separated",
+            }
+        ),
+        help_text="Only Twilio inventory numbers from SMS admin can be released.",
+    )
+
+    def clean_phone_numbers(self):
+        raw = self.cleaned_data["phone_numbers"]
+        normalized_numbers = []
+        invalid_entries = []
+
+        for token in re.split(r"[\n,]+", raw):
+            candidate = token.strip()
+            if not candidate:
+                continue
+
+            try:
+                parsed = phonenumbers.parse(candidate, "US")
+            except phonenumbers.NumberParseException:
+                invalid_entries.append(candidate)
+                continue
+
+            if not phonenumbers.is_possible_number(parsed):
+                invalid_entries.append(candidate)
+                continue
+
+            normalized_numbers.append(
+                phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164)
+            )
+
+        if invalid_entries:
+            preview = ", ".join(invalid_entries[:5])
+            suffix = "..." if len(invalid_entries) > 5 else ""
+            raise forms.ValidationError(f"Invalid phone number(s): {preview}{suffix}")
+
+        unique_numbers = list(dict.fromkeys(normalized_numbers))
+        if not unique_numbers:
+            raise forms.ValidationError("Provide at least one SMS number to release.")
+
+        return unique_numbers
+
+
+class FindReleaseCandidatesForm(forms.Form):
+    unused_days = forms.IntegerField(
+        label="Unused for at least (days)",
+        min_value=1,
+        initial=90,
+        help_text="Only numbers with no SMS send/receive activity in this window are returned.",
+    )
+    include_detached_unused = forms.BooleanField(
+        label="Detached unused",
+        required=False,
+        initial=True,
+        help_text="Twilio numbers with no agent owner attached and no SMS activity in the selected window.",
+    )
+    include_free_dormant_unused = forms.BooleanField(
+        label="Free-plan dormant unused",
+        required=False,
+        initial=True,
+        help_text="Twilio numbers still attached to a free-plan owner with no SMS activity in the selected window.",
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if not cleaned.get("include_detached_unused") and not cleaned.get("include_free_dormant_unused"):
+            raise forms.ValidationError("Select at least one candidate tier.")
+        return cleaned
 
 
 class GrantPlanCreditsForm(forms.Form):
