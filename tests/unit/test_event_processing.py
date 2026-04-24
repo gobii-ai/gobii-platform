@@ -1536,8 +1536,15 @@ class PromptContextBuilderTests(TestCase):
         self.assertLess(content.index(older_prompt), content.index(newer_prompt))
         self.assertLess(content.index(newer_prompt), content.index(newest_prompt))
 
-    def test_prompt_context_limits_internal_reasoning_steps(self):
-        """Unified history should keep only the newest configured reasoning steps."""
+    def test_prompt_context_caps_older_internal_reasoning_but_keeps_current_streak(self):
+        """Older reasoning stays capped once a newer visible step breaks the streak."""
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=1,
+        )
+
         base_time = timezone.now()
         descriptions = [
             f"{INTERNAL_REASONING_PREFIX} reasoning one",
@@ -1570,18 +1577,108 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("reasoning four", content)
         self.assertIn("Follow up with the user", content)
 
+    def test_prompt_context_preserves_current_reasoning_only_streak(self):
+        """The newest contiguous reasoning-only streak bypasses the historical reasoning cap."""
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=1,
+        )
+
+        base_time = timezone.now()
+        descriptions = [
+            "Older visible step",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning one",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning two",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning three",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning four",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning five",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning six",
+        ]
+
+        for idx, description in enumerate(descriptions):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=description,
+            )
+            PersistentAgentStep.objects.filter(pk=step.pk).update(
+                created_at=base_time + timedelta(seconds=idx)
+            )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("Older visible step", content)
+        self.assertIn("current reasoning one", content)
+        self.assertIn("current reasoning two", content)
+        self.assertIn("current reasoning three", content)
+        self.assertIn("current reasoning four", content)
+        self.assertIn("current reasoning five", content)
+        self.assertIn("current reasoning six", content)
+
+    def test_prompt_context_preserves_current_reasoning_only_streak_when_history_limit_zero(self):
+        """A zero historical reasoning cap should still keep the newest reasoning-only streak."""
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        base_time = timezone.now()
+        descriptions = [
+            f"{INTERNAL_REASONING_PREFIX} older reasoning",
+            "Visible step between reasoning batches",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning one",
+            f"{INTERNAL_REASONING_PREFIX} current reasoning two",
+        ]
+
+        for idx, description in enumerate(descriptions):
+            step = PersistentAgentStep.objects.create(
+                agent=self.agent,
+                description=description,
+            )
+            PersistentAgentStep.objects.filter(pk=step.pk).update(
+                created_at=base_time + timedelta(seconds=idx)
+            )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertNotIn("older reasoning", content)
+        self.assertIn("Visible step between reasoning batches", content)
+        self.assertIn("current reasoning one", content)
+        self.assertIn("current reasoning two", content)
+
     def test_prompt_context_overfetches_past_filtered_reasoning_steps(self):
-        """Hidden reasoning-only slices should not crowd out older visible steps."""
-        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
-        config.standard_tool_call_history_limit = 5
-        config.standard_unified_history_limit = 5
-        config.standard_unified_history_hysteresis = 2
-        config.internal_reasoning_history_limit = 0
-        config.save()
-        invalidate_prompt_settings_cache()
+        """Filtered older reasoning should not crowd out older visible steps."""
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=5,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
 
         base_time = timezone.now()
         crowding_reasoning_count = 12
+        newest_visible_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Newest visible step",
+        )
+        PersistentAgentStep.objects.filter(pk=newest_visible_step.pk).update(
+            created_at=base_time + timedelta(seconds=crowding_reasoning_count + 1)
+        )
         for idx in range(crowding_reasoning_count):
             step = PersistentAgentStep.objects.create(
                 agent=self.agent,
@@ -1607,6 +1704,7 @@ class PromptContextBuilderTests(TestCase):
         user_message = next((m for m in context if m["role"] == "user"), None)
         self.assertIsNotNone(user_message)
         content = user_message["content"]
+        self.assertIn("Newest visible step", content)
         self.assertIn("Older visible step", content)
         self.assertNotIn("hidden reasoning", content)
 
