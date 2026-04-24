@@ -113,6 +113,21 @@ COMPLETE_REGISTRATION_CAPI_SEND_NO_TRIAL = "complete_registration_capi_send_no_t
 # while still blocking explicit "no_trial" decisions.
 USER_TRIAL_REVIEW_ALLOWS_TRIAL = "user_trial_review_allows_trial"
 
+# Controls whether Scale trial checkout requires a billing address.
+STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED = (
+    "stripe_scale_trial_checkout_billing_address_required"
+)
+
+# Controls whether Scale trial checkout collects the individual's name.
+STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED = (
+    "stripe_scale_trial_checkout_individual_name_enabled"
+)
+
+# Controls whether the collected individual name is optional on Scale trial checkout.
+STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL = (
+    "stripe_scale_trial_checkout_individual_name_optional"
+)
+
 # Are we allow to send to multiple comm points at once - NOTE THIS IS NOT THE SAME AS MULTIPLAYER_AGENTS
 # This is a switch to send to multiple comms points at once, such as email and sms, or multiple emails. has to be a
 # switch not flag

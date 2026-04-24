@@ -76,7 +76,13 @@ from util.trial_eligibility import (
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from constants.plans import PlanNames
 from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
-from constants.feature_flags import CTA_SIGNUP_FIRST, CTA_SIGNUP_MODAL
+from constants.feature_flags import (
+    CTA_SIGNUP_FIRST,
+    CTA_SIGNUP_MODAL,
+    STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED,
+    STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED,
+    STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
+)
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
@@ -120,6 +126,7 @@ from marketing_events.value_utils import (
     calculate_start_trial_values,
     resolve_start_trial_conversion_rate,
 )
+from waffle import switch_is_active
 import logging
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -202,6 +209,30 @@ def _apply_trial_checkout_fields(
     checkout_kwargs["custom_text"] = {
         "after_submit": {
             "message": "Prepaid cards are not eligible for a free trial. Subscriptions are automatically charged at the end of the trial period if not canceled."
+        }
+    }
+
+
+def _apply_scale_trial_checkout_collection_fields(
+    checkout_kwargs: dict,
+    *,
+    include_trial: bool,
+) -> None:
+    if not include_trial:
+        return
+
+    if switch_is_active(STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED):
+        checkout_kwargs["billing_address_collection"] = "required"
+
+    if not switch_is_active(STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED):
+        return
+
+    checkout_kwargs["name_collection"] = {
+        "individual": {
+            "enabled": True,
+            "optional": switch_is_active(
+                STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
+            ),
         }
     }
 
@@ -2218,6 +2249,10 @@ class ScaleCheckoutView(LoginRequiredMixin, View):
             checkout_kwargs,
             include_trial=include_trial,
             trial_days=trial_days,
+        )
+        _apply_scale_trial_checkout_collection_fields(
+            checkout_kwargs,
+            include_trial=include_trial,
         )
         rewardful_referral = request.COOKIES.get("rewardful-referral", "")
         if rewardful_referral:
