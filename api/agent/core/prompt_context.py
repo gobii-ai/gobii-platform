@@ -2215,14 +2215,14 @@ def build_prompt_context(
     if agent.schedule:
         important_group.section_text(
             "schedule_note",
-            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match.",
+            schedule_fragments.schedule_note_with_schedule,
             weight=1,
             non_shrinkable=True
         )
     else:
         important_group.section_text(
             "schedule_note",
-            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
+            schedule_fragments.schedule_note_without_schedule,
             weight=1,
             non_shrinkable=True
         )
@@ -3310,6 +3310,8 @@ def _get_work_completion_prompt(
 @dataclass(frozen=True)
 class _SchedulePromptFragments:
     agent_config_note: str
+    schedule_note_with_schedule: str
+    schedule_note_without_schedule: str
     work_rescue_note: str
     stop_schedule_example: str
     mid_conversation_schedule_example: str
@@ -3337,6 +3339,12 @@ def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePr
                 "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
                 "(e.g., quick lookups) until you fetch and report the result."
             ),
+            schedule_note_with_schedule=(
+                "Planning Mode is active. Keep the current schedule unchanged until planning is completed or skipped."
+            ),
+            schedule_note_without_schedule=(
+                "Planning Mode is active. Leave schedule unset until planning is completed or skipped."
+            ),
             work_rescue_note=(
                 "Credits running low. Before stopping:\n"
                 "1. Update cards with current progress (what you've learned)\n"
@@ -3361,7 +3369,7 @@ def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePr
             ),
             first_response_example=(
                 "- **After planning is complete**, your first execution-oriented sqlite_batch can set charter, schedule, and kanban together: "
-                "`sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+                "`sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
             ),
             batch_everything_line=(
                 "- Once planning is complete, batch charter + schedule + kanban in one sqlite_batch when you start the work.\n"
@@ -3384,6 +3392,12 @@ def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePr
             "CRITICAL: Charter/schedule updates are NOT work. "
             "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
             "(e.g., quick lookups) until you fetch and report the result."
+        ),
+        schedule_note_with_schedule=(
+            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match."
+        ),
+        schedule_note_without_schedule=(
+            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop."
         ),
         work_rescue_note=(
             "Credits running low. Before stopping:\n"
@@ -3421,7 +3435,7 @@ def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePr
             "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
         ),
         first_response_example=(
-            "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter=<what>, schedule=<when> WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
+            "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
         ),
         batch_everything_line="- Batch everything: charter + schedule + kanban in one sqlite_batch\n",
         config_update_user_note=(

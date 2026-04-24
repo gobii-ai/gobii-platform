@@ -192,10 +192,12 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("make it weekly", prompt)
         self.assertNotIn("check every hour", prompt)
         self.assertIn("Do not update schedule or __agent_config.schedule while Planning Mode is active", prompt)
+        self.assertIn("charter='<what>', schedule='<when>'", prompt)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
-        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self.agent.schedule = "@daily"
+        self.agent.save(update_fields=["planning_state", "schedule", "updated_at"])
 
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
             "api.agent.core.prompt_context.ensure_comms_compacted"
@@ -207,7 +209,9 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIsNotNone(user_message)
-        self.assertNotIn("When in doubt, set a schedule", user_message["content"])
+        self.assertNotIn("⚠️ NO SCHEDULE SET.", user_message["content"])
+        self.assertNotIn("UPDATE YOUR SCHEDULE if the timing no longer matches the job", user_message["content"])
+        self.assertIn("Keep the current schedule unchanged until planning is completed or skipped", user_message["content"])
         self.assertNotIn("To update your charter or schedule", user_message["content"])
         self.assertIn("Do not update schedule while planning mode is active", user_message["content"])
         self.assertNotIn("You control your schedule.", system_message["content"])
@@ -234,6 +238,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("## Then sqlite_batch: charter + kanban cards + everything else", prompt)
         self.assertIn("### Execution Template", prompt)
         self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertIn("charter='<what>', schedule='<when>'", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):
