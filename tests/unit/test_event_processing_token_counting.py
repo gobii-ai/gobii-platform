@@ -131,15 +131,20 @@ class TestEventProcessingTokenCounting(TestCase):
 
                 messages, fitted_token_count, archive_id = build_prompt_context(self.test_agent)
 
-                # Verify it was called with token_count=0 for model selection
-                mock_get_config.assert_called_with(
-                    agent=self.test_agent,
-                    agent_id=str(self.test_agent.id),
-                    token_count=0,
-                    allow_unconfigured=True,
-                    is_first_loop=False,
-                    routing_profile=None,
-                )
+                call_kwargs = [call.kwargs for call in mock_get_config.call_args_list]
+                self.assertGreaterEqual(len(call_kwargs), 2)
+                self.assertEqual(call_kwargs[0]["token_count"], 0)
+                self.assertEqual(call_kwargs[0]["agent"], self.test_agent)
+                self.assertEqual(call_kwargs[0]["agent_id"], str(self.test_agent.id))
+                self.assertTrue(call_kwargs[0]["allow_unconfigured"])
+                self.assertIsNone(call_kwargs[0]["routing_profile"])
+                self.assertIsNone(call_kwargs[0]["prefer_low_latency"])
+                self.assertEqual(call_kwargs[1]["token_count"], fitted_token_count)
+                self.assertEqual(call_kwargs[1]["agent"], self.test_agent)
+                self.assertEqual(call_kwargs[1]["agent_id"], str(self.test_agent.id))
+                self.assertTrue(call_kwargs[1]["allow_unconfigured"])
+                self.assertIsNone(call_kwargs[1]["routing_profile"])
+                self.assertIsNone(call_kwargs[1]["prefer_low_latency"])
 
                 self.assertIsInstance(messages, list)
                 self.assertEqual(len(messages), 2)  # system + user messages

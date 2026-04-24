@@ -984,6 +984,69 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover")
+    def test_run_loop_uses_prompt_resolved_failover_configs(
+        self,
+        mock_get_llm_config,
+        mock_completion,
+        mock_build_prompt,
+        _mock_send_chat,
+        _mock_credit,
+        _mock_task_credit,
+    ):
+        prompt_failover_configs = [
+            ("provider-a", "openai/gpt-4o-mini", {"allow_implied_send": True}),
+            ("provider-b", "openai/gpt-4.1-mini", {"allow_implied_send": False}),
+        ]
+        mock_build_prompt.return_value = (
+            [{"role": "system", "content": "sys"}, {"role": "user", "content": "go"}],
+            1000,
+            None,
+            {
+                "prompt_allows_implied_send": False,
+                "prompt_failover_configs": prompt_failover_configs,
+            },
+        )
+        mock_get_llm_config.side_effect = AssertionError("loop should use prompt-resolved failover configs")
+
+        msg = MagicMock()
+        msg.content = ""
+        msg.reasoning_content = None
+        sleep_tool_call = MagicMock()
+        sleep_tool_call.function = MagicMock()
+        sleep_tool_call.function.name = "sleep_until_next_trigger"
+        sleep_tool_call.function.arguments = "{}"
+        msg.tool_calls = [sleep_tool_call]
+
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15)}
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(
+            mock_completion.call_args.kwargs["failover_configs"],
+            prompt_failover_configs,
+        )
+
+    @patch("api.models.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None})
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
     def test_implied_send_respects_selected_model_opt_out(
         self,
         mock_completion,

@@ -149,6 +149,49 @@ def _config_allows_implied_send(params_with_hints: Mapping[str, Any] | None) -> 
         return True
     return bool(params_with_hints.get("allow_implied_send", True))
 
+
+def _safe_get_prompt_failover_configs(
+    agent: PersistentAgent,
+    *,
+    token_count: int,
+    is_first_run: bool,
+    routing_profile: Any,
+    prefer_low_latency: Optional[bool],
+) -> List[Tuple[str, str, dict]]:
+    try:
+        return get_llm_config_with_failover(
+            agent_id=str(agent.id),
+            token_count=token_count,
+            allow_unconfigured=True,
+            agent=agent,
+            is_first_loop=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+    except LLMNotConfiguredError:
+        return []
+    except Exception:
+        return []
+
+
+def _prompt_render_settings_from_failover_configs(
+    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
+) -> Tuple[str, bool]:
+    if not failover_configs:
+        return _AGENT_MODEL, True
+    model = failover_configs[0][1]
+    allow_implied_send = all(
+        _config_allows_implied_send(params_with_hints)
+        for _, _, params_with_hints in failover_configs
+    )
+    return model, allow_implied_send
+
+
+def _prompt_render_signature_from_failover_configs(
+    failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None,
+) -> Tuple[str, bool]:
+    return _prompt_render_settings_from_failover_configs(failover_configs)
+
 SQLITE_FILES_SNAPSHOT_MAX_RECORDS = 5_000
 _SQLITE_RESULT_ID_RE = re.compile(r"""result_id\s*=\s*['"]([A-Za-z0-9_-]{4,64})['"]""")
 _SQLITE_EMPTY_RESULT_RE = re.compile(r"Query \d+ returned 0 rows\.", re.IGNORECASE)
@@ -236,12 +279,13 @@ def _get_recent_prompt_history_steps(
     visible_limit: int,
     reasoning_limit: int,
 ) -> List[PersistentAgentStep]:
-    """Return recent steps with bounded reasoning history and deterministic ordering."""
+    """Return recent steps while preserving the newest contiguous reasoning-only streak."""
 
     if visible_limit <= 0:
         return []
 
     reasoning_prefix = internal_reasoning.INTERNAL_REASONING_PREFIX
+    reasoning_only_prefix = internal_reasoning.REASONING_ONLY_PREFIX
     query_kwargs = {
         "agent": agent,
         "created_at__gt": step_cutoff,
@@ -255,29 +299,45 @@ def _get_recent_prompt_history_steps(
         .order_by("-created_at", "-id")
     )
 
+    leading_window = list(base_qs[:visible_limit])
+    current_reasoning_streak: List[PersistentAgentStep] = []
+    for step in leading_window:
+        if not (step.description or "").startswith(reasoning_prefix):
+            break
+        current_reasoning_streak.append(step)
+
+    sort_key = lambda step: (step.created_at, str(step.id))
+    if len(current_reasoning_streak) >= visible_limit:
+        return sorted(current_reasoning_streak, key=sort_key, reverse=True)[:visible_limit]
+
     non_reasoning_steps = list(
         base_qs.exclude(description__startswith=reasoning_prefix)[:visible_limit]
     )
-    reasoning_steps = list(
-        base_qs.filter(description__startswith=reasoning_prefix)[
-            : min(reasoning_limit, visible_limit)
-        ]
+    older_reasoning_qs = base_qs.filter(description__startswith=reasoning_prefix)
+    if current_reasoning_streak:
+        older_reasoning_qs = older_reasoning_qs.exclude(
+            id__in=[step.id for step in current_reasoning_streak]
+        )
+    older_reasoning_steps = list(
+        older_reasoning_qs[: min(reasoning_limit, visible_limit)]
     )
     protected_reasoning_step = (
-        base_qs.filter(
-            description__startswith=internal_reasoning.REASONING_ONLY_PREFIX,
-        )
-        .first()
+        base_qs.filter(description__startswith=reasoning_only_prefix).first()
     )
+
+    deduped_steps = {
+        step.id: step
+        for step in non_reasoning_steps + current_reasoning_streak + older_reasoning_steps
+    }
     if (
         protected_reasoning_step is not None
-        and all(step.id != protected_reasoning_step.id for step in reasoning_steps)
+        and protected_reasoning_step.id not in deduped_steps
     ):
-        reasoning_steps.append(protected_reasoning_step)
+        deduped_steps[protected_reasoning_step.id] = protected_reasoning_step
 
     recent_steps = sorted(
-        non_reasoning_steps + reasoning_steps,
-        key=lambda step: (step.created_at, str(step.id)),
+        deduped_steps.values(),
+        key=sort_key,
         reverse=True,
     )[:visible_limit]
     if (
@@ -287,7 +347,7 @@ def _get_recent_prompt_history_steps(
         recent_steps = recent_steps[: max(visible_limit - 1, 0)] + [protected_reasoning_step]
         recent_steps = sorted(
             recent_steps,
-            key=lambda step: (step.created_at, str(step.id)),
+            key=sort_key,
             reverse=True,
         )
 
@@ -2070,8 +2130,7 @@ def _build_agent_email_settings_section(agent: PersistentAgent) -> str:
     ]
     return "Agent email settings:\n- " + "\n- ".join(lines)
 
-@tracer.start_as_current_span("Build Prompt Context")
-def build_prompt_context(
+def _render_prompt_context_once(
     agent: PersistentAgent,
     current_iteration: int = 1,
     max_iterations: Optional[int] = None,
@@ -2080,81 +2139,45 @@ def build_prompt_context(
     daily_credit_state: Optional[dict] = None,
     continuation_notice: Optional[str] = None,
     routing_profile: Any = None,
-    include_metadata: bool = False,
-) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
-    """
-    Return a system + user message for the LLM using promptree for token budget management.
-
-    Args:
-        agent: Persistent agent being processed.
-        current_iteration: 1-based iteration counter inside the loop.
-        max_iterations: Maximum iterations allowed for this processing cycle.
-        reasoning_only_streak: Number of consecutive iterations without tool calls.
-        is_first_run: Whether this is the very first processing cycle for the agent.
-        daily_credit_state: Pre-computed daily credit state (optional).
-        continuation_notice: Optional system note to inject for follow-up loops.
-        routing_profile: LLMRoutingProfile instance for eval routing (optional).
-        include_metadata: When true, include prompt capability metadata in the return value.
-
-    Returns:
-        Tuple of (messages, fitted_token_count, prompt_archive_id) where
-        fitted_token_count is the actual token count after promptree fitting for
-        accurate LLM selection and prompt_archive_id references the metadata row
-        for the stored prompt archive (or ``None`` if archiving failed).
-
-        When ``include_metadata`` is true, a fourth item is returned containing
-        prompt capability flags used by the orchestration loop.
-    """
+    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = None,
+    system_directive_block: str | None = None,
+    skip_compaction: bool = False,
+    archive_prompt: bool = False,
+    record_span: bool = False,
+) -> tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
     max_iterations = _resolve_max_iterations(max_iterations)
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
-    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
 
     span = trace.get_current_span()
-    span.set_attribute("persistent_agent.id", str(agent.id))
+    if record_span:
+        span.set_attribute("persistent_agent.id", str(agent.id))
     safety_id = agent.user.id if agent.user else None
 
-    ensure_steps_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
-        safety_identifier=safety_id,
-    )
-    ensure_comms_compacted(
-        agent=agent,
-        summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
-        safety_identifier=safety_id,
+    if not skip_compaction:
+        ensure_steps_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_steps, agent=agent, routing_profile=routing_profile),
+            safety_identifier=safety_id,
+        )
+        ensure_comms_compacted(
+            agent=agent,
+            summarise_fn=partial(llm_summarise_comms, agent=agent, routing_profile=routing_profile),
+            safety_identifier=safety_id,
+        )
+
+    model, prompt_allows_implied_send = _prompt_render_settings_from_failover_configs(
+        prompt_failover_configs
     )
 
-    # Get the model being used for accurate token counting
-    # Note: We attempt to read DB-configured tiers with token_count=0 to pick
-    # a primary model; if unavailable, fall back to the reference tokenizer
-    # model so prompt building doesn’t hard-fail during tests or bootstrap.
-    try:
-        failover_configs = get_llm_config_with_failover(
-            agent_id=str(agent.id),
-            token_count=0,
-            allow_unconfigured=True,
-            agent=agent,
-            is_first_loop=is_first_run,
-            routing_profile=routing_profile,
-        )
-    except LLMNotConfiguredError:
-        failover_configs = None
-    except Exception:
-        failover_configs = None
-    model = failover_configs[0][1] if failover_configs else _AGENT_MODEL
-    
     # Create token estimator for the specific model
     token_estimator = _create_token_estimator(model)
-    
+
     # Initialize promptree with the token estimator
     prompt = Prompt(token_estimator=token_estimator)
 
     # System instruction (highest priority, never shrinks)
     peer_dm_context = _get_active_peer_dm_context(agent)
     proactive_context = _get_recent_proactive_context(agent)
-    prompt_allows_implied_send = _config_allows_implied_send(
-        failover_configs[0][2] if failover_configs else None
-    )
     implied_send_context = _get_implied_send_context(
         agent,
         allow_implied_send=prompt_allows_implied_send,
@@ -2167,6 +2190,7 @@ def build_prompt_context(
         proactive_context=proactive_context,
         implied_send_context=implied_send_context,
         continuation_notice=continuation_notice,
+        system_directive_block=system_directive_block,
     )
 
     # Medium priority sections (weight=6) - important but can be shrunk if needed
@@ -2212,20 +2236,30 @@ def build_prompt_context(
         schedule_str,
         weight=2
     )
-    if agent.schedule:
+    if planning_mode_active:
         important_group.section_text(
             "schedule_note",
-            schedule_fragments.schedule_note_with_schedule,
+            "Keep the current schedule unchanged until planning is completed or skipped. "
+            "Do not update schedule while planning mode is active. "
+            "If no schedule is set yet, leave it unchanged until planning ends.",
             weight=1,
             non_shrinkable=True
         )
     else:
-        important_group.section_text(
-            "schedule_note",
-            schedule_fragments.schedule_note_without_schedule,
-            weight=1,
-            non_shrinkable=True
-        )
+        if agent.schedule:
+            important_group.section_text(
+                "schedule_note",
+                "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match.",
+                weight=1,
+                non_shrinkable=True
+            )
+        else:
+            important_group.section_text(
+                "schedule_note",
+                "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop.",
+                weight=1,
+                non_shrinkable=True
+            )
 
     capabilities_sections = _build_agent_capabilities_sections(agent)
     if capabilities_sections:
@@ -2308,7 +2342,12 @@ def build_prompt_context(
         )
         important_group.section_text(
             "charter_note",
-            "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new.",
+            (
+                "Do not update __agent_config.charter directly while planning mode is active. "
+                "Finish planning with end_planning(full_plan=...), which replaces your runtime charter."
+                if planning_mode_active
+                else "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new."
+            ),
             weight=2,
             non_shrinkable=True
         )
@@ -2411,9 +2450,27 @@ def build_prompt_context(
         weight=1,
         non_shrinkable=True
     )
+    if planning_mode_active:
+        agent_config_note = (
+            f"Planning Mode is active. Do not update schedule while planning mode is active. "
+            "Keep the current schedule unchanged until planning is completed or skipped. "
+            f"When planning is finished, end_planning(full_plan=...) replaces your runtime charter, and only after planning ends should you write schedule changes to {AGENT_CONFIG_TABLE} via sqlite_batch. "
+            "CRITICAL: Planning is not deliverable work. Do not create kanban cards or start execution until planning is completed or skipped."
+        )
+    else:
+        agent_config_note = (
+            f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
+            "(single row, id=1). It resets every LLM call and is applied after tools run. "
+            "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
+            "Clear schedule with schedule=NULL or ''. "
+            "When in doubt, set a schedule (default '0 9 * * *'). "
+            "CRITICAL: Charter/schedule updates are NOT work. "
+            "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
+            "(e.g., quick lookups) until you fetch and report the result."
+        )
     variable_group.section_text(
         "agent_config_note",
-        schedule_fragments.agent_config_note,
+        agent_config_note,
         weight=2,
         non_shrinkable=True,
     )
@@ -2577,55 +2634,170 @@ def build_prompt_context(
     tokens_saved = tokens_before - tokens_after
 
     # Log token usage for monitoring
-    logger.info(
-        f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
-        f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
-        f"budget was {token_budget} tokens)"
-    )
+    if record_span:
+        logger.info(
+            f"Prompt rendered for agent {agent.id}: {tokens_before} tokens before fitting, "
+            f"{tokens_after} tokens after fitting (saved {tokens_saved} tokens, "
+            f"budget was {token_budget} tokens)"
+        )
 
-    archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
-        agent=agent,
-        system_prompt=system_prompt,
-        user_prompt=user_content,
-        tokens_before=tokens_before,
-        tokens_after=tokens_after,
-        tokens_saved=tokens_saved,
-        token_budget=token_budget,
-    )
-    if archive_key:
-        span.set_attribute("prompt.archive_key", archive_key)
-        if archive_raw_bytes is not None:
-            span.set_attribute("prompt.archive_bytes_raw", archive_raw_bytes)
-        if archive_compressed_bytes is not None:
-            span.set_attribute("prompt.archive_bytes_compressed", archive_compressed_bytes)
-    else:
-        span.set_attribute("prompt.archive_key", "")
+    archive_id = None
+    if archive_prompt:
+        archive_key, archive_raw_bytes, archive_compressed_bytes, archive_id = _archive_rendered_prompt(
+            agent=agent,
+            system_prompt=system_prompt,
+            user_prompt=user_content,
+            tokens_before=tokens_before,
+            tokens_after=tokens_after,
+            tokens_saved=tokens_saved,
+            token_budget=token_budget,
+        )
+        if record_span:
+            if archive_key:
+                span.set_attribute("prompt.archive_key", archive_key)
+                if archive_raw_bytes is not None:
+                    span.set_attribute("prompt.archive_bytes_raw", archive_raw_bytes)
+                if archive_compressed_bytes is not None:
+                    span.set_attribute("prompt.archive_bytes_compressed", archive_compressed_bytes)
+            else:
+                span.set_attribute("prompt.archive_key", "")
 
-    span.set_attribute("prompt.token_budget", token_budget)
-    span.set_attribute("prompt.tokens_before_fitting", tokens_before)
-    span.set_attribute("prompt.tokens_after_fitting", tokens_after)
-    span.set_attribute("prompt.tokens_saved", tokens_saved)
-    span.set_attribute("prompt.model", model)
-    
-    # Log the prompt report for debugging if needed
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
+    if record_span:
+        span.set_attribute("prompt.token_budget", token_budget)
+        span.set_attribute("prompt.tokens_before_fitting", tokens_before)
+        span.set_attribute("prompt.tokens_after_fitting", tokens_after)
+        span.set_attribute("prompt.tokens_saved", tokens_saved)
+        span.set_attribute("prompt.model", model)
 
-    result = (
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Prompt sections for agent {agent.id}:\n{prompt.report()}")
+
+    return (
         [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
         ],
         tokens_after,
         archive_id,
+        {
+            "prompt_allows_implied_send": prompt_allows_implied_send,
+            "prompt_render_signature": _prompt_render_signature_from_failover_configs(
+                prompt_failover_configs
+            ),
+        },
     )
-    if include_metadata:
-        return (
-            *result,
-            {
-                "prompt_allows_implied_send": prompt_allows_implied_send,
-            },
+
+@tracer.start_as_current_span("Build Prompt Context")
+def build_prompt_context(
+    agent: PersistentAgent,
+    current_iteration: int = 1,
+    max_iterations: Optional[int] = None,
+    reasoning_only_streak: int = 0,
+    is_first_run: bool = False,
+    daily_credit_state: Optional[dict] = None,
+    continuation_notice: Optional[str] = None,
+    routing_profile: Any = None,
+    prefer_low_latency: Optional[bool] = None,
+    include_metadata: bool = False,
+) -> tuple[List[dict], int, Optional[UUID]] | tuple[List[dict], int, Optional[UUID], dict[str, Any]]:
+    """
+    Return a system + user message for the LLM using promptree for token budget management.
+
+    Args:
+        agent: Persistent agent being processed.
+        current_iteration: 1-based iteration counter inside the loop.
+        max_iterations: Maximum iterations allowed for this processing cycle.
+        reasoning_only_streak: Number of consecutive iterations without tool calls.
+        is_first_run: Whether this is the very first processing cycle for the agent.
+        daily_credit_state: Pre-computed daily credit state (optional).
+        continuation_notice: Optional system note to inject for follow-up loops.
+        routing_profile: LLMRoutingProfile instance for eval routing (optional).
+        prefer_low_latency: Optional low-latency routing hint used to match the
+            prompt against the same failover set the completion call will use.
+        include_metadata: When true, include prompt capability metadata in the return value.
+
+    Returns:
+        Tuple of (messages, fitted_token_count, prompt_archive_id) where
+        fitted_token_count is the actual token count after promptree fitting for
+        accurate LLM selection and prompt_archive_id references the metadata row
+        for the stored prompt archive (or ``None`` if archiving failed).
+
+        When ``include_metadata`` is true, a fourth item is returned containing
+        prompt capability flags used by the orchestration loop.
+    """
+    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = (
+        _safe_get_prompt_failover_configs(
+            agent,
+            token_count=0,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
         )
+    )
+    preview_system_directive_block = _preview_system_prompt_messages(agent)
+
+    provisional_result = None
+    max_render_attempts = 3
+    for attempt in range(max_render_attempts):
+        provisional_result = _render_prompt_context_once(
+            agent,
+            current_iteration=current_iteration,
+            max_iterations=max_iterations,
+            reasoning_only_streak=reasoning_only_streak,
+            is_first_run=is_first_run,
+            daily_credit_state=daily_credit_state,
+            continuation_notice=continuation_notice,
+            routing_profile=routing_profile,
+            prompt_failover_configs=prompt_failover_configs,
+            system_directive_block=preview_system_directive_block,
+            skip_compaction=attempt > 0,
+            archive_prompt=False,
+            record_span=False,
+        )
+        _, fitted_token_count, _, provisional_metadata = provisional_result
+        resolved_failover_configs = _safe_get_prompt_failover_configs(
+            agent,
+            token_count=fitted_token_count,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+        if (
+            _prompt_render_signature_from_failover_configs(resolved_failover_configs)
+            == provisional_metadata["prompt_render_signature"]
+        ):
+            prompt_failover_configs = resolved_failover_configs
+            break
+        prompt_failover_configs = resolved_failover_configs
+    else:
+        logger.warning(
+            "Prompt render config did not stabilize for agent %s after %d attempts; using latest resolved failover signature.",
+            agent.id,
+            max_render_attempts,
+        )
+
+    final_messages, final_tokens, final_archive_id, final_metadata = _render_prompt_context_once(
+        agent,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        reasoning_only_streak=reasoning_only_streak,
+        is_first_run=is_first_run,
+        daily_credit_state=daily_credit_state,
+        continuation_notice=continuation_notice,
+        routing_profile=routing_profile,
+        prompt_failover_configs=prompt_failover_configs,
+        system_directive_block=preview_system_directive_block,
+        skip_compaction=True,
+        archive_prompt=True,
+        record_span=True,
+    )
+    if preview_system_directive_block:
+        _consume_system_prompt_messages(agent)
+    final_metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
+
+    result = (final_messages, final_tokens, final_archive_id)
+    if include_metadata:
+        return (*result, final_metadata)
     return result
 
 
@@ -3234,8 +3406,6 @@ def _get_work_completion_prompt(
             return None
 
     has_schedule = bool(agent.schedule)
-    planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
-    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
 
     # Determine credit pressure
     low_credits = False
@@ -3276,7 +3446,10 @@ def _get_work_completion_prompt(
             "work_rescue_required",
             (
                 f"⚠️ Low credits + unfinished work: {open_cards} card(s) ({cards_desc}).\n"
-                f"{schedule_fragments.work_rescue_note}"
+                "Credits running low. Before stopping:\n"
+                "1. Update cards with current progress (what you've learned)\n"
+                "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
+                "This ensures you resume when credits reset."
             ),
             8,
         )
@@ -3305,146 +3478,6 @@ def _get_work_completion_prompt(
             ),
             4,
         )
-
-
-@dataclass(frozen=True)
-class _SchedulePromptFragments:
-    agent_config_note: str
-    schedule_note_with_schedule: str
-    schedule_note_without_schedule: str
-    work_rescue_note: str
-    stop_schedule_example: str
-    mid_conversation_schedule_example: str
-    stop_continue_rule: str
-    schedule_control_guidance: str
-    schedule_intro_guidance: str
-    new_job_setup_example: str
-    timing_change_example: str
-    schedule_updates_section: str
-    golden_rule: str
-    first_response_example: str
-    batch_everything_line: str
-    config_update_user_note: str
-    adaptability_guidance: str
-
-
-def _get_schedule_prompt_fragments(*, planning_mode_active: bool) -> _SchedulePromptFragments:
-    if planning_mode_active:
-        return _SchedulePromptFragments(
-            agent_config_note=(
-                f"To update your charter, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
-                "(single row, id=1). It resets every LLM call and is applied after tools run. "
-                "Do not update schedule while planning mode is active. Complete or skip planning before changing it. "
-                "CRITICAL: Charter updates are NOT work. "
-                "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
-                "(e.g., quick lookups) until you fetch and report the result."
-            ),
-            schedule_note_with_schedule=(
-                "Planning Mode is active. Keep the current schedule unchanged until planning is completed or skipped."
-            ),
-            schedule_note_without_schedule=(
-                "Planning Mode is active. Leave schedule unset until planning is completed or skipped."
-            ),
-            work_rescue_note=(
-                "Credits running low. Before stopping:\n"
-                "1. Update cards with current progress (what you've learned)\n"
-                "2. Stop cleanly without changing schedule; planning mode blocks schedule updates until planning is complete."
-            ),
-            stop_schedule_example="",
-            mid_conversation_schedule_example="",
-            stop_continue_rule=(
-                "**The rule:** While planning is active, focus on clarifying scope and updating charter notes only; do not change schedule yet.\n"
-            ),
-            schedule_control_guidance=(
-                "Do not update schedule while planning mode is active, even if later prompt sections mention recurring work examples. "
-            ),
-            schedule_intro_guidance="",
-            new_job_setup_example=(
-                "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...' WHERE id=1;\")\n"
-            ),
-            timing_change_example="",
-            schedule_updates_section="",
-            golden_rule=(
-                "**Golden rule**: During planning, capture scope and constraints in the charter, but leave schedule unchanged until planning is complete.\n\n"
-            ),
-            first_response_example=(
-                "- **After planning is complete**, your first execution-oriented sqlite_batch can set charter, schedule, and kanban together: "
-                "`sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
-            ),
-            batch_everything_line=(
-                "- Once planning is complete, batch charter + schedule + kanban in one sqlite_batch when you start the work.\n"
-            ),
-            config_update_user_note=(
-                "Inform the user when you update your charter so they can provide corrections. Schedule changes wait until planning is complete. "
-            ),
-            adaptability_guidance=(
-                "Be proactive: as you learn more, refine your charter. Keep shaping the plan until it is ready to execute. "
-            ),
-        )
-
-    return _SchedulePromptFragments(
-        agent_config_note=(
-            f"To update your charter or schedule, write to {AGENT_CONFIG_TABLE} via sqlite_batch "
-            "(single row, id=1). It resets every LLM call and is applied after tools run. "
-            "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; "
-            "Clear schedule with schedule=NULL or ''. "
-            "When in doubt, set a schedule (default '0 9 * * *'). "
-            "CRITICAL: Charter/schedule updates are NOT work. "
-            "No kanban cards = no multi-step work, BUT you still continue for simple one-off requests "
-            "(e.g., quick lookups) until you fetch and report the result."
-        ),
-        schedule_note_with_schedule=(
-            "UPDATE YOUR SCHEDULE if the timing no longer matches the job. User wants it more/less frequent? Change it now. Task scope changed? Adjust timing to match."
-        ),
-        schedule_note_without_schedule=(
-            "⚠️ NO SCHEDULE SET. When in doubt, set one—default '0 9 * * *'. Without a schedule, you die when you stop."
-        ),
-        work_rescue_note=(
-            "Credits running low. Before stopping:\n"
-            "1. Update cards with current progress (what you've learned)\n"
-            "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-            "This ensures you resume when credits reset."
-        ),
-        stop_schedule_example=(
-            "- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
-        ),
-        mid_conversation_schedule_example=(
-            "- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
-        ),
-        stop_continue_rule=(
-            "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
-        ),
-        schedule_control_guidance="",
-        schedule_intro_guidance=(
-            "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
-            "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
-            "Ask about timezone if relevant. "
-        ),
-        new_job_setup_example=(
-            "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
-        ),
-        timing_change_example="→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n",
-        schedule_updates_section=(
-            "### Schedule updates:\n"
-            "Update your schedule when timing requirements change:\n"
-            "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
-            "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
-            "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
-        ),
-        golden_rule=(
-            "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
-        ),
-        first_response_example=(
-            "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
-        ),
-        batch_everything_line="- Batch everything: charter + schedule + kanban in one sqlite_batch\n",
-        config_update_user_note=(
-            "Inform the user when you update your charter/schedule so they can provide corrections. "
-        ),
-        adaptability_guidance=(
-            "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
-        ),
-    )
 
 
 def add_budget_awareness_sections(
@@ -3912,6 +3945,8 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
         return ""
 
     streak_label = "reply" if reasoning_only_streak == 1 else f"{reasoning_only_streak} consecutive replies"
+    # MAX_NO_TOOL_STREAK=1, so any no-tool response triggers auto-stop warning
+    urgency = "Auto-stop imminent! " if reasoning_only_streak >= 1 else ""
     if implied_send_active:
         patterns = (
             "(1) More work? Include a tool call, or end message with \"CONTINUE_WORK_SIGNAL\" (stripped) "
@@ -3925,7 +3960,7 @@ def _get_reasoning_streak_prompt(reasoning_only_streak: int, *, implied_send_act
             "(3) Done? sleep_until_next_trigger."
         )
     return (
-        f"Your previous {streak_label} had no tool calls. No-tool replies count toward auto-stop, so make the next step decisive. "
+        f"{urgency}Your previous {streak_label} had no tool calls. "
         f"Options: {patterns}"
     )
 
@@ -3983,6 +4018,92 @@ def _get_recent_sqlite_retry_warning(agent: PersistentAgent) -> str:
     return _build_sqlite_retry_warning(recent_calls)
 
 
+def _get_pending_system_prompt_message_payloads(
+    agent: PersistentAgent,
+) -> list[tuple[PersistentAgentSystemMessage, str]]:
+    """Load pending admin-authored directives for prompt injection."""
+
+    try:
+        pending_messages = list(
+            agent.system_prompt_messages.filter(
+                is_active=True,
+                delivered_at__isnull=True,
+            ).order_by("created_at")
+        )
+    except Exception:
+        logger.exception(
+            "Failed to process system prompt messages for agent %s. These messages will not be injected in this cycle.",
+            agent.id,
+        )
+        return []
+
+    message_payloads: list[tuple[PersistentAgentSystemMessage, str]] = []
+    for message in pending_messages:
+        text = (message.body or "").strip()
+        if not text:
+            text = "(No directive text provided)"
+        message_payloads.append((message, text))
+    return message_payloads
+
+
+def _format_system_prompt_messages_block(
+    message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
+) -> str:
+    """Render admin-authored directives into a system-prompt block."""
+
+    if not message_payloads:
+        return ""
+
+    directives = [
+        f"{idx}. {text}"
+        for idx, (_message, text) in enumerate(message_payloads, start=1)
+    ]
+    header = (
+        "A note from the Gobii team:\n"
+        "Please address these directive(s) before continuing with your regular work:"
+    )
+    footer = "Acknowledge in your reasoning and act on these promptly."
+    return f"{header}\n" + "\n".join(directives) + f"\n{footer}"
+
+
+def _deliver_system_prompt_messages(
+    agent: PersistentAgent,
+    message_payloads: list[tuple[PersistentAgentSystemMessage, str]],
+) -> None:
+    """Mark injected directives delivered and record audit steps."""
+
+    if not message_payloads:
+        return
+
+    with transaction.atomic():
+        now = dj_timezone.now()
+        message_ids = [message.id for message, _ in message_payloads]
+        PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
+        _record_system_directive_steps(agent, message_payloads)
+
+        # Broadcast updated delivery status to audit subscribers.
+        try:
+            from console.agent_audit.realtime import broadcast_system_message_audit
+
+            for message, _ in message_payloads:
+                message.delivered_at = now
+                broadcast_system_message_audit(message)
+        except Exception:
+            logger.debug(
+                "Failed to broadcast system directive delivery for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+
+
+def _preview_system_prompt_messages(agent: PersistentAgent) -> str:
+    """Return pending directives without mutating delivery state."""
+
+    return _format_system_prompt_messages_block(
+        _get_pending_system_prompt_message_payloads(agent)
+    )
+
+
 def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     """
     Return a formatted system directive block issued via the admin panel.
@@ -3990,62 +4111,12 @@ def _consume_system_prompt_messages(agent: PersistentAgent) -> str:
     Pending directives are marked as delivered so they only appear once.
     """
 
-    directives: list[str] = []
-    message_payloads: list[tuple[PersistentAgentSystemMessage, str]] = []
-
-    try:
-        with transaction.atomic():
-            pending_messages = list(
-                agent.system_prompt_messages.filter(
-                    is_active=True,
-                    delivered_at__isnull=True,
-                ).order_by("created_at")
-            )
-
-            if not pending_messages:
-                return ""
-
-            for idx, message in enumerate(pending_messages, start=1):
-                text = (message.body or "").strip()
-                if not text:
-                    text = "(No directive text provided)"
-                directives.append(f"{idx}. {text}")
-                message_payloads.append((message, text))
-
-            if not directives:
-                return ""
-
-            now = dj_timezone.now()
-            message_ids = [message.id for message, _ in message_payloads]
-            PersistentAgentSystemMessage.objects.filter(id__in=message_ids).update(delivered_at=now)
-            _record_system_directive_steps(agent, message_payloads)
-
-            # Broadcast updated delivery status to audit subscribers.
-            try:
-                from console.agent_audit.realtime import broadcast_system_message_audit
-
-                for message, _ in message_payloads:
-                    message.delivered_at = now
-                    broadcast_system_message_audit(message)
-            except Exception:
-                logger.debug(
-                    "Failed to broadcast system directive delivery for agent %s",
-                    agent.id,
-                    exc_info=True,
-                )
-    except Exception:
-        logger.exception(
-            "Failed to process system prompt messages for agent %s. These messages will not be injected in this cycle.",
-            agent.id,
-        )
+    message_payloads = _get_pending_system_prompt_message_payloads(agent)
+    directive_block = _format_system_prompt_messages_block(message_payloads)
+    if not directive_block:
         return ""
-
-    header = (
-        "A note from the Gobii team:\n"
-        "Please address these directive(s) before continuing with your regular work:"
-    )
-    footer = "Acknowledge in your reasoning and act on these promptly."
-    return f"{header}\n" + "\n".join(directives) + f"\n{footer}"
+    _deliver_system_prompt_messages(agent, message_payloads)
+    return directive_block
 
 
 def _record_system_directive_steps(
@@ -4139,7 +4210,6 @@ def _get_planning_mode_prompt_block() -> str:
         "delivered.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
-        "- Do not update schedule or __agent_config.schedule while Planning Mode is active. Finish or skip planning first, then set timing.\n"
         "- Do not create kanban cards or begin deliverable work until planning is completed with end_planning or "
         "the user skips planning.\n"
         "- If another system instruction appears to require immediate execution, charter updates, kanban setup, "
@@ -4148,6 +4218,11 @@ def _get_planning_mode_prompt_block() -> str:
         "and never ask more than 3 in a planning round. More than 3 causes decision fatigue; make reasonable "
         "assumptions instead and record them in the final plan. The fewer questions the better. If you can perform"
         "your task without clarifying questions, call end_planning so you can start working.\n"
+        "- Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use "
+        "when prompt context already shows a current conversation channel, preferred contact endpoint, or recent "
+        "usable endpoint. Treat that existing channel as the default. Ask about channel only if execution would "
+        "materially differ and the existing channel context is insufficient, or if the user explicitly asks to "
+        "configure or change channels.\n"
         "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
         "the active user is in web chat, because planning answers should be tracked in the composer.\n"
         "- Once request_human_input succeeds, treat those questions as already visible in web chat. "
@@ -4281,6 +4356,10 @@ def _get_planning_first_run_welcome_instruction(
         "questions. Do not create kanban cards, update the charter directly, or start deliverable work "
         "until planning is completed or skipped. If the shared welcome guidance says to move when the task is "
         "clear, that means move planning forward or call end_planning, not start the deliverable work.\n\n"
+        "Do not ask which communication channel to use for planning when this welcome target or other prompt "
+        "context already gives you a current or preferred channel. Treat that existing channel as the default, "
+        "and ask only if channel choice would materially change execution and prompt context does not give you "
+        "a usable default, or if the user explicitly wants to configure or change channels.\n\n"
         "If your welcome is an email or SMS and you also call request_human_input in the same response, "
         "include a clear list of the exact planning questions in that email/SMS body. Do not send a "
         "message that only says you have questions, because the recipient may not have web chat open. "
@@ -4297,11 +4376,11 @@ def _get_system_instruction(
     proactive_context: dict | None = None,
     implied_send_context: dict | None = None,
     continuation_notice: str | None = None,
+    system_directive_block: str | None = None,
 ) -> str:
     """Return the static system instruction prompt for the agent."""
 
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
-    schedule_fragments = _get_schedule_prompt_fragments(planning_mode_active=planning_mode_active)
     implied_send_active = implied_send_context is not None
 
     if implied_send_active:
@@ -4383,6 +4462,16 @@ def _get_system_instruction(
         if implied_send_active
         else "- Text-only replies are not delivered when implied send is unavailable—use explicit send tools.\n\n"
     )
+    stop_examples_schedule = (
+        ""
+        if planning_mode_active
+        else f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
+    )
+    mid_conversation_schedule_examples = (
+        ""
+        if planning_mode_active
+        else f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
+    )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**ALWAYS set will_continue_work explicitly on every tool call.** Be intentional.\n\n"
@@ -4391,7 +4480,7 @@ def _get_system_instruction(
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
-        f"{schedule_fragments.stop_schedule_example}"
+        f"{stop_examples_schedule}"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
         "- Research complete, report sent, all work done AND marked done → will_continue_work=false on final tool → STOP.\n\n"
         "**CONTINUE (will_continue_work=true)** — whenever at least one more action remains after this tool call:\n"
@@ -4404,7 +4493,7 @@ def _get_system_instruction(
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
-        f"{schedule_fragments.mid_conversation_schedule_example}"
+        f"{mid_conversation_schedule_examples}"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**CRITICAL termination sequence:**\n"
         "1. Send your final report to the user\n"
@@ -4412,7 +4501,7 @@ def _get_system_instruction(
         "3. You're done—no extra turn, no announcement\n\n"
         "**Guardrail:** If you mark the last kanban card done, your final report MUST already be sent "
         "(same turn is OK: send_chat_message(..., will_continue_work=true) then sqlite_batch(..., will_continue_work=false)).\n\n"
-        f"{schedule_fragments.stop_continue_rule}"
+        "**The rule:** Recurring or truly multi-phase work may need charter, kanban, or schedule updates; one-off work usually needs none.\n"
     )
 
     if implied_send_active:
@@ -4462,6 +4551,31 @@ def _get_system_instruction(
                 "```\n\n"
             )
 
+    charter_and_schedule_intro = (
+        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
+        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
+        "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
+        "Ask about timezone if relevant. "
+        if not planning_mode_active
+        else "Your runtime charter is your memory of purpose. While Planning Mode is active, do not update __agent_config.charter directly as a substitute for planning. "
+        "Do not update schedule or __agent_config.schedule while Planning Mode is active. "
+        "Keep the current schedule unchanged until planning is completed or skipped. "
+        "Ask about timezone if relevant. "
+    )
+    schedule_updates_guidance = (
+        ""
+        if planning_mode_active
+        else "### Schedule updates:\n"
+        "Update your schedule when timing requirements change:\n"
+        "- User says 'check every hour' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 * * * *' WHERE id=1;\")`\n"
+        "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
+        "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
+    )
+    kanban_setup_rule = (
+        "**Golden rule**: Multi-step work = charter + schedule + kanban cards, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
+        if not planning_mode_active
+        else "**Golden rule**: After Planning Mode is completed or skipped, multi-step work = charter + schedule + kanban cards, in that same response. Don't wait once execution starts.\n\n"
+    )
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
@@ -4510,9 +4624,7 @@ def _get_system_instruction(
         "Tool output (French), user in English: \"Erreur: permission refusee\"\n"
         "Assistant (English): \"The tool reported a permission error. I'll retry with the correct permissions or ask for approval if needed.\"\n\n"
 
-        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
-        f"{schedule_fragments.schedule_control_guidance}"
-        f"{schedule_fragments.schedule_intro_guidance}"
+        f"{charter_and_schedule_intro}"
 
         "\n\n"
         "## Your Charter: When & How to Update\n\n"
@@ -4534,7 +4646,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        f"{schedule_fragments.new_job_setup_example}"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('Find competitor list', 'doing'), ('Set up price tracking', 'todo');\")\n"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -4559,12 +4671,12 @@ def _get_system_instruction(
         "Before: 'Scout AI startups. Track YC, Product Hunt.'\n"
         "After:  'Track user portfolio stocks. Monitor prices and news.'\n"
         "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Track user portfolio stocks. Monitor prices and news.' WHERE id=1;\")\n"
-        f"{schedule_fragments.timing_change_example}"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET schedule='...' WHERE id=1;\") if timing changes\n"
         "```\n\n"
 
-        f"{schedule_fragments.schedule_updates_section}"
+        f"{schedule_updates_guidance}"
 
-        f"{schedule_fragments.golden_rule}"
+        f"{kanban_setup_rule}"
 
         "### When to use kanban cards:\n"
         "**USE CARDS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
@@ -4578,18 +4690,18 @@ def _get_system_instruction(
         "- **For multi-step work: create cards.** Complex tasks need tracking to avoid losing your place.\n"
         "- **Cards must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
         "- **Always include a reporting step.** The final card must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
-        f"{schedule_fragments.first_response_example}"
+        "- **First response to multi-step work:** `sqlite_batch(sql=\"UPDATE __agent_config SET charter='<what>', schedule='<when>' WHERE id=1; INSERT INTO __kanban_cards (title, status) VALUES ('<specific action — context about goal>', 'doing'), ('<next action — why it matters>', 'todo'), ('<deliver results to user — what they asked for>', 'todo')\")`\n"
         "- **As you discover more, add kanban cards.** Found N things? N cards: `INSERT INTO __kanban_cards (title, status) VALUES (<title1>, 'todo'), (<title2>, 'todo'), ...`\n"
         "- **Cards can multiply.** One vague card → N specific cards just by inserting new cards.\n"
         "- **Cards persist across turns.** Once inserted, cards stay in the table until you UPDATE or DELETE them. Never re-insert cards that already exist.\n"
         "- **Finish steps with UPDATE, not INSERT:** `UPDATE __kanban_cards SET status='done' WHERE friendly_id='step-1';` Never INSERT to change status—that creates duplicates.\n"
         "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
-        f"{schedule_fragments.batch_everything_line}"
+        "- Batch everything: charter + schedule + kanban in one sqlite_batch\n"
         "- **Cards in todo/doing = work remaining.** Keep going until all cards are done or you're blocked.\n"
         "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done.\n"
         "- **Terminate on final card:** When marking your last card done, use `will_continue_work=false` on that sqlite_batch. This ends your turn immediately—no extra cycle.\n\n"
 
-        f"{schedule_fragments.config_update_user_note}"
+        "Inform the user when you update your charter/schedule so they can provide corrections. "
         "Do not mention other internal maintenance such as kanban bookkeeping or skill creation/update unless the user explicitly asks about it. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
@@ -5043,7 +5155,7 @@ def _get_system_instruction(
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
-        f"{schedule_fragments.adaptability_guidance}"
+        "Be proactive: as you learn more, refine your charter. As conditions change, adjust your schedule. "
         "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about your limitations. If a task is too ambitious, help the user find a smaller scope where you can genuinely deliver value. "
@@ -5054,7 +5166,9 @@ def _get_system_instruction(
     )
     base_prompt += "\n\n<sqlite_examples>\n" + _get_sqlite_examples() + "\n</sqlite_examples>"
 
-    directive_block = _consume_system_prompt_messages(agent)
+    directive_block = system_directive_block
+    if directive_block is None:
+        directive_block = _consume_system_prompt_messages(agent)
     if directive_block:
         base_prompt += "\n\n" + directive_block
 
