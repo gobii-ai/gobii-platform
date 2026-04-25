@@ -954,6 +954,7 @@ def resolve_plan_from_subscription_data(
 
     items = ((subscription_data.get("items") or {}).get("data") or [])
     fallback_item: Mapping[str, Any] | None = None
+    rejected_org_only_plan = False
     plan_kind = "seat" if owner_type == "organization" else "base"
 
     for item in items:
@@ -983,6 +984,7 @@ def resolve_plan_from_subscription_data(
         if plan_version is not None:
             plan_payload = get_plan_context_for_version(plan_version)
             if owner_type == "user" and _plan_requires_organization(plan_version=plan_version, plan_context=plan_payload):
+                rejected_org_only_plan = True
                 logger.warning(
                     "Ignoring org-only plan for user-owned subscription item price=%s product=%s",
                     price_id,
@@ -995,6 +997,7 @@ def resolve_plan_from_subscription_data(
             plan = get_plan_by_product_id(str(product_id))
             if plan and plan.get("id"):
                 if owner_type == "user" and _plan_requires_organization(str(plan.get("id")), plan_context=plan):
+                    rejected_org_only_plan = True
                     logger.warning(
                         "Ignoring org-only legacy plan for user-owned subscription item product=%s",
                         product_id,
@@ -1004,6 +1007,9 @@ def resolve_plan_from_subscription_data(
 
         if fallback_item is None:
             fallback_item = item
+
+    if owner_type == "user" and rejected_org_only_plan:
+        return None, None, None
 
     return None, None, fallback_item
 

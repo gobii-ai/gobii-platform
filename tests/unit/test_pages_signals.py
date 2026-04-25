@@ -954,6 +954,62 @@ class SubscriptionSignalTests(TestCase):
         self.mock_capi.assert_not_called()
 
     @tag("batch_pages_signals")
+    @patch("util.subscription_helper.get_plan_by_product_id")
+    @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
+    @patch("util.subscription_helper.get_plan_version_by_price_id", return_value=None)
+    def test_mixed_org_plan_and_licensed_addon_does_not_mutate_user_billing(
+        self,
+        _mock_plan_version_by_price,
+        _mock_plan_version_by_product,
+        mock_plan_by_product,
+    ):
+        self.mock_capi.reset_mock()
+
+        def _plan_lookup(product_id):
+            if product_id == "prod_org_team":
+                return {"id": PlanNamesChoices.ORG_TEAM.value, "org": True}
+            return None
+
+        mock_plan_by_product.side_effect = _plan_lookup
+
+        dedicated_item = {
+            "plan": {"usage_type": "licensed"},
+            "price": {"id": "price_dedicated", "product": "prod_dedicated"},
+            "quantity": 1,
+        }
+        payload = _build_event_payload(
+            billing_reason="subscription_create",
+            product="prod_org_team",
+            extra_items=[dedicated_item],
+        )
+        payload["items"]["data"][0]["price"]["id"] = "price_org_team"
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        sub = self._mock_subscription(current_period_day=15, subscriber=self.user)
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.resume_owner_execution") as mock_resume, \
+            patch("pages.signals.AddonEntitlementService.sync_subscription_entitlements") as mock_sync_entitlements, \
+            patch("pages.signals.mark_user_billing_with_plan") as mock_mark_plan, \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track:
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertEqual(self.billing.subscription, PlanNames.FREE)
+        mock_resume.assert_not_called()
+        mock_sync_entitlements.assert_not_called()
+        mock_mark_plan.assert_not_called()
+        mock_grant.assert_not_called()
+        mock_identify.assert_not_called()
+        mock_track.assert_not_called()
+        self.mock_capi.assert_not_called()
+
+    @tag("batch_pages_signals")
     @override_settings(CAPI_LTV_MULTIPLE=1.0)
     def test_subscription_anchor_updates_from_stripe(self):
         self.mock_capi.reset_mock()

@@ -222,6 +222,54 @@ class ResolvePlanFromSubscriptionDataTests(TestCase):
         self.assertIsNone(plan_version)
         self.assertIsNone(licensed_item)
 
+    @patch("util.subscription_helper.get_plan_by_product_id")
+    @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
+    @patch("util.subscription_helper.get_plan_version_by_price_id", return_value=None)
+    def test_user_owner_rejects_mixed_org_plan_and_licensed_addon_payload(
+        self,
+        _mock_plan_version_by_price,
+        _mock_plan_version_by_product,
+        mock_plan_by_product,
+    ):
+        def _plan_lookup(product_id):
+            if product_id == "prod_org_team":
+                return {"id": PlanNames.ORG_TEAM, "org": True}
+            return None
+
+        mock_plan_by_product.side_effect = _plan_lookup
+
+        subscription_data = {
+            "items": {
+                "data": [
+                    {
+                        "price": {
+                            "id": "price_org_team",
+                            "product": "prod_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                        "quantity": 3,
+                    },
+                    {
+                        "price": {
+                            "id": "price_dedicated",
+                            "product": "prod_dedicated",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                        "quantity": 1,
+                    },
+                ]
+            }
+        }
+
+        plan_payload, plan_version, licensed_item = resolve_plan_from_subscription_data(
+            subscription_data,
+            owner_type="user",
+        )
+
+        self.assertIsNone(plan_payload)
+        self.assertIsNone(plan_version)
+        self.assertIsNone(licensed_item)
+
 
 @tag("batch_subscription")
 class GetUsersDueForMonthlyGrantTests(TestCase):
