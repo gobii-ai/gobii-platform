@@ -271,6 +271,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         pvc_name = _pvc_name(agent.id)
         egress_service_name = None
         no_proxy = None
+        workspace_reset = False
         if session.proxy_server:
             if not self._egress_proxy_image:
                 raise SandboxComputeUnavailable(
@@ -294,6 +295,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         try:
             if self._uses_pvc_workspace() and not _resource_exists(self._client, _pvc_path(self._namespace, pvc_name)):
                 self._create_pvc(pvc_name, agent_id=str(agent.id), snapshot_name=snapshot_name)
+                workspace_reset = snapshot_name is None
             if not _resource_exists(self._client, _service_path(self._namespace, sandbox_service_name)):
                 self._create_service(sandbox_service_name, agent_id=str(agent.id))
 
@@ -306,6 +308,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                     egress_service_name=egress_service_name,
                     no_proxy=no_proxy,
                 )
+                workspace_reset = workspace_reset or not self._uses_pvc_workspace()
             else:
                 phase = (pod.get("status") or {}).get("phase")
                 if not _sandbox_pod_matches(
@@ -328,6 +331,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                         egress_service_name=egress_service_name,
                         no_proxy=no_proxy,
                     )
+                    workspace_reset = workspace_reset or not self._uses_pvc_workspace()
                 elif phase not in {"Running", "Pending"}:
                     self._delete_pod(pod_name)
                     self._create_pod(
@@ -337,6 +341,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                         egress_service_name=egress_service_name,
                         no_proxy=no_proxy,
                     )
+                    workspace_reset = workspace_reset or not self._uses_pvc_workspace()
         except KubernetesApiError as exc:
             raise SandboxComputeUnavailable(f"Kubernetes scheduler failed: {exc}") from exc
 
@@ -344,7 +349,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._delete_pod(pod_name)
             self._delete_service(sandbox_service_name)
             self._delete_egress_proxy(agent)
-            return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
+            return SandboxSessionUpdate(
+                state=AgentComputeSession.State.ERROR,
+                pod_name=pod_name,
+                namespace=self._namespace,
+                workspace_reset=workspace_reset,
+            )
         if not self._wait_for_service_routable(
             sandbox_service_name,
             timeout_seconds=self._service_routable_timeout,
@@ -352,9 +362,19 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._delete_pod(pod_name)
             self._delete_service(sandbox_service_name)
             self._delete_egress_proxy(agent)
-            return SandboxSessionUpdate(state=AgentComputeSession.State.ERROR, pod_name=pod_name, namespace=self._namespace)
+            return SandboxSessionUpdate(
+                state=AgentComputeSession.State.ERROR,
+                pod_name=pod_name,
+                namespace=self._namespace,
+                workspace_reset=workspace_reset,
+            )
 
-        return SandboxSessionUpdate(state=AgentComputeSession.State.RUNNING, pod_name=pod_name, namespace=self._namespace)
+        return SandboxSessionUpdate(
+            state=AgentComputeSession.State.RUNNING,
+            pod_name=pod_name,
+            namespace=self._namespace,
+            workspace_reset=workspace_reset,
+        )
 
     def run_command(
         self,
@@ -533,7 +553,12 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         if delete_workspace and self._uses_pvc_workspace():
             pvc_name = _pvc_name(agent.id)
             self._delete_pvc(pvc_name)
-        return SandboxSessionUpdate(state=AgentComputeSession.State.STOPPED, pod_name=pod_name, namespace=self._namespace)
+        return SandboxSessionUpdate(
+            state=AgentComputeSession.State.STOPPED,
+            pod_name=pod_name,
+            namespace=self._namespace,
+            workspace_reset=(delete_workspace or not self._uses_pvc_workspace()),
+        )
 
     def delete_agent_resources(
         self,

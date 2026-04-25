@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
@@ -301,6 +302,11 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             if remote_checksum and full_path.exists():
                 local_checksum = _resolve_local_checksum(full_path, local_meta)
                 if local_checksum == remote_checksum:
+                    if entry_updated_at is not None:
+                        try:
+                            os.utime(full_path, (entry_updated_at, entry_updated_at))
+                        except OSError:
+                            pass
                     try:
                         local_stat = full_path.stat()
                     except OSError:
@@ -419,6 +425,11 @@ def _handle_sync_filespace(payload: Dict[str, Any]) -> Dict[str, Any]:
             try:
                 with open(full_path, "wb") as handle:
                     handle.write(content)
+                if entry_updated_at is not None:
+                    try:
+                        os.utime(full_path, (entry_updated_at, entry_updated_at))
+                    except OSError:
+                        pass
             except OSError as exc:
                 logger.exception("Failed to write synced file agent=%s path=%s", agent_id, normalized)
                 return {"status": "error", "message": f"Failed to write {normalized}: {exc}"}

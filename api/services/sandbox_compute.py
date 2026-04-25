@@ -305,6 +305,7 @@ class SandboxSessionUpdate:
     pod_name: Optional[str] = None
     namespace: Optional[str] = None
     workspace_snapshot_id: Optional[str] = None
+    workspace_reset: bool = False
 
 
 class SandboxComputeBackend:
@@ -707,6 +708,7 @@ def _session_update_from_response(response: Dict[str, Any]) -> SandboxSessionUpd
         pod_name=response.get("pod_name"),
         namespace=response.get("namespace"),
         workspace_snapshot_id=response.get("workspace_snapshot_id"),
+        workspace_reset=bool(response.get("workspace_reset")),
     )
 
 
@@ -1227,6 +1229,7 @@ class SandboxComputeService:
         logger.debug("Sandbox session touched agent=%s source=%s", session.agent_id, source)
 
     def _apply_session_update(self, session: AgentComputeSession, update: SandboxSessionUpdate) -> None:
+        update_fields = ["state", "pod_name", "namespace", "workspace_snapshot", "updated_at"]
         if update.state:
             session.state = update.state
         if update.pod_name is not None:
@@ -1237,7 +1240,10 @@ class SandboxComputeService:
             snapshot = ComputeSnapshot.objects.filter(id=update.workspace_snapshot_id).first()
             if snapshot:
                 session.workspace_snapshot = snapshot
-        session.save(update_fields=["state", "pod_name", "namespace", "workspace_snapshot", "updated_at"])
+        if update.workspace_reset:
+            session.last_filespace_pull_at = None
+            update_fields.append("last_filespace_pull_at")
+        session.save(update_fields=update_fields)
 
     def _deploy_or_resume_session(
         self,
@@ -1257,7 +1263,7 @@ class SandboxComputeService:
         logger.info(
             (
                 "Sandbox %s deploy_or_resume agent=%s source=%s attempt=%s duration_ms=%s "
-                "state=%s pod=%s namespace=%s"
+                "state=%s pod=%s namespace=%s workspace_reset=%s"
             ),
             mode,
             agent.id,
@@ -1267,6 +1273,7 @@ class SandboxComputeService:
             update.state,
             update.pod_name or session.pod_name,
             update.namespace or session.namespace,
+            update.workspace_reset,
         )
 
     def _ensure_session(self, agent, *, source: str) -> AgentComputeSession:
@@ -1383,6 +1390,52 @@ class SandboxComputeService:
             response.get("skipped"),
             response.get("conflicts"),
             cursor_persisted,
+        )
+        return response
+
+    def _sync_workspace_paths_pull(
+        self,
+        agent,
+        session: AgentComputeSession,
+        *,
+        paths: Sequence[str],
+    ) -> Optional[Dict[str, Any]]:
+        if isinstance(self._backend, LocalSandboxBackend):
+            return None
+
+        pull_paths = [str(path) for path in paths if isinstance(path, str) and path.strip()]
+        if not pull_paths:
+            return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+        pull_started_at = time.monotonic()
+        manifest = build_filespace_pull_manifest(agent, paths=pull_paths)
+        manifest_duration_ms = _elapsed_ms(pull_started_at)
+        if manifest.get("status") != "ok":
+            logger.warning(
+                "Sandbox targeted pull manifest failed agent=%s paths=%s duration_ms=%s status=%s result=%s",
+                agent.id,
+                len(pull_paths),
+                manifest_duration_ms,
+                manifest.get("status"),
+                manifest,
+            )
+            return manifest
+
+        files = manifest.get("files") or []
+        response = self._backend.sync_filespace(agent, session, direction="pull", payload={"files": files})
+        logger.info(
+            (
+                "Sandbox targeted pull sync completed agent=%s paths=%s files=%s status=%s "
+                "duration_ms=%s applied=%s skipped=%s conflicts=%s"
+            ),
+            agent.id,
+            len(pull_paths),
+            len(files),
+            response.get("status"),
+            _elapsed_ms(pull_started_at),
+            response.get("applied"),
+            response.get("skipped"),
+            response.get("conflicts"),
         )
         return response
 
@@ -1962,7 +2015,17 @@ class SandboxComputeService:
             session.pod_name = ""
             session.namespace = ""
             session.lease_expires_at = None
-            session.save(update_fields=["state", "pod_name", "namespace", "lease_expires_at", "updated_at"])
+            session.last_filespace_pull_at = None
+            session.save(
+                update_fields=[
+                    "state",
+                    "pod_name",
+                    "namespace",
+                    "lease_expires_at",
+                    "last_filespace_pull_at",
+                    "updated_at",
+                ]
+            )
 
         return {
             "status": "ok" if not sync_failed else "error",
@@ -2006,7 +2069,11 @@ class SandboxComputeService:
             else:
                 session.state = AgentComputeSession.State.STOPPED
             session.lease_expires_at = None
-            session.save(update_fields=["state", "workspace_snapshot", "lease_expires_at", "updated_at"])
+            update_fields = ["state", "workspace_snapshot", "lease_expires_at", "updated_at"]
+            if delete_workspace:
+                session.last_filespace_pull_at = None
+                update_fields.append("last_filespace_pull_at")
+            session.save(update_fields=update_fields)
         except Exception as exc:
             _track_sandbox_event(
                 agent=agent,

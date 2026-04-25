@@ -277,6 +277,81 @@ class SandboxComputeSyncTests(TestCase):
         session = AgentComputeSession.objects.get(agent=self.agent)
         self.assertEqual(session.last_filespace_pull_at, cursor_two)
 
+    def test_workspace_reset_clears_pull_cursor_before_pull_manifest(self):
+        class _ResetBackend(_DummyBackend):
+            def deploy_or_resume(self, agent, session):
+                self.deploy_calls.append(
+                    {
+                        "agent_id": str(agent.id),
+                        "state": session.state,
+                    }
+                )
+                return SandboxSessionUpdate(
+                    state=AgentComputeSession.State.RUNNING,
+                    workspace_reset=True,
+                )
+
+        backend = _ResetBackend()
+        cursor_before_reset = timezone.now() - timedelta(hours=1)
+        cursor_after_pull = timezone.now()
+        AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            last_filespace_pull_at=cursor_before_reset,
+        )
+
+        with patch("api.services.sandbox_compute.sandbox_compute_enabled", return_value=True), patch(
+            "api.services.sandbox_compute._select_proxy_for_session", return_value=None
+        ), patch(
+            "api.services.sandbox_compute.build_filespace_pull_manifest",
+            return_value={
+                "status": "ok",
+                "files": [],
+                "sync_cursor": cursor_after_pull.isoformat(),
+            },
+        ) as mock_manifest:
+            service = SandboxComputeService(backend=backend)
+            service._ensure_session(self.agent, source="tool_request")
+
+        self.assertIsNone(mock_manifest.call_args.kwargs.get("since"))
+        session = AgentComputeSession.objects.get(agent=self.agent)
+        self.assertEqual(session.last_filespace_pull_at, cursor_after_pull)
+
+    def test_targeted_workspace_pull_bypasses_session_cursor(self):
+        backend = _DummyBackend()
+        service = SandboxComputeService(backend=backend)
+        cursor = timezone.now()
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            last_filespace_pull_at=cursor,
+        )
+        write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"tool source",
+            extension="",
+            mime_type="text/x-python",
+            path="/tools/custom.py",
+            overwrite=True,
+        )
+        write_bytes_to_dir(
+            agent=self.agent,
+            content_bytes=b"other source",
+            extension="",
+            mime_type="text/plain",
+            path="/notes.txt",
+            overwrite=True,
+        )
+
+        result = service._sync_workspace_paths_pull(self.agent, session, paths=["/tools/custom.py"])
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(len(backend.sync_calls), 1)
+        payload_files = backend.sync_calls[0]["payload"]["files"]
+        self.assertEqual([entry["path"] for entry in payload_files], ["/tools/custom.py"])
+        session.refresh_from_db()
+        self.assertEqual(session.last_filespace_pull_at, cursor)
+
     def test_ensure_session_fails_before_pull_when_backend_returns_error_state(self):
         class _ErrorBackend(_DummyBackend):
             def deploy_or_resume(self, agent, session):

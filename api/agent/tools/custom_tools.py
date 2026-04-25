@@ -395,6 +395,16 @@ def _sync_workspace_source(agent: PersistentAgent, source_path: str) -> Optional
 
     try:
         session = service._ensure_session(agent, source="custom_tool_source_sync")
+        pull_result = service._sync_workspace_paths_pull(agent, session, paths=[source_path])
+        if isinstance(pull_result, dict) and pull_result.get("status") != "ok":
+            return {
+                "status": "error",
+                "message": (
+                    f"Failed to sync the latest sandbox workspace source for {source_path}: "
+                    f"{pull_result.get('message') or 'source pull failed'}"
+                ),
+                "sync_result": pull_result,
+            }
         sync_result = service._sync_workspace_push(agent, session)
     except Exception as exc:
         logger.warning(

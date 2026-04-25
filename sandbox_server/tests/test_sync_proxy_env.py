@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
@@ -132,6 +133,49 @@ class SyncProxyEnvTests(unittest.TestCase):
 
         self.assertEqual(result["status"], "ok")
         workspace_size_mock.assert_called_once()
+
+    def test_handle_sync_filespace_pull_preserves_remote_updated_at_mtime(self):
+        updated_at = "2026-03-24T12:00:00+00:00"
+        payload = {
+            "agent_id": "agent-1",
+            "direction": "pull",
+            "files": [
+                {
+                    "path": "/tools/custom.py",
+                    "content": "print('hello')",
+                    "updated_at": updated_at,
+                    "checksum_sha256": "",
+                },
+            ],
+        }
+
+        with TemporaryDirectory() as tmp_dir:
+            agent_root = Path(tmp_dir).resolve()
+            with patch(
+                "sandbox_server.sync._agent_workspace",
+                return_value=agent_root,
+            ), patch(
+                "sandbox_server.sync._store_proxy_env",
+                return_value=False,
+            ), patch(
+                "sandbox_server.sync._proxy_env_from_manifest",
+                return_value=None,
+            ), patch(
+                "sandbox_server.sync._load_manifest",
+                return_value={"files": {}, "deleted": {}},
+            ), patch(
+                "sandbox_server.sync._save_manifest"
+            ):
+                result = _handle_sync_filespace(payload)
+                synced_path = agent_root / "tools" / "custom.py"
+                synced_mtime = synced_path.stat().st_mtime
+
+        self.assertEqual(result["status"], "ok")
+        self.assertAlmostEqual(
+            synced_mtime,
+            datetime.fromisoformat(updated_at).timestamp(),
+            places=3,
+        )
 
     def test_handle_sync_filespace_push_includes_requested_internal_paths(self):
         payload = {

@@ -149,6 +149,7 @@ def build_filespace_pull_manifest(
     agent: PersistentAgent,
     *,
     since: Optional[datetime] = None,
+    paths: Optional[Iterable[str]] = None,
 ) -> Dict[str, Any]:
     """Build a pull manifest for syncing filespace into a workspace."""
     try:
@@ -158,6 +159,11 @@ def build_filespace_pull_manifest(
         return {"status": "error", "message": "Filespace unavailable."}
 
     queryset = AgentFsNode.objects.filter(filespace=filespace)
+    if paths is not None:
+        selected_paths = {path.strip() for path in paths if isinstance(path, str) and path.strip()}
+        if not selected_paths:
+            return {"status": "ok", "files": [], "sync_cursor": None}
+        queryset = queryset.filter(path__in=selected_paths)
     if since:
         queryset = queryset.filter(updated_at__gt=since)
 

@@ -415,8 +415,51 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             result = backend.deploy_or_resume(agent, session)
 
         self.assertEqual(result.state, "running")
+        self.assertTrue(result.workspace_reset)
         backend._create_pvc.assert_not_called()
         backend._create_service.assert_called_once_with("sandbox-agent-agent-emptydir", agent_id="agent-emptydir")
+        backend._create_pod.assert_called_once()
+
+    def test_deploy_or_resume_emptydir_recreate_marks_workspace_reset(self):
+        backend = self._backend()
+        backend._workspace_volume_mode = "emptydir"
+        agent = SimpleNamespace(id="agent-emptydir-recreate")
+        session = SimpleNamespace(proxy_server=None, workspace_snapshot=None)
+        backend._create_pvc = Mock()
+        backend._create_service = Mock()
+        backend._get_pod = Mock(
+            return_value={
+                "status": {"phase": "Succeeded"},
+                "spec": {
+                    "volumes": [
+                        {
+                            "name": "workspace",
+                            "emptyDir": {"sizeLimit": "1Gi"},
+                        },
+                    ],
+                    "containers": [
+                        {
+                            "name": "sandbox-supervisor",
+                            "image": "ghcr.io/example/sandbox:latest",
+                            "resources": SANDBOX_POD_RESOURCES,
+                            "env": [
+                                {"name": "SANDBOX_RUNTIME_CACHE_ROOT", "value": "/runtime-cache"},
+                            ],
+                        }
+                    ],
+                },
+            }
+        )
+        backend._delete_pod = Mock()
+        backend._create_pod = Mock()
+        backend._wait_for_pod_ready = Mock(return_value=True)
+
+        with patch("api.services.sandbox_kubernetes._resource_exists", side_effect=[True]):
+            result = backend.deploy_or_resume(agent, session)
+
+        self.assertEqual(result.state, "running")
+        self.assertTrue(result.workspace_reset)
+        backend._delete_pod.assert_called_once_with("sandbox-agent-agent-emptydir-recreate")
         backend._create_pod.assert_called_once()
 
     def test_deploy_or_resume_keeps_sandbox_service_separate_from_egress_service(self):
