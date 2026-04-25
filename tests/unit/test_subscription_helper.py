@@ -18,6 +18,7 @@ from api.models import (
 from constants.plans import PlanNames
 from constants.grant_types import GrantTypeChoices
 from util.subscription_helper import (
+    mark_owner_billing_with_plan,
     mark_user_billing_with_plan,
     mark_organization_billing_with_plan,
     downgrade_organization_to_free_plan,
@@ -28,6 +29,8 @@ from util.subscription_helper import (
     get_user_plan,
     reconcile_user_plan_from_stripe,
     get_subscription_base_price,
+    report_organization_task_usage_to_stripe,
+    resolve_plan_from_subscription_data,
 )
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 from waffle.models import Switch
@@ -121,6 +124,18 @@ class MarkUserBillingWithPlanTests(TestCase):
         agent.refresh_from_db()
         self.assertIsNone(agent.daily_credit_limit)
 
+    @tag("batch_subscription")
+    def test_rejects_org_only_plan_for_user(self):
+        """Organization-only plans are rejected for user billing records."""
+        with self.assertRaisesMessage(
+            ValueError,
+            "Cannot assign organization-only plan",
+        ):
+            mark_owner_billing_with_plan(self.user, PlanNames.ORG_TEAM)
+
+        billing = UserBilling.objects.get(user=self.user)
+        self.assertEqual(billing.subscription, PlanNames.FREE)
+
 
 @tag("batch_subscription")
 class MarkOrganizationBillingWithPlanTests(TestCase):
@@ -170,6 +185,42 @@ class MarkOrganizationBillingWithPlanTests(TestCase):
         self.assertEqual(billing.subscription, PlanNames.FREE)
         self.assertEqual(billing.billing_cycle_anchor, 5)
         self.assertEqual(billing.downgraded_at, datetime(2025, 6, 1, tzinfo=datetime_timezone.utc))
+
+
+@tag("batch_subscription")
+class ResolvePlanFromSubscriptionDataTests(TestCase):
+    @patch("util.subscription_helper.get_plan_by_product_id", return_value={"id": PlanNames.ORG_TEAM, "org": True})
+    @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
+    @patch("util.subscription_helper.get_plan_version_by_price_id", return_value=None)
+    def test_user_owner_ignores_org_only_plan_items(
+        self,
+        _mock_plan_version_by_price,
+        _mock_plan_version_by_product,
+        _mock_plan_by_product,
+    ):
+        subscription_data = {
+            "items": {
+                "data": [
+                    {
+                        "price": {
+                            "id": "price_org_team",
+                            "product": "prod_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                        "quantity": 3,
+                    }
+                ]
+            }
+        }
+
+        plan_payload, plan_version, licensed_item = resolve_plan_from_subscription_data(
+            subscription_data,
+            owner_type="user",
+        )
+
+        self.assertIsNone(plan_payload)
+        self.assertIsNone(plan_version)
+        self.assertIsNone(licensed_item)
 
 
 @tag("batch_subscription")
@@ -513,6 +564,19 @@ class GetActiveSubscriptionTests(TestCase):
             email="active-subscription@example.com",
             password="testpass123",
         )
+        self.org_owner = User.objects.create_user(
+            username="active-org-owner@example.com",
+            email="active-org-owner@example.com",
+            password="testpass123",
+        )
+        self.organization = Organization.objects.create(
+            name="Active Org",
+            slug="active-org",
+            created_by=self.org_owner,
+        )
+        self.organization.billing.stripe_subscription_id = "sub_org"
+        self.organization.billing.stripe_customer_id = None
+        self.organization.billing.save(update_fields=["stripe_subscription_id", "stripe_customer_id"])
 
     @patch("util.subscription_helper._sync_active_subscriptions_from_stripe_customer", return_value=True)
     @patch("util.subscription_helper.get_stripe_customer")
@@ -537,6 +601,22 @@ class GetActiveSubscriptionTests(TestCase):
         self.assertIs(subscription, active_subscription)
         mock_sync_customer.assert_called_once_with(customer)
         self.assertEqual(customer.subscriptions.filter.call_count, 2)
+
+    @patch("util.subscription_helper.get_stripe_customer")
+    @patch("util.subscription_helper.Subscription.objects.select_related")
+    def test_organization_uses_billing_subscription_id_before_customer_lookup(
+        self,
+        mock_select_related,
+        mock_get_customer,
+    ):
+        organization_subscription = MagicMock()
+        organization_subscription.id = "sub_org"
+        mock_select_related.return_value.filter.return_value.first.return_value = organization_subscription
+
+        subscription = get_active_subscription(self.organization)
+
+        self.assertIs(subscription, organization_subscription)
+        mock_get_customer.assert_not_called()
 
     @patch("util.subscription_helper.get_plan_by_product_id", return_value={"id": PlanNames.STARTUP, "name": "Pro"})
     @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
@@ -649,6 +729,53 @@ class GetActiveSubscriptionTests(TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].get("id"), "sub_match")
+
+
+@tag("batch_subscription")
+class ReportOrganizationTaskUsageTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(
+            username="org-meter-owner@example.com",
+            email="org-meter-owner@example.com",
+            password="testpass123",
+        )
+        self.organization = Organization.objects.create(
+            name="Meter Org",
+            slug="meter-org",
+            created_by=self.owner,
+        )
+
+    @patch("util.subscription_helper._ensure_stripe_ready")
+    @patch("util.subscription_helper.stripe.billing.MeterEvent.create")
+    @patch("util.subscription_helper.get_stripe_settings")
+    @patch("util.subscription_helper.get_active_subscription")
+    def test_report_org_usage_uses_active_subscription_customer(
+        self,
+        mock_get_active_subscription,
+        mock_get_stripe_settings,
+        mock_meter_event_create,
+        _mock_ready,
+    ):
+        subscription = MagicMock()
+        subscription.customer = MagicMock(id="cus_from_subscription")
+        mock_get_active_subscription.return_value = subscription
+        mock_get_stripe_settings.return_value = MagicMock(
+            org_task_meter_id="meter_org_team",
+            task_meter_id="meter_default",
+            task_meter_event_name="task_meter_event",
+        )
+
+        report_organization_task_usage_to_stripe(
+            self.organization,
+            quantity=7,
+            idempotency_key="meter-org-7",
+        )
+
+        mock_meter_event_create.assert_called_once_with(
+            event_name="task_meter_event",
+            payload={"value": 7, "stripe_customer_id": "cus_from_subscription"},
+            idempotency_key="meter-org-7",
+        )
 
 
 @tag("batch_subscription")

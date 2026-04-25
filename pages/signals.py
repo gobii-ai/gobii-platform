@@ -584,6 +584,82 @@ def _line_period_start(lines: list[Mapping[str, Any]]) -> datetime | None:
     return None
 
 
+def _extract_explicit_org_id(metadata: Mapping[str, Any] | None) -> str | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    org_id = metadata.get("org_id")
+    if org_id in (None, ""):
+        return None
+    normalized_org_id = str(org_id).strip()
+    return normalized_org_id or None
+
+
+def _resolve_organization_from_explicit_org_id(org_id: str | None):
+    if not org_id:
+        return None, None
+
+    try:
+        organization_id = uuid.UUID(str(org_id).strip())
+    except (TypeError, ValueError, AttributeError):
+        logger.warning("Ignoring invalid organization id %s from Stripe metadata", org_id)
+        return None, None
+
+    organization_billing = (
+        OrganizationBilling.objects.select_related("organization")
+        .filter(organization_id=organization_id)
+        .first()
+    )
+    if organization_billing and organization_billing.organization:
+        return organization_billing.organization, organization_billing
+
+    Organization = apps.get_model("api", "Organization")
+    organization = Organization.objects.filter(id=organization_id).first()
+    if organization is None:
+        return None, None
+    return organization, None
+
+
+def _resolve_owner_from_customer_context(
+    *,
+    customer_id: str | None,
+    resolved_customer: Customer | None = None,
+    explicit_org_id: str | None = None,
+):
+    if explicit_org_id:
+        explicit_organization, explicit_organization_billing = _resolve_organization_from_explicit_org_id(
+            explicit_org_id
+        )
+        if explicit_organization is not None:
+            if resolved_customer is not None and getattr(resolved_customer, "subscriber", None) is not None:
+                logger.warning(
+                    "Preferring Stripe metadata org_id=%s over subscriber=%s for customer %s",
+                    explicit_org_id,
+                    getattr(getattr(resolved_customer, "subscriber", None), "id", None),
+                    customer_id,
+                )
+            return explicit_organization, "organization", explicit_organization_billing
+
+        logger.warning(
+            "Stripe metadata org_id=%s did not resolve to an organization for customer %s",
+            explicit_org_id,
+            customer_id,
+        )
+
+    if resolved_customer and getattr(resolved_customer, "subscriber", None):
+        return resolved_customer.subscriber, "user", None
+
+    if customer_id:
+        organization_billing = (
+            OrganizationBilling.objects.select_related("organization")
+            .filter(stripe_customer_id=customer_id)
+            .first()
+        )
+        if organization_billing and organization_billing.organization:
+            return organization_billing.organization, "organization", organization_billing
+
+    return None, "", None
+
+
 def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
     customer = getattr(invoice, "customer", None) if invoice else None
     customer_id = getattr(customer, "id", None) if customer else None
@@ -597,22 +673,12 @@ def _resolve_invoice_owner(invoice: Invoice | None, payload: Mapping[str, Any]):
     if resolved_customer and getattr(resolved_customer, "id", None):
         customer_id = getattr(resolved_customer, "id")
 
-    owner = None
-    owner_type = ""
-    organization_billing: OrganizationBilling | None = None
-
-    if resolved_customer and getattr(resolved_customer, "subscriber", None):
-        owner = resolved_customer.subscriber
-        owner_type = "user"
-    elif customer_id:
-        organization_billing = (
-            OrganizationBilling.objects.select_related("organization")
-            .filter(stripe_customer_id=customer_id)
-            .first()
-        )
-        if organization_billing and organization_billing.organization:
-            owner = organization_billing.organization
-            owner_type = "organization"
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    owner, owner_type, organization_billing = _resolve_owner_from_customer_context(
+        customer_id=customer_id,
+        resolved_customer=resolved_customer,
+        explicit_org_id=_extract_explicit_org_id(metadata),
+    )
 
     return owner, owner_type, organization_billing, customer_id
 
@@ -629,22 +695,12 @@ def _resolve_setup_intent_owner(
         resolved_customer_id = _extract_stripe_object_id(_get_stripe_data_value(payment_method_data, "customer"))
 
     resolved_customer = _get_customer_with_subscriber(resolved_customer_id)
-    owner = None
-    owner_type = ""
-    organization_billing: OrganizationBilling | None = None
-
-    if resolved_customer and getattr(resolved_customer, "subscriber", None):
-        owner = resolved_customer.subscriber
-        owner_type = "user"
-    elif resolved_customer_id:
-        organization_billing = (
-            OrganizationBilling.objects.select_related("organization")
-            .filter(stripe_customer_id=resolved_customer_id)
-            .first()
-        )
-        if organization_billing and organization_billing.organization:
-            owner = organization_billing.organization
-            owner_type = "organization"
+    metadata = _coerce_metadata_dict(payload.get("metadata"))
+    owner, owner_type, organization_billing = _resolve_owner_from_customer_context(
+        customer_id=resolved_customer_id,
+        resolved_customer=resolved_customer,
+        explicit_org_id=_extract_explicit_org_id(metadata),
+    )
 
     return owner, owner_type, organization_billing, resolved_customer_id
 
@@ -3312,22 +3368,18 @@ def handle_subscription_event(event, **kwargs):
         span.set_attribute('subscription.customer.id', getattr(customer, 'id', ''))
         span.set_attribute('subscription.customer.email', getattr(customer, 'email', ''))
 
-        owner = None
-        owner_type = ""
-        organization_billing: OrganizationBilling | None = None
+        source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
+        subscription_metadata: dict[str, Any] = {}
+        if isinstance(source_data, Mapping):
+            subscription_metadata = _coerce_metadata_dict(source_data.get("metadata"))
+        if not subscription_metadata:
+            subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
 
-        if customer.subscriber:
-            owner = customer.subscriber
-            owner_type = "user"
-        else:
-            organization_billing = (
-                OrganizationBilling.objects.select_related("organization")
-                .filter(stripe_customer_id=customer.id)
-                .first()
-            )
-            if organization_billing and organization_billing.organization:
-                owner = organization_billing.organization
-                owner_type = "organization"
+        owner, owner_type, organization_billing = _resolve_owner_from_customer_context(
+            customer_id=getattr(customer, "id", None),
+            resolved_customer=customer,
+            explicit_org_id=_extract_explicit_org_id(subscription_metadata),
+        )
 
         if not owner:
             span.add_event('Ignoring subscription event with no owner')
@@ -3350,8 +3402,6 @@ def handle_subscription_event(event, **kwargs):
                 plan_before_cancellation = None
         else:
             marketing_context = {}
-
-        source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
 
         # Handle explicit deletions (downgrade to free immediately)
         try:
@@ -3628,12 +3678,6 @@ def handle_subscription_event(event, **kwargs):
 
         # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
         # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
-
-        subscription_metadata: dict[str, Any] = {}
-        if isinstance(source_data, Mapping):
-            subscription_metadata = _coerce_metadata_dict(source_data.get("metadata"))
-        if not subscription_metadata:
-            subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
 
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
@@ -4124,6 +4168,15 @@ def handle_subscription_event(event, **kwargs):
                         if billing.billing_cycle_anchor != new_day:
                             billing.billing_cycle_anchor = new_day
                             updates.append("billing_cycle_anchor")
+
+                    new_customer_id = getattr(customer, "id", None)
+                    if (
+                        new_customer_id
+                        and not getattr(customer, "subscriber", None)
+                        and getattr(billing, "stripe_customer_id", None) != new_customer_id
+                    ):
+                        billing.stripe_customer_id = new_customer_id
+                        updates.append("stripe_customer_id")
 
                     new_subscription_id = getattr(sub, 'id', None)
                     if getattr(billing, 'stripe_subscription_id', None) != new_subscription_id:

@@ -921,6 +921,39 @@ class SubscriptionSignalTests(TestCase):
         return sub
 
     @tag("batch_pages_signals")
+    @patch("util.subscription_helper.get_plan_by_product_id", return_value={"id": PlanNamesChoices.ORG_TEAM.value, "org": True})
+    @patch("util.subscription_helper.get_plan_version_by_product_id", return_value=None)
+    @patch("util.subscription_helper.get_plan_version_by_price_id", return_value=None)
+    def test_org_only_subscription_does_not_mutate_user_billing(
+        self,
+        _mock_plan_version_by_price,
+        _mock_plan_version_by_product,
+        _mock_plan_by_product,
+    ):
+        self.mock_capi.reset_mock()
+        payload = _build_event_payload(billing_reason="subscription_create", product="prod_org_team")
+        payload["items"]["data"][0]["price"]["id"] = "price_org_team"
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        sub = self._mock_subscription(current_period_day=15, subscriber=self.user)
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
+            patch("pages.signals.Analytics.identify") as mock_identify, \
+            patch("pages.signals.Analytics.track_event") as mock_track:
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertEqual(self.billing.subscription, PlanNames.FREE)
+        mock_grant.assert_not_called()
+        mock_identify.assert_not_called()
+        mock_track.assert_not_called()
+        self.mock_capi.assert_not_called()
+
+    @tag("batch_pages_signals")
     @override_settings(CAPI_LTV_MULTIPLE=1.0)
     def test_subscription_anchor_updates_from_stripe(self):
         self.mock_capi.reset_mock()
@@ -1903,13 +1936,13 @@ class SubscriptionSignalOrganizationTests(TestCase):
             "metadata": {},
         }
 
-    def _mock_subscription(self, *, quantity, billing_reason, payload_invoice="in_org"):
+    def _mock_subscription(self, *, quantity, billing_reason, payload_invoice="in_org", subscriber=None):
         aware_start = timezone.make_aware(datetime(2025, 9, 1, 0, 0, 0), timezone=dt_timezone.utc)
         aware_end = timezone.make_aware(datetime(2025, 10, 1, 0, 0, 0), timezone=dt_timezone.utc)
         sub = MagicMock()
         sub.status = "active"
         sub.id = "sub_org"
-        sub.customer = SimpleNamespace(id="cus_org", subscriber=None)
+        sub.customer = SimpleNamespace(id="cus_org", subscriber=subscriber)
         sub.billing_reason = billing_reason
         payload = _build_event_payload(
             invoice_id=payload_invoice,
@@ -1959,6 +1992,99 @@ class SubscriptionSignalOrganizationTests(TestCase):
         _, kwargs = mock_grant.call_args
         self.assertEqual(kwargs.get("seats"), 2)
         self.assertEqual(kwargs.get("invoice_id"), invoice_payload["id"])
+        self.mock_capi.assert_not_called()
+
+    @patch("pages.signals.stripe.SubscriptionItem.create")
+    @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
+    @patch("pages.signals.get_plan_by_product_id")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_metadata_org_id_overrides_customer_subscriber(
+        self,
+        mock_sync,
+        mock_plan,
+        mock_grant,
+        _mock_item_create,
+    ):
+        self.mock_capi.reset_mock()
+        org_billing = self.org.billing
+        org_billing.stripe_customer_id = None
+        org_billing.save(update_fields=["stripe_customer_id"])
+
+        sub, payload = self._mock_subscription(
+            quantity=2,
+            billing_reason=None,
+            subscriber=self.org.created_by,
+        )
+        payload["metadata"] = {"org_id": str(self.org.id)}
+        mock_sync.return_value = sub
+        mock_plan.return_value = {"id": PlanNamesChoices.ORG_TEAM.value, "credits_per_seat": 500, "org": True}
+        event = _build_djstripe_event(payload, event_type="customer.subscription.created")
+
+        invoice_payload = {
+            "id": payload["latest_invoice"],
+            "object": "invoice",
+            "billing_reason": "subscription_create",
+        }
+        invoice_obj = SimpleNamespace(billing_reason="subscription_create", stripe_data=invoice_payload)
+
+        owner_billing = UserBilling.objects.get(user=self.org.created_by)
+        owner_billing.subscription = PlanNames.FREE
+        owner_billing.save(update_fields=["subscription"])
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload), \
+            patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj):
+
+            handle_subscription_event(event)
+
+        org_billing.refresh_from_db()
+        owner_billing.refresh_from_db()
+
+        self.assertEqual(org_billing.subscription, PlanNames.ORG_TEAM)
+        self.assertEqual(org_billing.purchased_seats, 2)
+        self.assertIsNone(org_billing.stripe_customer_id)
+        self.assertEqual(org_billing.stripe_subscription_id, "sub_org")
+        self.assertEqual(owner_billing.subscription, PlanNames.FREE)
+        mock_grant.assert_called_once()
+        self.assertEqual(mock_grant.call_args.args[0], self.org)
+        self.mock_capi.assert_not_called()
+
+    @patch("pages.signals.downgrade_owner_to_free_plan")
+    @patch("pages.signals.DedicatedProxyService.release_for_owner")
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_cancellation_with_shared_customer_downgrades_org(
+        self,
+        mock_sync,
+        mock_release,
+        mock_downgrade,
+    ):
+        self.mock_capi.reset_mock()
+        billing = self.org.billing
+        billing.stripe_customer_id = None
+        billing.stripe_subscription_id = "sub_org"
+        billing.save(update_fields=["stripe_customer_id", "stripe_subscription_id"])
+
+        sub, payload = self._mock_subscription(
+            quantity=2,
+            billing_reason=None,
+            subscriber=self.org.created_by,
+        )
+        payload["status"] = "canceled"
+        payload["metadata"] = {"org_id": str(self.org.id)}
+        event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
+
+        sub.status = "canceled"
+        sub.stripe_data = payload
+        mock_sync.return_value = sub
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"):
+            handle_subscription_event(event)
+
+        billing.refresh_from_db()
+        mock_downgrade.assert_called_once_with(self.org)
+        mock_release.assert_called_once_with(self.org)
+        self.assertIsNone(billing.stripe_customer_id)
+        self.assertIsNone(billing.stripe_subscription_id)
         self.mock_capi.assert_not_called()
 
     @patch("pages.signals.stripe.SubscriptionItem.create")

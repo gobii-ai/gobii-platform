@@ -111,6 +111,33 @@ def _individual_plan_price_ids() -> set[str]:
     return price_ids
 
 
+def _plan_requires_organization(
+    plan_name: str | None = None,
+    *,
+    plan_version: Any | None = None,
+    plan_context: Mapping[str, Any] | None = None,
+) -> bool:
+    """Return whether the resolved plan is restricted to organization owners."""
+    if bool(getattr(getattr(plan_version, "plan", None), "is_org", False)):
+        return True
+
+    if isinstance(plan_context, Mapping) and bool(plan_context.get("org")):
+        return True
+
+    normalized_plan_name = str(plan_name or "").strip().lower()
+    if isinstance(plan_context, Mapping):
+        normalized_plan_name = (
+            str(plan_context.get("id") or plan_context.get("slug") or normalized_plan_name).strip().lower()
+        )
+
+    if not normalized_plan_name:
+        return False
+
+    legacy_plan_name = LEGACY_PLAN_BY_SLUG.get(normalized_plan_name, normalized_plan_name)
+    plan_config = PLAN_CONFIG.get(legacy_plan_name)
+    return bool(plan_config and plan_config.get("org"))
+
+
 def _normalize_stripe_object(obj):
     """Convert Stripe objects to plain dicts for easier inspection."""
     if hasattr(obj, "to_dict_recursive"):
@@ -646,6 +673,65 @@ def _subscription_products(sub) -> set[str]:
     return products
 
 
+def _sync_subscription_from_stripe_by_id(subscription_id: str):
+    """Best-effort sync for a specific Stripe subscription id."""
+    if Subscription is None or not subscription_id:
+        return None
+
+    _ensure_stripe_ready()
+
+    try:
+        stripe_subscription = stripe.Subscription.retrieve(  # type: ignore[attr-defined]
+            subscription_id,
+            expand=["items.data.price"],
+        )
+        return Subscription.sync_from_stripe_data(stripe_subscription)
+    except Exception:
+        logger.warning(
+            "Failed to sync Stripe subscription %s while resolving owner subscription",
+            subscription_id,
+            exc_info=True,
+        )
+        return None
+
+
+def _get_active_organization_subscription(
+    organization,
+    *,
+    now_ts: int,
+    sync_with_stripe: bool = False,
+):
+    """Return the organization's active subscription using the billing-owned subscription id."""
+    if Subscription is None:
+        return None
+
+    billing = getattr(organization, "billing", None)
+    subscription_id = getattr(billing, "stripe_subscription_id", None) if billing is not None else None
+    if not subscription_id:
+        return None
+
+    active_statuses = ["active", "trialing"]
+    query = Subscription.objects.select_related("customer").filter(
+        id=subscription_id,
+        stripe_data__status__in=active_statuses,
+        stripe_data__current_period_end__gte=now_ts,
+    )
+    subscription = query.first()
+    if subscription is not None or not sync_with_stripe:
+        return subscription
+
+    _sync_subscription_from_stripe_by_id(str(subscription_id))
+    return (
+        Subscription.objects.select_related("customer")
+        .filter(
+            id=subscription_id,
+            stripe_data__status__in=active_statuses,
+            stripe_data__current_period_end__gte=now_ts,
+        )
+        .first()
+    )
+
+
 def get_active_subscription(
     owner,
     *,
@@ -660,17 +746,27 @@ def get_active_subscription(
         if owner_id is not None:
             span.set_attribute("owner.id", str(owner_id))
 
+        now_ts = int(timezone.now().timestamp())
+
+        # Statuses you consider “active” for licensing (tweak as needed)
+        ACTIVE_STATUSES = ["active", "trialing"]  # add "past_due" if you still grant access
+
+        if owner_type == "organization":
+            subscription = _get_active_organization_subscription(
+                owner,
+                now_ts=now_ts,
+                sync_with_stripe=sync_with_stripe,
+            )
+            if subscription is not None:
+                span.set_attribute("owner.subscription.id", str(getattr(subscription, "id", "")))
+                return subscription
+
         customer = get_stripe_customer(owner)
         logger.debug("get_active_subscription %s %s: %s", owner_type, owner_id, customer)
 
         if not customer:
             span.set_attribute("owner.customer", "")
             return None
-
-        now_ts = int(timezone.now().timestamp())
-
-        # Statuses you consider “active” for licensing (tweak as needed)
-        ACTIVE_STATUSES = ["active", "trialing"]  # add "past_due" if you still grant access
 
         qs = customer.subscriptions.filter(
             stripe_data__status__in=ACTIVE_STATUSES,
@@ -873,9 +969,6 @@ def resolve_plan_from_subscription_data(
         if usage_type == "metered":
             continue
 
-        if fallback_item is None:
-            fallback_item = item
-
         price_id = price.get("id") or price.get("price")
         product_id = price.get("product")
         if isinstance(product_id, Mapping):
@@ -888,12 +981,29 @@ def resolve_plan_from_subscription_data(
             plan_version = get_plan_version_by_product_id(str(product_id), kind=plan_kind)
 
         if plan_version is not None:
-            return get_plan_context_for_version(plan_version), plan_version, item
+            plan_payload = get_plan_context_for_version(plan_version)
+            if owner_type == "user" and _plan_requires_organization(plan_version=plan_version, plan_context=plan_payload):
+                logger.warning(
+                    "Ignoring org-only plan for user-owned subscription item price=%s product=%s",
+                    price_id,
+                    product_id,
+                )
+                continue
+            return plan_payload, plan_version, item
 
         if product_id:
             plan = get_plan_by_product_id(str(product_id))
             if plan and plan.get("id"):
+                if owner_type == "user" and _plan_requires_organization(str(plan.get("id")), plan_context=plan):
+                    logger.warning(
+                        "Ignoring org-only legacy plan for user-owned subscription item product=%s",
+                        product_id,
+                    )
+                    continue
                 return dict(plan), None, item
+
+        if fallback_item is None:
+            fallback_item = item
 
     return None, None, fallback_item
 
@@ -1184,10 +1294,14 @@ def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
                                              idempotency_key: str | None = None):
     """Report additional task usage for an organization via Stripe metering."""
     with traced("SUBSCRIPTION Report Org Task Usage"):
-        billing = getattr(organization, "billing", None)
-        if not billing or not getattr(billing, "stripe_customer_id", None):
+        subscription = get_active_subscription(organization)
+        customer_id = (
+            getattr(getattr(subscription, "customer", None), "id", None)
+            or getattr(subscription, "customer_id", None)
+        )
+        if not customer_id:
             logger.debug(
-                "report_org_usage_to_stripe: Organization %s missing Stripe customer, skipping",
+                "report_org_usage_to_stripe: Organization %s missing active subscription customer, skipping",
                 getattr(organization, "id", "n/a"),
             )
             return None
@@ -1203,7 +1317,7 @@ def report_organization_task_usage_to_stripe(organization, quantity: int = 1,
             _ensure_stripe_ready()
             meter_event = stripe.billing.MeterEvent.create(
                 event_name=stripe_settings.task_meter_event_name,
-                payload={"value": quantity, "stripe_customer_id": billing.stripe_customer_id},
+                payload={"value": quantity, "stripe_customer_id": customer_id},
                 idempotency_key=idempotency_key,
             )
             return meter_event
@@ -1387,6 +1501,17 @@ def mark_owner_billing_with_plan(owner, plan_name: str, update_anchor: bool = Tr
 
         if plan_version is None and plan_name:
             plan_version = get_plan_version_by_legacy_code(plan_name)
+
+        if owner_type == "user" and _plan_requires_organization(plan_name, plan_version=plan_version):
+            span.add_event(
+                "Subscription - Rejected Invalid User Plan",
+                {
+                    "owner.type": owner_type,
+                    "owner.id": str(owner_id) if owner_id is not None else "",
+                    "plan.name": str(plan_name or ""),
+                },
+            )
+            raise ValueError(f"Cannot assign organization-only plan '{plan_name}' to a user billing record.")
 
         defaults = {"subscription": plan_name}
         if plan_version is not None:
