@@ -1011,7 +1011,7 @@ class CustomToolsTests(TestCase):
         self.assertEqual(len(service._backend.deploy_calls), 2)
         self.assertEqual(
             [call["direction"] for call in service._backend.sync_calls],
-            ["pull", "push"],
+            ["pull", "pull", "push"],
         )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -1045,6 +1045,10 @@ class CustomToolsTests(TestCase):
         pull_response.raise_for_status.return_value = None
         pull_response.text = '{"status": "ok"}'
         pull_response.json.return_value = {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+        targeted_pull_response = MagicMock()
+        targeted_pull_response.raise_for_status.return_value = None
+        targeted_pull_response.text = '{"status": "ok"}'
+        targeted_pull_response.json.return_value = {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
         push_response = MagicMock()
         push_response.raise_for_status.return_value = None
         push_response.text = '{"status": "ok"}'
@@ -1055,6 +1059,7 @@ class CustomToolsTests(TestCase):
         session.post.side_effect = [
             pull_response,
             requests.ConnectionError("connection refused"),
+            targeted_pull_response,
             push_response,
         ]
 
@@ -1065,9 +1070,10 @@ class CustomToolsTests(TestCase):
             sync_error = _sync_workspace_source(self.agent, "/tools/sync_intercom_waiting.py")
 
         self.assertIsNone(sync_error)
-        self.assertEqual(session.post.call_count, 3)
+        self.assertEqual(session.post.call_count, 4)
         self.assertIn("/sandbox/compute/sync_filespace", session.post.call_args_list[1].args[0])
         self.assertIn("/sandbox/compute/sync_filespace", session.post.call_args_list[2].args[0])
+        self.assertIn("/sandbox/compute/sync_filespace", session.post.call_args_list[3].args[0])
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools._resolve_bridge_base_url", return_value="https://example.com")
