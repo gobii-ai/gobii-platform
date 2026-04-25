@@ -12,6 +12,7 @@ from api.services.sandbox_kubernetes import (
     _build_egress_proxy_service_manifest,
     _build_proxy_env,
     _build_pod_manifest,
+    _normalize_workspace_volume_mode,
     _pod_name,
 )
 
@@ -419,6 +420,28 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         backend._create_pvc.assert_not_called()
         backend._create_service.assert_called_once_with("sandbox-agent-agent-emptydir", agent_id="agent-emptydir")
         backend._create_pod.assert_called_once()
+
+    def test_delete_agent_resources_emptydir_skips_pvc_and_snapshots(self):
+        backend = self._backend()
+        backend._workspace_volume_mode = "emptydir"
+        backend._delete_pod = Mock()
+        backend._delete_service = Mock()
+        backend._delete_pvc = Mock()
+        backend._snapshot_names_for_agent = Mock(return_value=["sandbox-snap-agent-emptydir"])
+        backend._delete_snapshot = Mock()
+
+        result = backend.delete_agent_resources(
+            "agent-emptydir",
+            delete_workspace=True,
+            delete_snapshots=True,
+        )
+
+        actions = {(entry["kind"], entry["name"]) for entry in result["actions"]}
+        self.assertNotIn(("PersistentVolumeClaim", "sandbox-workspace-agent-emptydir"), actions)
+        self.assertNotIn(("VolumeSnapshot", "sandbox-snap-agent-emptydir"), actions)
+        backend._delete_pvc.assert_not_called()
+        backend._snapshot_names_for_agent.assert_not_called()
+        backend._delete_snapshot.assert_not_called()
 
     def test_deploy_or_resume_emptydir_recreate_marks_workspace_reset(self):
         backend = self._backend()
@@ -844,6 +867,10 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
 
 @tag("batch_agent_lifecycle")
 class KubernetesSandboxPodManifestTests(SimpleTestCase):
+    def test_workspace_volume_mode_defaults_to_emptydir(self):
+        self.assertEqual(_normalize_workspace_volume_mode(""), "emptydir")
+        self.assertEqual(_normalize_workspace_volume_mode(None), "emptydir")
+
     def test_container_resources_match_normalizes_equivalent_quantities(self):
         container = {
             "resources": {

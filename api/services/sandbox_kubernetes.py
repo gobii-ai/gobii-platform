@@ -107,12 +107,14 @@ def _build_container_resources(
 
 def _normalize_workspace_volume_mode(value: Any) -> str:
     mode = str(value or "").strip().lower()
-    if mode in {"", _WORKSPACE_VOLUME_MODE_PVC, "persistentvolumeclaim", "persistent-volume-claim"}:
-        return _WORKSPACE_VOLUME_MODE_PVC
     if mode in {_WORKSPACE_VOLUME_MODE_EMPTYDIR, "empty-dir", "ephemeral"}:
         return _WORKSPACE_VOLUME_MODE_EMPTYDIR
+    if mode in {_WORKSPACE_VOLUME_MODE_PVC, "persistentvolumeclaim", "persistent-volume-claim"}:
+        return _WORKSPACE_VOLUME_MODE_PVC
+    if not mode:
+        return _WORKSPACE_VOLUME_MODE_EMPTYDIR
     raise SandboxComputeUnavailable(
-        "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE must be 'pvc' or 'emptydir'."
+        "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE must be 'emptydir' or 'pvc'."
     )
 
 
@@ -245,11 +247,11 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
         self._workspace_volume_mode = _normalize_workspace_volume_mode(
-            getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE", "pvc")
+            getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_VOLUME_MODE", "emptydir")
         )
-        self._workspace_emptydir_size = getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_EMPTYDIR_SIZE", self._pvc_size)
+        self._workspace_emptydir_size = getattr(settings, "SANDBOX_COMPUTE_WORKSPACE_EMPTYDIR_SIZE", "1Gi")
         self._snapshot_class = getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_CLASS", "")
-        self._snapshot_on_idle_stop = bool(getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_ON_IDLE_STOP", True))
+        self._snapshot_on_idle_stop = bool(getattr(settings, "SANDBOX_COMPUTE_SNAPSHOT_ON_IDLE_STOP", False))
         self._proxy_timeout = int(getattr(settings, "SANDBOX_COMPUTE_HTTP_TIMEOUT_SECONDS", 180))
         self._mcp_timeout = int(getattr(settings, "SANDBOX_COMPUTE_MCP_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
         self._tool_timeout = int(getattr(settings, "SANDBOX_COMPUTE_TOOL_REQUEST_TIMEOUT_SECONDS", self._proxy_timeout))
@@ -589,13 +591,13 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             self._delete_pod(egress_pod_name)
             self._delete_service(egress_service_name)
 
-        if delete_workspace:
+        if delete_workspace and self._uses_pvc_workspace():
             pvc_name = _pvc_name(agent_id_text)
             _record("PersistentVolumeClaim", pvc_name)
             if not dry_run:
                 self._delete_pvc(pvc_name)
 
-        if delete_snapshots:
+        if delete_snapshots and self._uses_pvc_workspace():
             for snapshot_name in self._snapshot_names_for_agent(agent_id_text):
                 _record("VolumeSnapshot", snapshot_name)
                 if not dry_run:
@@ -1194,7 +1196,7 @@ def _build_pod_manifest(
     secret_name: str,
     agent_id: str,
     resources: Dict[str, Dict[str, str]],
-    workspace_volume_mode: str = _WORKSPACE_VOLUME_MODE_PVC,
+    workspace_volume_mode: str = _WORKSPACE_VOLUME_MODE_EMPTYDIR,
     workspace_emptydir_size_limit: str = "",
     egress_service_name: Optional[str] = None,
     http_proxy_port: int = _DEFAULT_EGRESS_PROXY_HTTP_PORT,
