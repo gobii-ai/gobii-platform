@@ -45,11 +45,19 @@ export type BillingStatusInfo = {
   manageBillingUrl?: string | null
 }
 
+export type AccountPauseInfo = {
+  paused: boolean
+  reason?: string | null
+  resumeAt?: string | null
+  manageBillingUrl?: string | null
+}
+
 export type AgentAddonsResponse = {
   contactCap?: ContactCapInfo | null
   status?: {
     contactCap?: ContactCapStatus | null
     billing?: BillingStatusInfo | null
+    accountPause?: AccountPauseInfo | null
   }
   contactPacks?: ContactPackSettings | null
   taskPacks?: TaskPackSettings | null

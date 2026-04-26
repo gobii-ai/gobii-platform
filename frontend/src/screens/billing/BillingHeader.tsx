@@ -28,6 +28,8 @@ export function BillingHeader({
   onCancelScheduledSeatChange,
 }: BillingHeaderProps) {
   const isOrg = initialData.contextType === 'organization'
+  const accountPause = initialData.accountPause ?? null
+  const accountPaused = Boolean(accountPause?.paused)
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
   const planCurrency = isOrg
     ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
@@ -55,6 +57,20 @@ export function BillingHeader({
       ? date.toLocaleDateString()
       : initialData.seats.pendingEffectiveAtIso
     return `Seats scheduled to change to ${initialData.seats.pendingQuantity} on ${effective}.`
+  })()
+
+  const pausedUntilLabel = (() => {
+    const iso = accountPause?.resumeAt
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(d)
   })()
 
   return (
@@ -90,7 +106,7 @@ export function BillingHeader({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {initialData.contextType === 'personal' && onChangePlan ? (
+          {initialData.contextType === 'personal' && onChangePlan && !accountPaused ? (
             <button
               type="button"
               onClick={onChangePlan}
@@ -103,6 +119,7 @@ export function BillingHeader({
           {initialData.contextType === 'personal'
             && initialData.paidSubscriber
             && !initialData.cancelAtPeriodEnd
+            && !accountPaused
             && onCancel ? (
               <button
                 type="button"
@@ -127,7 +144,7 @@ export function BillingHeader({
 
           {initialData.contextType === 'personal'
             && initialData.paidSubscriber
-            && initialData.cancelAtPeriodEnd
+            && (initialData.cancelAtPeriodEnd || accountPaused)
             && onResume ? (
               <button
                 type="button"
@@ -135,7 +152,7 @@ export function BillingHeader({
                 className="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-700 transition hover:border-emerald-300 hover:text-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
               >
                 <RotateCcw className="h-4 w-4" />
-                Resume subscription
+                {accountPaused ? 'Resume now' : 'Resume subscription'}
               </button>
             ) : null}
 
@@ -176,11 +193,21 @@ export function BillingHeader({
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Status</div>
             <div className="mt-1 text-sm font-semibold text-slate-900">
-              {isTrialing
+              {accountPaused
+                ? (pausedUntilLabel ? `Paused until ${pausedUntilLabel}` : 'Paused')
+                : isTrialing
                 ? (trialEndsLabel ? `Trial until ${trialEndsLabel}` : 'Trial')
                 : (initialData.paidSubscriber ? 'Active' : 'Free')}
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {accountPaused ? (
+        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          {pausedUntilLabel
+            ? `Your account is paused until ${pausedUntilLabel}. Execution and new work stay disabled until billing resumes.`
+            : 'Your account is paused. Execution and new work stay disabled until billing resumes.'}
         </div>
       ) : null}
 
