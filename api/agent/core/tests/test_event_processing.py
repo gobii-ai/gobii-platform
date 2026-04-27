@@ -210,6 +210,10 @@ class DailyLimitProcessingTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.message_service.send_owner_daily_credit_hard_limit_notice")
     @patch("api.agent.core.event_processing._run_agent_loop", return_value={"total_tokens": 0})
+    @patch("api.agent.core.event_processing.maybe_schedule_agent_avatar")
+    @patch("api.agent.core.event_processing.maybe_schedule_agent_tags")
+    @patch("api.agent.core.event_processing.maybe_schedule_mini_description")
+    @patch("api.agent.core.event_processing.maybe_schedule_short_description")
     @patch(
         "api.agent.core.event_processing.get_agent_daily_credit_state",
         return_value={
@@ -229,6 +233,10 @@ class DailyLimitProcessingTests(TestCase):
         self,
         _mock_available,
         _mock_daily_state,
+        _mock_short_description,
+        _mock_mini_description,
+        _mock_agent_tags,
+        _mock_agent_avatar,
         mock_run_loop,
         mock_notice,
     ):
@@ -236,6 +244,10 @@ class DailyLimitProcessingTests(TestCase):
 
         mock_run_loop.assert_called_once()
         mock_notice.assert_not_called()
+        self.assertEqual(
+            mock_run_loop.call_args.kwargs["credit_snapshot"]["daily_state"]["hard_limit_remaining"],
+            Decimal("0"),
+        )
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,

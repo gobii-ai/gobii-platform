@@ -78,12 +78,24 @@ class PersistentAgentCreditGateTests(TestCase):
             return_value=None,
         )
         cls._tags_patcher.start()
+        cls._avatar_visual_patcher = patch(
+            "api.agent.tasks.agent_avatar.generate_agent_visual_description_task.delay",
+            return_value=None,
+        )
+        cls._avatar_visual_patcher.start()
+        cls._avatar_patcher = patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay",
+            return_value=None,
+        )
+        cls._avatar_patcher.start()
 
     @classmethod
     def tearDownClass(cls):
         cls._short_desc_patcher.stop()
         cls._mini_desc_patcher.stop()
         cls._tags_patcher.stop()
+        cls._avatar_visual_patcher.stop()
+        cls._avatar_patcher.stop()
         super().tearDownClass()
 
     @classmethod
@@ -316,8 +328,8 @@ class PersistentAgentCreditGateTests(TestCase):
         self.assertFalse(sent_second)
         self.assertEqual(mock_deliver_email.call_count, 1)
 
-    def test_process_agent_events_respects_daily_limit(self):
-        """Processing should exit early when the agent hit its daily limit."""
+    def test_process_agent_events_enters_message_only_mode_when_daily_limit_reached(self):
+        """Processing should continue in message-only mode when the hard daily limit is reached."""
         from api.agent.core.event_processing import _process_agent_events_locked
 
         self.agent.daily_credit_limit = 1
@@ -346,7 +358,11 @@ class PersistentAgentCreditGateTests(TestCase):
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=fake_state), \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
-            loop_mock.assert_not_called()
+            loop_mock.assert_called_once()
+            self.assertEqual(
+                loop_mock.call_args.kwargs["credit_snapshot"]["daily_state"]["hard_limit_remaining"],
+                Decimal("0"),
+            )
 
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(

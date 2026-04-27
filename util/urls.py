@@ -71,7 +71,7 @@ def build_site_url(path: str) -> str:
     if path.startswith("http://") or path.startswith("https://"):
         return path
 
-    base_url = settings.PUBLIC_SITE_URL.strip().rstrip("/")
+    base_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
     if not base_url:
         current_site = Site.objects.get_current()
         base_url = f"https://{current_site.domain}"
