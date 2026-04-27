@@ -29,6 +29,7 @@ type MessageEventCardProps = {
   agentAvatarUrl?: string | null
   viewerUserId?: number | null
   viewerEmail?: string | null
+  onMessageLinkClick?: (href: string) => boolean | void
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -39,7 +40,16 @@ function isRecentMessage(timestamp?: string | null): boolean {
   return Date.now() - messageTime < 3000
 }
 
-export const MessageEventCard = memo(function MessageEventCard({ eventCursor, message, agentFirstName, agentColorHex, agentAvatarUrl, viewerUserId, viewerEmail }: MessageEventCardProps) {
+export const MessageEventCard = memo(function MessageEventCard({
+  eventCursor,
+  message,
+  agentFirstName,
+  agentColorHex,
+  agentAvatarUrl,
+  viewerUserId,
+  viewerEmail,
+  onMessageLinkClick,
+}: MessageEventCardProps) {
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
@@ -190,6 +200,7 @@ export const MessageEventCard = memo(function MessageEventCard({ eventCursor, me
               bodyText={message.bodyText}
               showEmptyState={!message.attachments || message.attachments.length === 0}
               animateIn={shouldAnimate}
+              onLinkClick={onMessageLinkClick}
             />
           </div>
         )}

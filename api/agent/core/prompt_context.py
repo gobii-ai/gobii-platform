@@ -114,12 +114,14 @@ from .tool_results import (
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
 )
+from .daily_limit_mode import is_daily_hard_limit_message_only_mode
 from .file_results import FileSQLiteRecord, store_files_for_prompt
 from .message_results import MessageSQLiteRecord, store_messages_for_prompt
 from api.services.email_verification import has_verified_email
 from api.services.signup_preview import (
     can_bypass_email_verification_for_signup_preview_first_email,
 )
+from util.urls import build_agent_daily_limit_action_links
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -142,6 +144,9 @@ SIGNED_FILES_URL_RE = re.compile(
 )
 SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
+MESSAGE_ONLY_TOOL_NAMES_TEXT = (
+    "send_email, send_sms, send_chat_message, and send_agent_message"
+)
 
 
 def _config_allows_implied_send(params_with_hints: Mapping[str, Any] | None) -> bool:
@@ -3593,6 +3598,23 @@ def add_budget_awareness_sections(
             soft_target = daily_credit_state.get("soft_target")
             used = daily_credit_state.get("used", Decimal("0"))
             next_reset = daily_credit_state.get("next_reset")
+            message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+
+            if message_only_mode and agent is not None:
+                links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
+                sections.append((
+                    "daily_limit_message_only_mode",
+                    (
+                        "DAILY HARD LIMIT MODE: You reached today's hard task limit. "
+                        f"Only message tools are available until the user raises the limit: {MESSAGE_ONLY_TOOL_NAMES_TEXT}. "
+                        "Do not attempt any other tools or non-message work right now. "
+                        f"Ask the user to raise the limit with one of these links: settings {links['settings_url']} ; "
+                        f"double {links['double_limit_url']} ; unlimited {links['unlimited_limit_url']}. "
+                        "Once the user raises the limit, you can continue the task."
+                    ),
+                    9,
+                    True,
+                ))
 
             if soft_target is not None:
                 reset_text = (
@@ -3639,14 +3661,24 @@ def add_budget_awareness_sections(
                     hard_limit_warning = ""
                 remaining_hard = max(Decimal("0"), hard_limit - used)
 
-                hard_text = (
-                    f"This is your task usage hard limit for today. Once you reach this limit, "
-                    "you will be blocked from making further tool calls until the limit resets. "
-                    "Every tool call you make consumes credits against this limit. "
-                    f"Hard limit progress: {used}/{hard_limit} "
-                    f"Remaining credits: {remaining_hard} "
-                    f"{hard_limit_warning}"
-                )
+                if message_only_mode:
+                    hard_text = (
+                        "This is your task usage hard limit for today. "
+                        "You are currently limited to message tools until the user raises the limit or it resets. "
+                        "Every non-message tool remains blocked while this mode is active. "
+                        f"Hard limit progress: {used}/{hard_limit} "
+                        f"Remaining credits: {remaining_hard} "
+                        f"{hard_limit_warning}"
+                    )
+                else:
+                    hard_text = (
+                        f"This is your task usage hard limit for today. Once you reach this limit, "
+                        "you will be blocked from making further tool calls until the limit resets. "
+                        "Every tool call you make consumes credits against this limit. "
+                        f"Hard limit progress: {used}/{hard_limit} "
+                        f"Remaining credits: {remaining_hard} "
+                        f"{hard_limit_warning}"
+                    )
                 sections.append((
                     "hard_limit_progress",
                     hard_text,

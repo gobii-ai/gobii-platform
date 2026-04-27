@@ -1,5 +1,7 @@
 from datetime import timedelta
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.utils import timezone
@@ -21,6 +23,13 @@ from constants.plans import PlanNamesChoices
 @tag("batch_event_processing_credits")
 class ToolRateLimitTests(TestCase):
     def setUp(self):
+        self.task_credit_patcher = patch(
+            "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={"success": True, "credit": None},
+        )
+        self.task_credit_patcher.start()
+        self.addCleanup(self.task_credit_patcher.stop)
+
         self.user = get_user_model().objects.create_user(
             username="rate-limit@example.com",
             email="rate-limit@example.com",

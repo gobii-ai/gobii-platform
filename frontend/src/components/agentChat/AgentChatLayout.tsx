@@ -58,6 +58,23 @@ type TaskQuotaInfo = {
 
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
+function normalizeAgentSettingsPathname(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, '')
+  return trimmed || '/'
+}
+
+function isCurrentAgentSettingsHref(href: string, agentId: string): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  try {
+    const url = new URL(href, window.location.origin)
+    return normalizeAgentSettingsPathname(url.pathname) === `/console/agents/${agentId}`
+  } catch {
+    return false
+  }
+}
+
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
     return `collapsed:${event.cursor}`
@@ -502,8 +519,6 @@ export function AgentChatLayout({
     setContactCapDismissed(false)
   }, [agentId])
 
-  const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
-
   useEffect(() => {
     if (!contactCapDismissKey || typeof window === 'undefined') {
       return
@@ -852,6 +867,28 @@ export function AgentChatLayout({
     ? 'Finish signup to manage settings and collaborate.'
     : null
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
+  const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
+
+  const handleMessageLinkClick = useCallback((href: string) => {
+    if (!agentId || !isCurrentAgentSettingsHref(href, agentId)) {
+      return false
+    }
+    if (previewActionsDisabled && onBlockedSettingsClick) {
+      onBlockedSettingsClick()
+      return true
+    }
+    if (!canOpenQuickSettings) {
+      return false
+    }
+    handleSettingsOpen()
+    return true
+  }, [
+    agentId,
+    canOpenQuickSettings,
+    handleSettingsOpen,
+    onBlockedSettingsClick,
+    previewActionsDisabled,
+  ])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
   const sidebarSettings = useMemo(() => ({
@@ -1024,6 +1061,7 @@ export function AgentChatLayout({
                     statusExpansionTargets={statusExpansionTargets}
                     animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
                     onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
+                    onMessageLinkClick={handleMessageLinkClick}
                   />
                 ))}
                 {showScheduledResumeEvent ? (
