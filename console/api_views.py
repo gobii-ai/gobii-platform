@@ -201,7 +201,7 @@ from console.agent_creation import (
 )
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
-from api.views import cancel_browser_use_task
+from api.views import PersistentAgentViewSet, cancel_browser_use_task
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
@@ -356,6 +356,39 @@ class ApiLoginRequiredMixin(LoginRequiredMixin):
         if not self.request.user.is_authenticated:
             return JsonResponse({"error": "Authentication required"}, status=401)
         return super().handle_no_permission()
+
+
+class ConsolePersistentAgentViewSet(PersistentAgentViewSet):
+    def get_object(self):
+        agent_id = self.kwargs.get(self.lookup_url_kwarg or self.lookup_field)
+        if agent_id is None:
+            raise Http404("Agent not found.")
+
+        if self.action in {"partial_update", "update", "destroy"}:
+            agent = resolve_manageable_agent_for_request(
+                self.request,
+                str(agent_id),
+                allow_delinquent_personal_chat=True,
+            )
+        else:
+            agent = resolve_agent_for_request(
+                self.request,
+                str(agent_id),
+                allow_delinquent_personal_chat=True,
+            )
+        self._resolved_console_agent = agent
+        self.check_object_permissions(self.request, agent)
+        return agent
+
+    def _request_organization(self):
+        organization = super()._request_organization()
+        if organization is not None:
+            return organization
+
+        agent = getattr(self, "_resolved_console_agent", None)
+        if agent is not None and agent.organization_id:
+            return agent.organization
+        return None
 
 
 class ConsoleSessionAPIView(LoginRequiredMixin, View):

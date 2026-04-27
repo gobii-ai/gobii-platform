@@ -33,6 +33,7 @@ from api.models import (
     CommsAllowlistRequest,
     CommsChannel,
     DeliveryStatus,
+    IntelligenceTier,
     PersistentAgent,
     PersistentAgentKanbanCard,
     PersistentAgentKanbanEvent,
@@ -48,6 +49,8 @@ from api.models import (
     PersistentAgentToolCall,
     PersistentAgentWebSession,
     MCPServerConfig,
+    Organization,
+    OrganizationMembership,
     PipedreamAppSelection,
     build_web_agent_address,
     build_web_user_address,
@@ -88,6 +91,24 @@ CHANNEL_LAYER_SETTINGS = {
 class AgentChatAPITests(TestCase):
     @classmethod
     def setUpTestData(cls):
+        cls.standard_tier, _ = IntelligenceTier.objects.update_or_create(
+            key="standard",
+            defaults={
+                "display_name": "Standard",
+                "rank": 1,
+                "credit_multiplier": "1.00",
+                "is_default": True,
+            },
+        )
+        cls.premium_tier, _ = IntelligenceTier.objects.update_or_create(
+            key="premium",
+            defaults={
+                "display_name": "Premium",
+                "rank": 2,
+                "credit_multiplier": "2.00",
+                "is_default": False,
+            },
+        )
         user_model = get_user_model()
         cls.user = user_model.objects.create_user(
             username="agent-owner",
@@ -530,6 +551,64 @@ class AgentChatAPITests(TestCase):
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
         self.assertIsNotNone(created_agent.preferred_llm_tier)
         self.assertEqual(created_agent.preferred_llm_tier.key, "standard")
+
+    @tag("batch_agent_chat")
+    @patch("api.views.Analytics.track_event")
+    @patch("api.views.queue_settings_change_resume")
+    def test_console_agent_patch_allows_org_owner_when_agent_user_differs(self, resume_mock, analytics_mock):
+        user_model = get_user_model()
+        creator = user_model.objects.create_user(
+            username="org-agent-creator",
+            email="creator@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Gobii",
+            slug="gobii-test",
+            created_by=creator,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 2
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=creator, name="Org Browser Agent")
+        org_agent = PersistentAgent.objects.create(
+            user=creator,
+            organization=organization,
+            name="Org Agent",
+            charter="Help the org",
+            browser_use_agent=browser_agent,
+            preferred_llm_tier=self.standard_tier,
+        )
+
+        response = self.client.patch(
+            f"/console/api/agents/{org_agent.id}/",
+            data=json.dumps({"preferred_llm_tier": self.premium_tier.key}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        org_agent.refresh_from_db()
+        self.assertEqual(org_agent.preferred_llm_tier_id, self.premium_tier.id)
+        resume_mock.assert_called_once()
+        analytics_mock.assert_called_once()
+        self.assertEqual(
+            analytics_mock.call_args.kwargs["event"],
+            AnalyticsEvent.PERSISTENT_AGENT_UPDATED,
+        )
+        self.assertEqual(
+            analytics_mock.call_args.kwargs["properties"]["owner_type"],
+            "organization",
+        )
+        self.assertEqual(
+            analytics_mock.call_args.kwargs["properties"]["organization_id"],
+            str(organization.id),
+        )
 
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @tag("batch_agent_chat")

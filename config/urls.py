@@ -17,6 +17,7 @@ from config.account_views import (
 )
 from console.api_views import (
     LLMEndpointTestAPIView,
+    ConsolePersistentAgentViewSet,
     AgentFsNodeDownloadAPIView,
     SignedAgentFsNodeDownloadAPIView,
     AgentFsNodeBulkDeleteAPIView,
@@ -274,7 +275,7 @@ from console.views import (
 )
 from console.context_views import SwitchContextView
 from pages.views import PaidPlanLanding
-from api.views import LinkShortenerRedirectView, PersistentAgentViewSet, PipedreamConnectRedirectView
+from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
 
 API_REFERENCE_DOCS_URL = "https://docs.gobii.ai/api-reference"
 
@@ -430,7 +431,7 @@ urlpatterns = [
     path("console/api/staff/prompt-archives/<uuid:archive_id>/", StaffPromptArchiveAPIView.as_view(), name="console_prompt_archive_fetch"),
     path(
         "console/api/agents/<uuid:id>/",
-        PersistentAgentViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}),
+        ConsolePersistentAgentViewSet.as_view({'get': 'retrieve', 'patch': 'partial_update'}),
         name="console_agent_detail",
     ),
     path("system-settings/api/", SystemSettingsListAPIView.as_view(), name="system_settings_list"),
