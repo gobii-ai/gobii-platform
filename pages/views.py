@@ -1880,7 +1880,7 @@ class SpecialAccessView(TemplateView):
         plan_label = ""
         redemptions_remaining = None
         if promo is not None:
-            plan_label = "Scale" if promo.plan == PlanNames.SCALE else "Pro"
+            plan_label = promo.get_plan_display()
             if promo.max_redemptions is not None:
                 used_count = promo.redemptions.filter(
                     status__in=promo.redemptions.model.COUNTED_STATUSES,

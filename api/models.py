@@ -4272,7 +4272,10 @@ class TrialPromo(models.Model):
     max_redemptions = models.PositiveIntegerField(
         null=True,
         blank=True,
-        help_text="Maximum non-expired checkout starts/completions for this shared code.",
+        help_text=(
+            "Maximum completed promo redemptions for this shared code. "
+            "Checkout starts are not counted until Stripe confirms completion."
+        ),
     )
     active_from = models.DateTimeField(null=True, blank=True)
     active_until = models.DateTimeField(null=True, blank=True)

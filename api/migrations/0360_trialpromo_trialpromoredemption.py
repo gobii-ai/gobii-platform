@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ('repeat_trials_allowed', models.BooleanField(default=False, help_text='When enabled, this promo can ignore same-user prior trial/subscription history.')),
                 ('trial_abuse_filtering_enabled', models.BooleanField(default=True)),
                 ('trial_credit_amount', models.DecimalField(blank=True, decimal_places=3, help_text='Optional one-time task credit grant override for trial start.', max_digits=12, null=True, validators=[django.core.validators.MinValueValidator(Decimal('0.001'))])),
-                ('max_redemptions', models.PositiveIntegerField(blank=True, help_text='Maximum non-expired checkout starts/completions for this shared code.', null=True)),
+                ('max_redemptions', models.PositiveIntegerField(blank=True, help_text='Maximum completed promo redemptions for this shared code. Checkout starts are not counted until Stripe confirms completion.', null=True)),
                 ('active_from', models.DateTimeField(blank=True, null=True)),
                 ('active_until', models.DateTimeField(blank=True, null=True)),
                 ('is_active', models.BooleanField(default=True)),

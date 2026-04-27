@@ -277,6 +277,8 @@ def mark_trial_promo_redemption_from_checkout_session(
         updates["checkout_completed_at"] = now
     elif status == TrialPromoRedemptionStatusChoices.CHECKOUT_EXPIRED:
         updates["checkout_expired_at"] = now
+    elif status == TrialPromoRedemptionStatusChoices.CHECKOUT_FAILED:
+        updates["checkout_failed_at"] = now
 
     return bool(
         TrialPromoRedemption.objects.filter(

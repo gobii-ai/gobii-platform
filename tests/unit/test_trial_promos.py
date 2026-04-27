@@ -21,6 +21,7 @@ from api.services.trial_promos import (
     TrialPromoError,
     can_user_start_trial_promo,
     find_active_trial_promo_by_code,
+    mark_trial_promo_redemption_from_checkout_session,
     parse_trial_promo_credit_amount,
     reserve_trial_promo_redemption,
 )
@@ -160,6 +161,27 @@ class TrialPromoServiceTests(TestCase):
 
         self.assertEqual(retry_redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED)
 
+    def test_mark_redemption_from_checkout_session_sets_failed_timestamp(self):
+        promo = _create_promo(code="FAILED-SESSION")
+        redemption = reserve_trial_promo_redemption(
+            promo=promo,
+            user=self.user,
+            event_id="trial-promo-failed",
+            stripe_customer_id="cus_failed",
+        )
+        redemption.stripe_checkout_session_id = "cs_failed"
+        redemption.save(update_fields=["stripe_checkout_session_id", "updated_at"])
+
+        updated = mark_trial_promo_redemption_from_checkout_session(
+            checkout_session_id="cs_failed",
+            status=TrialPromoRedemptionStatusChoices.CHECKOUT_FAILED,
+        )
+
+        self.assertTrue(updated)
+        redemption.refresh_from_db()
+        self.assertEqual(redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_FAILED)
+        self.assertIsNotNone(redemption.checkout_failed_at)
+
     def test_parse_trial_promo_credit_amount_ignores_invalid_values(self):
         self.assertEqual(
             parse_trial_promo_credit_amount({TRIAL_PROMO_META_CREDIT_AMOUNT: "123.456"}),
@@ -204,6 +226,15 @@ class SpecialAccessCheckoutTests(TestCase):
             email="special-access@example.com",
             password="pw",
         )
+
+    def test_special_access_uses_model_plan_display_label(self):
+        promo = _create_promo(code="SCALE-DISPLAY", plan=PlanNames.SCALE)
+
+        response = self.client.post(reverse("pages:special_access"), {"code": "scale-display"}, follow=True)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["plan_label"], promo.get_plan_display())
+        self.assertContains(response, "Scale")
 
     @patch("pages.views._track_web_event_for_request")
     @patch("pages.views._emit_checkout_initiated_event")
