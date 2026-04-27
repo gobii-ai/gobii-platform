@@ -1,6 +1,7 @@
 import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Paperclip, X, ChevronDown, ChevronUp, Sparkles } from 'lucide-react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
+import { ArrowUp, ChevronDown, ChevronUp, Loader2, Paperclip, Plus, Sparkles, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -144,6 +145,79 @@ function buildHumanInputBatchAnalyticsProperties(
   }
 }
 
+type ComposerAppsAction = {
+  openModal: () => void
+  disabled: boolean
+  loading: boolean
+}
+
+type ComposerActionMenuProps = {
+  disabled?: boolean
+  onUploadFiles: () => void
+  appsAction?: ComposerAppsAction | null
+}
+
+function ComposerActionMenu({
+  disabled = false,
+  onUploadFiles,
+  appsAction = null,
+}: ComposerActionMenuProps) {
+  const [open, setOpen] = useState(false)
+
+  return (
+    <DialogTrigger isOpen={open} onOpenChange={setOpen}>
+      <Button
+        className="composer-action-trigger"
+        aria-label="More composer actions"
+        isDisabled={disabled}
+      >
+        <Plus className="h-4 w-4" aria-hidden="true" />
+      </Button>
+      <Popover className="composer-action-popover" placement="top start" offset={10}>
+        <Dialog className="composer-action-menu">
+          <button
+            type="button"
+            className="composer-action-item"
+            onClick={() => {
+              onUploadFiles()
+              setOpen(false)
+            }}
+            disabled={disabled}
+          >
+            <span className="composer-action-item-icon" aria-hidden="true">
+              <Paperclip className="h-3.5 w-3.5" />
+            </span>
+            <span className="composer-action-item-label">Upload Files</span>
+          </button>
+          {appsAction ? (
+            <>
+              <div className="composer-action-divider" aria-hidden="true" />
+              <button
+                type="button"
+                className="composer-action-item"
+                onClick={() => {
+                  appsAction.openModal()
+                  setOpen(false)
+                }}
+                disabled={appsAction.disabled}
+              >
+                <span className="composer-action-item-icon" aria-hidden="true">
+                  {appsAction.loading ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                </span>
+                <span className="composer-action-item-label">Apps</span>
+              </button>
+            </>
+          ) : null}
+        </Dialog>
+      </Popover>
+    </DialogTrigger>
+  )
+}
+
 type AgentComposerProps = {
   agentId?: string | null
   agentName?: string | null
@@ -275,7 +349,6 @@ export const AgentComposer = memo(function AgentComposer({
   const shellRef = useRef<HTMLDivElement | null>(null)
   const focusScrollTimeoutRef = useRef<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const attachmentInputId = useId()
   const dragCounter = useRef(0)
 
   // Countdown timer state for auto-rotation indicator
@@ -971,6 +1044,13 @@ export const AgentComposer = memo(function AgentComposer({
     event.target.value = ''
   }, [addAttachments])
 
+  const handleOpenFilePicker = useCallback(() => {
+    if (disabled || isSending) {
+      return
+    }
+    fileInputRef.current?.click()
+  }, [disabled, isSending])
+
   const removeAttachment = useCallback((index: number) => {
     setAttachments((current) => current.filter((_, currentIndex) => currentIndex !== index))
   }, [])
@@ -1036,6 +1116,77 @@ export const AgentComposer = memo(function AgentComposer({
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights || insightsLoading)
   const taskCount = processingTasks.length
   const showPlanningStrip = isPlanningMode
+  const composerActionsDisabled = disabled || isSending
+  const sendDisabled = composerActionsDisabled || stopProcessingBusy || (!body.trim() && attachments.length === 0)
+  const sendTitle = stopProcessingBusy
+    ? 'Stopping'
+    : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+
+  const renderComposerUtilityRow = (appsAction: ComposerAppsAction | null = null) => (
+    <div className="composer-utility-row">
+      <div className="composer-utility-row__leading">
+        <ComposerActionMenu
+          disabled={composerActionsDisabled}
+          onUploadFiles={handleOpenFilePicker}
+          appsAction={appsAction}
+        />
+      </div>
+      <div className="composer-utility-row__actions">
+        {showIntelligenceSelector ? (
+          <AgentIntelligenceSelector
+            config={intelligenceConfig as LlmIntelligenceConfig}
+            currentTier={intelligenceTier ?? 'standard'}
+            onSelect={(tier) => onIntelligenceChange?.(tier)}
+            onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
+            onOpenTaskPacks={onOpenTaskPacks}
+            allowLockedSelection={allowLockedIntelligenceSelection}
+            disabled={!canManageAgent}
+            busy={intelligenceBusy}
+            error={intelligenceError}
+          />
+        ) : null}
+        {showStopProcessing ? (
+          <button
+            type="button"
+            className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
+            disabled={stopProcessingBusy}
+            title={stopProcessingBusy ? 'Stopping' : 'Stop'}
+            aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
+            onClick={(event) => {
+              event.preventDefault()
+              void onStopProcessing?.()
+            }}
+          >
+            <span className="composer-send-button-stop-icon" aria-hidden="true" />
+            <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="composer-send-button"
+            disabled={sendDisabled}
+            title={sendTitle}
+            aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
+          >
+            {isSending ? (
+              <span className="inline-flex items-center justify-center">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
+                  aria-hidden="true"
+                />
+                <span className="sr-only">Sending</span>
+              </span>
+            ) : (
+              <>
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Send</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div
@@ -1221,28 +1372,15 @@ export const AgentComposer = memo(function AgentComposer({
             </div>
           ) : null}
           <div className="composer-input-surface flex flex-col rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3 transition">
-            <div className="flex items-center gap-3">
-              <input
-                ref={fileInputRef}
-                id={attachmentInputId}
-                type="file"
-                className="sr-only"
-                multiple
-                disabled={disabled || isSending}
-                onChange={handleAttachmentChange}
-              />
-              <label
-                htmlFor={attachmentInputId}
-                className={`inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200/60 text-slate-400 transition-all ${
-                  disabled
-                    ? 'cursor-not-allowed opacity-60'
-                    : 'cursor-pointer hover:border-slate-300 hover:text-slate-500'
-                }`}
-                aria-label="Attach file"
-                title={disabledReason || 'Attach file'}
-              >
-                <Paperclip className="h-4 w-4" aria-hidden="true" />
-              </label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="sr-only"
+              multiple
+              disabled={disabled || isSending}
+              onChange={handleAttachmentChange}
+            />
+            <div className="flex items-start gap-3">
               <textarea
                 name="body"
                 rows={1}
@@ -1263,63 +1401,18 @@ export const AgentComposer = memo(function AgentComposer({
                 disabled={disabled}
                 ref={textareaRef}
               />
-              {showIntelligenceSelector ? (
-                <AgentIntelligenceSelector
-                  config={intelligenceConfig as LlmIntelligenceConfig}
-                  currentTier={intelligenceTier ?? 'standard'}
-                  onSelect={(tier) => onIntelligenceChange?.(tier)}
-                  onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
-                  onOpenTaskPacks={onOpenTaskPacks}
-                  allowLockedSelection={allowLockedIntelligenceSelection}
-                  disabled={!canManageAgent}
-                  busy={intelligenceBusy}
-                  error={intelligenceError}
-                />
-              ) : null}
-              {showStopProcessing ? (
-                <button
-                  type="button"
-                  className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
-                  disabled={stopProcessingBusy}
-                  title={stopProcessingBusy ? 'Stopping' : 'Stop'}
-                  aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
-                  onClick={(event) => {
-                    event.preventDefault()
-                    void onStopProcessing?.()
-                  }}
-                >
-                  <span className="composer-send-button-stop-icon" aria-hidden="true" />
-                  <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
-                </button>
-              ) : (
-                <button
-                  type="submit"
-                  className="composer-send-button"
-                  disabled={disabled || isSending || stopProcessingBusy || (!body.trim() && attachments.length === 0)}
-                  title={
-                    stopProcessingBusy
-                      ? 'Stopping'
-                      : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
-                  }
-                  aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
-                >
-                  {isSending ? (
-                    <span className="inline-flex items-center justify-center">
-                      <span
-                        className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
-                        aria-hidden="true"
-                      />
-                      <span className="sr-only">Sending</span>
-                    </span>
-                  ) : (
-                    <>
-                      <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                      <span className="sr-only">Send</span>
-                    </>
-                  )}
-                </button>
-              )}
             </div>
+            {showPipedreamAppsControl ? (
+              <ComposerPipedreamAppsControl
+                settingsUrl={pipedreamAppsSettingsUrl as string}
+                searchUrl={pipedreamAppSearchUrl as string}
+                disabled={composerActionsDisabled}
+              >
+                {(appsAction) => renderComposerUtilityRow(appsAction)}
+              </ComposerPipedreamAppsControl>
+            ) : (
+              renderComposerUtilityRow()
+            )}
             {attachments.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
                 {attachments.map((file, index) => (
@@ -1341,15 +1434,6 @@ export const AgentComposer = memo(function AgentComposer({
                     </button>
                   </span>
                 ))}
-              </div>
-            ) : null}
-            {showPipedreamAppsControl ? (
-              <div className="flex items-center justify-start pt-2">
-                <ComposerPipedreamAppsControl
-                  settingsUrl={pipedreamAppsSettingsUrl as string}
-                  searchUrl={pipedreamAppSearchUrl as string}
-                  disabled={disabled || isSending}
-                />
               </div>
             ) : null}
             {feedbackMessage ? (

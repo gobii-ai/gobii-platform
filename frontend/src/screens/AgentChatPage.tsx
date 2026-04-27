@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
+import noiseLightTextureUrl from '../assets/textures/noise-light.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
@@ -54,7 +55,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { KanbanBoardSnapshot, PendingActionRequest, TimelineEvent } from '../types/agentChat'
+import type { KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -77,6 +78,7 @@ const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
+const RESOLVED_NOISE_LIGHT_TEXTURE_URL = new URL(noiseLightTextureUrl, import.meta.url).toString()
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -424,6 +426,8 @@ type AgentRosterQueryData = {
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
 }
+
+type AgentChatPageStyle = CSSProperties & Record<'--agent-chat-grain-texture', string>
 
 function isAgentRosterQueryData(value: unknown): value is AgentRosterQueryData {
   if (!value || typeof value !== 'object') {
@@ -2855,6 +2859,55 @@ export function AgentChatPage({
     }
   }, [activeAgentId, queryClient, refreshProcessing, stopProcessingBusy])
 
+  const applyPlanningMutationResult = useCallback((
+    targetAgentId: string,
+    nextPlanningState: PlanningState,
+    pendingActionRequests: PendingActionRequest[],
+    pendingHumanInputRequests: PendingHumanInputRequest[],
+  ) => {
+    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests)
+    useAgentChatStore.getState().updateAgentIdentity({
+      agentId: targetAgentId,
+      planningState: nextPlanningState,
+    })
+    queryClient.setQueryData<InfiniteData<TimelinePage>>(
+      timelineQueryKey(targetAgentId),
+      (current) => {
+        if (!current?.pages?.length) {
+          return current
+        }
+        return {
+          ...current,
+          pages: current.pages.map((page) => ({
+            ...page,
+            raw: {
+              ...page.raw,
+              planning_state: nextPlanningState,
+              pending_action_requests: pendingActionRequests,
+              pending_human_input_requests: pendingHumanInputRequests,
+            },
+          })),
+        }
+      },
+    )
+    queryClient.setQueriesData<AgentRosterQueryData>(
+      { queryKey: ['agent-roster'] },
+      (current) => {
+        if (!isAgentRosterQueryData(current)) {
+          return current
+        }
+        return {
+          ...current,
+          agents: current.agents.map((agent) => (
+            agent.id === targetAgentId
+              ? { ...agent, planningState: nextPlanningState }
+              : agent
+          )),
+        }
+      },
+    )
+  }, [queryClient])
+
   const handleSkipPlanning = useCallback(async () => {
     if (!activeAgentId || skipPlanningBusy) {
       return
@@ -2863,53 +2916,18 @@ export function AgentChatPage({
     setSendMessageError(null)
     try {
       const result = await skipAgentPlanning(activeAgentId)
-      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
-      useAgentChatStore.getState().updateAgentIdentity({
-        agentId: activeAgentId,
-        planningState: result.planningState,
-      })
-      queryClient.setQueryData<InfiniteData<TimelinePage>>(
-        timelineQueryKey(activeAgentId),
-        (current) => {
-          if (!current?.pages?.length) {
-            return current
-          }
-          return {
-            ...current,
-            pages: current.pages.map((page) => ({
-              ...page,
-              raw: {
-                ...page.raw,
-                planning_state: result.planningState,
-                pending_action_requests: result.pendingActionRequests,
-                pending_human_input_requests: result.pendingHumanInputRequests,
-              },
-            })),
-          }
-        },
-      )
-      queryClient.setQueriesData<AgentRosterQueryData>(
-        { queryKey: ['agent-roster'] },
-        (current) => {
-          if (!isAgentRosterQueryData(current)) {
-            return current
-          }
-          return {
-            ...current,
-            agents: current.agents.map((agent) => (
-              agent.id === activeAgentId
-                ? { ...agent, planningState: result.planningState }
-                : agent
-            )),
-          }
-        },
+      applyPlanningMutationResult(
+        activeAgentId,
+        result.planningState,
+        result.pendingActionRequests,
+        result.pendingHumanInputRequests,
       )
     } catch (error) {
       setSendMessageError(safeErrorMessage(error) || 'Unable to skip planning right now.')
     } finally {
       setSkipPlanningBusy(false)
     }
-  }, [activeAgentId, queryClient, skipPlanningBusy])
+  }, [activeAgentId, applyPlanningMutationResult, skipPlanningBusy])
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
@@ -3214,8 +3232,15 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
   }
+  const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
+    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_LIGHT_TEXTURE_URL}")`,
+  }), [])
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page agent-chat-page--framed" data-processing="false">
+    <div
+      className="agent-chat-page agent-chat-page--framed"
+      data-processing="false"
+      style={agentChatPageStyle}
+    >
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName}>
         <div id="agent-workspace-root">
@@ -3384,7 +3409,12 @@ export function AgentChatPage({
         })
         return
       }
-      await createNewAgent(body, selectedTier, charterOverride, selectedPipedreamAppSlugs)
+      await createNewAgent(
+        body,
+        selectedTier,
+        charterOverride,
+        selectedPipedreamAppSlugs,
+      )
       return
     }
     if (activeAgentId) {
@@ -3673,7 +3703,11 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page agent-chat-page--framed" data-processing={isProcessing ? 'true' : 'false'}>
+    <div
+      className="agent-chat-page agent-chat-page--framed"
+      data-processing={isProcessing ? 'true' : 'false'}
+      style={agentChatPageStyle}
+    >
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
       ) : null}
