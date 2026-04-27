@@ -8,9 +8,11 @@ from django.urls import reverse
 
 from api.models import (
     TrialPromo,
+    TrialPromoNoPaymentMethodEndBehaviorChoices,
     TrialPromoRedemption,
     TrialPromoRedemptionStatusChoices,
 )
+from api.admin_forms import TrialPromoAdminForm
 from api.services.trial_promos import (
     TRIAL_PROMO_META_CREDIT_AMOUNT,
     TRIAL_PROMO_META_ID,
@@ -39,6 +41,23 @@ def _create_promo(code: str = "CONF-ACCESS", **overrides) -> TrialPromo:
     promo.set_code(code)
     promo.save()
     return promo
+
+
+def _trial_promo_form_data(code: str, **overrides) -> dict[str, str]:
+    data = {
+        "name": "Conference special",
+        "code": code,
+        "plan": PlanNames.STARTUP,
+        "trial_days": "14",
+        "payment_method_required": "on",
+        "no_payment_method_end_behavior": TrialPromoNoPaymentMethodEndBehaviorChoices.CREATE_INVOICE,
+        "trial_abuse_filtering_enabled": "on",
+        "is_active": "on",
+        "headline": "",
+        "description": "",
+    }
+    data.update(overrides)
+    return data
 
 
 @tag("batch_pages")
@@ -148,6 +167,32 @@ class TrialPromoServiceTests(TestCase):
         )
         self.assertIsNone(parse_trial_promo_credit_amount({TRIAL_PROMO_META_CREDIT_AMOUNT: "0"}))
         self.assertIsNone(parse_trial_promo_credit_amount({TRIAL_PROMO_META_CREDIT_AMOUNT: "not-a-number"}))
+
+
+@tag("batch_pages")
+class TrialPromoAdminFormTests(TestCase):
+    def test_duplicate_code_is_form_error_before_save(self):
+        _create_promo(code="DUPE-CODE")
+
+        form = TrialPromoAdminForm(data=_trial_promo_form_data(" dupe-code "))
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("code", form.errors)
+        self.assertIn("already exists", form.errors["code"][0])
+
+    def test_editing_promo_can_keep_same_code(self):
+        promo = _create_promo(code="SAME-CODE")
+
+        form = TrialPromoAdminForm(
+            instance=promo,
+            data=_trial_promo_form_data("same-code", name="Updated conference special"),
+        )
+
+        self.assertTrue(form.is_valid(), form.errors)
+        updated = form.save()
+        self.assertEqual(updated.pk, promo.pk)
+        self.assertEqual(updated.code_label, "SAME-CODE")
+        self.assertEqual(updated.name, "Updated conference special")
 
 
 @tag("batch_pages")

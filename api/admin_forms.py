@@ -233,6 +233,12 @@ class TrialPromoAdminForm(forms.ModelForm):
         code = TrialPromo.normalize_code(self.cleaned_data.get("code"))
         if not code and self.instance.pk is None:
             raise forms.ValidationError("Enter a promo code.")
+        if code:
+            existing = TrialPromo.objects.filter(code_digest=TrialPromo.digest_code(code))
+            if self.instance.pk:
+                existing = existing.exclude(pk=self.instance.pk)
+            if existing.exists():
+                raise forms.ValidationError("A trial promo with this code already exists.")
         return code
 
     def clean(self):
