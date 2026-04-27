@@ -74,7 +74,13 @@ from billing.plan_resolver import (
     get_plan_version_by_price_id,
     get_plan_version_by_product_id,
 )
-from api.models import UserBilling, OrganizationBilling, StripeCheckoutContext, UserAttribution
+from api.models import (
+    OrganizationBilling,
+    StripeCheckoutContext,
+    TrialPromoRedemptionStatusChoices,
+    UserAttribution,
+    UserBilling,
+)
 from api.services.dedicated_proxy_service import (
     DedicatedProxyService,
     DedicatedProxyUnavailableError,
@@ -88,6 +94,11 @@ from api.services.trial_abuse import (
     SIGNAL_SOURCE_SIGNUP,
     capture_request_identity_signals_and_attribution,
     evaluate_user_trial_eligibility,
+)
+from api.services.trial_promos import (
+    mark_trial_promo_redemption_from_checkout_session,
+    mark_trial_promo_redemption_subscription,
+    parse_trial_promo_credit_amount,
 )
 from util.payments_helper import PaymentsHelper
 from util.integrations import stripe_status
@@ -2503,10 +2514,26 @@ def handle_checkout_session_event(event, **kwargs):
 
     metadata = _coerce_metadata_dict(payload.get("metadata"))
     expected_event_id = str(metadata.get("gobii_event_id") or "").strip()
+    checkout_session_id = _extract_stripe_object_id(payload)
+    stripe_subscription_id = _extract_stripe_object_id(_get_stripe_data_value(payload, "subscription"))
+    event_type = getattr(event, "type", "")
+    if event_type == "checkout.session.completed":
+        mark_trial_promo_redemption_from_checkout_session(
+            checkout_session_id=checkout_session_id,
+            status=TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED,
+            stripe_subscription_id=stripe_subscription_id,
+        )
+    elif event_type == "checkout.session.expired":
+        mark_trial_promo_redemption_from_checkout_session(
+            checkout_session_id=checkout_session_id,
+            status=TrialPromoRedemptionStatusChoices.CHECKOUT_EXPIRED,
+            stripe_subscription_id=stripe_subscription_id,
+        )
+
     if not customer_id or not expected_event_id:
         return
 
-    if getattr(event, "type", "") == "checkout.session.completed":
+    if event_type == "checkout.session.completed":
         try:
             _emit_add_payment_info_for_completed_checkout_session(
                 payload=payload,
@@ -3352,6 +3379,15 @@ def handle_subscription_event(event, **kwargs):
             marketing_context = {}
 
         source_data = stripe_sub if stripe_sub is not None else (getattr(sub, "stripe_data", {}) or {})
+        subscription_metadata: dict[str, Any] = {}
+        if isinstance(source_data, Mapping):
+            subscription_metadata = _coerce_metadata_dict(source_data.get("metadata"))
+        if not subscription_metadata:
+            subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
+        mark_trial_promo_redemption_subscription(
+            event_id=subscription_metadata.get("gobii_event_id"),
+            stripe_subscription_id=subscription_id,
+        )
 
         # Handle explicit deletions (downgrade to free immediately)
         try:
@@ -3629,12 +3665,6 @@ def handle_subscription_event(event, **kwargs):
         # Prefer explicit Stripe retrieve when present; otherwise use dj-stripe's cached payload
         # from the Subscription row. This allows the normal sync_from_stripe_data path to work.
 
-        subscription_metadata: dict[str, Any] = {}
-        if isinstance(source_data, Mapping):
-            subscription_metadata = _coerce_metadata_dict(source_data.get("metadata"))
-        if not subscription_metadata:
-            subscription_metadata = _coerce_metadata_dict(getattr(sub, "metadata", None))
-
         current_period_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_start"))
         current_period_end_dt = _coerce_datetime(_get_stripe_data_value(source_data, "current_period_end"))
         trial_start_dt = _coerce_datetime(_get_stripe_data_value(source_data, "trial_start"))
@@ -3806,10 +3836,12 @@ def handle_subscription_event(event, **kwargs):
                         if monthly_credits is None:
                             should_grant = False
                         else:
-                            trial_credit_amount = _trial_start_credit_amount(
-                                plan_id=plan_value,
-                                monthly_credits=monthly_credits,
-                            )
+                            trial_credit_amount = parse_trial_promo_credit_amount(subscription_metadata)
+                            if trial_credit_amount is None:
+                                trial_credit_amount = _trial_start_credit_amount(
+                                    plan_id=plan_value,
+                                    monthly_credits=monthly_credits,
+                                )
                             if trial_credit_amount != Decimal(monthly_credits):
                                 credit_override = trial_credit_amount
                         if not grant_invoice_id:

@@ -52,6 +52,7 @@ from .admin_forms import (
     BulkSetUserFlagsForm,
     AgentEmailAccountForm,
     StripeConfigForm,
+    TrialPromoAdminForm,
     MCPServerConfigAdminForm,
     GlobalAgentSkillImportForm,
 )
@@ -83,6 +84,8 @@ from .models import (
     UserIdentitySignal,
     UserTrialEligibility,
     UserTrialActivation,
+    TrialPromo,
+    TrialPromoRedemption,
     ExecutionPauseReasonChoices,
 )
 from django.contrib.auth import get_user_model
@@ -315,6 +318,99 @@ class StripeConfigAdmin(admin.ModelAdmin):
         return "Configured" if obj.has_value("webhook_secret") else "Not set"
 
     webhook_secret_status.short_description = "Webhook secret"
+
+
+@admin.register(TrialPromo)
+class TrialPromoAdmin(admin.ModelAdmin):
+    form = TrialPromoAdminForm
+    list_display = (
+        "name",
+        "code_label",
+        "plan",
+        "trial_days",
+        "payment_method_required",
+        "repeat_trials_allowed",
+        "trial_abuse_filtering_enabled",
+        "max_redemptions",
+        "is_active",
+        "active_from",
+        "active_until",
+    )
+    list_filter = (
+        "plan",
+        "payment_method_required",
+        "repeat_trials_allowed",
+        "trial_abuse_filtering_enabled",
+        "is_active",
+    )
+    search_fields = ("name", "code_label", "headline", "description")
+    readonly_fields = ("code_digest", "created_at", "updated_at")
+    fields = (
+        "name",
+        "code",
+        "code_label",
+        "code_digest",
+        "plan",
+        "trial_days",
+        "payment_method_required",
+        "no_payment_method_end_behavior",
+        "repeat_trials_allowed",
+        "trial_abuse_filtering_enabled",
+        "trial_credit_amount",
+        "max_redemptions",
+        "active_from",
+        "active_until",
+        "is_active",
+        "headline",
+        "description",
+        "created_at",
+        "updated_at",
+    )
+
+
+@admin.register(TrialPromoRedemption)
+class TrialPromoRedemptionAdmin(admin.ModelAdmin):
+    list_display = (
+        "promo",
+        "user",
+        "status",
+        "stripe_customer_id",
+        "stripe_checkout_session_id",
+        "stripe_subscription_id",
+        "checkout_started_at",
+        "checkout_completed_at",
+        "checkout_expired_at",
+    )
+    list_filter = ("status", "promo", "checkout_started_at")
+    search_fields = (
+        "promo__name",
+        "promo__code_label",
+        "user__email",
+        "user__id",
+        "event_id",
+        "stripe_customer_id",
+        "stripe_checkout_session_id",
+        "stripe_subscription_id",
+    )
+    readonly_fields = (
+        "promo",
+        "user",
+        "status",
+        "event_id",
+        "stripe_customer_id",
+        "stripe_checkout_session_id",
+        "stripe_subscription_id",
+        "metadata",
+        "checkout_started_at",
+        "checkout_completed_at",
+        "checkout_expired_at",
+        "checkout_failed_at",
+        "created_at",
+        "updated_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(AddonEntitlement)

@@ -15,6 +15,7 @@ from .models import (
     LLMProvider,
     MCPServerConfig,
     StripeConfig,
+    TrialPromo,
     UserFlagDefinition,
 )
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -199,6 +200,58 @@ class MCPServerConfigAdminForm(forms.ModelForm):
             obj.save()
             self.save_m2m()
         return obj
+
+
+class TrialPromoAdminForm(forms.ModelForm):
+    code = forms.CharField(
+        label="Promo code",
+        required=False,
+        help_text="Set a new code. Leave blank when editing to keep the existing code.",
+    )
+
+    class Meta:
+        model = TrialPromo
+        fields = (
+            "name",
+            "code",
+            "plan",
+            "trial_days",
+            "payment_method_required",
+            "no_payment_method_end_behavior",
+            "repeat_trials_allowed",
+            "trial_abuse_filtering_enabled",
+            "trial_credit_amount",
+            "max_redemptions",
+            "active_from",
+            "active_until",
+            "is_active",
+            "headline",
+            "description",
+        )
+
+    def clean_code(self) -> str:
+        code = TrialPromo.normalize_code(self.cleaned_data.get("code"))
+        if not code and self.instance.pk is None:
+            raise forms.ValidationError("Enter a promo code.")
+        return code
+
+    def clean(self):
+        cleaned = super().clean()
+        active_from = cleaned.get("active_from")
+        active_until = cleaned.get("active_until")
+        if active_from and active_until and active_until <= active_from:
+            raise forms.ValidationError("Active until must be after active from.")
+        return cleaned
+
+    def save(self, commit: bool = True):
+        instance: TrialPromo = super().save(commit=False)
+        code = self.cleaned_data.get("code")
+        if code:
+            instance.set_code(code)
+        if commit:
+            instance.save()
+            self.save_m2m()
+        return instance
 
 
 class GlobalAgentSkillImportForm(forms.Form):
