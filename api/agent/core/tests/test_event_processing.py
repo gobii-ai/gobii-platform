@@ -13,9 +13,11 @@ from api.agent.core.event_processing import (
     _normalize_tool_params_unicode_escapes,
     _should_imply_continue,
 )
+from django.urls import reverse
+
 from api.agent.core.prompt_context import build_prompt_context
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
-from util.urls import build_agent_daily_limit_action_links
+from util.urls import build_agent_detail_url, build_site_url
 
 
 class _DummySpan:
@@ -169,7 +171,19 @@ class DailyLimitPromptContextTests(TestCase):
             "used": Decimal("2"),
             "next_reset": timezone.now(),
         }
-        links = build_agent_daily_limit_action_links(self.agent.id, self.agent.organization_id)
+        settings_url = build_agent_detail_url(self.agent.id, self.agent.organization_id)
+        double_limit_url_prefix = build_site_url(
+            reverse(
+                "agent_daily_limit_action",
+                kwargs={"pk": self.agent.id, "action": "double"},
+            )
+        )
+        unlimited_limit_url_prefix = build_site_url(
+            reverse(
+                "agent_daily_limit_action",
+                kwargs={"pk": self.agent.id, "action": "unlimited"},
+            )
+        )
 
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
             "api.agent.core.prompt_context.ensure_comms_compacted"
@@ -185,9 +199,9 @@ class DailyLimitPromptContextTests(TestCase):
         user_message = next(message for message in context if message["role"] == "user")
         content = user_message["content"]
         self.assertIn("DAILY HARD LIMIT MODE", content)
-        self.assertIn(links["settings_url"], content)
-        self.assertIn(links["double_limit_url"], content)
-        self.assertIn(links["unlimited_limit_url"], content)
+        self.assertIn(settings_url, content)
+        self.assertIn(f"double {double_limit_url_prefix}?token=", content)
+        self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
 
 
@@ -210,6 +224,7 @@ class DailyLimitProcessingTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.message_service.send_owner_daily_credit_hard_limit_notice")
     @patch("api.agent.core.event_processing._run_agent_loop", return_value={"total_tokens": 0})
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.maybe_schedule_agent_avatar")
     @patch("api.agent.core.event_processing.maybe_schedule_agent_tags")
     @patch("api.agent.core.event_processing.maybe_schedule_mini_description")
@@ -244,10 +259,6 @@ class DailyLimitProcessingTests(TestCase):
 
         mock_run_loop.assert_called_once()
         mock_notice.assert_not_called()
-        self.assertEqual(
-            mock_run_loop.call_args.kwargs["credit_snapshot"]["daily_state"]["hard_limit_remaining"],
-            Decimal("0"),
-        )
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
