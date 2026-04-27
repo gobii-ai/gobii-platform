@@ -7,7 +7,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-RUN --mount=type=cache,target=/var/cache/apt \
+# Keep downloaded debs in the BuildKit cache mount across rebuilds.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
         git \
@@ -43,7 +45,7 @@ COPY server ./server
 COPY sandbox_utils.py logging_config.py ./
 
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --no-cache-dir .
+    pip install .
 
 COPY . ./
 
