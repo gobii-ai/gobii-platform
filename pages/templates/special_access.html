@@ -9,22 +9,15 @@
 {% endblock %}
 
 {% block content %}
-<main class="relative overflow-hidden bg-[#071824] text-white">
-  <div class="absolute inset-0 opacity-30" style="background: radial-gradient(circle at 20% 20%, rgba(14,165,233,0.45), transparent 32%), radial-gradient(circle at 82% 12%, rgba(16,185,129,0.28), transparent 30%), linear-gradient(135deg, rgba(7,24,36,1), rgba(12,52,67,0.92));"></div>
-  <div class="absolute -left-20 top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl"></div>
-  <div class="absolute -right-16 bottom-12 h-72 w-72 rounded-full bg-emerald-300/20 blur-3xl"></div>
+<main class="relative overflow-hidden">
+{#  <div class="absolute inset-0 opacity-30" style="background: radial-gradient(circle at 20% 20%, rgba(14,165,233,0.45), transparent 32%), radial-gradient(circle at 82% 12%, rgba(16,185,129,0.28), transparent 30%), linear-gradient(135deg, rgba(7,24,36,1), rgba(12,52,67,0.92));"></div>#}
+{#  <div class="absolute -left-20 top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl"></div>#}
+{#  <div class="absolute -right-16 bottom-12 h-72 w-72 rounded-full bg-emerald-300/20 blur-3xl"></div>#}
 
   <section class="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-20 sm:px-8 lg:px-10">
-    <a href="{% url 'pages:home' %}" class="inline-flex w-fit items-center gap-3 text-sm font-semibold text-cyan-100 hover:text-white">
-      <span class="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 ring-1 ring-white/15">
-        <img src="{% static 'images/gobii_fish_favicon_32.png' %}" alt="" class="h-5 w-5">
-      </span>
-      Gobii
-    </a>
-
     <div class="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
       <div>
-        <p class="mb-5 inline-flex rounded-full bg-cyan-300/10 px-4 py-2 text-xs font-bold uppercase tracking-[0.32em] text-cyan-100 ring-1 ring-cyan-100/20">
+        <p class="mb-5 inline-flex rounded-full bg-[#e7fff7] px-4 py-2 text-xs font-bold uppercase tracking-[0.32em] text-emerald-800 ring-1 ring-emerald-200">
           Special Access
         </p>
         {% if promo %}
