@@ -12,7 +12,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+# Keep downloaded debs in the BuildKit cache mount across rebuilds.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
         git \
