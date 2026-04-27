@@ -1116,6 +1116,77 @@ export const AgentComposer = memo(function AgentComposer({
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights || insightsLoading)
   const taskCount = processingTasks.length
   const showPlanningStrip = isPlanningMode
+  const composerActionsDisabled = disabled || isSending
+  const sendDisabled = composerActionsDisabled || stopProcessingBusy || (!body.trim() && attachments.length === 0)
+  const sendTitle = stopProcessingBusy
+    ? 'Stopping'
+    : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+
+  const renderComposerUtilityRow = (appsAction: ComposerAppsAction | null = null) => (
+    <div className="composer-utility-row">
+      <div className="composer-utility-row__leading">
+        <ComposerActionMenu
+          disabled={composerActionsDisabled}
+          onUploadFiles={handleOpenFilePicker}
+          appsAction={appsAction}
+        />
+      </div>
+      <div className="composer-utility-row__actions">
+        {showIntelligenceSelector ? (
+          <AgentIntelligenceSelector
+            config={intelligenceConfig as LlmIntelligenceConfig}
+            currentTier={intelligenceTier ?? 'standard'}
+            onSelect={(tier) => onIntelligenceChange?.(tier)}
+            onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
+            onOpenTaskPacks={onOpenTaskPacks}
+            allowLockedSelection={allowLockedIntelligenceSelection}
+            disabled={!canManageAgent}
+            busy={intelligenceBusy}
+            error={intelligenceError}
+          />
+        ) : null}
+        {showStopProcessing ? (
+          <button
+            type="button"
+            className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
+            disabled={stopProcessingBusy}
+            title={stopProcessingBusy ? 'Stopping' : 'Stop'}
+            aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
+            onClick={(event) => {
+              event.preventDefault()
+              void onStopProcessing?.()
+            }}
+          >
+            <span className="composer-send-button-stop-icon" aria-hidden="true" />
+            <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
+          </button>
+        ) : (
+          <button
+            type="submit"
+            className="composer-send-button"
+            disabled={sendDisabled}
+            title={sendTitle}
+            aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
+          >
+            {isSending ? (
+              <span className="inline-flex items-center justify-center">
+                <span
+                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
+                  aria-hidden="true"
+                />
+                <span className="sr-only">Sending</span>
+              </span>
+            ) : (
+              <>
+                <ArrowUp className="h-4 w-4" aria-hidden="true" />
+                <span className="sr-only">Send</span>
+              </>
+            )}
+          </button>
+        )}
+      </div>
+    </div>
+  )
 
   return (
     <div
@@ -1332,150 +1403,15 @@ export const AgentComposer = memo(function AgentComposer({
               />
             </div>
             {showPipedreamAppsControl ? (
-              <div className="composer-utility-row">
-                <ComposerPipedreamAppsControl
-                  settingsUrl={pipedreamAppsSettingsUrl as string}
-                  searchUrl={pipedreamAppSearchUrl as string}
-                  disabled={disabled || isSending}
-                >
-                  {(appsAction) => (
-                    <>
-                      <div className="composer-utility-row__leading">
-                        <ComposerActionMenu
-                          disabled={disabled || isSending}
-                          onUploadFiles={handleOpenFilePicker}
-                          appsAction={appsAction}
-                        />
-                      </div>
-                      <div className="composer-utility-row__actions">
-                        {showIntelligenceSelector ? (
-                          <AgentIntelligenceSelector
-                            config={intelligenceConfig as LlmIntelligenceConfig}
-                            currentTier={intelligenceTier ?? 'standard'}
-                            onSelect={(tier) => onIntelligenceChange?.(tier)}
-                            onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
-                            onOpenTaskPacks={onOpenTaskPacks}
-                            allowLockedSelection={allowLockedIntelligenceSelection}
-                            disabled={!canManageAgent}
-                            busy={intelligenceBusy}
-                            error={intelligenceError}
-                          />
-                        ) : null}
-                        {showStopProcessing ? (
-                          <button
-                            type="button"
-                            className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
-                            disabled={stopProcessingBusy}
-                            title={stopProcessingBusy ? 'Stopping' : 'Stop'}
-                            aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
-                            onClick={(event) => {
-                              event.preventDefault()
-                              void onStopProcessing?.()
-                            }}
-                          >
-                            <span className="composer-send-button-stop-icon" aria-hidden="true" />
-                            <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
-                          </button>
-                        ) : (
-                          <button
-                            type="submit"
-                            className="composer-send-button"
-                            disabled={disabled || isSending || stopProcessingBusy || (!body.trim() && attachments.length === 0)}
-                            title={
-                              stopProcessingBusy
-                                ? 'Stopping'
-                                : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
-                            }
-                            aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
-                          >
-                            {isSending ? (
-                              <span className="inline-flex items-center justify-center">
-                                <span
-                                  className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
-                                  aria-hidden="true"
-                                />
-                                <span className="sr-only">Sending</span>
-                              </span>
-                            ) : (
-                              <>
-                                <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                                <span className="sr-only">Send</span>
-                              </>
-                            )}
-                          </button>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </ComposerPipedreamAppsControl>
-              </div>
+              <ComposerPipedreamAppsControl
+                settingsUrl={pipedreamAppsSettingsUrl as string}
+                searchUrl={pipedreamAppSearchUrl as string}
+                disabled={composerActionsDisabled}
+              >
+                {(appsAction) => renderComposerUtilityRow(appsAction)}
+              </ComposerPipedreamAppsControl>
             ) : (
-              <div className="composer-utility-row">
-                <div className="composer-utility-row__leading">
-                  <ComposerActionMenu
-                    disabled={disabled || isSending}
-                    onUploadFiles={handleOpenFilePicker}
-                  />
-                </div>
-                <div className="composer-utility-row__actions">
-                  {showIntelligenceSelector ? (
-                    <AgentIntelligenceSelector
-                      config={intelligenceConfig as LlmIntelligenceConfig}
-                      currentTier={intelligenceTier ?? 'standard'}
-                      onSelect={(tier) => onIntelligenceChange?.(tier)}
-                      onUpsell={allowLockedIntelligenceSelection ? undefined : handleIntelligenceUpsell}
-                      onOpenTaskPacks={onOpenTaskPacks}
-                      allowLockedSelection={allowLockedIntelligenceSelection}
-                      disabled={!canManageAgent}
-                      busy={intelligenceBusy}
-                      error={intelligenceError}
-                    />
-                  ) : null}
-                  {showStopProcessing ? (
-                    <button
-                      type="button"
-                      className={`composer-send-button composer-send-button--stop${stopProcessingBusy ? ' composer-send-button--stop-busy' : ''}`}
-                      disabled={stopProcessingBusy}
-                      title={stopProcessingBusy ? 'Stopping' : 'Stop'}
-                      aria-label={stopProcessingBusy ? 'Stopping agent' : 'Stop agent'}
-                      onClick={(event) => {
-                        event.preventDefault()
-                        void onStopProcessing?.()
-                      }}
-                    >
-                      <span className="composer-send-button-stop-icon" aria-hidden="true" />
-                      <span className="sr-only">{stopProcessingBusy ? 'Stopping' : 'Stop'}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="submit"
-                      className="composer-send-button"
-                      disabled={disabled || isSending || stopProcessingBusy || (!body.trim() && attachments.length === 0)}
-                      title={
-                        stopProcessingBusy
-                          ? 'Stopping'
-                          : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
-                      }
-                      aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
-                    >
-                      {isSending ? (
-                        <span className="inline-flex items-center justify-center">
-                          <span
-                            className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
-                            aria-hidden="true"
-                          />
-                          <span className="sr-only">Sending</span>
-                        </span>
-                      ) : (
-                        <>
-                          <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                          <span className="sr-only">Send</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
+              renderComposerUtilityRow()
             )}
             {attachments.length > 0 ? (
               <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
