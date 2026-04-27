@@ -44,14 +44,32 @@ validate_prerequisites() {
 }
 
 is_supported_origin() {
-  case "$1" in
-    git@github.com:gobii-ai/gobii-platform|git@github.com:gobii-ai/gobii-platform.git|https://github.com/gobii-ai/gobii-platform|https://github.com/gobii-ai/gobii-platform.git|ssh://git@github.com/gobii-ai/gobii-platform|ssh://git@github.com/gobii-ai/gobii-platform.git)
-      return 0
-      ;;
-    *)
-      return 1
+  local normalized
+  normalized="$1"
+  normalized="${normalized#ssh://}"
+  normalized="${normalized#git://}"
+  normalized="${normalized#https://}"
+  normalized="${normalized#http://}"
+  normalized="${normalized#git@}"
+  normalized="${normalized#www.}"
+
+  case "$normalized" in
+    github.com:*)
+      normalized="github.com/${normalized#github.com:}"
       ;;
   esac
+
+  while [ "${normalized%/}" != "$normalized" ]; do
+    normalized="${normalized%/}"
+  done
+
+  normalized="${normalized%.git}"
+
+  while [ "${normalized%/}" != "$normalized" ]; do
+    normalized="${normalized%/}"
+  done
+
+  [ "$normalized" = "github.com/gobii-ai/gobii-platform" ]
 }
 
 ensure_install_checkout() {
@@ -61,7 +79,7 @@ ensure_install_checkout() {
     [ -n "$origin_url" ] || die "Existing checkout at $INSTALL_DIR has no origin remote."
     is_supported_origin "$origin_url" || die "Refusing to reuse $INSTALL_DIR because its origin remote is $origin_url."
 
-    if [ -n "$(git -C "$INSTALL_DIR" status --porcelain)" ]; then
+    if [ -n "$(git -C "$INSTALL_DIR" status --porcelain -uno)" ]; then
       die "Existing checkout at $INSTALL_DIR has local changes. Commit, stash, or use GOBII_INSTALL_DIR."
     fi
 
@@ -85,7 +103,14 @@ resolve_ref() {
   fi
 
   local latest_tag
-  latest_tag="$(git -C "$INSTALL_DIR" tag --sort=-version:refname | head -n 1)"
+  latest_tag="$(
+    {
+      git -C "$INSTALL_DIR" ls-remote --sort='-version:refname' --refs --tags origin 2>/dev/null || true
+    } | sed -n '1s#.*refs/tags/##p'
+  )"
+  if [ -z "$latest_tag" ]; then
+    latest_tag="$(git -C "$INSTALL_DIR" tag --sort=-version:refname | head -n 1)"
+  fi
   [ -n "$latest_tag" ] || die "Could not determine the latest Gobii release tag."
   printf '%s' "$latest_tag"
 }
