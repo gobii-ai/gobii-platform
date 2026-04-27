@@ -3217,7 +3217,6 @@ class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
             )
             if preferred_llm_tier_key:
                 request.session.pop("agent_preferred_llm_tier", None)
-                request.session.modified = True
             invalidate_account_info_cache(request.user.id)
             return redirect('agent_welcome', pk=result.agent.id)
         except ValidationError as exc:

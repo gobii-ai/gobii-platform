@@ -54,7 +54,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { KanbanBoardSnapshot, PendingActionRequest, TimelineEvent } from '../types/agentChat'
+import type { KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -2855,6 +2855,55 @@ export function AgentChatPage({
     }
   }, [activeAgentId, queryClient, refreshProcessing, stopProcessingBusy])
 
+  const applyPlanningMutationResult = useCallback((
+    targetAgentId: string,
+    nextPlanningState: PlanningState,
+    pendingActionRequests: PendingActionRequest[],
+    pendingHumanInputRequests: PendingHumanInputRequest[],
+  ) => {
+    replacePendingActionRequestsInCache(queryClient, targetAgentId, pendingActionRequests)
+    useAgentChatStore.getState().updateAgentIdentity({
+      agentId: targetAgentId,
+      planningState: nextPlanningState,
+    })
+    queryClient.setQueryData<InfiniteData<TimelinePage>>(
+      timelineQueryKey(targetAgentId),
+      (current) => {
+        if (!current?.pages?.length) {
+          return current
+        }
+        return {
+          ...current,
+          pages: current.pages.map((page) => ({
+            ...page,
+            raw: {
+              ...page.raw,
+              planning_state: nextPlanningState,
+              pending_action_requests: pendingActionRequests,
+              pending_human_input_requests: pendingHumanInputRequests,
+            },
+          })),
+        }
+      },
+    )
+    queryClient.setQueriesData<AgentRosterQueryData>(
+      { queryKey: ['agent-roster'] },
+      (current) => {
+        if (!isAgentRosterQueryData(current)) {
+          return current
+        }
+        return {
+          ...current,
+          agents: current.agents.map((agent) => (
+            agent.id === targetAgentId
+              ? { ...agent, planningState: nextPlanningState }
+              : agent
+          )),
+        }
+      },
+    )
+  }, [queryClient])
+
   const handleSkipPlanning = useCallback(async () => {
     if (!activeAgentId || skipPlanningBusy) {
       return
@@ -2863,53 +2912,18 @@ export function AgentChatPage({
     setSendMessageError(null)
     try {
       const result = await skipAgentPlanning(activeAgentId)
-      replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
-      useAgentChatStore.getState().updateAgentIdentity({
-        agentId: activeAgentId,
-        planningState: result.planningState,
-      })
-      queryClient.setQueryData<InfiniteData<TimelinePage>>(
-        timelineQueryKey(activeAgentId),
-        (current) => {
-          if (!current?.pages?.length) {
-            return current
-          }
-          return {
-            ...current,
-            pages: current.pages.map((page) => ({
-              ...page,
-              raw: {
-                ...page.raw,
-                planning_state: result.planningState,
-                pending_action_requests: result.pendingActionRequests,
-                pending_human_input_requests: result.pendingHumanInputRequests,
-              },
-            })),
-          }
-        },
-      )
-      queryClient.setQueriesData<AgentRosterQueryData>(
-        { queryKey: ['agent-roster'] },
-        (current) => {
-          if (!isAgentRosterQueryData(current)) {
-            return current
-          }
-          return {
-            ...current,
-            agents: current.agents.map((agent) => (
-              agent.id === activeAgentId
-                ? { ...agent, planningState: result.planningState }
-                : agent
-            )),
-          }
-        },
+      applyPlanningMutationResult(
+        activeAgentId,
+        result.planningState,
+        result.pendingActionRequests,
+        result.pendingHumanInputRequests,
       )
     } catch (error) {
       setSendMessageError(safeErrorMessage(error) || 'Unable to skip planning right now.')
     } finally {
       setSkipPlanningBusy(false)
     }
-  }, [activeAgentId, queryClient, skipPlanningBusy])
+  }, [activeAgentId, applyPlanningMutationResult, skipPlanningBusy])
 
   // Start/stop insight rotation based on processing state
   const isProcessing = allowAgentRefresh && (timelineProcessingActive || timelineAwaitingResponse || (timelineStreaming && !timelineStreaming.done))
@@ -3384,7 +3398,12 @@ export function AgentChatPage({
         })
         return
       }
-      await createNewAgent(body, selectedTier, charterOverride, selectedPipedreamAppSlugs)
+      await createNewAgent(
+        body,
+        selectedTier,
+        charterOverride,
+        selectedPipedreamAppSlugs,
+      )
       return
     }
     if (activeAgentId) {
