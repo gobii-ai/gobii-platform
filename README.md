@@ -223,26 +223,36 @@ The sandbox compute server now lives in this monorepo under [sandbox_server/](sa
 ## Launch in 5 Minutes
 
 1. **Prerequisites**: Docker Desktop (or compatible engine) with at least 12 GB RAM allocated.
-2. **Clone the repo**.
+2. **Run the hosted installer**.
+
+```bash
+curl -fsSL https://gobii.ai/install.sh | bash
+```
+
+Supported installer inputs:
+
+- `GOBII_INSTALL_DIR`: target repo checkout directory. Defaults to `~/gobii-platform`.
+- `GOBII_REF`: Git ref override. Defaults to the latest tagged release.
+
+Stable installer endpoint: [https://gobii.ai/install.sh](https://gobii.ai/install.sh)
+
+If you prefer not to pipe a remote script into `bash`, use the manual path instead:
 
 ```bash
 git clone https://github.com/gobii-ai/gobii-platform.git
 cd gobii-platform
-```
-
-3. **Start Gobii**.
-
-```bash
 docker compose up --build
 ```
 
-4. **Open Gobii** at [http://localhost:8000](http://localhost:8000) and complete setup.
+For Docker-based products, the standard pattern is to validate Docker and Compose rather than install Docker for you. This installer is a thin wrapper around the existing `compose.yaml` bootstrap flow.
+
+3. **Open Gobii** at [http://localhost:8000](http://localhost:8000) and complete setup.
 
 - Create your admin account.
 - Choose model providers (OpenAI, OpenRouter, Anthropic, Fireworks, or custom endpoint).
 - Add API keys and preferred model configuration.
 
-5. **Create your first always-on agent**.
+4. **Create your first always-on agent**.
 
 Optional runtime profiles:
 
@@ -367,4 +377,3 @@ uv run celery -A config worker -l info --pool=threads --concurrency=4
 - Source code is licensed under [MIT](LICENSE).
 - Gobii name and logo are trademarks of Gobii, Inc. See [NOTICE](NOTICE).
 - Proprietary mode and non-MIT components require a commercial agreement with Gobii, Inc.
-
