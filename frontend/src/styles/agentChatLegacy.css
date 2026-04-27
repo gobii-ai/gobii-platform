@@ -16,7 +16,7 @@
     radial-gradient(ellipse at 25% 0%, rgba(124, 58, 237, 0.18) 0%, transparent 55%),
     radial-gradient(ellipse at 80% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
     linear-gradient(175deg, #271955 0%, #1c0f42 55%, #170d38 100%);
-  --agent-chat-grain-texture: url('/static/images/noise-light.png');
+  --agent-chat-grain-texture: none;
   position: relative;
   /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
   height: 100vh;

@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
+import noiseLightTextureUrl from '../assets/textures/noise-light.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
@@ -77,6 +78,7 @@ const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
+const RESOLVED_NOISE_LIGHT_TEXTURE_URL = new URL(noiseLightTextureUrl, import.meta.url).toString()
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -424,6 +426,8 @@ type AgentRosterQueryData = {
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
 }
+
+type AgentChatPageStyle = CSSProperties & Record<'--agent-chat-grain-texture', string>
 
 function isAgentRosterQueryData(value: unknown): value is AgentRosterQueryData {
   if (!value || typeof value !== 'object') {
@@ -3228,8 +3232,15 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
   }
+  const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
+    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_LIGHT_TEXTURE_URL}")`,
+  }), [])
   const renderSelectionLayout = (content: ReactNode) => (
-    <div className="agent-chat-page agent-chat-page--framed" data-processing="false">
+    <div
+      className="agent-chat-page agent-chat-page--framed"
+      data-processing="false"
+      style={agentChatPageStyle}
+    >
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName}>
         <div id="agent-workspace-root">
@@ -3692,7 +3703,11 @@ export function AgentChatPage({
   }
 
   return (
-    <div className="agent-chat-page agent-chat-page--framed" data-processing={isProcessing ? 'true' : 'false'}>
+    <div
+      className="agent-chat-page agent-chat-page--framed"
+      data-processing={isProcessing ? 'true' : 'false'}
+      style={agentChatPageStyle}
+    >
       {topLevelError ? (
         <div className="mx-auto w-full max-w-3xl px-4 py-2 text-sm text-rose-600">{topLevelError}</div>
       ) : null}
