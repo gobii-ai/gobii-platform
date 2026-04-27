@@ -359,23 +359,33 @@ class ApiLoginRequiredMixin(LoginRequiredMixin):
 
 
 class ConsolePersistentAgentViewSet(PersistentAgentViewSet):
+    """
+    Reuse the API serializer/update flow for the console detail route.
+
+    The base API viewset resolves ownership from API auth, which does not map to the
+    console's personal/org context switching rules. The console route therefore has
+    to resolve the target agent through the console access helpers first.
+    """
+
+    def _resolve_console_agent(self, agent_id: str) -> PersistentAgent:
+        if self.action in {"partial_update", "update", "destroy"}:
+            return resolve_manageable_agent_for_request(
+                self.request,
+                agent_id,
+                allow_delinquent_personal_chat=True,
+            )
+        return resolve_agent_for_request(
+            self.request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+
     def get_object(self):
         agent_id = self.kwargs.get(self.lookup_url_kwarg or self.lookup_field)
         if agent_id is None:
             raise Http404("Agent not found.")
 
-        if self.action in {"partial_update", "update", "destroy"}:
-            agent = resolve_manageable_agent_for_request(
-                self.request,
-                str(agent_id),
-                allow_delinquent_personal_chat=True,
-            )
-        else:
-            agent = resolve_agent_for_request(
-                self.request,
-                str(agent_id),
-                allow_delinquent_personal_chat=True,
-            )
+        agent = self._resolve_console_agent(str(agent_id))
         self._resolved_console_agent = agent
         self.check_object_permissions(self.request, agent)
         return agent
@@ -385,6 +395,8 @@ class ConsolePersistentAgentViewSet(PersistentAgentViewSet):
         if organization is not None:
             return organization
 
+        # Console requests are session-authenticated, so org context comes from the
+        # resolved agent rather than API-key auth.
         agent = getattr(self, "_resolved_console_agent", None)
         if agent is not None and agent.organization_id:
             return agent.organization

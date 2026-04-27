@@ -167,6 +167,37 @@ class AgentChatAPITests(TestCase):
         self.client = Client()
         self.client.force_login(self.user)
 
+    def _create_org_owned_agent_for_other_creator(self):
+        creator = get_user_model().objects.create_user(
+            username="org-agent-creator",
+            email="creator@example.com",
+            password="password123",
+        )
+        organization = Organization.objects.create(
+            name="Gobii",
+            slug="gobii-test",
+            created_by=creator,
+        )
+        billing = organization.billing
+        billing.purchased_seats = 2
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=creator, name="Org Browser Agent")
+        org_agent = PersistentAgent.objects.create(
+            user=creator,
+            organization=organization,
+            name="Org Agent",
+            charter="Help the org",
+            browser_use_agent=browser_agent,
+            preferred_llm_tier=self.standard_tier,
+        )
+        return organization, org_agent
+
     @tag("batch_agent_chat")
     def test_quick_create_prefers_web_channel(self):
         message_text = "Plan my weekly operating cadence"
@@ -556,35 +587,7 @@ class AgentChatAPITests(TestCase):
     @patch("api.views.Analytics.track_event")
     @patch("api.views.queue_settings_change_resume")
     def test_console_agent_patch_allows_org_owner_when_agent_user_differs(self, resume_mock, analytics_mock):
-        user_model = get_user_model()
-        creator = user_model.objects.create_user(
-            username="org-agent-creator",
-            email="creator@example.com",
-            password="password123",
-        )
-        organization = Organization.objects.create(
-            name="Gobii",
-            slug="gobii-test",
-            created_by=creator,
-        )
-        billing = organization.billing
-        billing.purchased_seats = 2
-        billing.save(update_fields=["purchased_seats"])
-        OrganizationMembership.objects.create(
-            org=organization,
-            user=self.user,
-            role=OrganizationMembership.OrgRole.OWNER,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        )
-        browser_agent = BrowserUseAgent.objects.create(user=creator, name="Org Browser Agent")
-        org_agent = PersistentAgent.objects.create(
-            user=creator,
-            organization=organization,
-            name="Org Agent",
-            charter="Help the org",
-            browser_use_agent=browser_agent,
-            preferred_llm_tier=self.standard_tier,
-        )
+        organization, org_agent = self._create_org_owned_agent_for_other_creator()
 
         response = self.client.patch(
             f"/console/api/agents/{org_agent.id}/",
