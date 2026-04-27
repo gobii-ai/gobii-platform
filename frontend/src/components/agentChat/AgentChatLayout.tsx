@@ -387,8 +387,6 @@ export function AgentChatLayout({
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
-    openUpgradeModal,
-    ensureAuthenticated,
     ctaPickAPlan,
     trialDaysByPlan,
     trialEligible,
@@ -788,7 +786,7 @@ export function AgentChatLayout({
       return false
     }
     if (previewActionsDisabled && onBlockedSettingsClick) {
-      onBlockedSettingsClick()
+      onBlockedSettingsClick('banner_desktop')
       return true
     }
     if (!canOpenQuickSettings) {
