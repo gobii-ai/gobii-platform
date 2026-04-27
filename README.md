@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/gobii-fish-readme-dark.png" />
-    <source media="(prefers-color-scheme: light)" srcset="assets/logo/gobii-fish-readme-light.png" />
-    <img src="assets/logo/gobii-fish-readme-light.png" alt="Gobii fish mascot" width="190" />
-  </picture>
+  <img src="assets/logo/gobii-fish.png" alt="Gobii fish mascot" width="190" />
 </p>
 
 <h1 align="center">Gobii Platform</h1>
