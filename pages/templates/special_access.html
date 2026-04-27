@@ -24,7 +24,7 @@
           <h1 class="max-w-3xl text-5xl font-semibold leading-tight tracking-tight sm:text-6xl">
             {{ promo.headline|default:"Your private Gobii trial is ready." }}
           </h1>
-          <p class="mt-6 max-w-2xl text-lg leading-8 text-cyan-50/80">
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
             {% if promo.description %}
               {{ promo.description }}
             {% else %}
@@ -32,25 +32,25 @@
             {% endif %}
           </p>
 
-          <div class="mt-10 grid gap-3 text-sm text-cyan-50/85 sm:grid-cols-3">
-            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-              <p class="text-cyan-200">Plan</p>
-              <p class="mt-1 text-2xl font-semibold text-white">{{ plan_label }}</p>
+          <div class="mt-10 grid gap-3 text-sm sm:grid-cols-3">
+            <div class="rounded-2xl bg-[#f0fbff] p-4 ring-1 ring-cyan-200">
+              <p class="font-semibold text-cyan-800">Plan</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ plan_label }}</p>
             </div>
-            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-              <p class="text-cyan-200">Trial</p>
-              <p class="mt-1 text-2xl font-semibold text-white">{{ promo.trial_days }} days</p>
+            <div class="rounded-2xl bg-[#f0fff8] p-4 ring-1 ring-emerald-200">
+              <p class="font-semibold text-emerald-800">Trial</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ promo.trial_days }} days</p>
             </div>
-            <div class="rounded-2xl bg-white/10 p-4 ring-1 ring-white/15">
-              <p class="text-cyan-200">Payment</p>
-              <p class="mt-1 text-2xl font-semibold text-white">{% if promo.payment_method_required %}Required{% else %}Optional{% endif %}</p>
+            <div class="rounded-2xl bg-[#fff9ed] p-4 ring-1 ring-amber-200">
+              <p class="font-semibold text-amber-800">Card</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{% if promo.payment_method_required %}Required{% else %}Not Required{% endif %}</p>
             </div>
           </div>
         {% else %}
           <h1 class="max-w-3xl text-5xl font-semibold leading-tight tracking-tight sm:text-6xl">
-            Enter the room with your Gobii access code.
+            Enter your Gobii access code for a special trial for your group.
           </h1>
-          <p class="mt-6 max-w-2xl text-lg leading-8 text-cyan-50/80">
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
             If you received a code from our team, enter it here to unlock the trial configured for your group.
           </p>
         {% endif %}

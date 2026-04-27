@@ -86,9 +86,9 @@ class TrialPromoServiceTests(TestCase):
         self.assertEqual(decision.reason, "prior_trial_or_subscription")
         mock_prior_history.assert_called_once_with(self.user)
 
-    def test_redemption_capacity_counts_started_and_completed_only(self):
+    def test_redemption_capacity_counts_completed_only(self):
         promo = _create_promo(code="CAP-ONE", max_redemptions=1)
-        reserve_trial_promo_redemption(
+        started_redemption = reserve_trial_promo_redemption(
             promo=promo,
             user=self.user,
             event_id="trial-promo-one",
@@ -100,15 +100,46 @@ class TrialPromoServiceTests(TestCase):
             password="pw",
         )
 
+        second_started_redemption = reserve_trial_promo_redemption(
+            promo=promo,
+            user=second_user,
+            event_id="trial-promo-two",
+            stripe_customer_id="cus_two",
+        )
+
+        self.assertEqual(started_redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED)
+        self.assertEqual(second_started_redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED)
+
+        started_redemption.status = TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED
+        started_redemption.save(update_fields=["status", "updated_at"])
+
         with self.assertRaises(TrialPromoError) as raised:
             reserve_trial_promo_redemption(
                 promo=promo,
                 user=second_user,
-                event_id="trial-promo-two",
-                stripe_customer_id="cus_two",
+                event_id="trial-promo-three",
+                stripe_customer_id="cus_three",
             )
 
         self.assertEqual(raised.exception.code, "capacity_reached")
+
+    def test_user_can_retry_after_checkout_started_without_completion(self):
+        promo = _create_promo(code="RETRY-STARTED", max_redemptions=1)
+        reserve_trial_promo_redemption(
+            promo=promo,
+            user=self.user,
+            event_id="trial-promo-started",
+            stripe_customer_id="cus_started",
+        )
+
+        retry_redemption = reserve_trial_promo_redemption(
+            promo=promo,
+            user=self.user,
+            event_id="trial-promo-retry",
+            stripe_customer_id="cus_retry",
+        )
+
+        self.assertEqual(retry_redemption.status, TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED)
 
     def test_parse_trial_promo_credit_amount_ignores_invalid_values(self):
         self.assertEqual(

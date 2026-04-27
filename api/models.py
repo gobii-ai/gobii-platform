@@ -4333,7 +4333,6 @@ class TrialPromoRedemption(models.Model):
     """Tracks a user's reserved/started Stripe Checkout for a trial promo."""
 
     COUNTED_STATUSES = (
-        TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED,
         TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED,
     )
 
