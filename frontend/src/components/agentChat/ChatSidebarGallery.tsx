@@ -1,4 +1,4 @@
-import { Mail, MessageSquare, Settings, Star, Stethoscope } from 'lucide-react'
+import { Mail, MessageSquare, Plus, Settings, Star, Stethoscope } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -243,7 +243,8 @@ export function ChatSidebarGallery({
           aria-disabled={createAgentButtonDisabled ? 'true' : undefined}
           title={createAgentDisabledReason ?? undefined}
         >
-          Create Agent
+          <Plus className="h-4 w-4" />
+          <span>New Agent</span>
         </button>
       ) : null}
 

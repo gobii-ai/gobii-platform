@@ -15,9 +15,9 @@
   --agent-chat-gallery-conversation-width: 25rem;
   --agent-chat-purple-base: #1e1145;
   --agent-chat-purple-background:
-    radial-gradient(ellipse at 25% 0%, rgba(124, 58, 237, 0.18) 0%, transparent 55%),
-    radial-gradient(ellipse at 80% 100%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
-    linear-gradient(175deg, #271955 0%, #1c0f42 55%, #170d38 100%);
+    radial-gradient(ellipse at 25% 0%, rgba(64, 27, 104, 0.18) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 100%, rgba(64, 27, 104, 0.1) 0%, transparent 50%),
+    linear-gradient(175deg, #401B68 0%, #1c0f42 55%, #170d38 100%);
   --agent-chat-grain-texture: none;
   position: relative;
   /* Use dvh for dynamic mobile viewport (adjusts with address bar) */
@@ -6074,7 +6074,7 @@
 }
 
 .chat-sidebar-logo {
-  height: 1.25rem;
+  height: 2rem;
   width: auto;
   opacity: 0.88;
   flex-shrink: 0;
@@ -6086,7 +6086,6 @@
   gap: 0.4rem;
 }
 
-.chat-sidebar-view-toggle,
 .chat-sidebar-toggle {
   display: flex;
   align-items: center;
@@ -6101,18 +6100,11 @@
   transition: color 0.15s ease, background 0.15s ease, transform 0.2s ease;
 }
 
-.chat-sidebar-view-toggle:hover,
 .chat-sidebar-toggle:hover {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.85);
 }
 
-.chat-sidebar-view-toggle[data-active='true'] {
-  background: rgba(139, 92, 246, 0.2);
-  color: #f5f3ff;
-}
-
-.chat-sidebar-view-toggle:focus-visible,
 .chat-sidebar-toggle:focus-visible {
   outline: 2px solid rgba(167, 139, 250, 0.4);
   outline-offset: 2px;
@@ -6784,6 +6776,48 @@
 }
 
 /* Sidebar search */
+.chat-sidebar-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0 0.25rem;
+}
+
+.chat-sidebar-controls .chat-sidebar-search,
+.chat-sidebar-controls .chat-sidebar-sort-toggle {
+  margin: 0;
+}
+
+.chat-sidebar-controls[data-gallery='true'] {
+  --chat-sidebar-gallery-control-height: 2rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.5rem;
+}
+
+.chat-sidebar-controls[data-gallery='true'] .chat-sidebar-search {
+  min-height: var(--chat-sidebar-gallery-control-height);
+}
+
+.chat-sidebar-controls[data-gallery='true'] .chat-sidebar-search-input {
+  height: var(--chat-sidebar-gallery-control-height);
+}
+
+.chat-sidebar-controls[data-gallery='true'] .chat-sidebar-sort-toggle {
+  height: var(--chat-sidebar-gallery-control-height);
+  width: 11.25rem;
+  padding: 0.1875rem;
+}
+
+.chat-sidebar-controls[data-gallery='true'] .chat-sidebar-sort-toggle-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
 .chat-sidebar-search {
   position: relative;
   display: flex;
@@ -6975,6 +7009,14 @@
 
 .sidebar-settings__popover--sidebar[data-collapsed='false'] {
   width: calc(var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width, 18rem)) - 1rem);
+}
+
+.chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__trigger {
+  width: min(100%, calc(var(--agent-chat-sidebar-width, 18rem) - 1rem));
+}
+
+.chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__popover--sidebar[data-collapsed='false'] {
+  width: calc(var(--agent-chat-sidebar-width, 18rem) - 1rem);
 }
 
 .sidebar-settings__popover--sidebar[data-collapsed='true'] {
@@ -7200,6 +7242,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.45rem;
   width: 100%;
   min-height: 2.5rem;
   border: 1px dashed rgba(196, 181, 253, 0.35);
@@ -7245,15 +7288,15 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 1rem;
-  border: 1px solid rgba(167, 139, 250, 0.2);
+  border: 1px solid rgba(239, 221, 251, 0.26);
   box-shadow: 0 18px 32px rgba(15, 23, 42, 0.22);
 }
 
 .chat-sidebar-gallery-card {
   background:
-    linear-gradient(180deg, rgba(196, 181, 253, 0.14) 0%, rgba(196, 181, 253, 0.05) 24%, transparent 48%),
-    linear-gradient(180deg, rgba(58, 33, 119, 0.96), rgba(33, 18, 73, 0.985));
-  border-color: rgba(196, 181, 253, 0.26);
+    linear-gradient(180deg, rgba(244, 232, 252, 0.16) 0%, rgba(244, 232, 252, 0.05) 24%, transparent 48%),
+    linear-gradient(180deg, rgba(125, 85, 151, 0.98), rgba(110, 72, 136, 0.985));
+  border-color: rgba(239, 221, 251, 0.32);
   color: rgba(255, 255, 255, 0.94);
 }
 
@@ -7378,7 +7421,7 @@
 }
 
 .chat-sidebar-gallery-card-hero {
-  background: linear-gradient(180deg, rgba(68, 35, 136, 0.5), rgba(38, 19, 83, 0.22));
+  background: linear-gradient(180deg, rgba(248, 240, 252, 0.18), rgba(221, 189, 241, 0.08));
 }
 
 .agent-drawer-gallery-card-hero {

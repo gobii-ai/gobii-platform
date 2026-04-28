@@ -1,5 +1,5 @@
 import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react'
-import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, Plus } from 'lucide-react'
+import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -10,7 +10,13 @@ import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
-import { type AgentChatSidebarMode, SIDEBAR_MOBILE_BREAKPOINT_PX, type AgentDrawerViewMode } from './sidebarMode'
+import {
+  getNextAgentChatSidebarMode,
+  getPreviousAgentChatSidebarMode,
+  type AgentChatSidebarMode,
+  SIDEBAR_MOBILE_BREAKPOINT_PX,
+  type AgentDrawerViewMode,
+} from './sidebarMode'
 
 const SEARCH_THRESHOLD = 6
 
@@ -107,13 +113,13 @@ export const ChatSidebar = memo(function ChatSidebar({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
-  const handleCollapseToggle = useCallback(() => {
-    onDesktopModeChange?.(collapsed ? 'list' : 'collapsed')
-  }, [collapsed, onDesktopModeChange])
+  const handleStepLeft = useCallback(() => {
+    onDesktopModeChange?.(getPreviousAgentChatSidebarMode(desktopMode))
+  }, [desktopMode, onDesktopModeChange])
 
-  const handleGalleryToggle = useCallback(() => {
-    onDesktopModeChange?.(galleryMode ? 'list' : 'gallery')
-  }, [galleryMode, onDesktopModeChange])
+  const handleStepRight = useCallback(() => {
+    onDesktopModeChange?.(getNextAgentChatSidebarMode(desktopMode))
+  }, [desktopMode, onDesktopModeChange])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
@@ -422,27 +428,25 @@ export const ChatSidebar = memo(function ChatSidebar({
             {!collapsed ? (
               <button
                 type="button"
-                className="chat-sidebar-view-toggle"
-                data-active={galleryMode ? 'true' : 'false'}
-                onClick={handleGalleryToggle}
-                aria-label={galleryMode ? 'Show compact list' : 'Expand agent gallery'}
-                title={galleryMode ? 'Show compact list' : 'Expand agent gallery'}
+                className="chat-sidebar-toggle"
+                onClick={handleStepLeft}
+                aria-label={galleryMode ? 'Show list view' : 'Collapse sidebar'}
+                title={galleryMode ? 'Show list view' : 'Collapse sidebar'}
               >
-                {galleryMode ? <List className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
+                <PanelLeftClose className="h-4 w-4" />
               </button>
             ) : null}
-            <button
-              type="button"
-              className="chat-sidebar-toggle"
-              onClick={handleCollapseToggle}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-            >
-              {collapsed ? (
-                <PanelLeft className="h-4 w-4" />
-              ) : (
-                <PanelLeftClose className="h-4 w-4" />
-              )}
-            </button>
+            {!galleryMode ? (
+              <button
+                type="button"
+                className="chat-sidebar-toggle"
+                onClick={handleStepRight}
+                aria-label={collapsed ? 'Expand sidebar' : 'Expand agent gallery'}
+                title={collapsed ? 'Expand sidebar' : 'Expand agent gallery'}
+              >
+                <PanelRightClose className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -454,20 +458,27 @@ export const ChatSidebar = memo(function ChatSidebar({
             ) : null}
           </div>
 
-          {!collapsed && showSearch ? (
-            <AgentSearchInput
-              variant="sidebar"
-              value={searchQuery}
-              onChange={setSearchQuery}
-              onClear={() => setSearchQuery('')}
-            />
-          ) : null}
-          {!collapsed && showSortToggle ? (
-            <AgentSortToggle
-              variant="sidebar"
-              value={rosterSortMode}
-              onChange={(mode) => onRosterSortModeChange?.(mode)}
-            />
+          {!collapsed && (showSearch || showSortToggle) ? (
+            <div
+              className="chat-sidebar-controls"
+              data-gallery={galleryMode ? 'true' : 'false'}
+            >
+              {showSearch ? (
+                <AgentSearchInput
+                  variant="sidebar"
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  onClear={() => setSearchQuery('')}
+                />
+              ) : null}
+              {showSortToggle ? (
+                <AgentSortToggle
+                  variant="sidebar"
+                  value={rosterSortMode}
+                  onChange={(mode) => onRosterSortModeChange?.(mode)}
+                />
+              ) : null}
+            </div>
           ) : null}
 
           {galleryMode ? (
