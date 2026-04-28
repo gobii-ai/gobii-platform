@@ -1,7 +1,11 @@
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from django.contrib.sites.models import Site
 from django.core import signing
+from django.urls import NoReverseMatch, reverse
 from django.utils.http import url_has_allowed_host_and_scheme
+
+from config import settings
 
 IMMERSIVE_RETURN_TO_SESSION_KEY = "immersive_return_to"
 IMMERSIVE_APP_BASE_PATH = "/app"
@@ -59,6 +63,70 @@ def load_daily_limit_action_payload(token: str) -> dict | None:
     if not isinstance(payload, dict):
         return None
     return payload
+
+
+def build_site_url(path: str) -> str:
+    if not path:
+        return ""
+    if path.startswith("http://") or path.startswith("https://"):
+        return path
+
+    base_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
+    if not base_url:
+        current_site = Site.objects.get_current()
+        base_url = f"https://{current_site.domain}"
+
+    normalized = path if path.startswith("/") else f"/{path}"
+    return f"{base_url}{normalized}"
+
+
+def build_agent_detail_url(agent_id: str | int, organization_id: str | None = None) -> str:
+    try:
+        path = reverse("agent_detail", kwargs={"pk": agent_id})
+    except NoReverseMatch:
+        return ""
+    return append_context_query(build_site_url(path), organization_id)
+
+
+def build_agent_daily_limit_action_links(agent_id: str | int, organization_id: str | None = None) -> dict[str, str]:
+    settings_url = build_agent_detail_url(agent_id, organization_id)
+    try:
+        double_limit_url = build_site_url(
+            reverse(
+                "agent_daily_limit_action",
+                kwargs={"pk": agent_id, "action": "double"},
+            )
+        )
+        unlimited_limit_url = build_site_url(
+            reverse(
+                "agent_daily_limit_action",
+                kwargs={"pk": agent_id, "action": "unlimited"},
+            )
+        )
+    except NoReverseMatch:
+        return {
+            "settings_url": settings_url,
+            "double_limit_url": settings_url,
+            "unlimited_limit_url": settings_url,
+        }
+
+    double_limit_url = append_query_params(
+        double_limit_url,
+        {"token": build_daily_limit_action_token(str(agent_id), "double")},
+    )
+    unlimited_limit_url = append_query_params(
+        unlimited_limit_url,
+        {"token": build_daily_limit_action_token(str(agent_id), "unlimited")},
+    )
+    if organization_id:
+        double_limit_url = append_context_query(double_limit_url, organization_id)
+        unlimited_limit_url = append_context_query(unlimited_limit_url, organization_id)
+
+    return {
+        "settings_url": settings_url,
+        "double_limit_url": double_limit_url,
+        "unlimited_limit_url": unlimited_limit_url,
+    }
 
 
 def normalize_return_to(request, raw_value: str | None) -> str | None:

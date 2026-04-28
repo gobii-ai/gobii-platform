@@ -58,6 +58,23 @@ type TaskQuotaInfo = {
 
 const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
+function normalizeAgentSettingsPathname(pathname: string): string {
+  const trimmed = pathname.replace(/\/+$/, '')
+  return trimmed || '/'
+}
+
+function isCurrentAgentSettingsHref(href: string, agentId: string): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  try {
+    const url = new URL(href, window.location.origin)
+    return normalizeAgentSettingsPathname(url.pathname) === `/console/agents/${agentId}`
+  } catch {
+    return false
+  }
+}
+
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
     return `collapsed:${event.cursor}`
@@ -370,8 +387,6 @@ export function AgentChatLayout({
     upgradeModalSource,
     upgradeModalDismissible,
     isProprietaryMode,
-    openUpgradeModal,
-    ensureAuthenticated,
     ctaPickAPlan,
     trialDaysByPlan,
     trialEligible,
@@ -402,7 +417,6 @@ export function AgentChatLayout({
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
-  const [scheduledLimitBusy, setScheduledLimitBusy] = useState(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -501,8 +515,6 @@ export function AgentChatLayout({
     setAddonsMode(null)
     setContactCapDismissed(false)
   }, [agentId])
-
-  const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
 
   useEffect(() => {
     if (!contactCapDismissKey || typeof window === 'undefined') {
@@ -644,16 +656,6 @@ export function AgentChatLayout({
     && !hasMoreNewer
     && nextScheduledAt,
   )
-  const showScheduledCreditActions = Boolean(
-    showScheduledResumeEvent
-    && (
-      showTaskCreditsWarning
-      || dailyCredits?.low
-      || dailyCreditsStatus?.softTargetExceeded
-      || dailyCreditsStatus?.hardLimitReached
-      || dailyCreditsStatus?.hardLimitBlocked
-    ),
-  )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
   const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3
   const {
@@ -725,81 +727,6 @@ export function AgentChatLayout({
       setQuickIncreaseBusy(false)
     }
   }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
-  const scheduledDoubleLimitTarget = useMemo(() => {
-    if (!showScheduledCreditActions || !dailyCredits || !onUpdateDailyCredits || dailyCredits.unlimited) {
-      return null
-    }
-    if (!Number.isFinite(dailyCredits.limit ?? NaN) || !Number.isFinite(dailyCredits.sliderLimitMax)) {
-      return null
-    }
-    const currentLimit = Math.round(dailyCredits.limit as number)
-    const maxLimit = Math.round(dailyCredits.sliderLimitMax)
-    const target = Math.min(maxLimit, currentLimit * 2)
-    if (target <= currentLimit) {
-      return null
-    }
-    return target
-  }, [showScheduledCreditActions, dailyCredits, onUpdateDailyCredits])
-  const scheduledDoubleLimitLabel = useMemo(() => {
-    if (scheduledDoubleLimitTarget === null) {
-      return null
-    }
-    return `Double to ${scheduledDoubleLimitTarget}/day`
-  }, [scheduledDoubleLimitTarget])
-  const handleScheduledDoubleLimit = useCallback(async () => {
-    if (!onUpdateDailyCredits || scheduledDoubleLimitTarget === null || scheduledLimitBusy || quickIncreaseBusy) {
-      return
-    }
-    setScheduledLimitBusy(true)
-    try {
-      await onUpdateDailyCredits({ daily_credit_limit: scheduledDoubleLimitTarget })
-      onRefreshDailyCredits?.()
-    } finally {
-      setScheduledLimitBusy(false)
-    }
-  }, [
-    onUpdateDailyCredits,
-    scheduledDoubleLimitTarget,
-    scheduledLimitBusy,
-    quickIncreaseBusy,
-    onRefreshDailyCredits,
-  ])
-  const canSetUnlimitedFromSchedule = Boolean(
-    showScheduledCreditActions
-    && onUpdateDailyCredits
-    && dailyCredits
-    && !dailyCredits.unlimited,
-  )
-  const handleScheduledSetUnlimited = useCallback(async () => {
-    if (!onUpdateDailyCredits || !canSetUnlimitedFromSchedule || scheduledLimitBusy || quickIncreaseBusy) {
-      return
-    }
-    setScheduledLimitBusy(true)
-    try {
-      await onUpdateDailyCredits({ daily_credit_limit: null })
-      onRefreshDailyCredits?.()
-    } finally {
-      setScheduledLimitBusy(false)
-    }
-  }, [
-    onUpdateDailyCredits,
-    canSetUnlimitedFromSchedule,
-    scheduledLimitBusy,
-    quickIncreaseBusy,
-    onRefreshDailyCredits,
-  ])
-  const canShowScheduledUpgrade = Boolean(showScheduledCreditActions && isProprietaryMode && !isCollaborator)
-  const handleScheduledUpgrade = useCallback(async () => {
-    if (!canShowScheduledUpgrade) {
-      return
-    }
-    const authenticated = await ensureAuthenticated()
-    if (!authenticated) {
-      return
-    }
-    openUpgradeModal('task_credits_callout')
-  }, [canShowScheduledUpgrade, ensureAuthenticated, openUpgradeModal])
-  const scheduledActionBusy = quickIncreaseBusy || scheduledLimitBusy
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
   const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
   const showHighPriorityBanner = Boolean(
@@ -852,6 +779,28 @@ export function AgentChatLayout({
     ? 'Finish signup to manage settings and collaborate.'
     : null
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
+  const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
+
+  const handleMessageLinkClick = useCallback((href: string) => {
+    if (!agentId || !isCurrentAgentSettingsHref(href, agentId)) {
+      return false
+    }
+    if (previewActionsDisabled && onBlockedSettingsClick) {
+      onBlockedSettingsClick('banner_desktop')
+      return true
+    }
+    if (!canOpenQuickSettings) {
+      return false
+    }
+    handleSettingsOpen()
+    return true
+  }, [
+    agentId,
+    canOpenQuickSettings,
+    handleSettingsOpen,
+    onBlockedSettingsClick,
+    previewActionsDisabled,
+  ])
 
   const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
   const sidebarSettings = useMemo(() => ({
@@ -1024,19 +973,11 @@ export function AgentChatLayout({
                     statusExpansionTargets={statusExpansionTargets}
                     animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
                     onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
+                    onMessageLinkClick={handleMessageLinkClick}
                   />
                 ))}
                 {showScheduledResumeEvent ? (
-                  <ScheduledResumeCard
-                    nextScheduledAt={nextScheduledAt}
-                    onDoubleLimit={scheduledDoubleLimitTarget !== null ? handleScheduledDoubleLimit : undefined}
-                    doubleLimitLabel={scheduledDoubleLimitLabel ?? undefined}
-                    onSetUnlimited={canSetUnlimitedFromSchedule ? handleScheduledSetUnlimited : undefined}
-                    onOpenSettings={showScheduledCreditActions && onUpdateDailyCredits ? handleSettingsOpen : undefined}
-                    onOpenTaskPacks={showScheduledCreditActions ? resolvedOpenTaskPacks : undefined}
-                    onUpgrade={canShowScheduledUpgrade ? handleScheduledUpgrade : undefined}
-                    actionBusy={scheduledActionBusy}
-                  />
+                  <ScheduledResumeCard nextScheduledAt={nextScheduledAt} />
                 ) : null}
                 {showHardLimitCallout ? (
                   <HardLimitCalloutCard

@@ -73,8 +73,9 @@ from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
 from util.urls import (
     append_context_query,
-    append_query_params,
-    build_daily_limit_action_token,
+    build_agent_daily_limit_action_links,
+    build_agent_detail_url,
+    build_site_url,
 )
 
 tracer = trace.get_tracer("gobii.utils")
@@ -385,25 +386,12 @@ def _save_attachments(message: PersistentAgentMessage, attachments: Iterable[Any
 
 def _build_site_url(path: str) -> str:
     """Return an absolute URL for a site-relative path."""
-    from django.conf import settings as django_settings
-
-    if not path:
-        return ""
-    if path.startswith("http://") or path.startswith("https://"):
-        return path
-    base_url = (getattr(django_settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
-    if not base_url:
-        current_site = Site.objects.get_current()
-        protocol = "https://"
-        base_url = f"{protocol}{current_site.domain}"
-    normalized = path if path.startswith("/") else f"/{path}"
-    return f"{base_url}{normalized}"
+    return build_site_url(path)
 
 @tracer.start_as_current_span("_build_agent_detail_url")
 def _build_agent_detail_url(agent) -> str:
     """Return an absolute URL to the agent's detail page."""
-    path = reverse("agent_detail", kwargs={"pk": agent.id})
-    return _build_site_url(path)
+    return build_agent_detail_url(agent.id)
 
 @tracer.start_as_current_span("_find_agent_endpoint")
 def _find_agent_endpoint(agent, channel: str) -> PersistentAgentCommsEndpoint | None:
@@ -662,34 +650,9 @@ def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
             "I reached my daily task limit and am not able to continue today. "
             f"Adjust the limit here: {link}"
         )
-        try:
-            double_limit_url = _build_site_url(
-                reverse(
-                    "agent_daily_limit_action",
-                    kwargs={"pk": agent.id, "action": "double"},
-                )
-            )
-            unlimited_limit_url = _build_site_url(
-                reverse(
-                    "agent_daily_limit_action",
-                    kwargs={"pk": agent.id, "action": "unlimited"},
-                )
-            )
-        except NoReverseMatch:
-            double_limit_url = link
-            unlimited_limit_url = link
-        else:
-            double_limit_url = append_query_params(
-                double_limit_url,
-                {"token": build_daily_limit_action_token(str(agent.id), "double")},
-            )
-            unlimited_limit_url = append_query_params(
-                unlimited_limit_url,
-                {"token": build_daily_limit_action_token(str(agent.id), "unlimited")},
-            )
-            if agent.organization_id:
-                double_limit_url = append_context_query(double_limit_url, agent.organization_id)
-                unlimited_limit_url = append_context_query(unlimited_limit_url, agent.organization_id)
+        action_links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
+        double_limit_url = action_links["double_limit_url"] or link
+        unlimited_limit_url = action_links["unlimited_limit_url"] or link
 
         try:
             logo_url = _build_site_url(static("images/gobii_fish_with_text_purple.png"))
@@ -1191,41 +1154,6 @@ def ingest_inbound_message(
                             transaction.on_commit(_send_credit_event)
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check (WEB)")
-
-            if not should_skip_processing and agent_obj:
-                try:
-                    soft_target_value = agent_obj.get_daily_credit_soft_target()
-                    if soft_target_value is not None:
-                        remaining = agent_obj.get_daily_credit_remaining()
-                        comm_tool_cost = get_tool_credit_cost_for_channel(channel_val)
-                        if remaining is None or (remaining - comm_tool_cost) <= Decimal("0"):
-                            should_skip_processing = True
-
-                            try:
-                                link = _build_agent_detail_url(agent_obj)
-                            except Exception:
-                                logging.exception(
-                                    "Failed building agent detail URL for agent %s",
-                                    agent_obj.id,
-                                )
-                                try:
-                                    link = reverse("agent_detail", kwargs={"pk": agent_obj.id})
-                                except Exception:
-                                    link = ""
-
-                            _send_daily_credit_notice(
-                                agent_obj,
-                                channel_val,
-                                parsed,
-                                sender_endpoint=from_ep,
-                                conversation=conv,
-                                link=link,
-                            )
-                except Exception:
-                    logging.exception(
-                        "Error while evaluating daily credit state for agent %s",
-                        getattr(agent_obj, "id", owner_id),
-                    )
 
             def _trigger_processing() -> None:
                 inbound_generation = None

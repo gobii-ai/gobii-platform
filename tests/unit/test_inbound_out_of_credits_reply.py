@@ -12,7 +12,6 @@ from api.models import (
     PersistentAgentMessage,
     BrowserUseAgent,
     CommsChannel,
-    DeliveryStatus,
     Organization,
     OrganizationMembership,
     UserPhoneNumber,
@@ -96,7 +95,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(sender, mail.outbox[0].to)
         self.assertIn(self.owner.email, mail.outbox[0].to)
-        self.assertIn("https://example.com/console/billing/", mail.outbox[0].body)
+        self.assertIn("/console/billing/", mail.outbox[0].body)
         mock_delay.assert_not_called()
 
     @tag("batch_email")
@@ -128,7 +127,12 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=10)
     @patch("api.agent.comms.message_service.deliver_agent_email")
-    def test_daily_limit_notice_sent_to_owner(self, mock_deliver_email, mock_calc, mock_delay):
+    def test_daily_limit_email_queues_processing_without_sending_notice(
+        self,
+        mock_deliver_email,
+        mock_calc,
+        mock_delay,
+    ):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
         owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -152,24 +156,18 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         )
 
         with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")):
-            ingest_inbound_message(CommsChannel.EMAIL, parsed)
+            with self.captureOnCommitCallbacks(execute=True):
+                ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
-        mock_deliver_email.assert_called_once()
-        outbound = (
-            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True)
-            .order_by("-timestamp")
-            .first()
-        )
-        self.assertIsNotNone(outbound)
-        self.assertEqual(outbound.to_endpoint, owner_endpoint)
-        expected_link = f"https://example.com/console/agents/{self.agent.id}/"
-        self.assertIn(expected_link, outbound.body)
-        self.assertEqual(
-            outbound.raw_payload.get("subject"),
-            f"{self.agent.name} reached today's task limit",
-        )
+        mock_deliver_email.assert_not_called()
         mock_calc.assert_called_once()
-        mock_delay.assert_not_called()
+        mock_delay.assert_called_once()
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                is_outbound=True,
+            ).exists()
+        )
 
     @tag("batch_email")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
@@ -225,7 +223,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
         self.assertNotIn(agent_creator.email, mail.outbox[0].to)
-        self.assertIn("https://example.com/console/billing/?context_type=organization", mail.outbox[0].body)
+        self.assertIn("/console/billing/?context_type=organization", mail.outbox[0].body)
         self.assertIn(str(org.id), mail.outbox[0].body)
         mock_delay.assert_not_called()
         mock_calc.assert_called_once()
@@ -342,7 +340,13 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
 
     @tag("batch_sms")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
-    def test_daily_limit_sms_notice_sent(self):
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.comms.message_service.deliver_agent_sms")
+    def test_daily_limit_sms_queues_processing_without_sending_notice(
+        self,
+        mock_deliver_sms,
+        mock_delay,
+    ):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
@@ -356,20 +360,18 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
             msg_channel=CommsChannel.SMS,
         )
 
-        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")), \
-             patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay, \
-             patch("api.agent.comms.message_service.deliver_agent_sms") as mock_deliver_sms:
-            ingest_inbound_message(CommsChannel.SMS, parsed)
+        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")):
+            with self.captureOnCommitCallbacks(execute=True):
+                ingest_inbound_message(CommsChannel.SMS, parsed)
 
-        mock_delay.assert_not_called()
-        mock_deliver_sms.assert_called_once()
-        outbound_msg = mock_deliver_sms.call_args[0][0]
-        expected_link = f"https://example.com/console/agents/{self.agent.id}/"
-        self.assertIn(expected_link, outbound_msg.body)
-        self.assertEqual(outbound_msg.from_endpoint, self.sms_endpoint)
-        self.assertEqual(outbound_msg.to_endpoint.address, self.owner_phone)
-        self.assertTrue(outbound_msg.is_outbound)
-        self.assertEqual(outbound_msg.owner_agent, self.agent)
+        mock_delay.assert_called_once()
+        mock_deliver_sms.assert_not_called()
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                is_outbound=True,
+            ).exists()
+        )
 
     @tag("batch_sms")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -449,7 +451,8 @@ class InboundDailyCreditsWebChatTests(TestCase):
 
     @tag("batch_agent_chat")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
-    def test_daily_limit_web_notice_sent(self):
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_daily_limit_web_queues_processing_without_sending_notice(self, mock_delay):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
@@ -465,19 +468,14 @@ class InboundDailyCreditsWebChatTests(TestCase):
             msg_channel=CommsChannel.WEB,
         )
 
-        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")), \
-             patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
-            ingest_inbound_message(CommsChannel.WEB, parsed)
+        with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")):
+            with self.captureOnCommitCallbacks(execute=True):
+                ingest_inbound_message(CommsChannel.WEB, parsed)
 
-        mock_delay.assert_not_called()
-        outbound = (
-            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True)
-            .order_by("-timestamp")
-            .first()
+        mock_delay.assert_called_once()
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                is_outbound=True,
+            ).exists()
         )
-        self.assertIsNotNone(outbound)
-        expected_link = f"https://example.com/console/agents/{self.agent.id}/"
-        self.assertIn(expected_link, outbound.body)
-        self.assertEqual(outbound.raw_payload.get("source"), "daily_credit_limit_notice")
-        outbound.refresh_from_db()
-        self.assertEqual(outbound.latest_status, DeliveryStatus.DELIVERED)

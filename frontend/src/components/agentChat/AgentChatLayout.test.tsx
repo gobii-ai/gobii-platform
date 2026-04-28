@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentChatLayout } from './AgentChatLayout'
@@ -18,7 +18,25 @@ vi.mock('./AgentComposer', () => ({
 }))
 
 vi.mock('./TimelineVirtualItem', () => ({
-  TimelineVirtualItem: () => null,
+  TimelineVirtualItem: ({ event, onMessageLinkClick }: { event?: { messageLinkHref?: string | null }, onMessageLinkClick?: (href: string) => boolean | void }) => {
+    const href = event?.messageLinkHref
+    if (!href) {
+      return null
+    }
+    return (
+      <a
+        data-testid="timeline-message-link"
+        href={href}
+        onClick={(event) => {
+          if (onMessageLinkClick?.(href)) {
+            event.preventDefault()
+          }
+        }}
+      >
+        Open settings
+      </a>
+    )
+  },
 }))
 
 vi.mock('./StreamingReplyCard', () => ({
@@ -42,7 +60,9 @@ vi.mock('./AgentChatMobileSheet', () => ({
 }))
 
 vi.mock('./AgentChatSettingsPanel', () => ({
-  AgentChatSettingsPanel: () => null,
+  AgentChatSettingsPanel: ({ open }: { open: boolean }) => (
+    <div data-testid="agent-chat-settings-panel" data-open={String(open)} />
+  ),
 }))
 
 vi.mock('./AgentChatAddonsPanel', () => ({
@@ -143,6 +163,14 @@ function renderAgentChatLayout() {
 describe('AgentChatLayout upgrade modal gating', () => {
   beforeEach(() => {
     window.innerWidth = 1200
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: vi.fn(() => null),
+        setItem: vi.fn(),
+        removeItem: vi.fn(),
+      },
+    })
     useSubscriptionStore.setState(buildInitialSubscriptionState())
   })
 
@@ -224,5 +252,22 @@ describe('AgentChatLayout upgrade modal gating', () => {
 
     expect(screen.queryByTestId('signup-preview-panel')).not.toBeInTheDocument()
     expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
+  })
+
+  it('opens the settings panel when a chat message links to the current agent settings page', () => {
+    render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as any]}
+        onUpdateDailyCredits={vi.fn(async () => undefined)}
+      />,
+    )
+
+    expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'false')
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+
+    expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'true')
   })
 })

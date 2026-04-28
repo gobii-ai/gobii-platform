@@ -1,4 +1,5 @@
-import { useMemo, useState, useEffect, useRef } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 
 import { sanitizeHtml, stripBlockquoteQuotes } from '../../util/sanitize'
 import { MarkdownViewer } from '../common/MarkdownViewer'
@@ -9,6 +10,7 @@ type MessageContentProps = {
   showEmptyState?: boolean
   /** Animate text in with fast typewriter effect on mount */
   animateIn?: boolean
+  onLinkClick?: (href: string) => boolean | void
 }
 
 /**
@@ -67,7 +69,22 @@ function useFastReveal(content: string, enabled: boolean) {
   return content.slice(0, displayedLength)
 }
 
-export function MessageContent({ bodyHtml, bodyText, showEmptyState = true, animateIn = false }: MessageContentProps) {
+function shouldInterceptLinkClick(event: ReactMouseEvent<HTMLElement>): boolean {
+  return event.button === 0
+    && !event.defaultPrevented
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.shiftKey
+}
+
+export function MessageContent({
+  bodyHtml,
+  bodyText,
+  showEmptyState = true,
+  animateIn = false,
+  onLinkClick,
+}: MessageContentProps) {
   // Only use HTML rendering if backend explicitly provided bodyHtml (e.g., for email channel).
   // For other channels, bodyText may contain inline HTML like <br> which the markdown renderer handles.
   const htmlSource = useMemo(() => {
@@ -86,12 +103,41 @@ export function MessageContent({ bodyHtml, bodyText, showEmptyState = true, anim
   // Fast reveal animation for markdown content (not HTML)
   const displayedText = useFastReveal(normalizedText || '', animateIn && !htmlSource)
 
+  const handleContentClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (!onLinkClick || !shouldInterceptLinkClick(event)) {
+      return
+    }
+
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const anchor = target.closest('a[href]')
+    if (!(anchor instanceof HTMLAnchorElement)) {
+      return
+    }
+
+    const href = anchor.getAttribute('href')
+    if (!href) {
+      return
+    }
+
+    if (onLinkClick(href)) {
+      event.preventDefault()
+    }
+  }, [onLinkClick])
+
   if (htmlSource) {
-    return <div dangerouslySetInnerHTML={{ __html: htmlSource }} />
+    return <div onClick={handleContentClick} dangerouslySetInnerHTML={{ __html: htmlSource }} />
   }
 
   if (normalizedText && normalizedText.trim().length > 0) {
-    return <MarkdownViewer content={displayedText} />
+    return (
+      <div onClick={handleContentClick}>
+        <MarkdownViewer content={displayedText} />
+      </div>
+    )
   }
 
   if (!showEmptyState) {

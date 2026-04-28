@@ -21,6 +21,7 @@ type TimelineVirtualItemProps = {
   statusExpansionTargets?: StatusExpansionTargets
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
+  onMessageLinkClick?: (href: string) => boolean | void
 }
 
 export const TimelineVirtualItem = memo(function TimelineVirtualItem({
@@ -35,6 +36,7 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   statusExpansionTargets,
   animateIncoming = false,
   onIncomingAnimationConsumed,
+  onMessageLinkClick,
 }: TimelineVirtualItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
@@ -59,6 +61,7 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
         agentAvatarUrl={agentAvatarUrl}
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
+        onMessageLinkClick={onMessageLinkClick}
       />
     )
   }

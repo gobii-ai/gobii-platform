@@ -1,4 +1,5 @@
 """Tests for implied send behavior in event processing."""
+from decimal import Decimal
 from datetime import timedelta
 import json
 from unittest.mock import MagicMock, patch
@@ -43,6 +44,13 @@ class ImpliedSendTests(TestCase):
         quota.save()
 
     def setUp(self):
+        self.task_credit_patcher = patch(
+            "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={"success": True, "credit": None},
+        )
+        self.task_credit_patcher.start()
+        self.addCleanup(self.task_credit_patcher.stop)
+
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
             name="browser-agent-for-implied-send",
@@ -328,6 +336,241 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(mock_send_chat.called)
         params = mock_send_chat.call_args[0][1]
         self.assertTrue(params.get("will_continue_work"))
+
+
+@tag("batch_event_processing_credits")
+class DailyLimitMessageOnlyModeTests(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        user_model = get_user_model()
+        cls.user = user_model.objects.create_user(
+            username="daily-limit-mode@example.com",
+            email="daily-limit-mode@example.com",
+            password="password",
+        )
+        quota, _ = UserQuota.objects.get_or_create(user=cls.user)
+        quota.agent_limit = 100
+        quota.save()
+
+    def setUp(self):
+        self.task_credit_patcher = patch(
+            "api.models.TaskCreditService.check_and_consume_credit_for_owner",
+            return_value={"success": True, "credit": None},
+        )
+        self.task_credit_patcher.start()
+        self.addCleanup(self.task_credit_patcher.stop)
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="browser-agent-for-daily-limit-mode",
+        )
+        self.agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Daily Limit Mode Agent",
+            charter="Test charter",
+            browser_use_agent=browser_agent,
+        )
+
+    def _daily_limit_state(self):
+        return {
+            "hard_limit": Decimal("2"),
+            "hard_limit_remaining": Decimal("0"),
+            "soft_target": Decimal("1"),
+            "soft_target_remaining": Decimal("0"),
+            "used": Decimal("2"),
+            "next_reset": timezone.now(),
+        }
+
+    def _tool_definition(self, name: str) -> dict:
+        return {
+            "type": "function",
+            "function": {
+                "name": name,
+                "description": name,
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+
+    def _completion(self, *, content=None, tool_calls=None):
+        msg = MagicMock()
+        msg.tool_calls = tool_calls
+        msg.function_call = None
+        msg.content = content
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def _mock_completion(self, content, *, reasoning_content=None):
+        msg = MagicMock()
+        msg.tool_calls = None
+        msg.function_call = None
+        msg.content = content
+        if reasoning_content is not None:
+            msg.reasoning_content = reasoning_content
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        return resp
+
+    def _tool_call(self, name: str, arguments: dict) -> MagicMock:
+        tool_call = MagicMock()
+        tool_call.id = f"call_{name}"
+        tool_call.function = MagicMock()
+        tool_call.function.name = name
+        tool_call.function.arguments = json.dumps(arguments)
+        return tool_call
+
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    def test_daily_limit_mode_filters_tool_list_to_message_tools(
+        self,
+        mock_get_tools,
+        mock_get_daily_state,
+        mock_build_prompt,
+    ):
+        start_web_session(self.agent, self.user)
+        mock_get_tools.return_value = [
+            self._tool_definition("send_email"),
+            self._tool_definition("send_sms"),
+            self._tool_definition("send_chat_message"),
+            self._tool_definition("send_agent_message"),
+            self._tool_definition("sqlite_query"),
+        ]
+        mock_get_daily_state.return_value = self._daily_limit_state()
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        observed_tool_names: list[str] = []
+
+        def _capture_completion(*_args, **kwargs):
+            observed_tool_names.extend(
+                tool["function"]["name"]
+                for tool in kwargs["tools"]
+            )
+            return (
+                self._completion(content=None, tool_calls=None),
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            side_effect=_capture_completion,
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(
+            observed_tool_names,
+            ["send_email", "send_sms", "send_chat_message", "send_agent_message"],
+        )
+
+    @patch("api.agent.core.event_processing.execute_enabled_tool")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    def test_daily_limit_mode_rejects_non_message_tool_calls(
+        self,
+        mock_get_tools,
+        mock_get_daily_state,
+        mock_build_prompt,
+        mock_execute_enabled_tool,
+    ):
+        mock_get_tools.return_value = [self._tool_definition("send_email")]
+        mock_get_daily_state.return_value = self._daily_limit_state()
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        completion = self._completion(
+            tool_calls=[self._tool_call("sqlite_query", {"query": "select 1"})]
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            return_value=(
+                completion,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        mock_execute_enabled_tool.assert_not_called()
+        correction_step = PersistentAgentStep.objects.filter(
+            agent=self.agent,
+            description__contains="Only message tools are allowed right now",
+        ).first()
+        self.assertIsNotNone(correction_step)
+
+    @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch(
+        "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner",
+        return_value={"success": True, "credit": None},
+    )
+    @patch("api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner", return_value=Decimal("5"))
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing.get_agent_daily_credit_state")
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
+    def test_daily_limit_mode_executes_send_email_without_consuming_credit(
+        self,
+        mock_get_tools,
+        mock_get_daily_state,
+        mock_build_prompt,
+        _mock_available,
+        mock_consume,
+        mock_send_email,
+    ):
+        mock_get_tools.return_value = [self._tool_definition("send_email")]
+        mock_get_daily_state.return_value = self._daily_limit_state()
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+        completion = self._completion(
+            tool_calls=[
+                self._tool_call(
+                    "send_email",
+                    {
+                        "to_address": "owner@example.com",
+                        "subject": "Daily limit reached",
+                        "mobile_first_html": "<p>Please raise the limit.</p>",
+                    },
+                )
+            ]
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._completion_with_failover",
+            return_value=(
+                completion,
+                {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                    "model": "m",
+                    "provider": "p",
+                },
+            ),
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        mock_send_email.assert_called_once()
+        mock_consume.assert_not_called()
+        tool_call = PersistentAgentToolCall.objects.filter(
+            step__agent=self.agent,
+            tool_name="send_email",
+        ).order_by("-step_id").first()
+        self.assertIsNotNone(tool_call)
+        self.assertIsNone(tool_call.step.credits_cost)
+        self.assertIsNone(tool_call.step.completion_id)
 
     @patch("api.agent.core.event_processing._should_imply_continue", return_value=False)
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})

@@ -100,9 +100,14 @@ from .llm_config import (
     is_llm_bootstrap_required,
 )
 from api.agent.events import publish_agent_event, AgentEventType
-from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
 from api.evals.execution import get_current_eval_routing_profile
 from . import internal_reasoning
+from .daily_limit_mode import (
+    DAILY_LIMIT_MESSAGE_TOOL_NAMES,
+    filter_tools_for_daily_limit_message_only_mode,
+    is_daily_hard_limit_message_only_mode,
+    is_daily_limit_message_tool,
+)
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -207,12 +212,7 @@ TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
-MESSAGE_TOOL_NAMES = {
-    "send_email",
-    "send_sms",
-    "send_chat_message",
-    "send_agent_message",
-}
+MESSAGE_TOOL_NAMES = set(DAILY_LIMIT_MESSAGE_TOOL_NAMES)
 MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 MESSAGE_TOOL_BODY_KEYS = {
     "send_email": "mobile_first_html",
@@ -1667,6 +1667,52 @@ def _prepare_tool_batch(
                 heartbeat.touch("tool_call")
             tool_span.set_attribute("tool.name", tool_name)
             logger.info("Agent %s preparing tool %d/%d: %s", agent.id, idx, len(tool_calls), tool_name)
+
+            daily_state = None
+            if isinstance(credit_snapshot, dict):
+                daily_state = credit_snapshot.get("daily_state")
+            if daily_state is None:
+                try:
+                    daily_state = get_agent_daily_credit_state(agent)
+                except Exception:
+                    logger.warning(
+                        "Failed to load daily credit state while preparing tool batch for agent %s.",
+                        agent.id,
+                        exc_info=True,
+                    )
+                    daily_state = None
+                if isinstance(credit_snapshot, dict):
+                    credit_snapshot["daily_state"] = daily_state
+
+            if (
+                is_daily_hard_limit_message_only_mode(daily_state)
+                and not is_daily_limit_message_tool(tool_name)
+            ):
+                try:
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": (
+                            "Daily hard limit mode is active. Only message tools are allowed right now: "
+                            "send_email, send_sms, send_chat_message, send_agent_message. "
+                            f"Do not call {tool_name}; message the user and ask them to raise the limit."
+                        ),
+                    }
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    logger.info(
+                        "Agent %s: rejected %s in daily-limit message-only mode.",
+                        agent.id,
+                        tool_name,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to persist daily-limit message-only correction step for agent %s",
+                        agent.id,
+                        exc_info=True,
+                    )
+                followup_required = True
+                continue
 
             if tool_name == "sleep_until_next_trigger":
                 if has_non_sleep_calls:
@@ -3313,6 +3359,38 @@ def _ensure_credit_for_tool(
         if credit_snapshot is not None:
             credit_snapshot["daily_state"] = daily_state
 
+    if is_daily_hard_limit_message_only_mode(daily_state) and is_daily_limit_message_tool(tool_name):
+        if available is not None and available != TASKS_UNLIMITED and Decimal(available) <= Decimal("0"):
+            msg_desc = (
+                f"Skipped tool '{tool_name}' due to insufficient credits mid-loop."
+            )
+            step = PersistentAgentStep.objects.create(
+                agent=agent,
+                description=msg_desc,
+            )
+            PersistentAgentSystemStep.objects.create(
+                step=step,
+                code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                notes="credit_insufficient_mid_loop",
+            )
+            if span is not None:
+                try:
+                    span.add_event("Tool skipped - insufficient credits mid-loop")
+                except Exception:
+                    pass
+            logger.warning(
+                "Agent %s insufficient credits mid-loop while in daily-limit message-only mode.",
+                agent.id,
+            )
+            return False
+        if span is not None:
+            try:
+                span.add_event("Message tool allowed in daily-limit message-only mode")
+                span.set_attribute("credit_check.daily_limit_message_only_mode", True)
+            except Exception:
+                pass
+        return {"cost": None, "credit": None}
+
     hard_limit = daily_state.get("hard_limit")
     hard_remaining = daily_state.get("hard_limit_remaining")
     soft_target = daily_state.get("soft_target")
@@ -3469,7 +3547,6 @@ def _ensure_credit_for_tool(
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
             notes="daily_credit_limit_mid_loop",
         )
-        send_owner_daily_credit_hard_limit_notice(agent)
         if span is not None:
             try:
                 span.add_event("Tool skipped - daily credit limit reached")
@@ -4199,10 +4276,10 @@ def _process_agent_events_locked(
 
                     if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
                         msg = (
-                            "Skipped processing because this agent has reached its enforced daily task credit limit."
+                            "Agent reached its enforced daily task credit limit and is entering message-only mode."
                         )
                         logger.warning(
-                            "Persistent agent %s not processed – hard daily limit reached (used=%s limit=%s).",
+                            "Persistent agent %s reached hard daily limit before loop; continuing in message-only mode (used=%s limit=%s).",
                             persistent_agent_id,
                             daily_state.get("used"),
                             daily_limit,
@@ -4218,10 +4295,8 @@ def _process_agent_events_locked(
                             notes="daily_credit_limit_exhausted",
                         )
 
-                        send_owner_daily_credit_hard_limit_notice(agent)
-                        span.add_event("Agent processing skipped - daily credit limit reached")
+                        span.add_event("Agent processing entering daily-limit message-only mode")
                         span.set_attribute("credit_check.daily_limit_block", True)
-                        return agent
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no owner; skipping credit gate")
@@ -4404,11 +4479,6 @@ def _run_agent_loop(
     try:
         for i in range(max_remaining):
             had_deliverable_web_target_at_start = has_deliverable_web_session(agent)
-            iteration_tools = _gate_send_chat_tool_for_delivery(
-                tools,
-                agent,
-                has_deliverable_web_target_now=had_deliverable_web_target_at_start,
-            )
             if _should_abort_processing(
                 agent,
                 budget_ctx=budget_ctx,
@@ -4453,7 +4523,6 @@ def _run_agent_loop(
                 return cumulative_token_usage
             with tracer.start_as_current_span(f"Agent Loop Iteration {i + 1}"):
                 iter_span = trace.get_current_span()
-                iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
                 if heartbeat:
                     heartbeat.touch("iteration_start")
                 if lock_extender:
@@ -4470,6 +4539,15 @@ def _run_agent_loop(
 
                 if credit_snapshot is not None:
                     credit_snapshot["daily_state"] = daily_state
+
+                iteration_tools = _gate_send_chat_tool_for_delivery(
+                    tools,
+                    agent,
+                    has_deliverable_web_target_now=had_deliverable_web_target_at_start,
+                )
+                if is_daily_hard_limit_message_only_mode(daily_state):
+                    iteration_tools = filter_tools_for_daily_limit_message_only_mode(iteration_tools)
+                iter_span.set_attribute("persistent_agent.tools.count", len(iteration_tools))
 
                 burn_rate_action = handle_burn_rate_limit(
                     agent,
@@ -4709,7 +4787,14 @@ def _run_agent_loop(
                         )
                     return completion
 
-                # Persist completion immediately so token usage isn't lost if execution exits early
+                suppress_step_completion_billing = is_daily_hard_limit_message_only_mode(
+                    daily_state
+                )
+
+                # Persist completion immediately so token usage isn't lost if execution exits early.
+                # In daily-limit message-only mode we keep the completion record, but we do not
+                # attach it to steps because PersistentAgentStep.save() would otherwise consume
+                # more task credits via completion billing.
                 _ensure_completion()
 
                 deliverable_web_session_activated_post_completion = (
@@ -4730,6 +4815,8 @@ def _run_agent_loop(
                         continue
 
                 def _attach_completion(step_kwargs: dict) -> None:
+                    if suppress_step_completion_billing:
+                        return
                     completion_obj = _ensure_completion()
                     step_kwargs["completion"] = completion_obj
 
