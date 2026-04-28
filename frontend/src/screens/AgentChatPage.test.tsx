@@ -79,6 +79,7 @@ const {
     receiveRealtimeEvent: vi.fn(),
     finalizeStreaming: vi.fn(),
     refreshProcessing: vi.fn(),
+    persistPendingEventsToCache: vi.fn(),
     setInsightsForAgent: vi.fn(),
     startInsightRotation: vi.fn(),
     stopInsightRotation: vi.fn(),
@@ -169,12 +170,24 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
     AgentChatLayout: ({
       spawnIntentLoading,
       signupPreviewState,
+      activeAgentId,
+      showEmbeddedSettings,
+      agentRoster,
+      onConfigureAgent,
+      onBackFromEmbeddedSettings,
+      onOpenFullSettings,
       sidebarNotificationsEnabled,
       sidebarNotificationStatus,
       onSidebarNotificationsEnabledChange,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
+      activeAgentId?: string | null
+      showEmbeddedSettings?: boolean
+      agentRoster?: Array<{ id: string }>
+      onConfigureAgent?: (agent: { id: string }) => void
+      onBackFromEmbeddedSettings?: () => void
+      onOpenFullSettings?: () => void
       sidebarNotificationsEnabled?: boolean
       sidebarNotificationStatus?: string
       onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
@@ -184,12 +197,32 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         upgradeModalSource,
         upgradeModalDismissible,
       } = mockedUseSubscriptionStore()
+      const configureTarget = agentRoster?.find((agent) => agent.id !== activeAgentId) ?? agentRoster?.[0] ?? null
       return (
         <div>
           <div data-testid="spawn-intent-loading">{String(Boolean(spawnIntentLoading))}</div>
           <div data-testid="signup-preview-state">{signupPreviewState ?? ''}</div>
+          <div data-testid="active-agent-id">{activeAgentId ?? ''}</div>
+          <div data-testid="embedded-settings-open">{String(Boolean(showEmbeddedSettings))}</div>
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
           <div data-testid="notification-status">{sidebarNotificationStatus ?? ''}</div>
+          <button
+            type="button"
+            data-testid="configure-agent"
+            onClick={() => {
+              if (configureTarget) {
+                onConfigureAgent?.(configureTarget)
+              }
+            }}
+          >
+            Configure
+          </button>
+          <button type="button" data-testid="back-from-settings" onClick={() => onBackFromEmbeddedSettings?.()}>
+            Back
+          </button>
+          <button type="button" data-testid="open-full-settings" onClick={() => onOpenFullSettings?.()}>
+            Open full settings
+          </button>
           <button
             type="button"
             onClick={() => onSidebarNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
@@ -211,6 +244,10 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
 
 vi.mock('../components/agentChat/AgentIntelligenceGateModal', () => ({
   AgentIntelligenceGateModal: () => null,
+}))
+
+vi.mock('../components/agentChat/EmbeddedAgentSettingsPanel', () => ({
+  EmbeddedAgentSettingsPanel: () => <div data-testid="embedded-agent-settings-panel" />,
 }))
 
 vi.mock('../components/agentChat/CollaboratorInviteDialog', () => ({
@@ -293,13 +330,15 @@ vi.mock('../hooks/useAgentPanelRequestsEnabled', () => ({
 }))
 
 vi.mock('../hooks/useConsoleContextSwitcher', () => ({
-  useConsoleContextSwitcher: vi.fn(() => ({
+  useConsoleContextSwitcher: vi.fn(({ forAgentId }: { forAgentId?: string } = {}) => ({
     data: {
       context: rosterContext,
       personal: rosterContext,
       organizations: [],
       organizationsEnabled: false,
     },
+    resolvedForAgentId: forAgentId,
+    isLoading: false,
     isSwitching: false,
     error: null,
     switchContext: vi.fn(),
@@ -390,6 +429,30 @@ function buildInitialSubscriptionState() {
     trialDaysByPlan: { startup: 14, scale: 14 },
     trialEligible: true,
     ensureAuthenticated: ensureAuthenticatedMock,
+  }
+}
+
+function buildRosterAgent(id: string, name: string) {
+  return {
+    id,
+    name,
+    avatarUrl: null,
+    displayColorHex: '#111111',
+    isActive: true,
+    processingActive: false,
+    lastInteractionAt: null,
+    miniDescription: '',
+    shortDescription: '',
+    listingDescription: '',
+    listingDescriptionSource: null,
+    displayTags: [],
+    detailUrl: `/console/agents/${id}/`,
+    cardGradientStyle: '',
+    iconBackgroundHex: '',
+    iconBorderHex: '',
+    dailyCreditRemaining: null,
+    dailyCreditLow: false,
+    last24hCreditBurn: null,
   }
 }
 
@@ -704,6 +767,78 @@ describe('AgentChatPage trial onboarding', () => {
     })
     await waitFor(() => {
       expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('true')
+    })
+  })
+
+  it('opens embedded settings from the active agent route on direct app loads', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    window.history.pushState({}, '', '/app/agents/agent-1/settings')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+    })
+  })
+
+  it('opens embedded settings from the direct console shell settings route', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    window.history.pushState({}, '', '/console/agents/agent-1/chat/settings/')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+    })
+  })
+
+  it('switches active agents and opens embedded settings when configure is triggered', async () => {
+    rosterState.agents = [
+      buildRosterAgent('agent-1', 'Agent One'),
+      buildRosterAgent('agent-2', 'Agent Two'),
+    ]
+    window.history.pushState({}, '', '/app/agents/agent-1')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    fireEvent.click(screen.getByTestId('configure-agent'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('active-agent-id')).toHaveTextContent('agent-2')
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+      expect(window.location.pathname).toBe('/app/agents/agent-2/settings')
+    })
+  })
+
+  it('returns from embedded settings to the active agent chat route', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    window.history.pushState({}, '', '/app/agents/agent-1/settings')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+    })
+
+    fireEvent.click(screen.getByTestId('back-from-settings'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('false')
+      expect(window.location.pathname).toBe('/app/agents/agent-1')
+    })
+  })
+
+  it('opens embedded settings from the quick settings callback', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    window.history.pushState({}, '', '/app/agents/agent-1')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    fireEvent.click(screen.getByTestId('open-full-settings'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+      expect(window.location.pathname).toBe('/app/agents/agent-1/settings')
     })
   })
 })

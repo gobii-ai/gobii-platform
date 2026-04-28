@@ -20,6 +20,7 @@ type FileTableProps = {
   isBusy: boolean
   isLoading: boolean
   errorMessage: string | null
+  embedded?: boolean
   canManage: boolean
   currentFolderId: string | null
   parentFolderPath: string
@@ -40,6 +41,7 @@ export function FileTable({
   isBusy,
   isLoading,
   errorMessage,
+  embedded = false,
   canManage,
   currentFolderId,
   parentFolderPath,
@@ -96,6 +98,25 @@ export function FileTable({
   )
 
   const showSelection = canManage
+  const selectionInputClassName = embedded
+    ? 'h-4 w-4 rounded border-slate-500 bg-slate-900/40 text-blue-400 focus:ring-blue-400'
+    : 'h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500'
+  const tableTextMutedClassName = embedded ? 'text-slate-300' : 'text-slate-500'
+  const folderBadgeClassName = embedded
+    ? 'border border-blue-300/20 bg-blue-950/30 text-blue-200'
+    : 'bg-blue-100 text-blue-700'
+  const fileBadgeClassName = embedded
+    ? 'border border-emerald-300/20 bg-emerald-950/30 text-emerald-200'
+    : 'bg-emerald-100 text-emerald-700'
+  const folderUploadButtonClassName = embedded
+    ? `inline-flex items-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-1.5 text-xs font-semibold text-blue-100 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-200 hover:bg-blue-900/30'}`
+    : `inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-100'}`
+  const downloadButtonClassName = embedded
+    ? 'inline-flex items-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-1.5 text-xs font-semibold text-blue-100 transition hover:border-blue-200 hover:bg-blue-900/30'
+    : 'inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100'
+  const deleteButtonClassName = embedded
+    ? 'inline-flex items-center gap-2 rounded-lg border border-rose-300/40 bg-rose-950/20 px-3 py-1.5 text-xs font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-900/30'
+    : 'inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100'
   const columns = useMemo<ColumnDef<AgentFsNode>[]>(() => {
     const baseColumns: ColumnDef<AgentFsNode>[] = []
     if (showSelection) {
@@ -111,7 +132,7 @@ export function FileTable({
               }
             }}
             onChange={table.getToggleAllRowsSelectedHandler()}
-            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            className={selectionInputClassName}
             aria-label="Select all files"
           />
         ),
@@ -121,7 +142,7 @@ export function FileTable({
             checked={row.getIsSelected()}
             disabled={!row.getCanSelect()}
             onChange={row.getToggleSelectedHandler()}
-            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+            className={`${selectionInputClassName} disabled:opacity-50`}
             aria-label={`Select ${row.original.name}`}
           />
         ),
@@ -131,12 +152,12 @@ export function FileTable({
 
     baseColumns.push({
         id: 'name',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Name</span>,
+        header: () => <span className={`text-xs font-semibold uppercase tracking-wide ${tableTextMutedClassName}`}>Name</span>,
         cell: ({ row }) => {
           const isDir = row.original.nodeType === 'dir'
           return (
             <div className="flex items-center gap-3">
-              <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${isDir ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'}`}>
+              <span className={`flex h-9 w-9 items-center justify-center rounded-lg ${isDir ? folderBadgeClassName : fileBadgeClassName}`}>
                 {isDir ? <Folder className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
               </span>
               <div
@@ -147,38 +168,38 @@ export function FileTable({
                 tabIndex={isDir ? 0 : undefined}
                 title={isDir ? 'Open folder' : row.original.name}
               >
-                <span className="text-sm font-medium text-slate-900">{row.original.name}</span>
-                <span className="text-xs text-slate-500">{row.original.path}</span>
+                <span className={embedded ? 'text-sm font-medium text-slate-100' : 'text-sm font-medium text-slate-900'}>{row.original.name}</span>
+                <span className={embedded ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>{row.original.path}</span>
               </div>
-              {isDir ? <ChevronRight className="h-4 w-4 text-slate-400" aria-hidden="true" /> : null}
+              {isDir ? <ChevronRight className={embedded ? 'h-4 w-4 text-slate-500' : 'h-4 w-4 text-slate-400'} aria-hidden="true" /> : null}
             </div>
           )
         },
       })
     baseColumns.push({
         id: 'type',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Type</span>,
+        header: () => <span className={`text-xs font-semibold uppercase tracking-wide ${tableTextMutedClassName}`}>Type</span>,
         cell: ({ row }) => (
-          <span className="text-sm text-slate-600">{row.original.nodeType === 'dir' ? 'Folder' : 'File'}</span>
+          <span className={embedded ? 'text-sm text-slate-300' : 'text-sm text-slate-600'}>{row.original.nodeType === 'dir' ? 'Folder' : 'File'}</span>
         ),
       })
     baseColumns.push({
         id: 'size',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Size</span>,
+        header: () => <span className={`text-xs font-semibold uppercase tracking-wide ${tableTextMutedClassName}`}>Size</span>,
         cell: ({ row }) => (
-          <span className="text-sm text-slate-600">
+          <span className={embedded ? 'text-sm text-slate-300' : 'text-sm text-slate-600'}>
             {row.original.nodeType === 'dir' ? '-' : formatBytes(row.original.sizeBytes)}
           </span>
         ),
       })
     baseColumns.push({
         id: 'updated',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Updated</span>,
-        cell: ({ row }) => <span className="text-sm text-slate-600">{formatTimestamp(row.original.updatedAt)}</span>,
+        header: () => <span className={`text-xs font-semibold uppercase tracking-wide ${tableTextMutedClassName}`}>Updated</span>,
+        cell: ({ row }) => <span className={embedded ? 'text-sm text-slate-300' : 'text-sm text-slate-600'}>{formatTimestamp(row.original.updatedAt)}</span>,
       })
     baseColumns.push({
         id: 'actions',
-        header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Actions</span>,
+        header: () => <span className={`text-xs font-semibold uppercase tracking-wide ${tableTextMutedClassName}`}>Actions</span>,
         cell: ({ row }) => {
           const node = row.original
           if (node.nodeType === 'dir') {
@@ -188,7 +209,7 @@ export function FileTable({
                 role="button"
                 tabIndex={isBusy ? -1 : 0}
                 aria-disabled={isBusy}
-                className={`inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-100'}`}
+                className={folderUploadButtonClassName}
                 onPointerDown={(event) => {
                   if (isBusy) {
                     event.preventDefault()
@@ -209,7 +230,7 @@ export function FileTable({
             <div className="flex flex-wrap items-center gap-2">
               <a
                 href={downloadUrl}
-                className="inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 transition hover:bg-blue-100"
+                className={downloadButtonClassName}
               >
                 <ArrowDownToLine className="h-3.5 w-3.5" />
                 Download
@@ -217,7 +238,7 @@ export function FileTable({
               {canManage && (
                 <button
                   type="button"
-                  className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-100"
+                  className={deleteButtonClassName}
                   onClick={() => onDeleteNode(node)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -230,7 +251,7 @@ export function FileTable({
       })
 
     return baseColumns
-  }, [canManage, downloadBaseUrl, handleFolderKeyDown, handleUploadKeyDown, isBusy, onDeleteNode, onOpenFolder, onRequestUpload, showSelection, uploadInputId])
+  }, [canManage, deleteButtonClassName, downloadBaseUrl, downloadButtonClassName, embedded, fileBadgeClassName, folderBadgeClassName, folderUploadButtonClassName, handleFolderKeyDown, handleUploadKeyDown, isBusy, onDeleteNode, onOpenFolder, onRequestUpload, selectionInputClassName, showSelection, tableTextMutedClassName, uploadInputId])
 
   const table = useReactTable({
     data: rows,
@@ -245,7 +266,7 @@ export function FileTable({
   return (
     <div className="overflow-x-auto" onDragOver={dragAndDrop.onCurrentFolderDragOver} onDrop={dragAndDrop.onCurrentFolderDrop}>
       <table className="w-full border-collapse">
-        <thead className="bg-blue-50/70">
+        <thead className={embedded ? 'bg-slate-900/40' : 'bg-blue-50/70'}>
           {table.getHeaderGroups().map((headerGroup) => (
             <tr key={headerGroup.id}>
               {headerGroup.headers.map((header) => (
@@ -259,13 +280,13 @@ export function FileTable({
         <tbody>
           {isLoading ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-500">
+              <td colSpan={columns.length} className={embedded ? 'px-4 py-6 text-center text-sm text-slate-400' : 'px-4 py-6 text-center text-sm text-slate-500'}>
                 Loading files...
               </td>
             </tr>
           ) : errorMessage ? (
             <tr>
-              <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-rose-600">
+              <td colSpan={columns.length} className={embedded ? 'px-4 py-6 text-center text-sm text-rose-300' : 'px-4 py-6 text-center text-sm text-rose-600'}>
                 {errorMessage}
               </td>
             </tr>
@@ -274,8 +295,9 @@ export function FileTable({
               {currentFolderId ? (
                 <tr
                   className={[
-                    'cursor-pointer bg-blue-50/40',
-                    dragAndDrop.dragOverNodeId === dragAndDrop.parentDropKey ? 'bg-blue-100/70' : '',
+                    'cursor-pointer',
+                    embedded ? 'border-b border-slate-200/70 bg-slate-900/30' : 'bg-blue-50/40',
+                    dragAndDrop.dragOverNodeId === dragAndDrop.parentDropKey ? (embedded ? 'bg-blue-950/30' : 'bg-blue-100/70') : '',
                   ].join(' ')}
                   onClick={onNavigateToParent}
                   onDragOver={dragAndDrop.onParentDragOver}
@@ -288,19 +310,19 @@ export function FileTable({
                       <input
                         type="checkbox"
                         disabled
-                        className="h-4 w-4 rounded border-slate-300 text-blue-600 opacity-50"
+                        className={`${selectionInputClassName} opacity-50`}
                         aria-label="Parent folder selection disabled"
                       />
                     </td>
                   )}
                   <td colSpan={columns.length - (showSelection ? 1 : 0)} className="px-4 py-3">
-                    <div className="flex items-center gap-3 text-sm text-slate-700">
-                      <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
+                    <div className={embedded ? 'flex items-center gap-3 text-sm text-slate-300' : 'flex items-center gap-3 text-sm text-slate-700'}>
+                      <span className={embedded ? 'flex h-8 w-8 items-center justify-center rounded-lg border border-blue-300/20 bg-blue-950/30 text-blue-200' : 'flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700'}>
                         <ArrowUp className="h-4 w-4" aria-hidden="true" />
                       </span>
                       <div className="flex flex-col">
-                        <span className="text-sm font-semibold text-slate-900">Parent folder</span>
-                        <span className="text-xs text-slate-500">{parentFolderPath}</span>
+                        <span className={embedded ? 'text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-slate-900'}>Parent folder</span>
+                        <span className={embedded ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>{parentFolderPath}</span>
                       </div>
                     </div>
                   </td>
@@ -308,7 +330,7 @@ export function FileTable({
               ) : null}
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length} className="px-4 py-6 text-center text-sm text-slate-500">
+                  <td colSpan={columns.length} className={embedded ? 'px-4 py-6 text-center text-sm text-slate-400' : 'px-4 py-6 text-center text-sm text-slate-500'}>
                     This folder is empty. Upload files or create a folder to get started.
                   </td>
                 </tr>
@@ -317,8 +339,9 @@ export function FileTable({
                   <tr
                     key={row.id}
                     className={[
-                      row.getIsSelected() ? 'bg-blue-50/50' : '',
-                      dragAndDrop.dragOverNodeId === row.original.id ? 'bg-blue-100/70' : '',
+                      row.getIsSelected() ? (embedded ? 'bg-blue-950/20' : 'bg-blue-50/50') : '',
+                      dragAndDrop.dragOverNodeId === row.original.id ? (embedded ? 'bg-blue-950/30' : 'bg-blue-100/70') : '',
+                      embedded ? 'border-b border-slate-200/70' : '',
                     ].join(' ')}
                     draggable={canManage && !isBusy}
                     onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}

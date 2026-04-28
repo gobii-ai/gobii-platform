@@ -41,6 +41,10 @@ import {
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
+import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
+import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
+import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgentSecretsPanel'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
@@ -79,6 +83,14 @@ import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import { track, AnalyticsEvent } from '../util/analytics'
 import { parseAgentRosterSortMode, sortRosterEntries } from '../util/agentRosterSort'
+import {
+  type AgentChatShellSubview,
+  buildAgentChatShellPath,
+  buildAgentChatShellSelectionPath,
+  extractAgentChatShellAgentId,
+  getAgentChatShellSubview,
+} from '../util/agentChatShellRoutes'
+import { storeConsoleContext } from '../util/consoleContextStorage'
 import { appendReturnTo } from '../util/returnTo'
 
 function deriveFirstName(agentName?: string | null): string {
@@ -121,28 +133,15 @@ function normalizeAvatarUrl(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null
 }
 
-function buildAgentChatPath(pathname: string, agentId: string): string {
-  if (pathname.startsWith('/app')) {
-    return `/app/agents/${agentId}`
-  }
-  if (pathname.includes('/console/agents/')) {
-    return `/console/agents/${agentId}/chat/`
-  }
-  return `/app/agents/${agentId}`
-}
-
 function navigateToAgentChat(agentId: string): void {
   if (typeof window === 'undefined') {
     return
   }
-  const nextPath = buildAgentChatPath(window.location.pathname, agentId)
+  const nextPath = buildAgentChatShellPath(window.location.pathname, agentId, 'chat')
   const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
   window.history.pushState({ agentId }, '', nextUrl)
-  if (window.location.pathname.startsWith('/app')) {
-    window.dispatchEvent(new PopStateEvent('popstate'))
-  }
+  window.dispatchEvent(new PopStateEvent('popstate'))
 }
-
 function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
   // Find the most recent kanban event (they're ordered oldest to newest)
   for (let i = events.length - 1; i >= 0; i--) {
@@ -841,9 +840,13 @@ export function AgentChatPage({
   const fishFaviconSvgRef = useRef<string | null>(null)
   const fishFaviconSvgPromiseRef = useRef<Promise<string> | null>(null)
 
+  const [shellPathname, setShellPathname] = useState(() => (
+    typeof window === 'undefined' ? '' : window.location.pathname
+  ))
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
   const routeAgentId = typeof agentId === 'string' ? agentId : null
+  const shellSubview = useMemo(() => getAgentChatShellSubview(shellPathname), [shellPathname])
   const queryClient = useQueryClient()
   const {
     currentPlan,
@@ -919,12 +922,32 @@ export function AgentChatPage({
   const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
+    setShellPathname(typeof window === 'undefined' ? '' : window.location.pathname)
     setActiveAgentId(agentId ?? null)
   }, [agentId])
 
   useEffect(() => {
     activeAgentIdRef.current = activeAgentId
   }, [activeAgentId])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+
+    const handleShellLocationChange = () => {
+      const nextPathname = window.location.pathname
+      setShellPathname(nextPathname)
+      const nextAgentId = extractAgentChatShellAgentId(nextPathname)
+      if (nextAgentId !== activeAgentIdRef.current) {
+        setSwitchingAgentId(null)
+        setActiveAgentId(nextAgentId)
+      }
+    }
+
+    window.addEventListener('popstate', handleShellLocationChange)
+    return () => window.removeEventListener('popstate', handleShellLocationChange)
+  }, [])
 
   // Set up queryClient bridge for the Zustand store
   useEffect(() => { setTimelineQueryClient(queryClient) }, [queryClient])
@@ -2798,6 +2821,45 @@ export function AgentChatPage({
     trackSignupPreviewActionBlocked('collaborate', location)
   }, [trackSignupPreviewActionBlocked])
 
+  const navigateShellPath = useCallback((nextPath: string, nextAgentId?: string | null) => {
+    const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+    setShellPathname(nextPath)
+    if (typeof nextAgentId !== 'undefined' && nextAgentId !== activeAgentIdRef.current) {
+      setSwitchingAgentId(null)
+      setActiveAgentId(nextAgentId)
+    }
+    window.history.pushState({ agentId: nextAgentId ?? null }, '', nextUrl)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }, [])
+
+  const navigateToShellSubview = useCallback((subview: AgentChatShellSubview, nextAgentId?: string | null) => {
+    const resolvedAgentId = nextAgentId ?? activeAgentIdRef.current
+    if (!resolvedAgentId) {
+      return
+    }
+    setSelectionSidebarMode('gallery')
+    const nextPath = buildAgentChatShellPath(window.location.pathname, resolvedAgentId, subview)
+    navigateShellPath(nextPath, resolvedAgentId)
+  }, [navigateShellPath])
+
+  const handleConfigureAgent = useCallback((agent: AgentRosterEntry) => {
+    pendingAgentMetaRef.current = {
+      agentId: agent.id,
+      agentName: agent.name,
+      agentColorHex: agent.displayColorHex,
+      agentAvatarUrl: agent.avatarUrl,
+      processingActive: agent.processingActive,
+      signupPreviewState: agent.signupPreviewState ?? 'none',
+      planningState: agent.planningState ?? 'skipped',
+    }
+    locallySelectedAgentIdsRef.current.add(agent.id)
+    if (agent.id !== activeAgentIdRef.current) {
+      setSwitchingAgentId(agent.id)
+      setActiveAgentId(agent.id)
+    }
+    navigateToShellSubview('settings', agent.id)
+  }, [navigateToShellSubview])
+
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
       openAgentChat(agent.id, {
@@ -2811,6 +2873,59 @@ export function AgentChatPage({
     },
     [openAgentChat],
   )
+
+  const handleOpenFullSettings = useCallback(() => {
+    navigateToShellSubview('settings')
+  }, [navigateToShellSubview])
+
+  const handleOpenEmbeddedSecrets = useCallback(() => {
+    navigateToShellSubview('secrets')
+  }, [navigateToShellSubview])
+
+  const handleOpenEmbeddedEmailSettings = useCallback(() => {
+    navigateToShellSubview('email')
+  }, [navigateToShellSubview])
+
+  const handleOpenEmbeddedFiles = useCallback(() => {
+    navigateToShellSubview('files')
+  }, [navigateToShellSubview])
+
+  const handleCloseEmbeddedSettings = useCallback(() => {
+    if (!activeAgentIdRef.current) {
+      return
+    }
+    const nextSubview = shellSubview === 'settings' ? 'chat' : 'settings'
+    navigateToShellSubview(nextSubview, activeAgentIdRef.current)
+  }, [navigateToShellSubview, shellSubview])
+
+  const handleEmbeddedSettingsDeleted = useCallback(() => {
+    const selectionPath = buildAgentChatShellSelectionPath(window.location.pathname)
+    if (selectionPath.startsWith('/app')) {
+      navigateShellPath(selectionPath, null)
+      return
+    }
+    window.location.assign(selectionPath)
+  }, [navigateShellPath])
+
+  const handleEmbeddedSettingsReassigned = useCallback((payload: {
+    context?: { type: string; id: string; name?: string | null }
+    redirect?: string | null
+    organization?: { id: string; name: string } | null
+  }) => {
+    if (payload.context) {
+      storeConsoleContext({
+        type: payload.context.type as ConsoleContext['type'],
+        id: payload.context.id,
+        name: payload.context.name ?? '',
+      })
+    }
+    const currentAgentId = activeAgentIdRef.current
+    if (!currentAgentId) {
+      return
+    }
+    const nextPath = buildAgentChatShellPath(window.location.pathname, currentAgentId, 'settings')
+    window.location.assign(nextPath)
+  }, [])
 
   const handleCreateAgent = useCallback(() => {
     if (createAgentDisabledReason) {
@@ -3830,6 +3945,51 @@ export function AgentChatPage({
   const showSpawnIntentLoader = Boolean(
     spawnFlow && isNewAgent && (spawnIntentStatus === 'loading' || spawnIntentStatus === 'ready'),
   )
+  const showEmbeddedSettings = shellSubview !== 'chat' && Boolean(activeAgentId)
+  const embeddedSettingsTitle = useMemo(() => {
+    switch (shellSubview) {
+      case 'secrets':
+        return 'Agent Secrets'
+      case 'email':
+        return 'Email Settings'
+      case 'files':
+        return 'Agent Files'
+      case 'settings':
+      default:
+        return 'Agent Settings'
+    }
+  }, [shellSubview])
+  const embeddedSettingsPanel = showEmbeddedSettings && activeAgentId ? (
+    shellSubview === 'settings' ? (
+      <EmbeddedAgentSettingsPanel
+        agentId={activeAgentId}
+        onBack={handleCloseEmbeddedSettings}
+        onDeleted={handleEmbeddedSettingsDeleted}
+        onReassigned={handleEmbeddedSettingsReassigned}
+        onOpenSecrets={handleOpenEmbeddedSecrets}
+        onOpenEmailSettings={handleOpenEmbeddedEmailSettings}
+        onOpenFiles={handleOpenEmbeddedFiles}
+      />
+    ) : shellSubview === 'secrets' ? (
+      <EmbeddedAgentSecretsPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        onBack={handleCloseEmbeddedSettings}
+      />
+    ) : shellSubview === 'email' ? (
+      <EmbeddedAgentEmailSettingsPanel
+        agentId={activeAgentId}
+        onBack={handleCloseEmbeddedSettings}
+      />
+    ) : (
+      <EmbeddedAgentFilesPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        canManage={activeCanManageAgent}
+        onBack={handleCloseEmbeddedSettings}
+      />
+    )
+  ) : null
 
   const activeAuditUrl = useMemo(() => {
     if (!activeAgentId) {
@@ -3961,6 +4121,7 @@ export function AgentChatPage({
         rosterLoading={rosterLoading}
         rosterError={rosterErrorMessage}
         onSelectAgent={handleSelectAgent}
+        onConfigureAgent={handleConfigureAgent}
         onToggleAgentFavorite={handleToggleAgentFavorite}
         onCreateAgent={handleCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
@@ -3976,6 +4137,10 @@ export function AgentChatPage({
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}
         sidebarNotificationStatus={notificationStatus}
         onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
+        showEmbeddedSettings={showEmbeddedSettings}
+        embeddedSettingsPanel={embeddedSettingsPanel}
+        embeddedSettingsTitle={embeddedSettingsTitle}
+        onBackFromEmbeddedSettings={handleCloseEmbeddedSettings}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}
@@ -3985,6 +4150,7 @@ export function AgentChatPage({
         onRefreshDailyCredits={canManageDailyCredits ? refetchQuickSettings : undefined}
         onUpdateDailyCredits={canManageDailyCredits ? handleUpdateDailyCredits : undefined}
         dailyCreditsUpdating={canManageDailyCredits ? quickSettingsUpdating : false}
+        onOpenFullSettings={handleOpenFullSettings}
         hardLimitShowUpsell={canManageDailyCredits ? hardLimitUpsell : false}
         hardLimitUpgradeUrl={canManageDailyCredits ? hardLimitUpgradeUrl : null}
         contactCap={contactCap}

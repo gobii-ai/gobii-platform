@@ -8,6 +8,7 @@ import type { AllowlistTableRow } from './contactTypes'
 type AllowlistContactsTableProps = {
   rows: AllowlistTableRow[]
   disabled?: boolean
+  embedded?: boolean
   onRemoveRow: (row: AllowlistTableRow) => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
 }
@@ -32,7 +33,7 @@ function renderStatus(row: AllowlistTableRow) {
   return <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Allowed</span>
 }
 
-export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
+export function AllowlistContactsTable({ rows, disabled = false, embedded = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
 
   useEffect(() => {
@@ -144,7 +145,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
               type="button"
               onClick={() => onRemoveRow(row.original)}
               disabled={disabled}
-              className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+              className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-rose-300/70 bg-transparent px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50/70 disabled:opacity-50' : 'inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50'}
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               {row.original.kind === 'invite' ? 'Cancel invite' : 'Remove'}
@@ -186,10 +187,10 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
         </div>
       )}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className={embedded ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent' : 'overflow-hidden rounded-xl border border-slate-200'}>
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse">
-            <thead className="bg-white">
+            <thead className={embedded ? 'bg-transparent' : 'bg-white'}>
               {table.getHeaderGroups().map((headerGroup) => (
                 <tr key={headerGroup.id} className="border-b border-slate-200">
                   {headerGroup.headers.map((header) => (
@@ -200,7 +201,7 @@ export function AllowlistContactsTable({ rows, disabled = false, onRemoveRow, on
                 </tr>
               ))}
             </thead>
-            <tbody className="bg-white">
+            <tbody className={embedded ? 'bg-transparent' : 'bg-white'}>
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-slate-500">

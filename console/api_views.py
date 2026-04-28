@@ -184,7 +184,7 @@ from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone,
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
-from console.views import build_llm_intelligence_props
+from console.views import build_agent_detail_props_for_request, build_llm_intelligence_props
 from console.agent_addons import (
     _build_billing_status_payload,
     build_agent_addons_payload,
@@ -6473,6 +6473,19 @@ class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
                 "status": build_daily_credit_status(context),
             }
         )
+
+
+class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        payload = build_agent_detail_props_for_request(request, agent)
+        return JsonResponse(payload)
 
 
 class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):

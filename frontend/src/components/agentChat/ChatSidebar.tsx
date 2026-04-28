@@ -1,4 +1,4 @@
-import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties } from 'react'
+import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react'
 import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
@@ -30,6 +30,7 @@ type ChatSidebarProps = {
   desktopMode?: AgentChatSidebarMode
   onDesktopModeChange?: (mode: AgentChatSidebarMode) => void
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
@@ -38,6 +39,10 @@ type ChatSidebarProps = {
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
   settings?: SidebarSettingsInfo
+  showEmbeddedSettings?: boolean
+  embeddedSettingsPanel?: ReactNode
+  embeddedSettingsTitle?: string
+  onBackFromEmbeddedSettings?: () => void
 }
 
 export const ChatSidebar = memo(function ChatSidebar({
@@ -50,6 +55,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   desktopMode = 'list',
   onDesktopModeChange,
   onSelectAgent,
+  onConfigureAgent,
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentDisabledReason = null,
@@ -58,6 +64,10 @@ export const ChatSidebar = memo(function ChatSidebar({
   onRosterSortModeChange,
   contextSwitcher,
   settings,
+  showEmbeddedSettings = false,
+  embeddedSettingsPanel = null,
+  embeddedSettingsTitle = 'Agent Settings',
+  onBackFromEmbeddedSettings,
 }: ChatSidebarProps) {
   const [isMobile, setIsMobile] = useState(() => {
     if (typeof window === 'undefined') {
@@ -69,8 +79,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [searchQuery, setSearchQuery] = useState('')
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
 
-  const collapsed = desktopMode === 'collapsed'
-  const galleryMode = desktopMode === 'gallery'
+  const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
+  const collapsed = desktopMode === 'collapsed' && !showSettingsView
+  const galleryMode = desktopMode === 'gallery' || showSettingsView
   const showSearch = agents.length >= SEARCH_THRESHOLD
   const filteredAgents = useMemo(() => {
     if (!searchQuery.trim()) {
@@ -113,13 +124,27 @@ export const ChatSidebar = memo(function ChatSidebar({
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
+  useEffect(() => {
+    if (showSettingsView) {
+      setDrawerOpen(true)
+      setDrawerViewMode('gallery')
+    }
+  }, [showSettingsView])
+
   const handleStepLeft = useCallback(() => {
+    if (showSettingsView) {
+      onBackFromEmbeddedSettings?.()
+      return
+    }
     onDesktopModeChange?.(getPreviousAgentChatSidebarMode(desktopMode))
-  }, [desktopMode, onDesktopModeChange])
+  }, [desktopMode, onBackFromEmbeddedSettings, onDesktopModeChange, showSettingsView])
 
   const handleStepRight = useCallback(() => {
+    if (showSettingsView) {
+      return
+    }
     onDesktopModeChange?.(getNextAgentChatSidebarMode(desktopMode))
-  }, [desktopMode, onDesktopModeChange])
+  }, [desktopMode, onDesktopModeChange, showSettingsView])
 
   const handleAgentSelect = useCallback(
     (agent: AgentRosterEntry) => {
@@ -333,16 +358,23 @@ export const ChatSidebar = memo(function ChatSidebar({
         <AgentChatMobileSheet
           open={drawerOpen}
           keepMounted={true}
-          onClose={() => setDrawerOpen(false)}
-          title="Switch agent"
+          onClose={() => {
+            if (showSettingsView) {
+              onBackFromEmbeddedSettings?.()
+              return
+            }
+            setDrawerOpen(false)
+          }}
+          title={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
           icon={PanelLeft}
           bodyPadding={false}
-          headerAccessory={mobileContextSwitcher ? (
+          headerAccessory={!showSettingsView && mobileContextSwitcher ? (
             <AgentChatContextSwitcher {...mobileContextSwitcher} variant="drawer" />
           ) : null}
-          ariaLabel="Switch agent"
+          ariaLabel={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
         >
-          {showSearch ? (
+          {showSettingsView ? embeddedSettingsPanel : null}
+          {!showSettingsView && showSearch ? (
             <AgentSearchInput
               variant="drawer"
               value={searchQuery}
@@ -350,14 +382,14 @@ export const ChatSidebar = memo(function ChatSidebar({
               onClear={() => setSearchQuery('')}
             />
           ) : null}
-          {showSortToggle ? (
+          {!showSettingsView && showSortToggle ? (
             <AgentSortToggle
               variant="drawer"
               value={rosterSortMode}
               onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
-          {hasAgents ? (
+          {!showSettingsView && hasAgents ? (
             <div className="agent-drawer-view-toggle" role="group" aria-label="Agent roster view">
               <button
                 type="button"
@@ -380,7 +412,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
-          {drawerViewMode === 'gallery' ? (
+          {!showSettingsView && drawerViewMode === 'gallery' ? (
             <ChatSidebarGallery
               variant="drawer"
               agents={filteredAgents}
@@ -392,17 +424,18 @@ export const ChatSidebar = memo(function ChatSidebar({
               errorMessage={errorMessage}
               searchQuery={searchQuery}
               onSelectAgent={handleAgentSelect}
+              onConfigureAgent={onConfigureAgent}
               onToggleAgentFavorite={onToggleAgentFavorite}
               onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
               createAgentButtonDisabled={createAgentButtonDisabled}
               createAgentDisabledReason={createAgentDisabledReason}
             />
-          ) : (
+          ) : !showSettingsView ? (
             <div className="agent-drawer-list" role="list">
               {renderListContent('drawer', false)}
             </div>
-          )}
-          {settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
+          ) : null}
+          {!showSettingsView && settings ? <SidebarSettingsMenu {...settings} variant="drawer" /> : null}
         </AgentChatMobileSheet>
       </>
     )
@@ -425,7 +458,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {contextSwitcher ? (
               <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
             ) : null}
-            {!collapsed ? (
+            {!collapsed && !showSettingsView ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -436,7 +469,7 @@ export const ChatSidebar = memo(function ChatSidebar({
                 <PanelLeftClose className="h-4 w-4" />
               </button>
             ) : null}
-            {!galleryMode ? (
+            {!galleryMode && !showSettingsView ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"
@@ -452,13 +485,13 @@ export const ChatSidebar = memo(function ChatSidebar({
 
         <div className="chat-sidebar-section">
           <div className="chat-sidebar-section-header">
-            <span className="chat-sidebar-section-title">Agents</span>
-            {!collapsed && hasAgents ? (
+            <span className="chat-sidebar-section-title">{showSettingsView ? embeddedSettingsTitle : 'Agents'}</span>
+            {!collapsed && hasAgents && !showSettingsView ? (
               <span className="chat-sidebar-section-count">{agents.length}</span>
             ) : null}
           </div>
 
-          {!collapsed && (showSearch || showSortToggle) ? (
+          {!collapsed && !showSettingsView && (showSearch || showSortToggle) ? (
             <div
               className="chat-sidebar-controls"
               data-gallery={galleryMode ? 'true' : 'false'}
@@ -481,7 +514,11 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
-          {galleryMode ? (
+          {showSettingsView ? (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {embeddedSettingsPanel}
+            </div>
+          ) : galleryMode ? (
             <ChatSidebarGallery
               variant="sidebar"
               agents={filteredAgents}
@@ -493,6 +530,7 @@ export const ChatSidebar = memo(function ChatSidebar({
               errorMessage={errorMessage}
               searchQuery={searchQuery}
               onSelectAgent={handleAgentSelect}
+              onConfigureAgent={onConfigureAgent}
               onToggleAgentFavorite={onToggleAgentFavorite}
               onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
               createAgentButtonDisabled={createAgentButtonDisabled}
@@ -505,7 +543,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           )}
         </div>
 
-        {settings ? (
+        {!showSettingsView && settings ? (
           <SidebarSettingsMenu
             {...settings}
             variant="sidebar"

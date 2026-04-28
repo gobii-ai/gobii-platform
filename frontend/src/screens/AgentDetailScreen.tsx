@@ -34,6 +34,8 @@ import {
 } from 'react-aria-components'
 import { Modal } from '../components/common/Modal'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
+import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
+import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
@@ -47,42 +49,25 @@ import type {
   PendingCollaboratorAction,
 } from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
-import type { IntelligenceTierKey, LlmIntelligenceConfig } from '../types/llmIntelligence'
-
-type PrimaryEndpoint = {
-  address: string
-}
-
-type PendingTransfer = {
-  toEmail: string
-  createdAtIso: string
-  createdAtDisplay: string
-}
-
-type AgentOrganization = {
-  id: string
-  name: string
-} | null
-
-type AgentSummary = {
-  id: string
-  name: string
-  avatarUrl: string | null
-  charter: string
-  isActive: boolean
-  createdAtDisplay: string
-  pendingTransfer: PendingTransfer | null
-  whitelistPolicy: string
-  organization: AgentOrganization
-  preferredLlmTier: IntelligenceTierKey
-  agentColorHex: string
-}
-
-type AgentColorOption = {
-  id: string
-  name: string
-  hex: string
-}
+import type { IntelligenceTierKey } from '../types/llmIntelligence'
+import type {
+  AgentColorOption,
+  AgentDailyCreditsInfo as DailyCreditsInfo,
+  AgentInboundWebhook,
+  AgentOrganization,
+  AgentSettingsData,
+  AgentSettingsReassignmentInfo as ReassignmentInfo,
+  AgentSummary,
+  AgentWebhook,
+  AllowlistState,
+  CollaboratorState,
+  DedicatedIpInfo,
+  McpServersInfo,
+  PeerLinkCandidate,
+  PeerLinkEntry,
+  PeerLinksInfo,
+  PrimaryEndpoint,
+} from '../types/agentSettings'
 
 function resolveAgentColorHex(agentColorHex: string | null | undefined, palette: AgentColorOption[]): string {
   if (!palette.length) {
@@ -91,167 +76,6 @@ function resolveAgentColorHex(agentColorHex: string | null | undefined, palette:
   const normalized = (agentColorHex || '').toUpperCase()
   const match = palette.find((color) => color.hex.toUpperCase() === normalized)
   return match ? match.hex : palette[0].hex
-}
-
-type DailyCreditsInfo = {
-  limit: number | null
-  hardLimit: number | null
-  usage: number
-  remaining: number | null
-  softRemaining: number | null
-  unlimited: boolean
-  percentUsed: number | null
-  softPercentUsed: number | null
-  nextResetIso: string | null
-  nextResetLabel: string | null
-  low: boolean
-  sliderMin: number
-  sliderMax: number
-  sliderLimitMax: number
-  sliderStep: number
-  sliderValue: number
-  sliderEmptyValue: number
-  standardSliderLimit: number
-}
-
-type DedicatedIpOption = {
-  id: string
-  label: string
-  inUseElsewhere: boolean
-  disabled: boolean
-  assignedNames: string[]
-}
-
-type DedicatedIpInfo = {
-  total: number
-  available: number
-  multiAssign: boolean
-  ownerType: 'organization' | 'user'
-  selectedId: string | null
-  options: DedicatedIpOption[]
-  organizationName: string | null
-}
-
-type AllowlistEntry = {
-  id: string
-  channel: string
-  address: string
-  allowInbound: boolean
-  allowOutbound: boolean
-}
-
-type AllowlistInvite = {
-  id: string
-  channel: string
-  address: string
-  allowInbound: boolean
-  allowOutbound: boolean
-}
-
-type AllowlistState = {
-  show: boolean
-  ownerEmail: string | null
-  ownerPhone: string | null
-  entries: AllowlistEntry[]
-  pendingInvites: AllowlistInvite[]
-  activeCount: number
-  maxContacts: number | null
-  pendingContactRequests: number
-  emailVerified: boolean
-}
-
-type CollaboratorEntry = {
-  id: string
-  userId: string
-  email: string
-  name: string
-}
-
-type CollaboratorInvite = {
-  id: string
-  email: string
-  invitedAtIso: string | null
-  expiresAtIso: string | null
-}
-
-type CollaboratorState = {
-  entries: CollaboratorEntry[]
-  pendingInvites: CollaboratorInvite[]
-  activeCount: number
-  pendingCount: number
-  totalCount: number
-  maxContacts: number | null
-  canManage: boolean
-}
-
-type McpServer = {
-  id: string
-  displayName: string
-  description: string | null
-  scope: string
-  inherited: boolean
-  assigned: boolean
-}
-
-type PersonalMcpServer = {
-  id: string
-  displayName: string
-  description: string | null
-  assigned: boolean
-}
-
-type McpServersInfo = {
-  inherited: McpServer[]
-  organization: McpServer[]
-  personal: PersonalMcpServer[]
-  showPersonalForm: boolean
-  canManage: boolean
-  manageUrl: string | null
-}
-
-type PeerLinkCandidate = {
-  id: string
-  name: string
-}
-
-type PeerLinkState = {
-  creditsRemaining: number | null
-  windowResetLabel: string | null
-}
-
-type PeerLinkEntry = {
-  id: string
-  counterpartId: string | null
-  counterpartName: string | null
-  isEnabled: boolean
-  messagesPerWindow: number
-  windowHours: number
-  featureFlag: string | null
-  createdOnLabel: string
-  state: PeerLinkState | null
-}
-
-type PeerLinksInfo = {
-  entries: PeerLinkEntry[]
-  candidates: PeerLinkCandidate[]
-  defaults: {
-    messagesPerWindow: number
-    windowHours: number
-  }
-}
-
-type AgentWebhook = {
-  id: string
-  name: string
-  url: string
-}
-
-type AgentInboundWebhook = {
-  id: string
-  name: string
-  url: string
-  isActive: boolean
-  lastTriggeredAt: string | null
 }
 
 type PendingWebhookAction =
@@ -294,48 +118,35 @@ type ConfirmActionConfig = {
   onConfirm?: () => Promise<void> | void
 }
 
-type ReassignmentInfo = {
-  enabled: boolean
-  canReassign: boolean
-  organizations: { id: string; name: string }[]
-  assignedOrg: AgentOrganization
-}
-
-type AgentDetailPageData = {
-  csrfToken: string
-  urls: {
-    detail: string
-    list: string
-    chat: string
-    secrets: string
-    emailSettings: string
-    manageFiles: string
-    smsEnable: string | null
-    contactRequests: string
-    delete: string
-    mcpServersManage: string | null
-  }
-  agent: AgentSummary
-  agentColors: AgentColorOption[]
-  primaryEmail: PrimaryEndpoint | null
-  primarySms: PrimaryEndpoint | null
-  dailyCredits: DailyCreditsInfo
-  dedicatedIps: DedicatedIpInfo
-  allowlist: AllowlistState
-  collaborators: CollaboratorState
-  mcpServers: McpServersInfo
-  peerLinks: PeerLinksInfo
-  webhooks: AgentWebhook[]
-  inboundWebhooks: AgentInboundWebhook[]
-  features: {
-    organizations: boolean
-  }
-  reassignment: ReassignmentInfo
-  llmIntelligence: LlmIntelligenceConfig | null
-}
-
 export type AgentDetailScreenProps = {
-  initialData: AgentDetailPageData
+  initialData: AgentSettingsData
+}
+
+type AgentSettingsWorkspaceVariant = 'standalone' | 'embedded'
+
+export type AgentSettingsWorkspaceSavePayload = {
+  agentId: string
+  agentName: string
+  agentAvatarUrl: string | null
+  agentColorHex: string
+  preferredLlmTier: IntelligenceTierKey
+  organization: AgentOrganization
+}
+
+export type AgentSettingsWorkspaceProps = {
+  initialData: AgentSettingsData
+  variant?: AgentSettingsWorkspaceVariant
+  onBack?: () => void
+  onSaved?: (payload: AgentSettingsWorkspaceSavePayload) => void
+  onDeleted?: () => void
+  onOpenSecrets?: () => void
+  onOpenEmailSettings?: () => void
+  onOpenFiles?: () => void
+  onReassigned?: (payload: {
+    context?: { type: string; id: string; name?: string | null }
+    redirect?: string | null
+    organization?: AgentOrganization
+  }) => void
 }
 
 type FormState = {
@@ -575,7 +386,18 @@ function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   return true
 }
 
-export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
+export function AgentSettingsWorkspace({
+  initialData,
+  variant = 'standalone',
+  onBack,
+  onSaved,
+  onDeleted,
+  onOpenSecrets,
+  onOpenEmailSettings,
+  onOpenFiles,
+  onReassigned,
+}: AgentSettingsWorkspaceProps) {
+  const isEmbedded = variant === 'embedded'
   const fallbackSliderMax = initialData.dailyCredits.sliderMax
   const fallbackSliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? fallbackSliderMax
   const fallbackSliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? fallbackSliderMax
@@ -596,7 +418,7 @@ export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
           : '',
       sliderValue: initialData.dailyCredits.sliderValue ?? fallbackSliderEmptyValue,
       dedicatedProxyId: initialData.dedicatedIps.selectedId ?? '',
-      preferredTier: initialData.agent.preferredLlmTier ?? 'standard',
+      preferredTier: (initialData.agent.preferredLlmTier || 'standard') as IntelligenceTierKey,
       agentColorHex: resolveAgentColorHex(initialData.agent.agentColorHex, initialData.agentColors),
     }),
     [
@@ -1310,6 +1132,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     setSaveError(null)
     setSaveNotice(null)
     try {
+      let nextSavedAvatarUrl = savedAvatarUrl
+      let nextSavedFormState = formState
       if (generalHasChanges && generalFormRef.current) {
         const data = await submitFormData(new FormData(generalFormRef.current))
         const warning = typeof data?.warning === 'string' && data.warning.trim() ? String(data.warning) : null
@@ -1329,6 +1153,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
 
         setFormState(nextFormState)
         setSavedFormState(nextFormState)
+        nextSavedFormState = nextFormState
         if (warning) {
           setSaveNotice(warning)
         }
@@ -1336,6 +1161,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         clearAvatarPreviewUrl()
         setSavedAvatarUrl(nextAvatar ?? null)
         setAvatarPreviewUrl(nextAvatar ?? null)
+        nextSavedAvatarUrl = nextAvatar ?? null
         setAvatarFile(null)
         setRemoveAvatar(false)
         if (avatarInputRef.current) {
@@ -1396,6 +1222,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       })
 
       setSaveError(null)
+      onSaved?.({
+        agentId: initialData.agent.id,
+        agentName: nextSavedFormState.name,
+        agentAvatarUrl: nextSavedAvatarUrl,
+        agentColorHex: nextSavedFormState.agentColorHex,
+        preferredLlmTier: nextSavedFormState.preferredTier,
+        organization: initialData.agent.organization,
+      })
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : 'Failed to save changes. Please try again.')
     } finally {
@@ -1429,6 +1263,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     submitPeerAction,
     submitFormData,
     submitWebhookAction,
+    onSaved,
   ])
   const openConfirmAction = useCallback(
     (config: ConfirmActionConfig) => {
@@ -1766,6 +1601,14 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'Reassignment failed. Please try again.')
         }
+        if (variant === 'embedded') {
+          onReassigned?.({
+            context: data.context as { type: string; id: string; name?: string | null } | undefined,
+            redirect: (data.redirect as string | null | undefined) ?? null,
+            organization: (data.organization as AgentOrganization | undefined) ?? null,
+          })
+          return
+        }
         if (data.redirect) {
           window.location.href = data.redirect as string
           return
@@ -1777,7 +1620,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         setReassigning(false)
       }
     },
-    [initialData.csrfToken, initialData.urls.detail],
+    [initialData.csrfToken, initialData.urls.detail, onReassigned, variant],
   )
 
   const deleteAgent = useCallback(async () => {
@@ -1795,6 +1638,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         const message = (await response.text())?.trim()
         throw new Error(message || 'Failed to delete agent. Please try again.')
       }
+      if (variant === 'embedded') {
+        onDeleted?.()
+        return
+      }
       const redirectTarget = response.headers.get('HX-Redirect') || initialData.urls.list
       window.location.assign(redirectTarget)
     } catch (error) {
@@ -1802,7 +1649,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       setDeleteError(message)
       throw error
     }
-  }, [initialData.csrfToken, initialData.urls.delete, initialData.urls.list])
+  }, [initialData.csrfToken, initialData.urls.delete, initialData.urls.list, onDeleted, variant])
 
   const confirmDeleteAgent = useCallback(() => {
     openConfirmAction({
@@ -1881,55 +1728,137 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
+  const sectionClassName = isEmbedded
+    ? 'group rounded-none border-0 bg-transparent shadow-none'
+    : 'gobii-card-base group'
+  const sectionSummaryClassName = isEmbedded
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
+  const sectionBodyClassName = isEmbedded ? 'px-0 pt-5' : 'p-6 sm:p-8'
+  const stackedSectionBodyClassName = isEmbedded ? 'px-0 pt-5 space-y-6' : 'p-6 sm:p-8 space-y-6'
+  const embeddedUtilityLinkClassName = 'inline-flex items-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
+  const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
+  const standaloneHeaderActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-blue-50'
+  const embeddedHeaderActions = (
+    <>
+      {onOpenSecrets ? (
+        <button
+          type="button"
+          onClick={onOpenSecrets}
+          className={embeddedUtilityLinkClassName}
+        >
+          <KeyRound className="h-4 w-4" aria-hidden="true" />
+          Secrets
+        </button>
+      ) : (
+        <a
+          href={initialData.urls.secrets}
+          className={embeddedUtilityLinkClassName}
+        >
+          <KeyRound className="h-4 w-4" aria-hidden="true" />
+          Secrets
+        </a>
+      )}
+      {onOpenEmailSettings ? (
+        <button
+          type="button"
+          onClick={onOpenEmailSettings}
+          className={embeddedUtilityLinkClassName}
+        >
+          <Mail className="h-4 w-4" aria-hidden="true" />
+          Email Settings
+        </button>
+      ) : (
+        <a
+          href={initialData.urls.emailSettings}
+          className={embeddedUtilityLinkClassName}
+        >
+          <Mail className="h-4 w-4" aria-hidden="true" />
+          Email Settings
+        </a>
+      )}
+      {onOpenFiles ? (
+        <button
+          type="button"
+          onClick={onOpenFiles}
+          className={embeddedUtilityLinkClassName}
+        >
+          <Folder className="h-4 w-4" aria-hidden="true" />
+          Manage Files
+        </button>
+      ) : (
+        <a
+          href={initialData.urls.manageFiles}
+          className={embeddedUtilityLinkClassName}
+        >
+          <Folder className="h-4 w-4" aria-hidden="true" />
+          Manage Files
+        </a>
+      )}
+    </>
+  )
+  const standaloneHeaderActions = (
+    <>
+      <a
+        href={initialData.urls.chat}
+        className={standaloneHeaderActionClassName}
+      >
+        <MessageSquare className="w-4 h-4" aria-hidden="true" />
+        Web Chat
+      </a>
+      <a
+        href={initialData.urls.secrets}
+        className={standaloneHeaderActionClassName}
+      >
+        <KeyRound className="w-4 h-4" aria-hidden="true" />
+        Secrets
+      </a>
+      <a
+        href={initialData.urls.emailSettings}
+        className={standaloneHeaderActionClassName}
+      >
+        <Mail className="w-4 h-4" aria-hidden="true" />
+        Email Settings
+      </a>
+      <a
+        href={initialData.urls.manageFiles}
+        className={standaloneHeaderActionClassName}
+      >
+        <Folder className="w-4 h-4" aria-hidden="true" />
+        Manage Files
+      </a>
+    </>
+  )
+
   return (
-    <div className="space-y-6 pb-6">
-      <header className="bg-white/80 backdrop-blur-sm shadow-xl rounded-xl overflow-hidden">
-        <div className="px-6 py-4 border-b border-gray-200/70 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800" id="agent-name-heading">
-              {(formState.name || 'Agent').trim()} Settings
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">Manage your agent settings and preferences</p>
+    <div className={isEmbedded ? 'space-y-6 pb-24' : 'space-y-6 pb-6'}>
+      {isEmbedded ? (
+        <SettingsBanner
+          variant="embedded"
+          leading={<EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to gallery" />}
+          eyebrow="Agent settings"
+          title={(formState.name || 'Agent').trim()}
+          headingId="agent-name-heading"
+          actions={embeddedHeaderActions}
+        />
+      ) : (
+        <SettingsBanner
+          variant="standalone"
+          title={`${(formState.name || 'Agent').trim()} Settings`}
+          subtitle="Manage your agent settings and preferences"
+          supportingContent={(
             <a
               href={initialData.urls.list}
-              className="group inline-flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 transition-colors mt-3"
+              className="group inline-flex items-center gap-2 text-sm text-blue-600 transition-colors hover:text-blue-800"
             >
               <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" aria-hidden="true" />
               Back to Agents
             </a>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <a
-              href={initialData.urls.chat}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-blue-50 transition-colors"
-            >
-              <MessageSquare className="w-4 h-4" aria-hidden="true" />
-              Web Chat
-            </a>
-            <a
-              href={initialData.urls.secrets}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
-            >
-              <KeyRound className="w-4 h-4" aria-hidden="true" />
-              Secrets
-            </a>
-            <a
-              href={initialData.urls.emailSettings}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
-            >
-              <Mail className="w-4 h-4" aria-hidden="true" />
-              Email Settings
-            </a>
-            <a
-              href={initialData.urls.manageFiles}
-              className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm hover:bg-gray-50 transition-colors"
-            >
-              <Folder className="w-4 h-4" aria-hidden="true" />
-              Manage Files
-            </a>
-          </div>
-        </div>
-      </header>
+          )}
+          headingId="agent-name-heading"
+          actions={standaloneHeaderActions}
+        />
+      )}
 
       {initialData.agent.pendingTransfer && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl shadow-md px-5 py-4 flex flex-col gap-2">
@@ -1985,15 +1914,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       {initialData.allowlist.show && (
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
-        <details className="gobii-card-base group" id="agent-identity" open>
-          <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+        <details className={sectionClassName} id="agent-identity" {...(isEmbedded ? {} : { open: true })}>
+          <summary className={sectionSummaryClassName}>
             <div>
               <h2 className="text-lg font-semibold text-gray-800">General Settings</h2>
               <p className="text-sm text-gray-500">Core configuration and runtime controls.</p>
             </div>
             <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
           </summary>
-          <div className="p-6 sm:p-8">
+          <div className={sectionBodyClassName}>
             <div className="grid sm:grid-cols-12 gap-4 sm:gap-6">
               <div className="sm:col-span-3">
                 <label htmlFor="agent-name" className="inline-block text-sm font-medium text-gray-800 mt-2.5">
@@ -2034,7 +1963,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                       <button
                         type="button"
                         onClick={() => avatarInputRef.current?.click()}
-                        className="inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700"
+                        className={isEmbedded ? embeddedNeutralButtonClassName : 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700'}
                       >
                         <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
                         Upload
@@ -2043,7 +1972,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         <button
                           type="button"
                           onClick={handleAvatarRemove}
-                          className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300"
+                          className={isEmbedded ? 'inline-flex items-center gap-2 rounded-lg border border-red-300/70 bg-transparent px-3 py-2 text-sm font-semibold text-red-700 transition-colors hover:border-red-400' : 'inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300'}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
                           Remove
@@ -2064,6 +1993,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <AgentColorPicker
                   colors={initialData.agentColors}
                   selectedHex={formState.agentColorHex}
+                  embedded={isEmbedded}
                   onChange={(hex) => setFormState((prev) => ({ ...prev, agentColorHex: hex }))}
                 />
                 <p className="mt-2 text-xs text-gray-500">Choose the accent color used across agent chat and cards.</p>
@@ -2090,7 +2020,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Status</span>
               </div>
               <div className="sm:col-span-9">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6 p-4 border border-gray-200 rounded-lg bg-gray-50/60">
+                <div className={isEmbedded ? 'flex flex-col gap-4 rounded-lg border border-slate-200/70 bg-transparent p-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6' : 'flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6 p-4 border border-gray-200 rounded-lg bg-gray-50/60'}>
                   <div className="flex items-center gap-3">
                     <div className={`flex items-center justify-center w-10 h-10 rounded-full ${formState.isActive ? 'bg-green-100' : 'bg-gray-100'}`}>
                       {formState.isActive ? (
@@ -2160,7 +2090,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
               </div>
               <div className="sm:col-span-9 space-y-4">
-                <DailyCreditSummary dailyCredits={initialData.dailyCredits} formatNumber={formatNumber} />
+                <DailyCreditSummary dailyCredits={initialData.dailyCredits} embedded={isEmbedded} formatNumber={formatNumber} />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-3">
                     <label htmlFor="daily-credit-limit-slider" className="inline-block text-sm font-medium text-gray-700">
@@ -2231,6 +2161,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               <div className="sm:col-span-9">
                 <DedicatedIpSummary
                   dedicatedIps={initialData.dedicatedIps}
+                  embedded={isEmbedded}
                   organizationName={initialData.agent.organization?.name ?? null}
                   selectedValue={formState.dedicatedProxyId}
                   onChange={(value) => setFormState((prev) => ({ ...prev, dedicatedProxyId: value }))}
@@ -2248,33 +2179,38 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         </details>
       </form>
 
-      <SaveBar
-        id="agent-save-bar"
-        visible={hasAnyChanges}
-        onCancel={handleResetAll}
-        onSave={handleSaveAll}
-        busy={saving}
-        error={saveError}
-      />
+      {variant === 'standalone' ? (
+        <SaveBar
+          id="agent-save-bar"
+          visible={hasAnyChanges}
+          onCancel={handleResetAll}
+          onSave={handleSaveAll}
+          busy={saving}
+          error={saveError}
+        />
+      ) : null}
 
-      <details className="gobii-card-base group" id="agent-contact-controls">
-        <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+      <details className={sectionClassName} id="agent-contact-controls">
+        <summary className={sectionSummaryClassName}>
           <div>
             <h2 className="text-lg font-semibold text-gray-800">Contacts &amp; Access</h2>
             <p className="text-sm text-gray-500">Contact endpoints and allowlist management.</p>
           </div>
           <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
         </summary>
-        <div className="p-6 sm:p-8 space-y-6">
+        <div className={stackedSectionBodyClassName}>
           <PrimaryContacts
             primaryEmail={initialData.primaryEmail}
             primarySms={initialData.primarySms}
             emailSettingsUrl={initialData.urls.emailSettings}
             smsEnableUrl={initialData.urls.smsEnable}
+            embedded={isEmbedded}
+            onOpenEmailSettings={onOpenEmailSettings}
           />
 
           {initialData.allowlist.show && (
             <AllowlistManager
+              embedded={isEmbedded}
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
@@ -2286,6 +2222,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           )}
 
           <CollaboratorManager
+            embedded={isEmbedded}
             state={savedCollaboratorState}
             rows={collaboratorRows}
             projectedTotalCount={projectedCollaboratorTotalCount}
@@ -2299,6 +2236,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       </details>
 
       <IntegrationsSection
+        variant={variant}
         mcpServers={initialData.mcpServers}
         isOrgAgent={Boolean(initialData.agent.organization)}
         selectedOrgServers={selectedOrgServers}
@@ -2326,6 +2264,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       <ActionsSection
         csrfToken={initialData.csrfToken}
         urls={initialData.urls}
+        variant={variant}
         agent={initialData.agent}
         features={initialData.features}
         reassignment={initialData.reassignment}
@@ -2338,24 +2277,64 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         deleteError={deleteError}
       />
 
+      {isEmbedded && hasAnyChanges ? (
+        <div className="sticky bottom-4 z-20">
+          <div className="rounded-2xl border border-slate-300/70 bg-transparent px-4 py-3 shadow-none">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-slate-900">You have unsaved changes</p>
+                {saveError ? (
+                  <p className="mt-1 text-xs text-red-600">{saveError}</p>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">Save now to update the chat shell and gallery immediately.</p>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleResetAll}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:text-slate-900"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAll}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  {saving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {modal}
     </div>
   )
 }
 
+export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
+  return <AgentSettingsWorkspace initialData={initialData} variant="standalone" />
+}
+
 type DailyCreditSummaryProps = {
   dailyCredits: DailyCreditsInfo
+  embedded?: boolean
   formatNumber: (value: number | null, fractionDigits?: number) => string | null
 }
 
-function DailyCreditSummary({ dailyCredits, formatNumber }: DailyCreditSummaryProps) {
+function DailyCreditSummary({ dailyCredits, embedded = false, formatNumber }: DailyCreditSummaryProps) {
   const usageDisplay = formatNumber(dailyCredits.usage, 2)
   const limitDisplay = dailyCredits.limit === null ? 'Unlimited' : formatNumber(dailyCredits.limit, 0)
   const softRemaining = formatNumber(dailyCredits.softRemaining, 2)
   const hardRemaining = formatNumber(dailyCredits.remaining, 2)
 
   return (
-    <div className="p-4 border border-gray-200 rounded-lg bg-white/70 space-y-4">
+    <div className={embedded ? 'space-y-4 rounded-lg border border-slate-200/70 bg-transparent p-4' : 'p-4 border border-gray-200 rounded-lg bg-white/70 space-y-4'}>
       {dailyCredits.unlimited ? (
         <div>
           <p className="text-sm text-gray-700">Soft target is currently Unlimited, so this agent will keep running until your overall credits run out.</p>
@@ -2386,6 +2365,7 @@ function DailyCreditSummary({ dailyCredits, formatNumber }: DailyCreditSummaryPr
 
 type DedicatedIpSummaryProps = {
   dedicatedIps: DedicatedIpInfo
+  embedded?: boolean
   organizationName: string | null
   selectedValue: string
   onChange: (value: string) => void
@@ -2394,10 +2374,11 @@ type DedicatedIpSummaryProps = {
 type AgentColorPickerProps = {
   colors: AgentColorOption[]
   selectedHex: string
+  embedded?: boolean
   onChange: (hex: string) => void
 }
 
-function AgentColorPicker({ colors, selectedHex, onChange }: AgentColorPickerProps) {
+function AgentColorPicker({ colors, selectedHex, embedded = false, onChange }: AgentColorPickerProps) {
   if (!colors.length) {
     return <p className="text-xs text-gray-500">No theme colors are available right now.</p>
   }
@@ -2423,10 +2404,12 @@ function AgentColorPicker({ colors, selectedHex, onChange }: AgentColorPickerPro
             [
               'relative flex items-center justify-center rounded-md border p-1 transition',
               'size-9 sm:size-10',
-              isSelected ? 'border-blue-500 bg-blue-50/60' : 'border-gray-200 bg-white',
+              isSelected
+                ? `border-blue-500 ${embedded ? 'bg-transparent' : 'bg-blue-50/60'}`
+                : `${embedded ? 'border-slate-200 bg-transparent' : 'border-gray-200 bg-white'}`,
               isHovered && !isSelected ? 'border-blue-300' : '',
               isDisabled ? 'opacity-60' : '',
-              isFocusVisible ? 'ring-2 ring-blue-300 ring-offset-2 ring-offset-white' : '',
+              isFocusVisible ? `ring-2 ring-blue-300 ring-offset-2 ${embedded ? 'ring-offset-transparent' : 'ring-offset-white'}` : '',
             ]
               .filter(Boolean)
               .join(' ')
@@ -2436,7 +2419,7 @@ function AgentColorPicker({ colors, selectedHex, onChange }: AgentColorPickerPro
             <>
               <ColorSwatch className="h-5 w-5 rounded-full border border-slate-300 sm:h-6 sm:w-6" />
               {isSelected && (
-                <span className="absolute right-1 top-1 rounded-full bg-white/80 p-0.5 text-blue-600">
+                <span className={embedded ? 'absolute right-1 top-1 rounded-full bg-slate-900 p-0.5 text-white' : 'absolute right-1 top-1 rounded-full bg-white/80 p-0.5 text-blue-600'}>
                   <Check className="h-3 w-3" aria-hidden="true" />
                 </span>
               )}
@@ -2448,12 +2431,12 @@ function AgentColorPicker({ colors, selectedHex, onChange }: AgentColorPickerPro
   )
 }
 
-function DedicatedIpSummary({ dedicatedIps, organizationName, selectedValue, onChange }: DedicatedIpSummaryProps) {
+function DedicatedIpSummary({ dedicatedIps, embedded = false, organizationName, selectedValue, onChange }: DedicatedIpSummaryProps) {
   return (
     <div className="text-sm text-gray-600 space-y-4" data-dedicated-ip-total={dedicatedIps.total}>
       <p className="text-sm text-gray-500">Monitor and assign dedicated IP addresses reserved for this account.</p>
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="border border-gray-200 rounded-lg bg-gray-50 p-4">
+        <div className={embedded ? 'rounded-lg border border-slate-200/70 bg-transparent p-4' : 'border border-gray-200 rounded-lg bg-gray-50 p-4'}>
           <p className="text-xs uppercase tracking-wide text-gray-500">Total Reserved</p>
           <p className="text-2xl font-semibold text-gray-800 mt-1">{dedicatedIps.total}</p>
           <p className="text-xs text-gray-500 mt-3">
@@ -2464,7 +2447,7 @@ function DedicatedIpSummary({ dedicatedIps, organizationName, selectedValue, onC
           {!dedicatedIps.multiAssign && <p className="text-xs text-amber-600 mt-1">Each dedicated IP can be assigned to only one agent at a time.</p>}
           {dedicatedIps.total === 0 && <p className="text-xs text-gray-500 mt-1">Purchase dedicated IPs in Billing to make them available here.</p>}
         </div>
-        <div className="border border-gray-200 rounded-lg bg-gray-50 p-4">
+        <div className={embedded ? 'rounded-lg border border-slate-200/70 bg-transparent p-4' : 'border border-gray-200 rounded-lg bg-gray-50 p-4'}>
           <p className="text-xs uppercase tracking-wide text-gray-500">Available to Assign</p>
           <p className="text-2xl font-semibold text-gray-800 mt-1">{dedicatedIps.available}</p>
           {dedicatedIps.options.length > 0 ? (
@@ -2506,9 +2489,37 @@ type PrimaryContactsProps = {
   primarySms: PrimaryEndpoint | null
   emailSettingsUrl: string
   smsEnableUrl: string | null
+  embedded?: boolean
+  onOpenEmailSettings?: () => void
 }
 
-function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnableUrl }: PrimaryContactsProps) {
+function PrimaryContacts({
+  primaryEmail,
+  primarySms,
+  emailSettingsUrl,
+  smsEnableUrl,
+  embedded = false,
+  onOpenEmailSettings,
+}: PrimaryContactsProps) {
+  const manageEmailSettingsLink = onOpenEmailSettings ? (
+    <button type="button" onClick={onOpenEmailSettings} className="text-sm text-blue-600 hover:text-blue-800">
+      Manage Email Settings
+    </button>
+  ) : (
+    <a href={emailSettingsUrl} className="text-sm text-blue-600 hover:text-blue-800">
+      Manage Email Settings
+    </a>
+  )
+  const setupEmailLink = onOpenEmailSettings ? (
+    <button type="button" onClick={onOpenEmailSettings} className="text-blue-600 hover:text-blue-800">
+      Set up email
+    </button>
+  ) : (
+    <a href={emailSettingsUrl} className="text-blue-600 hover:text-blue-800">
+      Set up email
+    </a>
+  )
+
   return (
     <div className="grid sm:grid-cols-12 gap-4 sm:gap-6">
       <div className="sm:col-span-3">
@@ -2522,13 +2533,11 @@ function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnable
               type="text"
               value={primaryEmail.address}
               readOnly
-              className="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm"
+              className={embedded ? 'block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none' : 'py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm'}
             />
             <p className="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
             <div className="mt-2 space-y-1">
-              <a href={emailSettingsUrl} className="text-sm text-blue-600 hover:text-blue-800">
-                Manage Email Settings
-              </a>
+              {manageEmailSettingsLink}
               {!primarySms && smsEnableUrl && (
                 <div>
                   <a href={smsEnableUrl} className="text-sm text-blue-600 hover:text-blue-800">
@@ -2539,11 +2548,8 @@ function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnable
             </div>
           </>
         ) : (
-          <div className="py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded">
-            Not configured.{' '}
-            <a href={emailSettingsUrl} className="text-blue-600 hover:text-blue-800">
-              Set up email
-            </a>
+          <div className={embedded ? 'rounded border border-dashed border-slate-300 px-3 py-2 text-sm text-gray-600 bg-transparent' : 'py-2 px-3 text-sm text-gray-600 bg-gray-50 border border-dashed border-gray-300 rounded'}>
+            Not configured. {setupEmailLink}
           </div>
         )}
       </div>
@@ -2559,7 +2565,7 @@ function PrimaryContacts({ primaryEmail, primarySms, emailSettingsUrl, smsEnable
               type="text"
               value={primarySms.address}
               readOnly
-              className="py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm"
+              className={embedded ? 'block w-full rounded-lg border border-slate-200/70 bg-transparent px-3 py-2 text-sm shadow-none' : 'py-2 px-3 block w-full border-gray-200 bg-gray-100 shadow-sm rounded-lg text-sm'}
             />
             <p className="mt-2 text-xs text-gray-500">The agent's primary SMS address for communication. This cannot be changed.</p>
           </div>
@@ -2577,9 +2583,10 @@ type AllowlistManagerProps = {
   onAddContact: () => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
   contactRequestsUrl: string
+  embedded?: boolean
 }
 
-function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl }: AllowlistManagerProps) {
+function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, embedded = false }: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   return (
     <div className="space-y-5">
@@ -2619,7 +2626,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       )}
 
       {(state.ownerEmail || state.ownerPhone) && (
-        <div className="rounded-xl border border-slate-200 bg-white px-4 py-4">
+        <div className={embedded ? 'rounded-xl border border-slate-200/70 bg-transparent px-4 py-4' : 'rounded-xl border border-slate-200 bg-white px-4 py-4'}>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
           <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
           {state.ownerEmail && (
@@ -2669,6 +2676,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
         </div>
 
         <AllowlistContactsTable
+          embedded={embedded}
           rows={rows}
           disabled={saving}
           onRemoveRow={(row) => onRemoveRows([row])}
@@ -2688,9 +2696,10 @@ type CollaboratorManagerProps = {
   onAdd: () => void
   onRemove: (row: CollaboratorTableRow) => void
   onConfirmAction: (config: ConfirmActionConfig) => void
+  embedded?: boolean
 }
 
-function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction }: CollaboratorManagerProps) {
+function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction, embedded = false }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
 
@@ -2731,6 +2740,7 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
         {error && <div className="text-xs text-rose-600">{error}</div>}
 
         <CollaboratorsTable
+          embedded={embedded}
           rows={rows}
           disabled={busy}
           canManage={canManage}
@@ -2750,6 +2760,7 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
 }
 
 type IntegrationsSectionProps = {
+  variant?: AgentSettingsWorkspaceVariant
   mcpServers: McpServersInfo
   isOrgAgent: boolean
   selectedOrgServers: Set<string>
@@ -2779,6 +2790,7 @@ type IntegrationsSectionProps = {
 }
 
 function IntegrationsSection({
+  variant = 'standalone',
   mcpServers,
   isOrgAgent,
   selectedOrgServers,
@@ -2802,17 +2814,35 @@ function IntegrationsSection({
   onInboundWebhookCopy,
   onConfirmAction,
 }: IntegrationsSectionProps) {
+  const embedded = variant === 'embedded'
+  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const summaryClassName = embedded
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-6 px-0 py-5' : 'p-6 sm:p-8 space-y-6'
+  const cardClassName = embedded ? 'rounded-xl border border-slate-200/70 bg-transparent p-4 space-y-4' : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
+  const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent' : 'overflow-hidden border border-gray-200 rounded-xl'
+  const tableHeadClassName = embedded ? 'bg-transparent' : 'bg-gray-50'
+  const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-gray-200' : 'bg-white divide-y divide-gray-200'
+  const neutralButtonClassName = embedded
+    ? 'inline-flex items-center gap-2 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60 disabled:opacity-50'
+    : 'inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
+  const emptyStateClassName = embedded
+    ? 'rounded-xl border border-dashed border-slate-300 px-4 py-4 text-sm text-gray-600 bg-transparent'
+    : 'p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600'
+
   return (
-    <details className="gobii-card-base group" id="agent-integrations">
-      <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+    <details className={sectionClassName} id="agent-integrations">
+      <summary className={summaryClassName}>
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Integrations</h2>
           <p className="text-sm text-gray-500">MCP servers, peer links, and webhooks.</p>
         </div>
         <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
       </summary>
-      <div className="divide-y divide-gray-200/70">
-        <section className="p-6 sm:p-8 space-y-6">
+      <div className={wrapperClassName}>
+        <section className={sectionBodyClassName}>
         <div>
           <h3 className="text-base font-semibold text-gray-800">MCP Servers</h3>
           <p className="text-sm text-gray-500">
@@ -2826,7 +2856,7 @@ function IntegrationsSection({
             <h4 className="text-sm font-semibold text-gray-700">Inherited Servers</h4>
               <ul className="space-y-2">
                 {mcpServers.inherited.map((server) => (
-                  <li key={server.id} className="flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3">
+                  <li key={server.id} className={embedded ? 'flex items-start justify-between gap-3 rounded-lg border border-slate-200/70 bg-transparent px-4 py-3' : 'flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3'}>
                     <div>
                       <p className="text-sm font-medium text-gray-800">{server.displayName}</p>
                       {server.description && <p className="text-sm text-gray-600">{server.description}</p>}
@@ -2846,7 +2876,7 @@ function IntegrationsSection({
                   {mcpServers.organization.map((server) => {
                     const checked = selectedOrgServers.has(server.id)
                     return (
-                      <label key={server.id} className="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
+                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/70 bg-transparent px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2869,12 +2899,12 @@ function IntegrationsSection({
 
           {mcpServers.personal.length > 0 ? (
             mcpServers.showPersonalForm ? (
-              <div className="border border-gray-200 rounded-xl bg-white p-4 space-y-4">
+              <div className={cardClassName}>
                 <div className="grid gap-3 md:grid-cols-2">
                   {mcpServers.personal.map((server) => {
                     const checked = selectedPersonalServers.has(server.id)
                     return (
-                      <label key={server.id} className="flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3">
+                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/70 bg-transparent px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2893,7 +2923,7 @@ function IntegrationsSection({
                   <div className="flex justify-end">
                     <a
                       href={mcpServers.manageUrl}
-                      className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50"
+                      className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-medium text-gray-800 transition-colors hover:border-slate-400 hover:text-slate-900' : 'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50'}
                     >
                       <ServerCog className="h-4 w-4" aria-hidden="true" />
                       Manage All Servers
@@ -2909,7 +2939,7 @@ function IntegrationsSection({
           )}
         </section>
 
-        <section className="p-6 sm:p-8 space-y-6">
+        <section className={sectionBodyClassName}>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3 className="text-base font-semibold text-gray-800">Agent Contacts (Peer Links)</h3>
@@ -2930,9 +2960,9 @@ function IntegrationsSection({
           )}
 
           {peerLinks.entries.length > 0 ? (
-            <div className="overflow-hidden border border-gray-200 rounded-xl">
+            <div className={tableWrapperClassName}>
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className={tableHeadClassName}>
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Agent</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Quota</th>
@@ -2942,7 +2972,7 @@ function IntegrationsSection({
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className={tableBodyClassName}>
                   {peerLinks.entries.map((entry) => {
                     const pendingLabel =
                       entry.pendingType === 'delete'
@@ -2976,7 +3006,7 @@ function IntegrationsSection({
                           <div className="flex flex-wrap gap-2">
                             <button
                               type="button"
-                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                              className={neutralButtonClassName}
                               onClick={() => onPeerLinkEdit(entry)}
                               disabled={entry.pendingType === 'delete'}
                             >
@@ -3007,13 +3037,13 @@ function IntegrationsSection({
               </table>
             </div>
           ) : (
-            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+            <div className={emptyStateClassName}>
               No peer links yet. Use the button above to connect this agent with another agent you control.
             </div>
           )}
         </section>
 
-        <section className="p-6 sm:p-8 space-y-6">
+        <section className={sectionBodyClassName}>
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
               <h3 className="text-base font-semibold text-gray-800">Outbound Webhooks</h3>
@@ -3030,16 +3060,16 @@ function IntegrationsSection({
           </div>
 
           {webhooks.length > 0 ? (
-            <div className="overflow-hidden border border-gray-200 rounded-xl">
+            <div className={tableWrapperClassName}>
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className={tableHeadClassName}>
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">URL</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className={tableBodyClassName}>
                   {webhooks.map((webhook) => {
                     const pendingLabel =
                       webhook.pendingType === 'delete'
@@ -3064,7 +3094,7 @@ function IntegrationsSection({
                             <button
                               type="button"
                               onClick={() => onWebhookEdit(webhook)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
+                              className={embedded ? 'inline-flex items-center gap-1.5 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60' : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50'}
                             >
                               Edit
                             </button>
@@ -3093,13 +3123,13 @@ function IntegrationsSection({
               </table>
             </div>
           ) : (
-            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+            <div className={emptyStateClassName}>
               No webhooks yet. Add one to let your agent notify external systems.
             </div>
           )}
         </section>
 
-        <section className="p-6 sm:p-8 space-y-6">
+        <section className={sectionBodyClassName}>
           <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
             <div>
               <h3 className="text-base font-semibold text-gray-800">Inbound Webhooks</h3>
@@ -3116,9 +3146,9 @@ function IntegrationsSection({
           </div>
 
           {inboundWebhooks.length > 0 ? (
-            <div className="overflow-hidden border border-gray-200 rounded-xl">
+            <div className={tableWrapperClassName}>
               <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+                <thead className={tableHeadClassName}>
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Name</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Webhook URL</th>
@@ -3127,7 +3157,7 @@ function IntegrationsSection({
                     <th className="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase tracking-wider">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
+                <tbody className={tableBodyClassName}>
                   {inboundWebhooks.map((webhook) => {
                     const pendingLabel =
                       webhook.pendingType === 'delete'
@@ -3151,7 +3181,7 @@ function IntegrationsSection({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          <div className="flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200">
+                          <div className={embedded ? 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-slate-200/70 bg-transparent' : 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200'}>
                             <input
                               type="text"
                               value={webhook.url ?? ''}
@@ -3159,13 +3189,13 @@ function IntegrationsSection({
                               placeholder="URL available after save"
                               aria-label={`Webhook URL for ${webhook.name}`}
                               onFocus={(event) => event.currentTarget.select()}
-                              className="min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0"
+                              className={embedded ? 'min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0' : 'min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0'}
                             />
                             <button
                               type="button"
                               onClick={() => onInboundWebhookCopy(webhook)}
                               disabled={!webhook.url}
-                              className="inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400"
+                              className={embedded ? 'inline-flex shrink-0 items-center gap-1.5 border-l border-slate-200/70 bg-transparent px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-slate-100/60 disabled:cursor-not-allowed disabled:text-gray-400' : 'inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400'}
                             >
                               {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
                               {copyLabel}
@@ -3183,7 +3213,7 @@ function IntegrationsSection({
                             <button
                               type="button"
                               onClick={() => onInboundWebhookEdit(webhook)}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50"
+                              className={embedded ? 'inline-flex items-center gap-1.5 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60' : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50'}
                             >
                               Edit
                             </button>
@@ -3228,7 +3258,7 @@ function IntegrationsSection({
               </table>
             </div>
           ) : (
-            <div className="p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600">
+            <div className={emptyStateClassName}>
               No inbound webhooks yet. Add one to let external systems trigger this agent.
             </div>
           )}
@@ -3502,9 +3532,10 @@ function InboundWebhookModal({ mode, webhook, onSubmit, onClose }: InboundWebhoo
 
 type ActionsSectionProps = {
   csrfToken: string
-  urls: AgentDetailPageData['urls']
+  urls: AgentSettingsData['urls']
+  variant?: AgentSettingsWorkspaceVariant
   agent: AgentSummary
-  features: AgentDetailPageData['features']
+  features: AgentSettingsData['features']
   reassignment: ReassignmentInfo
   selectedOrgId: string
   onOrgChange: (value: string) => void
@@ -3517,6 +3548,7 @@ type ActionsSectionProps = {
 
 function ActionsSection({
   csrfToken,
+  variant = 'standalone',
   agent,
   features,
   reassignment,
@@ -3528,25 +3560,33 @@ function ActionsSection({
   onDeleteAgent,
   deleteError,
 }: ActionsSectionProps) {
+  const embedded = variant === 'embedded'
+  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const summaryClassName = embedded
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-4 px-0 py-5' : 'p-6 sm:p-8 space-y-4'
+
   return (
-    <details className="gobii-card-base group" id="agent-ownership">
-      <summary className="flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none">
+    <details className={sectionClassName} id="agent-ownership">
+      <summary className={summaryClassName}>
         <div>
           <h2 className="text-lg font-semibold text-gray-800">Actions</h2>
           <p className="text-sm text-gray-500">Ownership, transfer, and deletion tools.</p>
         </div>
         <ChevronDown className="w-4 h-4 text-gray-500 transition-transform duration-200 group-open:-rotate-180" aria-hidden="true" />
       </summary>
-      <div className="divide-y divide-gray-200/70">
+      <div className={wrapperClassName}>
         {features.organizations && reassignment.enabled && (
-          <section className="p-6 sm:p-8 space-y-4">
+          <section className={sectionBodyClassName}>
             <div>
               <h3 className="text-base font-semibold text-gray-800">Organization Assignment</h3>
               <p className="text-sm text-gray-500">Switch this agent between your personal workspace and an organization you manage.</p>
             </div>
             {agent.organization ? (
               <div className="space-y-3">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+                <div className={embedded ? 'flex flex-col gap-3 rounded-lg border border-slate-200/70 bg-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between' : 'flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3'}>
                   <span className="text-sm text-gray-700">
                     Currently assigned to <strong>{agent.organization.name}</strong>
                   </span>
@@ -3592,7 +3632,7 @@ function ActionsSection({
           </section>
         )}
 
-        <section className="p-6 sm:p-8 space-y-4">
+        <section className={sectionBodyClassName}>
           <div>
             <h3 className="text-base font-semibold text-gray-800">Transfer Ownership</h3>
             <p className="text-sm text-gray-500">Send this agent to someone else. They can accept or decline from their dashboard.</p>
@@ -3609,7 +3649,7 @@ function ActionsSection({
               <form method="post" className="flex">
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
-                <button type="submit" className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50">
+                <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-transparent px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100/60' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
                   Cancel Invitation
                 </button>
               </form>
@@ -3652,7 +3692,7 @@ function ActionsSection({
           )}
         </section>
 
-        <section className="p-6 sm:p-8">
+        <section className={embedded ? 'px-0 py-5' : 'p-6 sm:p-8'}>
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
               <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50">

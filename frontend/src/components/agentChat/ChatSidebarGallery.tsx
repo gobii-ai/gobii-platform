@@ -15,6 +15,7 @@ type ChatSidebarGalleryProps = {
   errorMessage?: string | null
   searchQuery: string
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentButtonDisabled?: boolean
@@ -83,6 +84,7 @@ type GalleryCardProps = {
   isSwitching: boolean
   isFavorite: boolean
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
 }
 
@@ -93,13 +95,14 @@ function GalleryCard({
   isSwitching,
   isFavorite,
   onSelectAgent,
+  onConfigureAgent,
   onToggleAgentFavorite,
 }: GalleryCardProps) {
   const styles = SURFACE_STYLES[variant]
   const isSignupPreviewAgent = !agent.isCollaborator && Boolean(agent.signupPreviewState) && agent.signupPreviewState !== 'none'
   const showSmsAction = Boolean(agent.sms) && !isSignupPreviewAgent
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
-  const showConfigureAction = Boolean(agent.canManageAgent && agent.detailUrl) && !isSignupPreviewAgent
+  const showConfigureAction = Boolean(agent.canManageAgent && (onConfigureAgent || agent.detailUrl)) && !isSignupPreviewAgent
   const showAuditAction = Boolean(agent.auditUrl) && !isSignupPreviewAgent
   const miniDescription = (agent.miniDescription || '').trim()
   const showChatAction = Boolean(onSelectAgent)
@@ -173,11 +176,23 @@ function GalleryCard({
       </button>
 
       <div className={styles.footerClass}>
-        {showConfigureAction && agent.detailUrl ? (
-          <a className={styles.primaryActionClass} href={agent.detailUrl}>
-            <Settings className="h-3.5 w-3.5" />
-            <span>Configure</span>
-          </a>
+        {showConfigureAction ? (
+          onConfigureAgent ? (
+            <button
+              type="button"
+              className={styles.primaryActionClass}
+              onClick={() => onConfigureAgent(agent)}
+              disabled={isSwitching}
+            >
+              <Settings className="h-3.5 w-3.5" />
+              <span>Configure</span>
+            </button>
+          ) : agent.detailUrl ? (
+            <a className={styles.primaryActionClass} href={agent.detailUrl}>
+              <Settings className="h-3.5 w-3.5" />
+              <span>Configure</span>
+            </a>
+          ) : null
         ) : null}
         <div className={styles.channelRowClass}>
           {showEmailAction && agent.email ? (
@@ -220,6 +235,7 @@ export function ChatSidebarGallery({
   errorMessage,
   searchQuery,
   onSelectAgent,
+  onConfigureAgent,
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentButtonDisabled = false,
@@ -270,6 +286,7 @@ export function ChatSidebarGallery({
                 isSwitching={agent.id === switchingAgentId}
                 isFavorite={true}
                 onSelectAgent={onSelectAgent}
+                onConfigureAgent={onConfigureAgent}
                 onToggleAgentFavorite={onToggleAgentFavorite}
               />
             ))}
@@ -294,6 +311,7 @@ export function ChatSidebarGallery({
                 isSwitching={agent.id === switchingAgentId}
                 isFavorite={false}
                 onSelectAgent={onSelectAgent}
+                onConfigureAgent={onConfigureAgent}
                 onToggleAgentFavorite={onToggleAgentFavorite}
               />
             ))}
