@@ -61,7 +61,7 @@
     }
 
     if (pixels.linkedin && typeof window.lintrk === 'function') {
-      window.lintrk('track', { conversion_id: pixels.linkedin });
+      window.lintrk('track', { conversion_id: pixels.linkedin, event_id: data.eventId });
     }
 
     trackWithSegment('Signup Pixels Fired', {

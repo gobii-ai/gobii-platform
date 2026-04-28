@@ -1,6 +1,7 @@
 from django.conf import settings
 
 from .google_analytics import GoogleAnalyticsMP
+from .linkedin import LinkedInCAPI
 from .meta import MetaCAPI
 from .reddit import RedditCAPI
 from .tiktok import TikTokCAPI
@@ -14,6 +15,14 @@ def get_providers():
         providers.append(RedditCAPI(pixel_id=settings.REDDIT_ADVERTISER_ID, token=settings.REDDIT_ACCESS_TOKEN))
     if getattr(settings, "TIKTOK_ACCESS_TOKEN", None) and getattr(settings, "TIKTOK_PIXEL_ID", None):
         providers.append(TikTokCAPI(pixel_id=settings.TIKTOK_PIXEL_ID, token=settings.TIKTOK_ACCESS_TOKEN))
+    if settings.LINKEDIN_CAPI_ACCESS_TOKEN and settings.LINKEDIN_CAPI_CONVERSION_IDS:
+        providers.append(
+            LinkedInCAPI(
+                token=settings.LINKEDIN_CAPI_ACCESS_TOKEN,
+                conversion_ids=settings.LINKEDIN_CAPI_CONVERSION_IDS,
+                api_version=settings.LINKEDIN_CAPI_VERSION,
+            )
+        )
     if settings.GA_MEASUREMENT_ID and settings.GA_MEASUREMENT_API_SECRET:
         providers.append(
             GoogleAnalyticsMP(

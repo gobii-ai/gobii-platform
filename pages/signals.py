@@ -129,7 +129,7 @@ UTM_MAPPING = {
     'term': 'utm_term'
 }
 
-CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid')
+CLICK_ID_PARAMS = ('gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'li_fat_id')
 TRIAL_CONVERSION_PAYMENT_FAILED_EVENT = "TrialConversionPaymentFailed"
 TRIAL_CONVERSION_PAYMENT_FAILED_FINAL_EVENT = "TrialConversionPaymentFailedFinal"
 SUBSCRIPTION_PAYMENT_FAILED_EVENT = "SubscriptionPaymentFailed"
@@ -2219,6 +2219,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                     'ttclid_last': last_click.get('ttclid', ''),
                     'rdt_cid_first': first_click.get('rdt_cid', ''),
                     'rdt_cid_last': last_click.get('rdt_cid', ''),
+                    'li_fat_id_first': first_click.get('li_fat_id', ''),
+                    'li_fat_id_last': last_click.get('li_fat_id', ''),
                     'first_referrer': first_referrer,
                     'last_referrer': last_referrer,
                     'first_landing_path': first_path,

@@ -27,6 +27,7 @@ from api.models import (
 )
 from constants.plans import PlanNames, PlanNamesChoices
 from constants.grant_types import GrantTypeChoices
+from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from dateutil.relativedelta import relativedelta
 from api.services.trial_abuse import SIGNAL_SOURCE_SIGNUP
 from billing.checkout_metadata import (
@@ -92,6 +93,7 @@ class UserSignedUpSignalTests(TestCase):
             "msclkid": "first-msclkid",
             "ttclid": "first-ttclid",
             "rdt_cid": "first-rdt-cid",
+            "li_fat_id": "first-li-fat-id",
         }
         now = timezone.now()
         later = now + timedelta(minutes=5)
@@ -110,6 +112,7 @@ class UserSignedUpSignalTests(TestCase):
             "msclkid": "last-msclkid",
             "ttclid": "last-ttclid",
             "rdt_cid": "last-rdt-cid",
+            "li_fat_id": "last-li-fat-id",
             "first_referrer": "https://first.example/",
             "last_referrer": "https://last.example/",
             "first_path": "/landing/first/",
@@ -141,6 +144,8 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(traits["msclkid_last"], "last-msclkid")
         self.assertEqual(traits["rdt_cid_first"], "first-rdt-cid")
         self.assertEqual(traits["rdt_cid_last"], "last-rdt-cid")
+        self.assertEqual(traits["li_fat_id_first"], "first-li-fat-id")
+        self.assertEqual(traits["li_fat_id_last"], "last-li-fat-id")
         self.assertEqual(traits["first_referrer"], "https://first.example/")
         self.assertEqual(traits["last_referrer"], "https://last.example/")
         self.assertEqual(traits["first_landing_path"], "/landing/first/")
@@ -151,6 +156,8 @@ class UserSignedUpSignalTests(TestCase):
         attribution = UserAttribution.objects.get(user=self.user)
         self.assertEqual(attribution.rdt_cid_first, "first-rdt-cid")
         self.assertEqual(attribution.rdt_cid_last, "last-rdt-cid")
+        self.assertEqual(attribution.li_fat_id_first, "first-li-fat-id")
+        self.assertEqual(attribution.li_fat_id_last, "last-li-fat-id")
 
         track_call = mock_track.call_args.kwargs
         properties = track_call["properties"]
@@ -2750,7 +2757,7 @@ class PaymentFailedSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "TrialConversionPaymentFailed")
-        self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
+        self.assertEqual(capi_kwargs["provider_targets"], AD_CAPI_PROVIDER_TARGETS)
         props = capi_kwargs["properties"]
         self.assertFalse(props["final_attempt"])
         self.assertTrue(props["trial_conversion_invoice"])
@@ -2802,7 +2809,7 @@ class PaymentFailedSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "TrialConversionPaymentFailedFinal")
-        self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
+        self.assertEqual(capi_kwargs["provider_targets"], AD_CAPI_PROVIDER_TARGETS)
         self.assertEqual(capi_kwargs["context"]["page"]["url"], "https://gobii.ai/pricing")
         props = capi_kwargs["properties"]
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
@@ -2903,7 +2910,7 @@ class PaymentFailedSignalTests(TestCase):
         mock_capi.assert_called_once()
         capi_kwargs = mock_capi.call_args.kwargs
         self.assertEqual(capi_kwargs["event_name"], "SubscriptionPaymentFailed")
-        self.assertEqual(capi_kwargs["provider_targets"], ["meta", "reddit", "tiktok"])
+        self.assertEqual(capi_kwargs["provider_targets"], AD_CAPI_PROVIDER_TARGETS)
         props = capi_kwargs["properties"]
         self.assertEqual(props["plan"], PlanNamesChoices.STARTUP.value)
         self.assertEqual(props["subscription_id"], "sub_user")

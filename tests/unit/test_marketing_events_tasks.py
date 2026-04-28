@@ -109,6 +109,57 @@ class MarketingEventsTaskTests(SimpleTestCase):
         self.assertEqual(kwargs["properties"]["value"], 1250.0)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks.get_providers")
+    def test_enqueue_provider_targets_can_select_linkedin(self, mock_get_providers, mock_track):
+        meta_provider = MagicMock()
+        meta_provider.__class__.__name__ = "MetaCAPI"
+        meta_provider.send.return_value = {}
+
+        linkedin_provider = MagicMock()
+        linkedin_provider.__class__.__name__ = "LinkedInCAPI"
+        linkedin_provider.send.return_value = {}
+
+        mock_get_providers.return_value = [meta_provider, linkedin_provider]
+
+        enqueue_marketing_event(
+            {
+                "event_name": "Activated",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-linkedin"},
+                "user": {"id": "88", "email": "test@example.com"},
+                "context": {},
+                "provider_targets": ["linkedin"],
+            }
+        )
+
+        meta_provider.send.assert_not_called()
+        linkedin_provider.send.assert_called_once()
+
+        self.assertEqual(mock_track.call_args.kwargs["properties"]["provider"], "LinkedInCAPI")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("marketing_events.tasks.Analytics.track")
+    @patch("marketing_events.tasks.get_providers")
+    def test_enqueue_does_not_track_provider_explicit_skip_as_sent(self, mock_get_providers, mock_track):
+        linkedin_provider = MagicMock()
+        linkedin_provider.__class__.__name__ = "LinkedInCAPI"
+        linkedin_provider.send.return_value = False
+        mock_get_providers.return_value = [linkedin_provider]
+
+        enqueue_marketing_event(
+            {
+                "event_name": "UnconfiguredEvent",
+                "properties": {"event_time": 1_900_000_000, "event_id": "evt-skip"},
+                "user": {"id": "88", "email": "test@example.com"},
+                "context": {},
+                "provider_targets": ["linkedin"],
+            }
+        )
+
+        linkedin_provider.send.assert_called_once()
+        mock_track.assert_not_called()
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("marketing_events.tasks._dispatch_marketing_event")
     @patch("marketing_events.tasks.Analytics.track")
     @patch("marketing_events.tasks._subscription_state_from_db", return_value=(None, None))

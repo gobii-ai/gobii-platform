@@ -17,6 +17,7 @@ from marketing_events.custom_events import (
     _is_first_workspace_agent_creation,
     emit_configured_custom_capi_event,
 )
+from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from api.models import (
     BrowserUseAgent,
     Organization,
@@ -195,7 +196,7 @@ class MarketingEventsApiTests(SimpleTestCase):
             },
             request=None,
             context={"consent": True},
-            provider_targets=["meta", "reddit", "tiktok"],
+            provider_targets=AD_CAPI_PROVIDER_TARGETS,
         )
 
     @override_settings(
@@ -241,7 +242,7 @@ class MarketingEventsApiTests(SimpleTestCase):
             properties={"agent_id": "agent-1"},
             request=None,
             context={"consent": True},
-            provider_targets=["meta", "reddit", "tiktok"],
+            provider_targets=AD_CAPI_PROVIDER_TARGETS,
         )
 
     @patch("marketing_events.custom_events.capi_delay_subscription_guarded")
@@ -334,7 +335,7 @@ class MarketingEventsApiTests(SimpleTestCase):
             },
             request=None,
             context={"consent": True},
-            provider_targets=["meta", "reddit", "tiktok"],
+            provider_targets=AD_CAPI_PROVIDER_TARGETS,
         )
 
     @override_settings(
@@ -468,7 +469,7 @@ class MarketingEventsApiTests(SimpleTestCase):
             },
             request=None,
             context={"consent": True},
-            provider_targets=["meta", "reddit", "tiktok"],
+            provider_targets=AD_CAPI_PROVIDER_TARGETS,
         )
 
 

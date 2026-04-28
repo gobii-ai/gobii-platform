@@ -33,6 +33,8 @@ DEFAULTS: Dict[str, Dict[str, str]] = {
         "MIXPANEL_PROJECT_TOKEN": "",
         "LINKEDIN_PARTNER_ID": "",
         "LINKEDIN_SIGNUP_CONVERSION_ID": "",
+        "LINKEDIN_CAPI_ACCESS_TOKEN": "",
+        "LINKEDIN_CAPI_CONVERSION_IDS_JSON": "",
     },
 }
 

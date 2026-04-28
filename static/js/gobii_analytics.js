@@ -54,7 +54,7 @@ if (typeof window !== 'undefined') {
 }
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
-const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'fbclid'];
+const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'li_fat_id', 'fbclid'];
 
 const LANDING_PARAM = 'g';
 

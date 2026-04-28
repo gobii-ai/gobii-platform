@@ -4560,6 +4560,8 @@ class UserAttribution(models.Model):
     ttclid_last = models.CharField(max_length=256, blank=True)
     rdt_cid_first = models.CharField(max_length=256, blank=True)
     rdt_cid_last = models.CharField(max_length=256, blank=True)
+    li_fat_id_first = models.CharField(max_length=256, blank=True)
+    li_fat_id_last = models.CharField(max_length=256, blank=True)
 
     first_referrer = models.CharField(max_length=512, blank=True)
     last_referrer = models.CharField(max_length=512, blank=True)

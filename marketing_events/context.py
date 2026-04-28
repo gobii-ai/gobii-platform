@@ -43,6 +43,7 @@ def extract_click_context(request):
 
     rdt_cid = q.get("rdt_cid") or q.get("rdt_click_id") or c.get("rdt_cid") or c.get("rdt_click_id")
     ttclid = q.get("ttclid") or q.get("tt_click_id")
+    li_fat_id = q.get("li_fat_id") or c.get("li_fat_id")
 
     utm = {k: v for k, v in q.items() if k.startswith("utm_")}
 
@@ -56,6 +57,7 @@ def extract_click_context(request):
             "fbclid": fbclid,
             "rdt_cid": rdt_cid,
             "ttclid": ttclid,
+            "li_fat_id": li_fat_id,
         },
         "ga_client_id": ga_client_id,
         "page": {"url": request.build_absolute_uri()},
@@ -91,6 +93,7 @@ def build_marketing_context_from_user(
     fbp = getattr(attribution, "fbp", "")
     rdt_cid = getattr(attribution, "rdt_cid_last", "") or getattr(attribution, "rdt_cid_first", "")
     ttclid = getattr(attribution, "ttclid_last", "") or getattr(attribution, "ttclid_first", "")
+    li_fat_id = getattr(attribution, "li_fat_id_last", "") or getattr(attribution, "li_fat_id_first", "")
 
     if fbc:
         click_ids["fbc"] = fbc
@@ -107,6 +110,8 @@ def build_marketing_context_from_user(
         click_ids["rdt_cid"] = rdt_cid
     if ttclid:
         click_ids["ttclid"] = ttclid
+    if li_fat_id:
+        click_ids["li_fat_id"] = li_fat_id
     if click_ids:
         context["click_ids"] = click_ids
 

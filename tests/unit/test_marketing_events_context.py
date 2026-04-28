@@ -57,6 +57,14 @@ class ExtractClickContextTests(SimpleTestCase):
 
         self.assertEqual(context["click_ids"]["rdt_cid"], "reddit-cookie-123")
 
+    @patch("marketing_events.context.Analytics.get_client_ip", return_value="198.51.100.24")
+    def test_reads_linkedin_first_party_ads_tracking_id(self, _mock_client_ip):
+        request = self.factory.get("/pricing", {"li_fat_id": "linkedin-click-123"})
+
+        context = extract_click_context(request)
+
+        self.assertEqual(context["click_ids"]["li_fat_id"], "linkedin-click-123")
+
 
 @tag("batch_marketing_events")
 class BuildMarketingContextFromUserTests(TestCase):
@@ -75,3 +83,19 @@ class BuildMarketingContextFromUserTests(TestCase):
         context = build_marketing_context_from_user(user)
 
         self.assertEqual(context["click_ids"]["ttclid"], "ttclid-last")
+
+    def test_build_marketing_context_from_user_includes_persisted_linkedin_click_id(self):
+        user = get_user_model().objects.create_user(
+            username="marketing-context-linkedin-user",
+            email="marketing-context-linkedin@example.com",
+            password="password123",
+        )
+        UserAttribution.objects.create(
+            user=user,
+            li_fat_id_first="li-first",
+            li_fat_id_last="li-last",
+        )
+
+        context = build_marketing_context_from_user(user)
+
+        self.assertEqual(context["click_ids"]["li_fat_id"], "li-last")

@@ -45,3 +45,13 @@ class NormalizeEventTests(SimpleTestCase):
         }
         out = normalize_event(payload)
         self.assertEqual(out["network"]["ttclid"], "tt-123")
+
+    def test_normalize_event_captures_linkedin_click_id(self):
+        payload = {
+            "event_name": "CompleteRegistration",
+            "properties": {},
+            "user": {"id": "789"},
+            "context": {"click_ids": {"li_fat_id": "li-123"}},
+        }
+        out = normalize_event(payload)
+        self.assertEqual(out["network"]["li_fat_id"], "li-123")

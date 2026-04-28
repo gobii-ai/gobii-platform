@@ -20,6 +20,7 @@ _PROVIDER_TARGET_KEY_BY_CLASS = {
     "MetaCAPI": "meta",
     "RedditCAPI": "reddit",
     "TikTokCAPI": "tiktok",
+    "LinkedInCAPI": "linkedin",
     "GoogleAnalyticsMP": "google_analytics",
 }
 
@@ -27,6 +28,8 @@ _PROVIDER_TARGET_ALIASES = {
     "ga": "google_analytics",
     "ga4": "google_analytics",
     "googleanalyticsmp": "google_analytics",
+    "li": "linkedin",
+    "linkedin_capi": "linkedin",
 }
 
 
@@ -306,7 +309,9 @@ def _dispatch_marketing_event(payload: dict):
             if provider_targets and provider_key not in provider_targets:
                 continue
             try:
-                provider.send(evt)
+                send_result = provider.send(evt)
+                if send_result is False:
+                    continue
                 # Track successful CAPI send for observability
                 Analytics.track(
                     user_id=analytics_user_id,

@@ -21,7 +21,7 @@ class UTMTrackingMiddleware:
         "utm_content",
         "utm_term",
     )
-    CLICK_ID_PARAMS: Tuple[str, ...] = ("gclid", "gbraid", "wbraid", "msclkid", "ttclid", "rdt_cid")
+    CLICK_ID_PARAMS: Tuple[str, ...] = ("gclid", "gbraid", "wbraid", "msclkid", "ttclid", "rdt_cid", "li_fat_id")
     EXTRA_PARAMS: Tuple[str, ...] = ("fbclid",)
 
     SESSION_UTM_FIRST = "utm_first_touch"

@@ -4,6 +4,7 @@ Gobii settings – dev profile
 
 from pathlib import Path
 from datetime import timedelta
+import json
 import environ, os
 from decimal import Decimal
 from typing import Any
@@ -166,6 +167,22 @@ def _community_default(section: str, key: str, *, fallback: str = "") -> str:
 
     section_defaults = _COMMUNITY_DEFAULTS.get(section, {})
     return section_defaults.get(key, fallback)
+
+
+def _parse_env_json_mapping(raw_value: str, *, setting_name: str) -> dict[str, str]:
+    if not raw_value:
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError as exc:
+        raise ImproperlyConfigured(f"{setting_name} must be a JSON object.") from exc
+    if not isinstance(parsed, dict):
+        raise ImproperlyConfigured(f"{setting_name} must be a JSON object.")
+    return {
+        str(key): str(value).strip()
+        for key, value in parsed.items()
+        if value not in (None, "")
+    }
 
 # ────────── Core ──────────
 DEBUG = env.bool("DEBUG", default=False)
@@ -1078,6 +1095,51 @@ META_PIXEL_ID = env(
 LINKEDIN_PARTNER_ID = env(
     "LINKEDIN_PARTNER_ID",
     default=_proprietary_default("analytics", "LINKEDIN_PARTNER_ID"),
+)
+LINKEDIN_CAPI_ACCESS_TOKEN = env(
+    "LINKEDIN_CAPI_ACCESS_TOKEN",
+    default=_proprietary_default("analytics", "LINKEDIN_CAPI_ACCESS_TOKEN"),
+)
+LINKEDIN_CAPI_VERSION = env("LINKEDIN_CAPI_VERSION", default="202601")
+_LINKEDIN_CAPI_KNOWN_CONVERSION_IDS = {
+    "CompleteRegistration": env(
+        "LINKEDIN_CAPI_COMPLETE_REGISTRATION_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_COMPLETE_REGISTRATION_CONVERSION_ID"),
+    ),
+    "StartTrial": env(
+        "LINKEDIN_CAPI_START_TRIAL_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_START_TRIAL_CONVERSION_ID"),
+    ),
+    "Subscribe": env(
+        "LINKEDIN_CAPI_SUBSCRIBE_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_SUBSCRIBE_CONVERSION_ID"),
+    ),
+    "Activated": env(
+        "LINKEDIN_CAPI_ACTIVATED_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_ACTIVATED_CONVERSION_ID"),
+    ),
+    "InitiateCheckout": env(
+        "LINKEDIN_CAPI_INITIATE_CHECKOUT_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_INITIATE_CHECKOUT_CONVERSION_ID"),
+    ),
+    "AddPaymentInfo": env(
+        "LINKEDIN_CAPI_ADD_PAYMENT_INFO_CONVERSION_ID",
+        default=_proprietary_default("analytics", "LINKEDIN_CAPI_ADD_PAYMENT_INFO_CONVERSION_ID"),
+    ),
+}
+LINKEDIN_CAPI_CONVERSION_IDS = {
+    event_name: conversion_id
+    for event_name, conversion_id in _LINKEDIN_CAPI_KNOWN_CONVERSION_IDS.items()
+    if conversion_id
+}
+LINKEDIN_CAPI_CONVERSION_IDS.update(
+    _parse_env_json_mapping(
+        env(
+            "LINKEDIN_CAPI_CONVERSION_IDS_JSON",
+            default=_proprietary_default("analytics", "LINKEDIN_CAPI_CONVERSION_IDS_JSON"),
+        ),
+        setting_name="LINKEDIN_CAPI_CONVERSION_IDS_JSON",
+    )
 )
 
 TIKTOK_PIXEL_ID = env(

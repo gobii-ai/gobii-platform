@@ -284,6 +284,8 @@ class MarketingProvidersRegistrationTests(SimpleTestCase):
         REDDIT_ADVERTISER_ID="",
         TIKTOK_ACCESS_TOKEN="",
         TIKTOK_PIXEL_ID="",
+        LINKEDIN_CAPI_ACCESS_TOKEN="",
+        LINKEDIN_CAPI_CONVERSION_IDS={},
     )
     def test_get_providers_includes_google_analytics_when_configured(self):
         providers = get_providers()
@@ -299,6 +301,8 @@ class MarketingProvidersRegistrationTests(SimpleTestCase):
         REDDIT_ADVERTISER_ID="",
         TIKTOK_ACCESS_TOKEN="",
         TIKTOK_PIXEL_ID="",
+        LINKEDIN_CAPI_ACCESS_TOKEN="",
+        LINKEDIN_CAPI_CONVERSION_IDS={},
     )
     def test_get_providers_skips_google_analytics_without_secret(self):
         providers = get_providers()

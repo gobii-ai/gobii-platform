@@ -1,16 +1,18 @@
 # Marketing Events (CAPI fan-out)
-`marketing_events` provides a single helper, `capi(user, event_name, properties=None, request=None, context=None)`, that normalizes marketing signals and pushes them through an async Celery task to the configured providers (Meta/Facebook, Reddit, TikTok, and optional GA4 Measurement Protocol). Calls are non-blocking; hashing, consent checks, retries, and tracing happen in the background worker.
+`marketing_events` provides a single helper, `capi(user, event_name, properties=None, request=None, context=None)`, that normalizes marketing signals and pushes them through an async Celery task to the configured providers (Meta/Facebook, Reddit, TikTok, LinkedIn, and optional GA4 Measurement Protocol). Calls are non-blocking; hashing, consent checks, retries, and tracing happen in the background worker.
 
 ## Required settings
 
 Set these environment variables (usually via Django settings) to enable each provider:
 
 - `META_PIXEL_ID`
-- `META_CAPI_TOKEN`
-- `REDDIT_PIXEL_ID`
-- `REDDIT_CONVERSIONS_TOKEN`
+- `FACEBOOK_ACCESS_TOKEN`
+- `REDDIT_ADVERTISER_ID` (defaults to `REDDIT_PIXEL_ID`)
+- `REDDIT_ACCESS_TOKEN`
 - `TIKTOK_PIXEL_ID`
 - `TIKTOK_ACCESS_TOKEN`
+- `LINKEDIN_CAPI_ACCESS_TOKEN`
+- `LINKEDIN_CAPI_CONVERSION_IDS_JSON` or the per-event `LINKEDIN_CAPI_*_CONVERSION_ID` settings
 - `GA_MEASUREMENT_ID` (already used by frontend gtag)
 - `GA_MEASUREMENT_API_SECRET` (enables server-side GA4 events)
 - `CAPI_START_TRIAL_CONV_RATE` (optional, defaults to `0.322`; scales non-scale `StartTrial` conversion value from predicted LTV)
@@ -18,6 +20,15 @@ Set these environment variables (usually via Django settings) to enable each pro
 - `CAPI_START_TRIAL_DELAY_MINUTES` (optional, defaults to `60`; delays `StartTrial` dispatch)
 
 If a provider’s credentials are missing the task will skip it automatically.
+
+LinkedIn conversion IDs can be configured as plain IDs or full `urn:lla:llaPartnerConversion:<id>` URNs. The built-in per-event settings are:
+
+- `LINKEDIN_CAPI_COMPLETE_REGISTRATION_CONVERSION_ID`
+- `LINKEDIN_CAPI_START_TRIAL_CONVERSION_ID`
+- `LINKEDIN_CAPI_SUBSCRIBE_CONVERSION_ID`
+- `LINKEDIN_CAPI_ACTIVATED_CONVERSION_ID`
+- `LINKEDIN_CAPI_INITIATE_CHECKOUT_CONVERSION_ID`
+- `LINKEDIN_CAPI_ADD_PAYMENT_INFO_CONVERSION_ID`
 
 ## What `capi` does
 
@@ -78,7 +89,8 @@ capi(
 ## Billing failure events
 
 `invoice.payment_failed` can emit ad-only marketing events for user-owned subscriptions.
-These are currently routed to `meta`, `reddit`, and `tiktok`, but not GA.
+These are currently routed to `meta`, `reddit`, `tiktok`, and `linkedin`, but
+not GA. LinkedIn sends only when a matching conversion ID/URN is configured.
 
 - `TrialConversionPaymentFailed`: retryable failed trial-conversion charge.
 - `TrialConversionPaymentFailedFinal`: terminal failed trial-conversion charge.
