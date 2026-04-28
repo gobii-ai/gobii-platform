@@ -12,14 +12,16 @@ def get_end_planning_tool() -> Dict[str, Any]:
             "name": "end_planning",
             "description": (
                 "Complete planning mode once the user's need, scope, desired outcome, "
-                "constraints, assumptions, and success criteria are clear in plain language."
+                "constraints, assumptions, and success criteria are clear in plain language. "
+                "Call this before doing substantive task work; planning mode should not execute "
+                "the actual task until this tool has been used."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "full_plan": {
                         "type": "string",
-                        "description": "The full decision-complete plan to store as the agent charter.",
+                        "description": "The full decision-complete plan to store as the agent charter before work begins.",
                     },
                 },
                 "required": ["full_plan"],

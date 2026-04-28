@@ -7,7 +7,7 @@ from django.urls import reverse
 from waffle.testutils import override_flag
 
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
-from api.agent.tools.planning import execute_end_planning
+from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import get_static_tool_definitions
 from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
@@ -105,6 +105,20 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("spawn_web_task", names)
         self.assertIn("send_chat_message", names)
 
+    def test_end_planning_tool_description_requires_planning_to_finish_before_work(self):
+        tool = get_end_planning_tool()
+        function = tool["function"]
+
+        self.assertIn("Call this before doing substantive task work", function["description"])
+        self.assertIn(
+            "planning mode should not execute the actual task until this tool has been used",
+            function["description"],
+        )
+        self.assertIn(
+            "before work begins",
+            function["parameters"]["properties"]["full_plan"]["description"],
+        )
+
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -151,6 +165,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("After the welcome, continue Planning Mode", prompt)
         self.assertIn("move planning forward or call end_planning, not start the deliverable work", prompt)
+        self.assertIn("Stay in planning only until planning is completed or skipped", prompt)
+        self.assertIn("or otherwise start doing the task before calling end_planning", prompt)
         self.assertIn("include a clear list of the exact planning questions in that email/SMS body", prompt)
         self.assertIn("the recipient may not have web chat open", prompt)
         self.assertIn("skip those questions and get right to work", prompt)
@@ -172,9 +188,16 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
         self.assertIn("Keep planning questions focused on the user's need, scope, and desired outcome", prompt)
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
+        self.assertIn("Stay in planning only until you call end_planning(full_plan=...)", prompt)
+        self.assertIn("do not do substantive task work before planning ends", prompt)
+        self.assertIn("no research for the deliverable", prompt)
+        self.assertIn("no implementation", prompt)
         self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
         self.assertIn("Do not create kanban cards or begin deliverable work", prompt)
         self.assertIn("treat that instruction as applying only after Planning Mode is completed or skipped", prompt)
+        self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
+        self.assertIn("Do not start doing the task while planning mode is still active", prompt)
+        self.assertIn("Planning ends when you call this tool; the actual work starts only after that", prompt)
         self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
         self.assertNotIn("delivery format", prompt)
         self.assertNotIn("delivery cadence", prompt)
@@ -209,6 +232,8 @@ class PersistentAgentPlanningModeTests(TestCase):
             prompt,
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
+        self.assertIn("do not do substantive task work before planning ends", prompt)
+        self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
         self.assertNotIn("You control your schedule. Update __agent_config.schedule via sqlite_batch when needed", prompt)
