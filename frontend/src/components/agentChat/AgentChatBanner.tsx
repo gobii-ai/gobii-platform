@@ -10,6 +10,7 @@ import { AnalyticsEvent } from '../../constants/analyticsEvents'
 import type { KanbanBoardSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 import type { SignupPreviewState } from '../../types/agentRoster'
+import type { AgentChatSidebarMode } from './sidebarMode'
 
 export type ConnectionStatusTone = 'connected' | 'connecting' | 'reconnecting' | 'offline' | 'error'
 
@@ -39,7 +40,7 @@ type AgentChatBannerProps = {
   shareDisabled?: boolean
   shareDisabledReason?: string | null
   onBlockedShareClick?: (location: 'banner_desktop' | 'banner_mobile') => void
-  sidebarCollapsed?: boolean
+  sidebarMode?: AgentChatSidebarMode
   signupPreviewState?: SignupPreviewState
   children?: ReactNode
 }
@@ -82,7 +83,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   shareDisabled = false,
   shareDisabledReason = null,
   onBlockedShareClick,
-  sidebarCollapsed = true,
+  sidebarMode = 'list',
   signupPreviewState = 'none',
   children,
 }: AgentChatBannerProps) {
@@ -213,10 +214,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     onClose?.()
   }, [agentId, onClose, previewAnalyticsEnabled, signupPreviewState])
 
-  const shellClass = `banner-shell ${sidebarCollapsed ? 'banner-shell--sidebar-collapsed' : 'banner-shell--sidebar-expanded'}`
-
   return (
-    <div className={shellClass} ref={bannerRef}>
+    <div className="banner-shell" data-sidebar-mode={sidebarMode} ref={bannerRef}>
       <div
         className="banner"
         style={{ '--banner-accent': accentColor } as React.CSSProperties}

@@ -7,6 +7,7 @@ import { normalizeHexColor } from '../util/color'
 import { track } from '../util/analytics'
 import { leaveCollaboration } from '../api/agents'
 import { useModal } from '../hooks/useModal'
+import { buildAgentSearchBlob, styleStringToObject } from '../util/agentCards'
 
 type AgentSummary = {
   id: string
@@ -678,26 +679,10 @@ function LeaveCollaborationDialog({ agentName, onClose, onConfirm }: LeaveCollab
 }
 
 function buildSearchBlob(agent: AgentSummary): string {
-  const tags = agent.displayTags?.join(' ') ?? ''
-  return [agent.name ?? '', agent.listingDescription ?? '', tags].join(' ').toLowerCase()
-}
-
-function styleStringToObject(styleString: string): CSSProperties {
-  if (!styleString) {
-    return {}
-  }
-
-  return styleString
-    .split(';')
-    .map((rule) => rule.trim())
-    .filter(Boolean)
-    .reduce<CSSProperties | Record<string, string>>((acc, rule) => {
-      const [property, value] = rule.split(':')
-      if (!property || !value) {
-        return acc
-      }
-      const camelProperty = property.trim().replace(/-([a-z])/g, (_, char) => char.toUpperCase())
-      acc[camelProperty as keyof CSSProperties] = value.trim()
-      return acc
-    }, {})
+  return buildAgentSearchBlob({
+    name: agent.name,
+    miniDescription: agent.miniDescription,
+    listingDescription: agent.listingDescription,
+    displayTags: agent.displayTags,
+  })
 }

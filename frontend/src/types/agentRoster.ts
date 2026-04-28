@@ -20,6 +20,16 @@ export type AgentRosterEntry = {
   lastInteractionAt: string | null
   miniDescription: string
   shortDescription: string
+  listingDescription: string
+  listingDescriptionSource: string | null
+  displayTags: string[]
+  detailUrl: string | null
+  cardGradientStyle: string
+  iconBackgroundHex: string
+  iconBorderHex: string
+  dailyCreditRemaining: number | null
+  dailyCreditLow: boolean
+  last24hCreditBurn: number | null
   auditUrl?: string | null
   isOrgOwned?: boolean
   isCollaborator?: boolean

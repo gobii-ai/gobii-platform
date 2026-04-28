@@ -188,7 +188,7 @@ const ITEM_STYLES = {
   },
 }
 
-function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
+export function AgentWorkingIndicator({ label = true }: { label?: boolean }) {
   return (
     <span className="agent-list-working" aria-label="Working">
       <span className="agent-list-working__dots" aria-hidden="true">

@@ -85,6 +85,69 @@ class ConsoleViewsTest(TestCase):
         self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
     @tag("batch_console_agents")
+    def test_agents_page_embeds_rich_card_payload_fields(self):
+        from api.models import BrowserUseAgent, Organization, OrganizationMembership, PersistentAgent
+
+        organization = Organization.objects.create(
+            name="Pipeline Org",
+            slug="pipeline-org",
+            plan="free",
+            created_by=self.user,
+        )
+        organization_billing = organization.billing
+        organization_billing.purchased_seats = 1
+        organization_billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Pipeline Browser Agent",
+        )
+        persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name="Pipeline Agent",
+            charter="Qualify inbound leads and prepare summaries for account executives.",
+            browser_use_agent=browser_agent,
+            short_description="Qualifies inbound leads and drafts handoff-ready summaries.",
+            mini_description="Revenue pipeline assistant",
+            tags=["pipeline", "sales"],
+        )
+
+        response = self.client.get(reverse("agents"))
+        self.assertEqual(response.status_code, 200)
+
+        payload = self._get_agent_list_payload(response)
+        matching_entry = next(
+            entry for entry in payload.get("agents", []) if entry.get("id") == str(persistent_agent.id)
+        )
+        self.assertEqual(
+            matching_entry.get("listingDescription"),
+            "Qualifies inbound leads and drafts handoff-ready summaries.",
+        )
+        self.assertEqual(matching_entry.get("listingDescriptionSource"), "short")
+        self.assertEqual(matching_entry.get("displayTags"), ["pipeline", "sales"])
+        self.assertEqual(
+            matching_entry.get("detailUrl"),
+            reverse("agent_detail", kwargs={"pk": persistent_agent.id}),
+        )
+        self.assertIn("linear-gradient", matching_entry.get("cardGradientStyle", ""))
+        self.assertTrue((matching_entry.get("iconBackgroundHex") or "").startswith("#"))
+        self.assertTrue((matching_entry.get("iconBorderHex") or "").startswith("#"))
+        self.assertIn("dailyCreditRemaining", matching_entry)
+        self.assertEqual(matching_entry.get("dailyCreditLow"), False)
+
+    @tag("batch_console_agents")
     def test_staff_agent_audit_page_accessible_for_soft_deleted_agent(self):
         from api.models import BrowserUseAgent, PersistentAgent
 
