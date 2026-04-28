@@ -1736,7 +1736,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
   const sectionBodyClassName = isEmbedded ? 'px-0 pt-5' : 'p-6 sm:p-8'
   const stackedSectionBodyClassName = isEmbedded ? 'px-0 pt-5 space-y-6' : 'p-6 sm:p-8 space-y-6'
-  const embeddedUtilityLinkClassName = 'inline-flex items-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
+  const embeddedUtilityLinkClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white sm:w-auto'
   const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
   const standaloneHeaderActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-blue-50'
   const embeddedHeaderActions = (

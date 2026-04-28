@@ -27,6 +27,12 @@ export function SettingsBanner({
   const surfaceClassName = isEmbedded
     ? 'border-slate-200/70 bg-slate-950/60 text-slate-100'
     : 'border-gray-200/70 bg-white/78 text-gray-900'
+  const contentLayoutClassName = isEmbedded
+    ? 'flex min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between'
+    : 'flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between'
+  const actionsClassName = isEmbedded
+    ? 'flex w-full flex-wrap items-center gap-2 xl:w-auto xl:shrink-0 xl:justify-end'
+    : 'flex shrink-0 flex-wrap items-center justify-end gap-2'
   const eyebrowClassName = isEmbedded
     ? 'text-xs font-semibold uppercase tracking-[0.22em] text-slate-400'
     : 'text-xs font-semibold uppercase tracking-[0.18em] text-gray-500'
@@ -43,7 +49,7 @@ export function SettingsBanner({
         <div className="px-6 py-4">
           <div className={`flex items-start gap-3 ${leading ? '' : 'justify-between'}`}>
             {leading ? <div className="shrink-0">{leading}</div> : null}
-            <div className="flex min-w-0 flex-1 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className={contentLayoutClassName}>
               <div className="min-w-0">
                 {eyebrow ? <p className={eyebrowClassName}>{eyebrow}</p> : null}
                 <h1 className={titleClassName} id={headingId}>
@@ -53,7 +59,7 @@ export function SettingsBanner({
                 {supportingContent ? <div className="mt-3">{supportingContent}</div> : null}
               </div>
               {actions ? (
-                <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+                <div className={actionsClassName}>
                   {actions}
                 </div>
               ) : null}

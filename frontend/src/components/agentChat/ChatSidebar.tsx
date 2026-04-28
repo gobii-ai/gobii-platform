@@ -358,6 +358,7 @@ export const ChatSidebar = memo(function ChatSidebar({
         <AgentChatMobileSheet
           open={drawerOpen}
           keepMounted={true}
+          tone="sidebar"
           onClose={() => {
             if (showSettingsView) {
               onBackFromEmbeddedSettings?.()

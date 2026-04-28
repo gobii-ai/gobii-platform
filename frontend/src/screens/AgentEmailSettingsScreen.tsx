@@ -240,7 +240,7 @@ export function AgentEmailSettingsScreen({
 }: AgentEmailSettingsScreenProps) {
   const isEmbedded = variant === 'embedded'
   const helpButtonClassName = isEmbedded
-    ? 'rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100'
+    ? 'inline-flex w-full items-center justify-center rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100 sm:w-auto'
     : 'rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white'
   const selectionCardClassName = isEmbedded
     ? 'rounded-lg border border-blue-300/30 bg-blue-950/20 p-3 text-sm text-slate-100'

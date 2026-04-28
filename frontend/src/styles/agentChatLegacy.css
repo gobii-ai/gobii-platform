@@ -8599,6 +8599,221 @@
   color: #64748b;
 }
 
+.agent-mobile-sheet--sidebar .chat-context-switcher__trigger {
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(167, 139, 250, 0.12);
+  color: #c4b5fd;
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__trigger:hover {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: rgba(167, 139, 250, 0.4);
+  color: #ddd6fe;
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__trigger:focus-visible {
+  outline-color: rgba(167, 139, 250, 0.35);
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__menu {
+  background: rgba(31, 20, 68, 0.88);
+  border: 1px solid rgba(221, 214, 254, 0.18);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(18px) saturate(1.25);
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__heading {
+  color: rgba(226, 232, 240, 0.58);
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__item {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__item:hover,
+.agent-mobile-sheet--sidebar .chat-context-switcher__item[data-selected='true'],
+.agent-mobile-sheet--sidebar .chat-context-switcher__item[data-focused='true'] {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--sidebar .chat-context-switcher__item-role {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search {
+  border-bottom: 1px solid rgba(167, 139, 250, 0.14);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-icon {
+  color: rgba(196, 181, 253, 0.56);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-input {
+  border-color: rgba(196, 181, 253, 0.18);
+  background: rgba(15, 23, 42, 0.22);
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-input::placeholder {
+  color: rgba(196, 181, 253, 0.44);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-input:focus {
+  border-color: rgba(196, 181, 253, 0.34);
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-clear {
+  color: rgba(196, 181, 253, 0.56);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-search-clear:active {
+  background: rgba(167, 139, 250, 0.16);
+  color: #ddd6fe;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-sort-toggle {
+  border-bottom: 1px solid rgba(167, 139, 250, 0.14);
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.08), rgba(167, 139, 250, 0.02));
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-section-header {
+  color: rgba(226, 232, 240, 0.52);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-sort-toggle-button,
+.agent-mobile-sheet--sidebar .agent-drawer-view-toggle-button {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.84);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-sort-toggle-button[data-active='true'],
+.agent-mobile-sheet--sidebar .agent-drawer-view-toggle-button[data-active='true'] {
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-sort-toggle-button:active,
+.agent-mobile-sheet--sidebar .agent-drawer-view-toggle-button:active {
+  background: rgba(124, 58, 237, 0.88);
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-create {
+  border-color: rgba(196, 181, 253, 0.35);
+  background: rgba(167, 139, 250, 0.12);
+  color: #ede9fe;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item {
+  color: rgba(255, 255, 255, 0.88);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item[data-active='true'] {
+  background: rgba(167, 139, 250, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(196, 181, 253, 0.16);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item[data-active='true'] .agent-drawer-item-avatar {
+  box-shadow: 0 0 0 2.5px rgba(31, 20, 68, 0.94), 0 0 0 5px var(--agent-accent, #8b5cf6);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item[data-active='true'] .agent-drawer-item-name {
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-name {
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-desc,
+.agent-mobile-sheet--sidebar .agent-drawer-item[data-active='true'] .agent-drawer-item-desc,
+.agent-mobile-sheet--sidebar .agent-drawer-empty {
+  color: rgba(226, 232, 240, 0.66);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-favorite {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-favorite[data-active='true'] {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-favorite:active {
+  background: rgba(167, 139, 250, 0.16);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-item-check {
+  color: #c4b5fd;
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card {
+  background:
+    linear-gradient(180deg, rgba(244, 232, 252, 0.16) 0%, rgba(244, 232, 252, 0.05) 24%, transparent 48%),
+    linear-gradient(180deg, rgba(125, 85, 151, 0.98), rgba(110, 72, 136, 0.985));
+  border-color: rgba(239, 221, 251, 0.32);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-favorite,
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-icon-action {
+  background: rgba(15, 23, 42, 0.26);
+  color: rgba(255, 255, 255, 0.74);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-hero {
+  background: linear-gradient(180deg, rgba(248, 240, 252, 0.18), rgba(221, 189, 241, 0.08));
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-avatar {
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-mini {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card .chat-sidebar-gallery-card-tag {
+  background: rgba(15, 23, 42, 0.18);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-primary-action,
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-channel-action--email,
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-channel-action--sms,
+.agent-mobile-sheet--sidebar .agent-drawer-gallery-card-channel-action--chat {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+.agent-mobile-sheet--sidebar .sidebar-settings--drawer {
+  background: linear-gradient(180deg, rgba(28, 15, 66, 0), rgba(28, 15, 66, 0.94) 32%, rgba(23, 13, 56, 0.98));
+  border-top: 1px solid rgba(167, 139, 250, 0.12);
+}
+
+.agent-mobile-sheet--sidebar .sidebar-settings--drawer .sidebar-settings__trigger {
+  border-color: rgba(167, 139, 250, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.agent-mobile-sheet--sidebar .sidebar-settings--drawer .sidebar-settings__trigger:hover,
+.agent-mobile-sheet--sidebar .sidebar-settings--drawer .sidebar-settings__trigger[data-open='true'] {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(196, 181, 253, 0.32);
+  color: #ffffff;
+}
+
 /* ==========================================================================
    Agent Chat Settings Panel
    ========================================================================== */
