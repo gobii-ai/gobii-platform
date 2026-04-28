@@ -145,6 +145,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Be warm and adventurous", prompt)
         self.assertIn("### R1: Greeting (first impression)", prompt)
         self.assertIn("## Then Planning Mode: clarify before main work", prompt)
+        self.assertIn("clear plain-language brief before doing the work", prompt)
+        self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
+        self.assertIn("If timing changes the shape of the work itself", prompt)
         self.assertNotIn("Start your response with a brief welcome message to Matt", prompt)
         self.assertIn("After the welcome, continue Planning Mode", prompt)
         self.assertIn("move planning forward or call end_planning, not start the deliverable work", prompt)
@@ -160,18 +163,24 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("refer to the existing pending questions in a normal message", prompt)
         self.assertIn("ask only the new unanswered question", prompt)
         self.assertIn(
-            "Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use",
+            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
             prompt,
         )
-        self.assertIn("Treat that existing channel as the default", prompt)
         self.assertIn(
-            "Do not ask which communication channel to use for planning when this welcome target or other prompt context already gives you a current or preferred channel",
+            "Do not ask which communication channel or delivery method to use for planning when this welcome target or other prompt context already gives you a current or preferred setup",
             prompt,
         )
+        self.assertIn("Keep planning questions focused on the user's need, scope, and desired outcome", prompt)
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
         self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
         self.assertIn("Do not create kanban cards or begin deliverable work", prompt)
         self.assertIn("treat that instruction as applying only after Planning Mode is completed or skipped", prompt)
+        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
+        self.assertNotIn("delivery format", prompt)
+        self.assertNotIn("delivery cadence", prompt)
+        self.assertNotIn("integrations or accounts", prompt)
+        self.assertNotIn("how results should be delivered", prompt)
+        self.assertNotIn("delivery expectations", prompt)
         self.assertNotIn("Then sqlite_batch: charter + kanban cards + everything else", prompt)
         self.assertNotIn("### Execution Template", prompt)
 
@@ -196,15 +205,18 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("## Planning Mode", prompt)
         self.assertIn("Resume the pending planning turn.", prompt)
         self.assertIn(
-            "Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use",
+            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
             prompt,
         )
+        self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
         self.assertNotIn("You control your schedule. Update __agent_config.schedule via sqlite_batch when needed", prompt)
         self.assertNotIn("make it weekly", prompt)
         self.assertNotIn("check every hour", prompt)
+        self.assertNotIn("Ask about timezone if relevant", prompt)
         self.assertIn("Do not update schedule or __agent_config.schedule while Planning Mode is active", prompt)
+        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
         self.assertIn("charter='<what>', schedule='<when>'", prompt)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
@@ -230,6 +242,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("You control your schedule.", system_message["content"])
         self.assertNotIn("check every hour", system_message["content"])
         self.assertNotIn("weekly on Fridays", system_message["content"])
+        self.assertNotIn("Ask about timezone if relevant", system_message["content"])
+        self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", system_message["content"])
 
     def test_update_schedule_is_blocked_during_planning(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING

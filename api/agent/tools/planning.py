@@ -11,8 +11,8 @@ def get_end_planning_tool() -> Dict[str, Any]:
         "function": {
             "name": "end_planning",
             "description": (
-                "Complete planning mode once the goal, scope, success criteria, constraints, "
-                "delivery expectations, cadence, assumptions, and boundaries are clear."
+                "Complete planning mode once the user's need, scope, desired outcome, "
+                "constraints, assumptions, and success criteria are clear in plain language."
             ),
             "parameters": {
                 "type": "object",
