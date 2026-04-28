@@ -183,6 +183,7 @@ from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
+from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 from console.views import build_llm_intelligence_props
 from console.agent_addons import (
     _build_billing_status_payload,
@@ -2450,6 +2451,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         shared_agents = list(shared_qs.order_by("name"))
         collaborators_by_agent_id = {agent.id for agent in shared_agents}
         agents += shared_agents
+        enrich_agents_for_card_surface(agents, owner)
         processing_activity_by_agent_id = build_processing_activity_map(agents)
         user = request.user
         org_memberships = OrganizationMembership.objects.filter(
@@ -2486,53 +2488,57 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         )
         # Keep behavior aligned with SystemAdminRequiredMixin: superusers may not be staff.
         is_admin_user = bool(user.is_staff or user.is_superuser)
-        def get_display_email(agent: PersistentAgent) -> str | None:
-            endpoints = (
-                getattr(agent, "email_endpoints_for_display", None)
-                or getattr(agent, "primary_email_endpoints", None)
+        payload = []
+        for agent in agents:
+            is_collaborator = agent.id in collaborators_by_agent_id
+            card_payload = serialize_agent_card_payload(
+                request,
+                agent,
+                avatar_variant="thumbnail",
+                is_staff=is_admin_user,
+                is_shared=is_collaborator,
             )
-            if endpoints:
-                return endpoints[0].address if endpoints else None
-            return None
-
-        def get_primary_sms(agent: PersistentAgent) -> str | None:
-            endpoints = getattr(agent, "primary_sms_endpoints", None)
-            if endpoints:
-                return endpoints[0].address if endpoints else None
-            return None
-
-        payload = [
-            {
-                "id": str(agent.id),
-                "name": agent.name or "",
-                "avatar_url": agent.get_avatar_thumbnail_url(),
-                "display_color_hex": agent.get_display_color(),
-                "is_active": bool(agent.is_active),
-                "mini_description": agent.mini_description or "",
-                "short_description": agent.short_description or "",
-                "is_org_owned": agent.organization_id is not None,
-                "is_collaborator": agent.id in collaborators_by_agent_id,
-                "can_manage_agent": (
-                    is_admin_user
-                    or agent.user_id == user.id
-                    or (agent.organization_id and agent.organization_id in org_ids)
-                ),
-                "can_manage_collaborators": (
-                    is_admin_user
-                    or agent.user_id == user.id
-                    or (agent.organization_id and agent.organization_id in admin_org_ids)
-                ),
-                "audit_url": reverse("console-agent-audit", kwargs={"agent_id": agent.id}) if is_admin_user else None,
-                "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
-                "email": get_display_email(agent),
-                "sms": get_primary_sms(agent),
-                "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
-                "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
-                "signup_preview_state": agent.signup_preview_state,
-                "planning_state": agent.planning_state,
-            }
-            for agent in agents
-        ]
+            payload.append(
+                {
+                    "id": str(agent.id),
+                    "name": agent.name or "",
+                    "avatar_url": card_payload["avatarUrl"],
+                    "display_color_hex": card_payload["displayColorHex"],
+                    "is_active": bool(agent.is_active),
+                    "processing_active": processing_activity_by_agent_id.get(str(agent.id), False),
+                    "mini_description": agent.mini_description or "",
+                    "short_description": agent.short_description or "",
+                    "listing_description": card_payload["listingDescription"],
+                    "listing_description_source": card_payload["listingDescriptionSource"],
+                    "display_tags": card_payload["displayTags"],
+                    "detail_url": card_payload["detailUrl"],
+                    "card_gradient_style": card_payload["cardGradientStyle"],
+                    "icon_background_hex": card_payload["iconBackgroundHex"],
+                    "icon_border_hex": card_payload["iconBorderHex"],
+                    "daily_credit_remaining": card_payload["dailyCreditRemaining"],
+                    "daily_credit_low": card_payload["dailyCreditLow"],
+                    "last_24h_credit_burn": card_payload["last24hCreditBurn"],
+                    "is_org_owned": agent.organization_id is not None,
+                    "is_collaborator": is_collaborator,
+                    "can_manage_agent": (
+                        is_admin_user
+                        or agent.user_id == user.id
+                        or (agent.organization_id and agent.organization_id in org_ids)
+                    ),
+                    "can_manage_collaborators": (
+                        is_admin_user
+                        or agent.user_id == user.id
+                        or (agent.organization_id and agent.organization_id in admin_org_ids)
+                    ),
+                    "audit_url": card_payload["auditUrl"],
+                    "preferred_llm_tier": getattr(getattr(agent, "preferred_llm_tier", None), "key", None),
+                    "email": card_payload["primaryEmail"],
+                    "sms": card_payload["primarySms"],
+                    "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
+                    "signup_preview_state": agent.signup_preview_state,
+                    "planning_state": agent.planning_state,
+                }
+            )
         return JsonResponse(
             {
                 "context": {

@@ -31,6 +31,7 @@ import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelli
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
+import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
@@ -799,7 +800,7 @@ export function AgentChatPage({
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
-  const [selectionSidebarCollapsed, setSelectionSidebarCollapsed] = useState(false)
+  const [selectionSidebarMode, setSelectionSidebarMode] = useState(getInitialAgentChatSidebarMode)
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
@@ -2431,6 +2432,16 @@ export function AgentChatPage({
       lastInteractionAt: null,
       miniDescription: '',
       shortDescription: '',
+      listingDescription: '',
+      listingDescriptionSource: null,
+      displayTags: [],
+      detailUrl: `/console/agents/${activeAgentId}/`,
+      cardGradientStyle: '',
+      iconBackgroundHex: '',
+      iconBorderHex: '',
+      dailyCreditRemaining: null,
+      dailyCreditLow: false,
+      last24hCreditBurn: null,
       isOrgOwned: false,
     }
   }, [activeAgentId, resolvedAgentColorHex, resolvedAgentName, resolvedAvatarUrl])
@@ -2753,6 +2764,16 @@ export function AgentChatPage({
           lastInteractionAt: new Date().toISOString(),
           miniDescription: '',
           shortDescription: '',
+          listingDescription: '',
+          listingDescriptionSource: null,
+          displayTags: [],
+          detailUrl: `/console/agents/${result.agent_id}/`,
+          cardGradientStyle: '',
+          iconBackgroundHex: '',
+          iconBorderHex: '',
+          dailyCreditRemaining: null,
+          dailyCreditLow: false,
+          last24hCreditBurn: null,
           email: createdAgentEmail,
           signupPreviewState: personalSignupPreviewAvailable ? 'awaiting_first_reply_pause' : 'none',
           planningState: createdPlanningState,
@@ -3193,7 +3214,7 @@ export function AgentChatPage({
     bannerBillingStatus?.reason,
     billingManageUrl,
   ])
-  const selectionMainClassName = `agent-chat-main${selectionSidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const selectionMainClassName = 'agent-chat-main'
   const selectionSidebarSettings = useMemo(() => ({
     context: effectiveContext,
     viewerEmail: viewerEmail ?? null,
@@ -3228,8 +3249,8 @@ export function AgentChatPage({
     createAgentDisabledReason,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
-    defaultCollapsed: selectionSidebarCollapsed,
-    onToggle: setSelectionSidebarCollapsed,
+    desktopMode: selectionSidebarMode,
+    onDesktopModeChange: setSelectionSidebarMode,
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
   }
@@ -3243,7 +3264,7 @@ export function AgentChatPage({
       style={agentChatPageStyle}
     >
       <ChatSidebar {...selectionSidebarProps} />
-      <main className={selectionMainClassName}>
+      <main className={selectionMainClassName} data-sidebar-mode={selectionSidebarMode}>
         <div id="agent-workspace-root">
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
             {content}

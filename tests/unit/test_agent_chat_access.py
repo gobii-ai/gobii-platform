@@ -726,7 +726,8 @@ class AgentChatAccessTests(TestCase):
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"
         self.org_agent.short_description = "Qualifies inbound leads and drafts handoff-ready summaries."
-        self.org_agent.save(update_fields=["mini_description", "short_description"])
+        self.org_agent.tags = ["pipeline", "sales"]
+        self.org_agent.save(update_fields=["mini_description", "short_description", "tags"])
 
         response = self.client.get(
             reverse("console_agent_roster"),
@@ -743,6 +744,68 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(
             matching_entry.get("short_description"),
             "Qualifies inbound leads and drafts handoff-ready summaries.",
+        )
+        self.assertEqual(
+            matching_entry.get("listing_description"),
+            "Qualifies inbound leads and drafts handoff-ready summaries.",
+        )
+        self.assertEqual(matching_entry.get("listing_description_source"), "short")
+        self.assertEqual(matching_entry.get("display_tags"), ["pipeline", "sales"])
+        self.assertEqual(
+            matching_entry.get("detail_url"),
+            reverse("agent_detail", kwargs={"pk": self.org_agent.id}),
+        )
+        self.assertIn("linear-gradient", matching_entry.get("card_gradient_style", ""))
+        self.assertTrue((matching_entry.get("icon_background_hex") or "").startswith("#"))
+        self.assertTrue((matching_entry.get("icon_border_hex") or "").startswith("#"))
+        self.assertIn("daily_credit_remaining", matching_entry)
+        self.assertEqual(matching_entry.get("daily_credit_low"), False)
+        self.assertEqual(matching_entry.get("last_24h_credit_burn"), 0.0)
+
+    def test_roster_marks_shared_agents_as_collaborator_gallery_entries(self):
+        User = get_user_model()
+        owner = User.objects.create_user(
+            username="shared-owner@example.com",
+            email="shared-owner@example.com",
+            password="pw",
+        )
+        shared_browser_agent = BrowserUseAgent.objects.create(user=owner, name="Shared Browser Agent")
+        shared_agent = PersistentAgent.objects.create(
+            user=owner,
+            name="Shared Agent",
+            charter="Coordinate follow-up with inbound leads.",
+            browser_use_agent=shared_browser_agent,
+            short_description="Handles follow-up workflows for shared collaborators.",
+            mini_description="Shared follow-up agent",
+            tags=["shared", "follow-up"],
+        )
+        AgentCollaborator.objects.create(
+            agent=shared_agent,
+            user=self.user,
+            invited_by=owner,
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="personal",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.user.id),
+        )
+        self.assertEqual(response.status_code, 200)
+
+        payload = response.json()
+        matching_entry = next(
+            entry for entry in payload.get("agents", []) if entry.get("id") == str(shared_agent.id)
+        )
+        self.assertTrue(matching_entry.get("is_collaborator"))
+        self.assertFalse(matching_entry.get("can_manage_agent"))
+        self.assertFalse(matching_entry.get("can_manage_collaborators"))
+        self.assertTrue(
+            (matching_entry.get("detail_url") or "").startswith(f"/app/agents/{shared_agent.id}")
+        )
+        self.assertEqual(matching_entry.get("display_tags"), ["shared", "follow-up"])
+        self.assertEqual(
+            matching_entry.get("listing_description"),
+            "Handles follow-up workflows for shared collaborators.",
         )
 
     def test_roster_includes_processing_activity_for_mixed_agents(self):

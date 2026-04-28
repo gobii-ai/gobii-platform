@@ -40,6 +40,16 @@ type AgentRosterPayload = {
     processing_active: boolean
     mini_description: string
     short_description: string
+    listing_description: string
+    listing_description_source: string | null
+    display_tags: string[]
+    detail_url: string | null
+    card_gradient_style: string
+    icon_background_hex: string
+    icon_border_hex: string
+    daily_credit_remaining: number | null
+    daily_credit_low: boolean
+    last_24h_credit_burn: number | null
     is_org_owned: boolean
     is_collaborator: boolean
     can_manage_agent: boolean
@@ -77,6 +87,16 @@ export async function fetchAgentRoster(
     processingActive: agent.processing_active,
     miniDescription: agent.mini_description,
     shortDescription: agent.short_description,
+    listingDescription: agent.listing_description,
+    listingDescriptionSource: agent.listing_description_source,
+    displayTags: Array.isArray(agent.display_tags) ? agent.display_tags : [],
+    detailUrl: agent.detail_url,
+    cardGradientStyle: agent.card_gradient_style,
+    iconBackgroundHex: agent.icon_background_hex,
+    iconBorderHex: agent.icon_border_hex,
+    dailyCreditRemaining: agent.daily_credit_remaining,
+    dailyCreditLow: Boolean(agent.daily_credit_low),
+    last24hCreditBurn: agent.last_24h_credit_burn,
     auditUrl: agent.audit_url ?? null,
     isOrgOwned: agent.is_org_owned,
     isCollaborator: agent.is_collaborator,

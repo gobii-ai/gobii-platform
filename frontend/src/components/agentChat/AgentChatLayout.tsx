@@ -22,6 +22,7 @@ import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { PlanningModeStrip } from './PlanningModeStrip'
+import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
@@ -55,8 +56,6 @@ type TaskQuotaInfo = {
   used: number
   used_pct: number
 }
-
-const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 
 function normalizeAgentSettingsPathname(pathname: string): string {
   const trimmed = pathname.replace(/\/+$/, '')
@@ -375,12 +374,7 @@ export function AgentChatLayout({
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === 'undefined') {
-      return true
-    }
-    return window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX
-  })
+  const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
   const {
     currentPlan: subscriptionPlan,
     isLoading: subscriptionLoading,
@@ -440,8 +434,8 @@ export function AgentChatLayout({
     return `agent-chat-high-priority-dismissed:${agentId}:${highPriorityBannerId}`
   }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
 
-  const handleSidebarToggle = useCallback((collapsed: boolean) => {
-    setSidebarCollapsed(collapsed)
+  const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
+    setSidebarMode(mode)
   }, [])
 
   const handleSettingsOpen = useCallback(() => {
@@ -659,7 +653,7 @@ export function AgentChatLayout({
     && nextScheduledAt,
   )
   const showBottomSentinel = !initialLoading && !hasMoreNewer
-  const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < SIDEBAR_MOBILE_BREAKPOINT_PX ? 2 : 3
+  const starterPromptCount = typeof window !== 'undefined' && window.innerWidth < 768 ? 2 : 3
   const {
     starterPrompts,
     starterPromptsLoading,
@@ -804,7 +798,7 @@ export function AgentChatLayout({
     previewActionsDisabled,
   ])
 
-  const mainClassName = `agent-chat-main${sidebarCollapsed ? ' agent-chat-main--sidebar-collapsed' : ''}`
+  const mainClassName = 'agent-chat-main'
   const sidebarSettings = useMemo(() => ({
     context: currentContext,
     viewerEmail: viewerEmail ?? null,
@@ -831,8 +825,8 @@ export function AgentChatLayout({
   return (
     <>
       <ChatSidebar
-        defaultCollapsed={sidebarCollapsed}
-        onToggle={handleSidebarToggle}
+        desktopMode={sidebarMode}
+        onDesktopModeChange={handleSidebarModeChange}
         agents={agentRoster}
         favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}
@@ -877,7 +871,7 @@ export function AgentChatLayout({
           shareDisabledReason={previewActionsDisabledReason}
           onBlockedShareClick={onBlockedCollaborate}
           signupPreviewState={signupPreviewState}
-	          sidebarCollapsed={sidebarCollapsed}
+	          sidebarMode={sidebarMode}
 	        >
             {showHighPriorityBanner && highPriorityBanner ? (
               <HighPriorityBanner
@@ -925,7 +919,7 @@ export function AgentChatLayout({
         taskQuota={taskQuota}
         manageBillingUrl={contactPackManageUrl}
       />
-      <main className={mainClassName}>
+      <main className={mainClassName} data-sidebar-mode={sidebarMode}>
         <div
           id="agent-workspace-root"
           style={composerPalette.cssVars}
