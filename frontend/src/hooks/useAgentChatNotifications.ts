@@ -21,9 +21,10 @@ function getAudioContextConstructor(): AudioContextConstructor | null {
   if (typeof window === 'undefined') {
     return null
   }
-  const candidate = (window as Window & { webkitAudioContext?: AudioContextConstructor }).AudioContext
-    ?? (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext
-  return candidate ?? null
+  if (typeof AudioContext !== 'undefined') {
+    return AudioContext
+  }
+  return (window as Window & { webkitAudioContext?: AudioContextConstructor }).webkitAudioContext ?? null
 }
 
 export function nativeNotificationsSupported(): boolean {
