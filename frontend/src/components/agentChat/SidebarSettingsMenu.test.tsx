@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { SidebarSettingsMenu } from './SidebarSettingsMenu'
 
@@ -79,5 +79,30 @@ describe('SidebarSettingsMenu', () => {
 
     expect(await screen.findByText('Acme Ops')).toBeInTheDocument()
     expect(screen.queryByText('person@example.com')).not.toBeInTheDocument()
+  })
+
+  it('renders the notifications toggle with permission status and handles changes', async () => {
+    const handleNotificationsEnabledChange = vi.fn()
+
+    render(
+      <SidebarSettingsMenu
+        context={{ type: 'personal', id: '1', name: 'Personal' }}
+        viewerEmail="person@example.com"
+        isProprietaryMode={true}
+        notificationsEnabled={true}
+        notificationStatus="needs_permission"
+        onNotificationsEnabledChange={handleNotificationsEnabledChange}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
+
+    const toggle = await screen.findByRole('switch', { name: /Notifications & sound/i })
+    expect(toggle).toHaveAttribute('aria-checked', 'true')
+    expect(screen.getByText('Needs browser permission')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(handleNotificationsEnabledChange).toHaveBeenCalledWith(false)
   })
 })

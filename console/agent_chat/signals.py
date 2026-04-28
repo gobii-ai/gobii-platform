@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
+from django.utils.text import Truncator
 
 from api.models import (
     AgentSpawnRequest,
@@ -99,6 +100,49 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
         _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID[str(agent.id)] = normalized_processing_active
     for user_id in _resolve_profile_listener_user_ids(agent):
         _send(user_profile_group_name(user_id), "agent_profile_event", payload)
+
+
+def _build_message_notification_preview(message: PersistentAgentMessage) -> str:
+    body = " ".join((message.body or "").split())
+    if body:
+        return Truncator(body).chars(160)
+    return "New agent message"
+
+
+def emit_message_notification(message: PersistentAgentMessage) -> None:
+    """Broadcast a lightweight outbound-message notification to session listeners."""
+    agent = getattr(message, "owner_agent", None)
+    if not message or not agent or not getattr(agent, "id", None):
+        return
+
+    workspace_type = "organization" if agent.organization_id else "personal"
+    workspace_id = agent.organization_id or agent.user_id
+    if workspace_id is None:
+        return
+
+    channel = "web"
+    if message.conversation_id:
+        channel = message.conversation.channel
+    elif message.from_endpoint_id:
+        channel = message.from_endpoint.channel
+
+    payload = {
+        "agent_id": str(agent.id),
+        "agent_name": agent.name or "Agent",
+        "agent_avatar_url": agent.get_avatar_thumbnail_url(),
+        "workspace": {
+            "type": workspace_type,
+            "id": str(workspace_id),
+        },
+        "message": {
+            "id": str(message.id),
+            "body_preview": _build_message_notification_preview(message),
+            "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+            "channel": channel,
+        },
+    }
+    for user_id in _resolve_profile_listener_user_ids(agent):
+        _send(user_profile_group_name(user_id), "message_notification_event", payload)
 
 
 def emit_agent_planning_state_update(
@@ -265,7 +309,11 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
     def _on_commit():
         # Re-fetch to ensure we have committed data
         try:
-            msg = PersistentAgentMessage.objects.get(id=message_id)
+            msg = (
+                PersistentAgentMessage.objects
+                .select_related("owner_agent", "conversation", "from_endpoint")
+                .get(id=message_id)
+            )
         except PersistentAgentMessage.DoesNotExist:
             return
         if is_hidden:
@@ -281,6 +329,11 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             logger.exception("Failed to serialize agent message %s: %s", message_id, exc)
             return
         _send(_group_name(owner_agent_id), "timeline_event", payload, agent_id=str(owner_agent_id))
+        if msg.is_outbound:
+            try:
+                emit_message_notification(msg)
+            except Exception:
+                logger.debug("Failed to broadcast message notification for %s", message_id, exc_info=True)
         try:
             audit_payload = serialize_message(msg)
             _broadcast_audit_event(str(owner_agent_id), audit_payload)

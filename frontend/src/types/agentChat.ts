@@ -107,6 +107,24 @@ export type ProcessingSnapshot = {
   nextScheduledAt?: string | null
 }
 
+export type AgentMessageNotificationWorkspace = {
+  type: 'personal' | 'organization'
+  id: string
+}
+
+export type AgentMessageNotification = {
+  agent_id: string
+  agent_name: string
+  agent_avatar_url: string | null
+  workspace: AgentMessageNotificationWorkspace
+  message: {
+    id: string
+    body_preview: string
+    timestamp: string | null
+    channel: string
+  }
+}
+
 export type HumanInputOption = {
   key: string
   title: string

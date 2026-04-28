@@ -7080,6 +7080,7 @@
 }
 
 .sidebar-settings__link,
+.sidebar-settings__notification-toggle,
 .sidebar-settings__credits-trigger {
   display: flex;
   align-items: center;
@@ -7100,15 +7101,76 @@
 }
 
 .sidebar-settings__link:hover,
+.sidebar-settings__notification-toggle:hover,
 .sidebar-settings__credits-trigger:hover {
   background: rgba(255, 255, 255, 0.1);
   color: #ffffff;
 }
 
 .sidebar-settings__link:focus-visible,
+.sidebar-settings__notification-toggle:focus-visible,
 .sidebar-settings__credits-trigger:focus-visible {
   outline: 2px solid rgba(221, 214, 254, 0.36);
   outline-offset: 1px;
+}
+
+.sidebar-settings__notification-toggle {
+  justify-content: space-between;
+  min-height: 2.8rem;
+}
+
+.sidebar-settings__notification-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.12rem;
+}
+
+.sidebar-settings__notification-title {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.sidebar-settings__notification-status {
+  padding-left: 1.55rem;
+  color: rgba(221, 214, 254, 0.76);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.sidebar-settings__switch {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.2rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  transition: background 0.18s ease;
+}
+
+.sidebar-settings__switch[data-checked='true'] {
+  background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+}
+
+.sidebar-settings__switch-thumb {
+  position: absolute;
+  top: 0.16rem;
+  left: 0.16rem;
+  width: 0.98rem;
+  height: 0.98rem;
+  border-radius: 999px;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.28);
+  transition: transform 0.18s ease;
+}
+
+.sidebar-settings__switch[data-checked='true'] .sidebar-settings__switch-thumb {
+  transform: translateX(0.9rem);
 }
 
 .sidebar-settings__credits {

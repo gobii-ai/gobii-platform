@@ -689,6 +689,7 @@ class UserPreference(models.Model):
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
+    KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
     PREFERENCE_DEFINITIONS = {
         KEY_AGENT_CHAT_ROSTER_SORT_MODE: {
@@ -703,6 +704,10 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: {
             "default": None,
             "type": "nullable_boolean",
+        },
+        KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: {
+            "default": True,
+            "type": "boolean",
         },
         KEY_USER_TIMEZONE: {
             "default": "",

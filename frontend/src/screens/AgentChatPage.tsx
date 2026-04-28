@@ -1,4 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Dispatch,
+  type MutableRefObject,
+  type ReactNode,
+  type SetStateAction,
+} from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
 import noiseLightTextureUrl from '../assets/textures/noise-light.png'
@@ -17,10 +29,12 @@ import {
 } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
+  parseBooleanPreference,
   parseNullableBooleanPreference,
   updateUserPreferences,
   parseFavoriteAgentIdsPreference,
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
+  USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
@@ -40,6 +54,7 @@ import { useAgentRoster } from '../hooks/useAgentRoster'
 import { useAgentQuickSettings } from '../hooks/useAgentQuickSettings'
 import { useAgentAddons } from '../hooks/useAgentAddons'
 import { useAgentInsights } from '../hooks/useAgentInsights'
+import { useAgentChatNotifications } from '../hooks/useAgentChatNotifications'
 import { useRecentAgentSubscriptions } from '../hooks/useRecentAgentSubscriptions'
 import { useAgentPanelRequestsEnabled } from '../hooks/useAgentPanelRequestsEnabled'
 import { useConsoleContextSwitcher } from '../hooks/useConsoleContextSwitcher'
@@ -114,6 +129,18 @@ function buildAgentChatPath(pathname: string, agentId: string): string {
     return `/console/agents/${agentId}/chat/`
   }
   return `/app/agents/${agentId}`
+}
+
+function navigateToAgentChat(agentId: string): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  const nextPath = buildAgentChatPath(window.location.pathname, agentId)
+  const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
+  window.history.pushState({ agentId }, '', nextUrl)
+  if (window.location.pathname.startsWith('/app')) {
+    window.dispatchEvent(new PopStateEvent('popstate'))
+  }
 }
 
 function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
@@ -425,8 +452,84 @@ type AgentRosterQueryData = {
   agentRosterSortMode?: AgentRosterSortMode
   favoriteAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
+  agentChatNotificationsEnabled?: boolean
   agents: AgentRosterEntry[]
   llmIntelligence?: unknown
+}
+
+type AgentRosterPreferenceField =
+  | 'agentRosterSortMode'
+  | 'favoriteAgentIds'
+  | 'insightsPanelExpanded'
+  | 'agentChatNotificationsEnabled'
+
+type AgentRosterPreferenceState = {
+  agentRosterSortMode: AgentRosterSortMode
+  favoriteAgentIds: string[]
+  insightsPanelExpanded: boolean | null
+  agentChatNotificationsEnabled: boolean
+}
+
+type AgentRosterPreferenceComparator<K extends AgentRosterPreferenceField> = (
+  currentValue: AgentRosterQueryData[K] | undefined,
+  nextValue: AgentRosterPreferenceState[K],
+) => boolean
+
+type PersistAgentRosterPreferenceOptions<K extends AgentRosterPreferenceField> = {
+  field: K
+  preferenceKey: string
+  setState: Dispatch<SetStateAction<AgentRosterPreferenceState[K]>>
+  parsePersistedValue: (value: unknown) => AgentRosterPreferenceState[K]
+  currentValue?: AgentRosterPreferenceState[K] | undefined
+  beforePersist?: (() => void) | undefined
+  rollbackOnError?: boolean | undefined
+  areEqual?: AgentRosterPreferenceComparator<K> | undefined
+}
+
+const AGENT_ROSTER_QUERY_KEY = ['agent-roster'] as const
+
+function useHydratedAgentRosterPreference<StateValue>(
+  serverValue: unknown,
+  hydratedRef: MutableRefObject<boolean>,
+  setValue: Dispatch<SetStateAction<StateValue>>,
+  parseValue: (value: unknown) => StateValue,
+): void {
+  useEffect(() => {
+    if (serverValue === undefined || hydratedRef.current) {
+      return
+    }
+    hydratedRef.current = true
+    setValue(parseValue(serverValue))
+  }, [hydratedRef, parseValue, serverValue, setValue])
+}
+
+function favoriteAgentIdsPreferenceEquals(
+  currentValue: AgentRosterQueryData['favoriteAgentIds'] | undefined,
+  nextValue: string[],
+): boolean {
+  const normalizedCurrentValue = Array.isArray(currentValue)
+    ? currentValue.filter((value): value is string => typeof value === 'string')
+    : []
+  return areStringArraysEqual(normalizedCurrentValue, nextValue)
+}
+
+function updateAgentRosterPreferenceInQueryData<K extends AgentRosterPreferenceField>(
+  current: AgentRosterQueryData | undefined,
+  field: K,
+  nextValue: AgentRosterPreferenceState[K],
+  areEqual?: AgentRosterPreferenceComparator<K>,
+): AgentRosterQueryData | undefined {
+  if (!isAgentRosterQueryData(current)) {
+    return current
+  }
+  const comparator: AgentRosterPreferenceComparator<K> = areEqual ?? ((left, right) => Object.is(left, right))
+  if (comparator(current[field], nextValue)) {
+    return current
+  }
+  return {
+    ...current,
+    [field]: nextValue,
+  }
 }
 
 type AgentChatPageStyle = CSSProperties & Record<'--agent-chat-grain-texture', string>
@@ -1285,17 +1388,22 @@ export function AgentChatPage({
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
   const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
+  const [agentChatNotificationsEnabled, setAgentChatNotificationsEnabled] = useState<boolean>(() => (
+    rosterQuery.data?.agentChatNotificationsEnabled === undefined
+      ? false
+      : parseBooleanPreference(rosterQuery.data.agentChatNotificationsEnabled)
+  ))
   const hasHydratedAgentRosterSortModeRef = useRef(false)
   const hasHydratedInsightsPanelExpandedPreferenceRef = useRef(false)
+  const hasHydratedAgentChatNotificationsEnabledRef = useRef(false)
+  const notificationPermissionPromptAttemptedRef = useRef(false)
 
-  useEffect(() => {
-    const serverSortMode = rosterQuery.data?.agentRosterSortMode
-    if (!serverSortMode || hasHydratedAgentRosterSortModeRef.current) {
-      return
-    }
-    hasHydratedAgentRosterSortModeRef.current = true
-    setAgentRosterSortMode(serverSortMode)
-  }, [rosterQuery.data?.agentRosterSortMode])
+  useHydratedAgentRosterPreference(
+    rosterQuery.data?.agentRosterSortMode,
+    hasHydratedAgentRosterSortModeRef,
+    setAgentRosterSortMode,
+    parseAgentRosterSortMode,
+  )
 
   useEffect(() => {
     const serverFavoriteAgentIds = Array.isArray(rosterQuery.data?.favoriteAgentIds)
@@ -1308,106 +1416,81 @@ export function AgentChatPage({
     ))
   }, [rosterQuery.data?.favoriteAgentIds])
 
-  useEffect(() => {
-    const serverInsightsPanelExpanded = rosterQuery.data?.insightsPanelExpanded
-    if (serverInsightsPanelExpanded === undefined || hasHydratedInsightsPanelExpandedPreferenceRef.current) {
-      return
-    }
-    hasHydratedInsightsPanelExpandedPreferenceRef.current = true
-    setInsightsPanelExpandedPreference(parseNullableBooleanPreference(serverInsightsPanelExpanded))
-  }, [rosterQuery.data?.insightsPanelExpanded])
+  useHydratedAgentRosterPreference(
+    rosterQuery.data?.insightsPanelExpanded,
+    hasHydratedInsightsPanelExpandedPreferenceRef,
+    setInsightsPanelExpandedPreference,
+    parseNullableBooleanPreference,
+  )
 
-  const handleAgentRosterSortModeChange = useCallback(
-    (nextSortMode: AgentRosterSortMode) => {
-      setAgentRosterSortMode(nextSortMode)
+  useHydratedAgentRosterPreference(
+    rosterQuery.data?.agentChatNotificationsEnabled,
+    hasHydratedAgentChatNotificationsEnabledRef,
+    setAgentChatNotificationsEnabled,
+    parseBooleanPreference,
+  )
+
+  const updateAgentRosterPreferenceInCache = useCallback(
+    function updateAgentRosterPreferenceInCache<K extends AgentRosterPreferenceField>(
+      field: K,
+      nextValue: AgentRosterPreferenceState[K],
+      areEqual?: AgentRosterPreferenceComparator<K>,
+    ) {
       queryClient.setQueriesData<AgentRosterQueryData>(
-        { queryKey: ['agent-roster'] },
-        (current) => {
-          if (!isAgentRosterQueryData(current)) {
-            return current
-          }
-          if (current.agentRosterSortMode === nextSortMode) {
-            return current
-          }
-          return {
-            ...current,
-            agentRosterSortMode: nextSortMode,
-          }
-        },
+        { queryKey: AGENT_ROSTER_QUERY_KEY },
+        (current) => updateAgentRosterPreferenceInQueryData(current, field, nextValue, areEqual),
       )
+    },
+    [queryClient],
+  )
+
+  const persistAgentRosterPreference = useCallback(
+    function persistAgentRosterPreference<K extends AgentRosterPreferenceField>(
+      nextValue: AgentRosterPreferenceState[K],
+      {
+        field,
+        preferenceKey,
+        setState,
+        parsePersistedValue,
+        currentValue,
+        beforePersist,
+        rollbackOnError = true,
+        areEqual,
+      }: PersistAgentRosterPreferenceOptions<K>,
+    ) {
+      setState(nextValue)
+      updateAgentRosterPreferenceInCache(field, nextValue, areEqual)
+      beforePersist?.()
 
       void updateUserPreferences({
         preferences: {
-          [USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE]: nextSortMode,
+          [preferenceKey]: nextValue,
         },
       }).then((response) => {
-        const persistedSortMode = parseAgentRosterSortMode(
-          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE],
-        )
-        setAgentRosterSortMode(persistedSortMode)
-        queryClient.setQueriesData<AgentRosterQueryData>(
-          { queryKey: ['agent-roster'] },
-          (current) => {
-            if (!isAgentRosterQueryData(current)) {
-              return current
-            }
-            if (current.agentRosterSortMode === persistedSortMode) {
-              return current
-            }
-            return {
-              ...current,
-              agentRosterSortMode: persistedSortMode,
-            }
-          },
-        )
-      }).catch(() => undefined)
+        const persistedValue = parsePersistedValue(response.preferences[preferenceKey])
+        setState(persistedValue)
+        updateAgentRosterPreferenceInCache(field, persistedValue, areEqual)
+      }).catch(() => {
+        if (rollbackOnError && currentValue !== undefined) {
+          setState(currentValue)
+          updateAgentRosterPreferenceInCache(field, currentValue, areEqual)
+        }
+      })
     },
-    [queryClient],
+    [updateAgentRosterPreferenceInCache],
   )
 
-  const updateFavoriteAgentIdsInRosterCache = useCallback(
-    (nextFavoriteAgentIds: string[]) => {
-      queryClient.setQueriesData<AgentRosterQueryData>(
-        { queryKey: ['agent-roster'] },
-        (current) => {
-          if (!isAgentRosterQueryData(current)) {
-            return current
-          }
-          const currentFavoriteAgentIds = Array.isArray(current.favoriteAgentIds)
-            ? current.favoriteAgentIds.filter((value): value is string => typeof value === 'string')
-            : []
-          if (areStringArraysEqual(currentFavoriteAgentIds, nextFavoriteAgentIds)) {
-            return current
-          }
-          return {
-            ...current,
-            favoriteAgentIds: nextFavoriteAgentIds,
-          }
-        },
-      )
+  const handleAgentRosterSortModeChange = useCallback(
+    (nextSortMode: AgentRosterSortMode) => {
+      persistAgentRosterPreference(nextSortMode, {
+        field: 'agentRosterSortMode',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
+        setState: setAgentRosterSortMode,
+        parsePersistedValue: parseAgentRosterSortMode,
+        currentValue: agentRosterSortMode,
+      })
     },
-    [queryClient],
-  )
-
-  const updateInsightsPanelExpandedInRosterCache = useCallback(
-    (nextInsightsPanelExpanded: boolean | null) => {
-      queryClient.setQueriesData<AgentRosterQueryData>(
-        { queryKey: ['agent-roster'] },
-        (current) => {
-          if (!isAgentRosterQueryData(current)) {
-            return current
-          }
-          if (current.insightsPanelExpanded === nextInsightsPanelExpanded) {
-            return current
-          }
-          return {
-            ...current,
-            insightsPanelExpanded: nextInsightsPanelExpanded,
-          }
-        },
-      )
-    },
-    [queryClient],
+    [agentRosterSortMode, persistAgentRosterPreference],
   )
 
   const handleToggleAgentFavorite = useCallback(
@@ -1416,42 +1499,29 @@ export function AgentChatPage({
         ? favoriteAgentIds.filter((candidateId) => candidateId !== agentId)
         : [...favoriteAgentIds, agentId]
 
-      setFavoriteAgentIds(nextFavoriteAgentIds)
-      updateFavoriteAgentIdsInRosterCache(nextFavoriteAgentIds)
-
-      void updateUserPreferences({
-        preferences: {
-          [USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS]: nextFavoriteAgentIds,
-        },
-      }).then((response) => {
-        const persistedFavoriteAgentIds = parseFavoriteAgentIdsPreference(
-          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS],
-        )
-        setFavoriteAgentIds(persistedFavoriteAgentIds)
-        updateFavoriteAgentIdsInRosterCache(persistedFavoriteAgentIds)
-      }).catch(() => undefined)
+      persistAgentRosterPreference(nextFavoriteAgentIds, {
+        field: 'favoriteAgentIds',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+        setState: setFavoriteAgentIds,
+        parsePersistedValue: parseFavoriteAgentIdsPreference,
+        currentValue: favoriteAgentIds,
+        areEqual: favoriteAgentIdsPreferenceEquals,
+      })
     },
-    [favoriteAgentIds, updateFavoriteAgentIdsInRosterCache],
+    [favoriteAgentIds, persistAgentRosterPreference],
   )
 
   const handleInsightsPanelExpandedPreferenceChange = useCallback(
     (nextInsightsPanelExpanded: boolean) => {
-      setInsightsPanelExpandedPreference(nextInsightsPanelExpanded)
-      updateInsightsPanelExpandedInRosterCache(nextInsightsPanelExpanded)
-
-      void updateUserPreferences({
-        preferences: {
-          [USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED]: nextInsightsPanelExpanded,
-        },
-      }).then((response) => {
-        const persistedInsightsPanelExpanded = parseNullableBooleanPreference(
-          response.preferences[USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED],
-        )
-        setInsightsPanelExpandedPreference(persistedInsightsPanelExpanded)
-        updateInsightsPanelExpandedInRosterCache(persistedInsightsPanelExpanded)
-      }).catch(() => undefined)
+      persistAgentRosterPreference(nextInsightsPanelExpanded, {
+        field: 'insightsPanelExpanded',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
+        setState: setInsightsPanelExpandedPreference,
+        parsePersistedValue: parseNullableBooleanPreference,
+        currentValue: insightsPanelExpandedPreference,
+      })
     },
-    [updateInsightsPanelExpandedInRosterCache],
+    [insightsPanelExpandedPreference, persistAgentRosterPreference],
   )
 
   useEffect(() => {
@@ -1993,6 +2063,107 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  const visibleRosterAgentIds = useMemo(
+    () => rosterAgents.map((agent) => agent.id),
+    [rosterAgents],
+  )
+  const openAgentChat = useCallback(
+    (nextAgentId: string, pendingMeta: Omit<AgentSwitchMeta, 'agentId'> = {}) => {
+      if (nextAgentId === activeAgentIdRef.current) {
+        return
+      }
+      const rosterEntry = rosterAgents.find((agent) => agent.id === nextAgentId)
+      pendingAgentMetaRef.current = {
+        agentId: nextAgentId,
+        agentName: pendingMeta.agentName ?? rosterEntry?.name ?? null,
+        agentColorHex: pendingMeta.agentColorHex ?? rosterEntry?.displayColorHex ?? null,
+        agentAvatarUrl: pendingMeta.agentAvatarUrl ?? rosterEntry?.avatarUrl ?? null,
+        processingActive: pendingMeta.processingActive ?? rosterEntry?.processingActive,
+        signupPreviewState: pendingMeta.signupPreviewState ?? rosterEntry?.signupPreviewState ?? 'none',
+        planningState: pendingMeta.planningState ?? rosterEntry?.planningState ?? 'skipped',
+      }
+      locallySelectedAgentIdsRef.current.add(nextAgentId)
+      setSwitchingAgentId(nextAgentId)
+      setActiveAgentId(nextAgentId)
+      navigateToAgentChat(nextAgentId)
+    },
+    [rosterAgents],
+  )
+  const {
+    notificationPermission,
+    notificationStatus,
+    requestNotificationPermission,
+    handleMessageNotificationEvent,
+  } = useAgentChatNotifications({
+    enabled: agentChatNotificationsEnabled,
+    currentContext: effectiveContext,
+    activeAgentId,
+    availableAgentIds: visibleRosterAgentIds,
+    onOpenAgent: openAgentChat,
+  })
+  const persistAgentChatNotificationsEnabled = useCallback(
+    (
+      nextAgentChatNotificationsEnabled: boolean,
+      options: { rollbackOnError?: boolean } = {},
+    ) => {
+      persistAgentRosterPreference(nextAgentChatNotificationsEnabled, {
+        field: 'agentChatNotificationsEnabled',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
+        setState: setAgentChatNotificationsEnabled,
+        parsePersistedValue: parseBooleanPreference,
+        currentValue: agentChatNotificationsEnabled,
+        rollbackOnError: options.rollbackOnError,
+      })
+    },
+    [agentChatNotificationsEnabled, persistAgentRosterPreference],
+  )
+
+  useEffect(() => {
+    if (rosterQuery.data?.agentChatNotificationsEnabled === undefined) {
+      return
+    }
+    if (!agentChatNotificationsEnabled) {
+      notificationPermissionPromptAttemptedRef.current = false
+      return
+    }
+    if (notificationPermission === 'denied') {
+      notificationPermissionPromptAttemptedRef.current = false
+      persistAgentChatNotificationsEnabled(false, { rollbackOnError: false })
+      return
+    }
+    if (
+      notificationPermission !== 'default'
+      || notificationPermissionPromptAttemptedRef.current
+    ) {
+      return
+    }
+    notificationPermissionPromptAttemptedRef.current = true
+    void requestNotificationPermission()
+  }, [
+    agentChatNotificationsEnabled,
+    notificationPermission,
+    rosterQuery.data?.agentChatNotificationsEnabled,
+    persistAgentChatNotificationsEnabled,
+    requestNotificationPermission,
+  ])
+
+  const handleAgentChatNotificationsEnabledChange = useCallback(
+    (nextAgentChatNotificationsEnabled: boolean) => {
+      if (!nextAgentChatNotificationsEnabled) {
+        persistAgentChatNotificationsEnabled(false)
+        return
+      }
+
+      notificationPermissionPromptAttemptedRef.current = true
+      void requestNotificationPermission().then((permission) => {
+        if (permission !== 'granted') {
+          return
+        }
+        persistAgentChatNotificationsEnabled(true)
+      })
+    },
+    [persistAgentChatNotificationsEnabled, requestNotificationPermission],
+  )
   const desiredSocketSubscriptions = useRecentAgentSubscriptions({
     activeAgentId,
     liveAgentId,
@@ -2005,6 +2176,7 @@ export function AgentChatPage({
     contextOverride: contextReady ? effectiveContext : null,
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
+    onMessageNotificationEvent: handleMessageNotificationEvent,
   })
   useEffect(() => {
     if (!agentContextReady) return
@@ -2628,29 +2800,16 @@ export function AgentChatPage({
 
   const handleSelectAgent = useCallback(
     (agent: AgentRosterEntry) => {
-      if (agent.id === activeAgentId) {
-        return
-      }
-      pendingAgentMetaRef.current = {
-        agentId: agent.id,
+      openAgentChat(agent.id, {
         agentName: agent.name,
         agentColorHex: agent.displayColorHex,
         agentAvatarUrl: agent.avatarUrl,
         processingActive: agent.processingActive,
         signupPreviewState: agent.signupPreviewState ?? 'none',
         planningState: agent.planningState ?? 'skipped',
-      }
-      locallySelectedAgentIdsRef.current.add(agent.id)
-      setSwitchingAgentId(agent.id)
-      setActiveAgentId(agent.id)
-      const nextPath = buildAgentChatPath(window.location.pathname, agent.id)
-      const nextUrl = `${nextPath}${window.location.search}${window.location.hash}`
-      window.history.pushState({ agentId: agent.id }, '', nextUrl)
-      if (window.location.pathname.startsWith('/app')) {
-        window.dispatchEvent(new PopStateEvent('popstate'))
-      }
+      })
     },
-    [activeAgentId],
+    [openAgentChat],
   )
 
   const handleCreateAgent = useCallback(() => {
@@ -3814,6 +3973,9 @@ export function AgentChatPage({
         sidebarBillingUrl={billingManageUrl}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
+        sidebarNotificationsEnabled={agentChatNotificationsEnabled}
+        sidebarNotificationStatus={notificationStatus}
+        onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}

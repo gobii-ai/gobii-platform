@@ -1,7 +1,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 
 import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
-import type { ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import {
   injectRealtimeEventIntoCache,
@@ -78,6 +78,7 @@ export function routeAgentChatSocketMessage({
   receiveStreamEvent,
   onCreditEvent,
   onAgentProfileEvent,
+  onMessageNotificationEvent,
 }: {
   payload: unknown
   queryClient: QueryClient
@@ -88,6 +89,7 @@ export function routeAgentChatSocketMessage({
   receiveStreamEvent: (payload: StreamEventPayload) => void
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
+  onMessageNotificationEvent?: ((payload: AgentMessageNotification) => void) | null
 }): AgentChatSocketMessageOutcome {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     return { type: 'ignored' }
@@ -190,6 +192,16 @@ export function routeAgentChatSocketMessage({
 
   if (messageType === 'credit.event' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
     onCreditEvent?.(message.payload as Record<string, unknown>)
+    return { type: 'handled' }
+  }
+
+  if (
+    messageType === 'message.notification'
+    && message.payload
+    && typeof message.payload === 'object'
+    && !Array.isArray(message.payload)
+  ) {
+    onMessageNotificationEvent?.(message.payload as AgentMessageNotification)
     return { type: 'handled' }
   }
 

@@ -678,6 +678,7 @@ class AgentChatAccessTests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("agent_roster_sort_mode"), "recent")
         self.assertEqual(payload.get("favorite_agent_ids"), [])
+        self.assertTrue(payload.get("agent_chat_notifications_enabled"))
         roster_ids = {entry["id"] for entry in payload.get("agents", [])}
         self.assertIn(str(self.org_agent.id), roster_ids)
         self.assertIn(str(self.org_agent_two.id), roster_ids)
@@ -722,6 +723,23 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("insights_panel_expanded"))
+
+    def test_roster_includes_agent_chat_notifications_enabled_preference(self):
+        UserPreference.update_known_preferences(
+            self.user,
+            {
+                UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: False,
+            },
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload.get("agent_chat_notifications_enabled"))
 
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"

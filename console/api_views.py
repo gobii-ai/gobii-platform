@@ -2379,6 +2379,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         insights_panel_expanded = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
         )
+        agent_chat_notifications_enabled = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED
+        )
         if for_agent_id:
             override_for_agent, error_response, requested_agent_status = self._resolve_override_for_agent(
                 request,
@@ -2550,6 +2553,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
                 "insights_panel_expanded": insights_panel_expanded,
+                "agent_chat_notifications_enabled": agent_chat_notifications_enabled,
                 "billingStatus": billing_status,
                 "agents": payload,
                 "llmIntelligence": llm_intelligence,
