@@ -10,6 +10,7 @@ import {
   removeRequestedSecrets,
   resolveContactRequests,
   resolveSpawnRequest,
+  dismissHumanInputRequest,
   respondToHumanInputRequest,
   respondToHumanInputRequestsBatch,
   skipAgentPlanning,
@@ -3464,13 +3465,14 @@ export function AgentChatPage({
       return
     }
     if ('responses' in response) {
-      const result = await respondToHumanInputRequestsBatch(activeAgentId, {
+      const payload = {
         responses: response.responses.map((item) => (
           item.selectedOptionKey
             ? { request_id: item.requestId, selected_option_key: item.selectedOptionKey }
             : { request_id: item.requestId, free_text: item.freeText?.trim() ?? '' }
         )),
-      })
+      }
+      const result = await respondToHumanInputRequestsBatch(activeAgentId, payload)
       replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
       if (result.event) {
         receiveRealtimeEvent(result.event)
@@ -3493,6 +3495,21 @@ export function AgentChatPage({
       }
     } else {
       return
+    }
+    if (!autoScrollPinnedRef.current) {
+      return
+    }
+    scrollToBottom()
+  }, [activeAgentId, queryClient, receiveRealtimeEvent, scrollToBottom])
+
+  const handleDismissHumanInputRequest = useCallback(async (requestId: string) => {
+    if (!activeAgentId) {
+      return
+    }
+    const result = await dismissHumanInputRequest(activeAgentId, requestId)
+    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+    if (result.event) {
+      receiveRealtimeEvent(result.event)
     }
     if (!autoScrollPinnedRef.current) {
       return
@@ -3843,6 +3860,7 @@ export function AgentChatPage({
         onLoadOlder={requestPreviousPage}
         onSendMessage={handleSend}
         onRespondHumanInputRequest={handleRespondHumanInputRequest}
+        onDismissHumanInputRequest={handleDismissHumanInputRequest}
         onResolveSpawnRequest={handleResolveSpawnRequest}
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}

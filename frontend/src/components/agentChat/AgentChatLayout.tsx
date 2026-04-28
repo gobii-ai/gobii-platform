@@ -221,6 +221,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
       | { requestId: string; selectedOptionKey?: string; freeText?: string }
       | { batchId: string; responses: Array<{ requestId: string; selectedOptionKey?: string; freeText?: string }> }
   ) => Promise<void>
+  onDismissHumanInputRequest?: (requestId: string) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
@@ -366,6 +367,7 @@ export function AgentChatLayout({
   pipedreamAppSearchUrl = null,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
+  onDismissHumanInputRequest,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
@@ -1121,6 +1123,7 @@ export function AgentChatLayout({
               onSkipPlanning={onSkipPlanning}
               skipPlanningBusy={skipPlanningBusy}
               onRespondHumanInput={onRespondHumanInputRequest}
+              onDismissHumanInput={onDismissHumanInputRequest}
               onResolveSpawnRequest={onResolveSpawnRequest}
               onFulfillRequestedSecrets={onFulfillRequestedSecrets}
               onRemoveRequestedSecrets={onRemoveRequestedSecrets}

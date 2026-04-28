@@ -38,6 +38,7 @@ from django.utils.text import get_valid_filename
 
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import (
+    dismiss_human_input_request,
     submit_human_input_response,
     submit_human_input_responses_batch,
 )
@@ -3071,6 +3072,42 @@ class AgentHumanInputRequestResponseAPIView(LoginRequiredMixin, View):
                 human_input_request,
                 selected_option_key=selected_option_key,
                 free_text=free_text,
+                actor_user_id=request.user.id,
+            )
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+
+        return JsonResponse(
+            {
+                "event": serialize_message_event(message),
+                **_pending_action_payload(agent, request.user),
+            },
+            status=201,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentHumanInputRequestDismissAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, request_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id, allow_shared=True)
+        human_input_request = get_object_or_404(
+            PersistentAgentHumanInputRequest.objects.select_related(
+                "agent",
+                "conversation",
+                "requested_message__from_endpoint",
+            ),
+            id=request_id,
+            agent=agent,
+        )
+
+        if human_input_request.status != PersistentAgentHumanInputRequest.Status.PENDING:
+            return JsonResponse({"error": "This request is no longer pending."}, status=400)
+
+        try:
+            message = dismiss_human_input_request(
+                human_input_request,
                 actor_user_id=request.user.id,
             )
         except ValueError as exc:

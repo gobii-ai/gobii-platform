@@ -1,6 +1,6 @@
 import { useId, useLayoutEffect, useRef, useState } from 'react'
 
-import { CircleHelp } from 'lucide-react'
+import { Info } from 'lucide-react'
 import { Button } from 'react-aria-components'
 import { createPortal } from 'react-dom'
 
@@ -77,7 +77,7 @@ export function InlineInfoTooltipButton({
           setIsPinnedOpen(false)
         }}
       >
-        <CircleHelp className="h-3.5 w-3.5" aria-hidden="true" />
+        <Info className="h-3.5 w-3.5" aria-hidden="true" />
       </Button>
       {isOpen && tooltipPosition && typeof document !== 'undefined'
         ? createPortal(

@@ -94,12 +94,14 @@ vi.mock('../api/agentSpawnIntent', () => ({
 }))
 
 vi.mock('../api/agentChat', () => ({
+  dismissHumanInputRequest: vi.fn(),
   fulfillRequestedSecrets: vi.fn(),
   removeRequestedSecrets: vi.fn(),
   resolveContactRequests: vi.fn(),
   resolveSpawnRequest: vi.fn(),
   respondToHumanInputRequest: vi.fn(),
   respondToHumanInputRequestsBatch: vi.fn(),
+  skipAgentPlanning: vi.fn(),
 }))
 
 vi.mock('../api/userPreferences', () => ({

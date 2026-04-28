@@ -7,6 +7,7 @@ import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
+import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { PlanningModeStrip } from './PlanningModeStrip'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
@@ -109,9 +110,50 @@ type HumanInputComposerBatchResponse = {
 }
 
 function hasHumanInputComposerResponse(
+  request: PendingHumanInputRequest,
   response: HumanInputComposerResponse | undefined,
 ): response is HumanInputComposerResponse {
-  return Boolean(response?.selectedOptionKey || response?.freeText?.trim())
+  if (!response) {
+    return false
+  }
+  if (
+    request.inputMode === 'free_text_only'
+    || request.options.length === 0
+    || response.selectedOptionKey === HUMAN_INPUT_OTHER_OPTION_KEY
+  ) {
+    return Boolean(response.freeText?.trim())
+  }
+  return Boolean(response.selectedOptionKey)
+}
+
+function buildSubmittedHumanInputResponse(
+  request: PendingHumanInputRequest,
+  response: HumanInputComposerResponse | undefined,
+): HumanInputComposerResponse | null {
+  if (!hasHumanInputComposerResponse(request, response)) {
+    return null
+  }
+  if (
+    request.inputMode === 'free_text_only'
+    || request.options.length === 0
+    || response.selectedOptionKey === HUMAN_INPUT_OTHER_OPTION_KEY
+  ) {
+    const freeText = response.freeText?.trim()
+    if (!freeText) {
+      return null
+    }
+    return {
+      requestId: request.id,
+      freeText,
+    }
+  }
+  if (!response.selectedOptionKey) {
+    return null
+  }
+  return {
+    requestId: request.id,
+    selectedOptionKey: response.selectedOptionKey,
+  }
 }
 
 type HumanInputBatchAnalyticsProperties = {
@@ -227,6 +269,7 @@ type AgentComposerProps = {
   onSkipPlanning?: () => void | Promise<void>
   skipPlanningBusy?: boolean
   onRespondHumanInput?: (response: HumanInputComposerResponse | HumanInputComposerBatchResponse) => Promise<void>
+  onDismissHumanInput?: (requestId: string) => Promise<void>
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
@@ -290,6 +333,7 @@ export const AgentComposer = memo(function AgentComposer({
   onSkipPlanning,
   skipPlanningBusy = false,
   onRespondHumanInput,
+  onDismissHumanInput,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
@@ -342,6 +386,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [activeHumanInputRequestId, setActiveHumanInputRequestId] = useState<string | null>(null)
   const [busyHumanInputRequestId, setBusyHumanInputRequestId] = useState<string | null>(null)
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
+  const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
   const [pendingActionsCollapsedInsights, setPendingActionsCollapsedInsights] = useState(false)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
@@ -628,9 +673,10 @@ export const AgentComposer = memo(function AgentComposer({
     if (!pendingHumanInputRequests.length) {
       setActiveHumanInputRequestId(null)
       setBusyHumanInputRequestId(null)
-      setDraftHumanInputResponses((current) => (
-        Object.keys(current).length === 0 ? current : {}
-      ))
+      if (Object.keys(draftHumanInputResponsesRef.current).length > 0) {
+        draftHumanInputResponsesRef.current = {}
+        setDraftHumanInputResponses({})
+      }
       return
     }
     const hasActiveRequest = pendingHumanInputRequests.some((request) => request.id === activeHumanInputRequestId)
@@ -645,13 +691,14 @@ export const AgentComposer = memo(function AgentComposer({
 
   useEffect(() => {
     const pendingIds = new Set(pendingHumanInputRequests.map((request) => request.id))
-    setDraftHumanInputResponses((current) => {
-      const nextEntries = Object.entries(current).filter(([requestId]) => pendingIds.has(requestId))
-      if (nextEntries.length === Object.keys(current).length) {
-        return current
-      }
-      return Object.fromEntries(nextEntries)
-    })
+    const currentDrafts = draftHumanInputResponsesRef.current
+    const nextEntries = Object.entries(currentDrafts).filter(([requestId]) => pendingIds.has(requestId))
+    if (nextEntries.length === Object.keys(currentDrafts).length) {
+      return
+    }
+    const nextDrafts = Object.fromEntries(nextEntries)
+    draftHumanInputResponsesRef.current = nextDrafts
+    setDraftHumanInputResponses(nextDrafts)
   }, [pendingHumanInputRequests])
 
   useEffect(() => {
@@ -722,25 +769,18 @@ export const AgentComposer = memo(function AgentComposer({
     ?? pendingActionRequests[0]
     ?? null
   const activeHumanInputRequest =
-    pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
-    ?? null
-  const activeHumanInputDraftText = activeHumanInputRequestId
-    ? (draftHumanInputResponses[activeHumanInputRequestId]?.freeText ?? '')
-    : ''
-
-  useEffect(() => {
-    if (activePendingAction?.kind !== 'human_input' || !activeHumanInputRequestId) {
-      return
-    }
-    setBody((current) => (current === activeHumanInputDraftText ? current : activeHumanInputDraftText))
-  }, [activeHumanInputDraftText, activeHumanInputRequestId, activePendingAction?.kind])
+    activePendingAction?.kind === 'human_input'
+      ? (
+        pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
+        ?? activePendingAction.requests[0]
+        ?? null
+      )
+      : null
 
   const submitShortcutHint = shouldShowSubmitShortcutHint()
     ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
     : ''
-  const composerPlaceholder = disabledReason || (activeHumanInputRequest && activePendingAction?.kind === 'human_input'
-    ? ['Other option', submitShortcutHint].filter(Boolean).join(' · ')
-    : ['Message', submitShortcutHint].filter(Boolean).join(' · '))
+  const composerPlaceholder = disabledReason || ['Message', submitShortcutHint].filter(Boolean).join(' · ')
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -759,149 +799,12 @@ export const AgentComposer = memo(function AgentComposer({
     resolvedWorkingExpanded,
   ])
 
-  const submitHumanInputResponse = useCallback(async (
-    request: PendingHumanInputRequest,
-    response: HumanInputComposerResponse,
-  ) => {
-    if (!onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
-      return false
-    }
-
-    const batchRequests = pendingHumanInputRequests
-      .filter((candidate) => candidate.batchId === request.batchId)
-      .sort((left, right) => left.batchPosition - right.batchPosition)
-    const nextDrafts = {
-      ...draftHumanInputResponses,
-      [request.id]: response,
-    }
-
-    if (batchRequests.length > 1) {
-      const nextUnanswered = batchRequests.find((candidate) => !hasHumanInputComposerResponse(nextDrafts[candidate.id]))
-      if (nextUnanswered) {
-        const nextPendingAction = pendingActionRequests.find((candidate) => (
-          candidate.kind === 'human_input'
-          && candidate.requests.some((pendingRequest) => pendingRequest.id === nextUnanswered.id)
-        ))
-        setDraftHumanInputResponses(nextDrafts)
-        if (nextPendingAction) {
-          setActivePendingActionId(nextPendingAction.id)
-        }
-        setActiveHumanInputRequestId(nextUnanswered.id)
-        setBody('')
-        requestAnimationFrame(() => adjustTextareaHeight(true))
-        return true
-      }
-    }
-
-    try {
-      setBusyHumanInputRequestId(request.id)
-      if (batchRequests.length > 1) {
-        const responses = batchRequests
-          .map((candidate) => nextDrafts[candidate.id])
-          .filter(hasHumanInputComposerResponse)
-        if (responses.length !== batchRequests.length) {
-          setDraftHumanInputResponses(nextDrafts)
-          return true
-        }
-        await onRespondHumanInput({
-          batchId: request.batchId,
-          responses,
-        })
-        setDraftHumanInputResponses((current) => {
-          const remaining = { ...current }
-          batchRequests.forEach((candidate) => {
-            delete remaining[candidate.id]
-          })
-          return remaining
-        })
-      } else {
-        await onRespondHumanInput(response)
-        setDraftHumanInputResponses((current) => {
-          if (!current[request.id]) {
-            return current
-          }
-          const remaining = { ...current }
-          delete remaining[request.id]
-          return remaining
-        })
-      }
-      setBody('')
-      requestAnimationFrame(() => adjustTextareaHeight(true))
-      return true
-    } finally {
-      setBusyHumanInputRequestId(null)
-    }
-  }, [
-    adjustTextareaHeight,
-    busyHumanInputRequestId,
-    disabled,
-    draftHumanInputResponses,
-    isSending,
-    onRespondHumanInput,
-    pendingActionRequests,
-    pendingHumanInputRequests,
-  ])
-
   const handleActiveHumanInputRequestChange = useCallback((nextRequestId: string) => {
-    const currentRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? null
-    const trimmedBody = body.trim()
-    if (currentRequest) {
-      setDraftHumanInputResponses((current) => {
-        const next = { ...current }
-        const existing = next[currentRequest.id]
-        if (trimmedBody) {
-          next[currentRequest.id] = {
-            ...existing,
-            requestId: currentRequest.id,
-            freeText: trimmedBody,
-          }
-        } else if (existing?.selectedOptionKey) {
-          next[currentRequest.id] = {
-            ...existing,
-            requestId: currentRequest.id,
-            freeText: '',
-          }
-        } else {
-          delete next[currentRequest.id]
-        }
-        return next
-      })
-    }
     setActiveHumanInputRequestId(nextRequestId)
-  }, [activeHumanInputRequestId, body, pendingHumanInputRequests])
+  }, [])
 
   const handleActivePendingActionChange = useCallback((nextActionId: string) => {
-    const currentAction = pendingActionRequests.find((request) => request.id === activePendingActionId) ?? null
     const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
-
-    if (currentAction?.kind === 'human_input') {
-      const currentRequest = currentAction.requests.find((request) => request.id === activeHumanInputRequestId)
-        ?? currentAction.requests[0]
-        ?? null
-      const trimmedBody = body.trim()
-      if (currentRequest) {
-        setDraftHumanInputResponses((current) => {
-          const next = { ...current }
-          const existing = next[currentRequest.id]
-          if (trimmedBody) {
-            next[currentRequest.id] = {
-              ...existing,
-              requestId: currentRequest.id,
-              freeText: trimmedBody,
-            }
-          } else if (existing?.selectedOptionKey) {
-            next[currentRequest.id] = {
-              ...existing,
-              requestId: currentRequest.id,
-              freeText: '',
-            }
-          } else {
-            delete next[currentRequest.id]
-          }
-          return next
-        })
-      }
-    }
 
     setActivePendingActionId(nextActionId)
     if (nextAction?.kind === 'human_input') {
@@ -909,8 +812,234 @@ export const AgentComposer = memo(function AgentComposer({
         ?? nextAction.requests[0]
         ?? null
       setActiveHumanInputRequestId(nextRequest?.id ?? null)
+      return
     }
-  }, [activeHumanInputRequestId, activePendingActionId, body, pendingActionRequests])
+    setBody('')
+  }, [activeHumanInputRequestId, pendingActionRequests])
+
+  const syncDraftHumanInputResponses = useCallback((nextDrafts: Record<string, HumanInputComposerResponse>) => {
+    draftHumanInputResponsesRef.current = nextDrafts
+    setDraftHumanInputResponses(nextDrafts)
+  }, [])
+
+  const getHumanInputBatchRequests = useCallback((batchId: string) => (
+    pendingHumanInputRequests
+      .filter((candidate) => candidate.batchId === batchId)
+      .sort((left, right) => left.batchPosition - right.batchPosition)
+  ), [pendingHumanInputRequests])
+
+  const submitHumanInputDrafts = useCallback(async (
+    request: PendingHumanInputRequest,
+    nextDrafts: Record<string, HumanInputComposerResponse>,
+  ) => {
+    if (!onRespondHumanInput) {
+      return
+    }
+
+    const batchRequests = getHumanInputBatchRequests(request.batchId)
+
+    try {
+      setBusyHumanInputRequestId(request.id)
+      if (batchRequests.length > 1) {
+        const responses = batchRequests
+          .map((candidate) => buildSubmittedHumanInputResponse(candidate, nextDrafts[candidate.id]))
+          .filter((candidate): candidate is HumanInputComposerResponse => Boolean(candidate))
+        if (responses.length !== batchRequests.length) {
+          syncDraftHumanInputResponses(nextDrafts)
+          return
+        }
+        await onRespondHumanInput({
+          batchId: request.batchId,
+          responses,
+        })
+        const remaining = { ...draftHumanInputResponsesRef.current }
+        batchRequests.forEach((candidate) => {
+          delete remaining[candidate.id]
+        })
+        syncDraftHumanInputResponses(remaining)
+      } else {
+        const submittedResponse = buildSubmittedHumanInputResponse(request, nextDrafts[request.id])
+        if (!submittedResponse) {
+          syncDraftHumanInputResponses(nextDrafts)
+          return
+        }
+        await onRespondHumanInput(submittedResponse)
+        const currentDrafts = draftHumanInputResponsesRef.current
+        if (!currentDrafts[request.id]) {
+          return
+        }
+        const remaining = { ...currentDrafts }
+        delete remaining[request.id]
+        syncDraftHumanInputResponses(remaining)
+      }
+    } finally {
+      setBusyHumanInputRequestId(null)
+    }
+  }, [getHumanInputBatchRequests, onRespondHumanInput, syncDraftHumanInputResponses])
+
+  const handleSelectHumanInputOption = useCallback(async (requestId: string, optionKey: string) => {
+    if (disabled || isSending || busyHumanInputRequestId) {
+      return
+    }
+
+    const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
+    if (!request) {
+      return
+    }
+
+    const currentDrafts = draftHumanInputResponsesRef.current
+    const existing = currentDrafts[requestId]
+    const nextSelectedOptionKey = existing?.selectedOptionKey === optionKey ? undefined : optionKey
+    const nextDraft: HumanInputComposerResponse = {
+      ...existing,
+      requestId,
+      selectedOptionKey: nextSelectedOptionKey,
+    }
+    const nextDrafts = { ...currentDrafts }
+    if (!nextSelectedOptionKey && !nextDraft.freeText?.trim()) {
+      delete nextDrafts[requestId]
+    } else {
+      nextDrafts[requestId] = nextDraft
+    }
+    syncDraftHumanInputResponses(nextDrafts)
+
+    const optionIndex = request.options.findIndex((candidate) => candidate.key === optionKey)
+    if (
+      agentId
+      && nextSelectedOptionKey === optionKey
+      && optionKey !== HUMAN_INPUT_OTHER_OPTION_KEY
+      && optionIndex >= 0
+    ) {
+      const option = request.options[optionIndex]
+      track(AnalyticsEvent.HUMAN_INPUT_OPTION_SELECTED, {
+        agent_id: agentId,
+        batch_id: request.batchId,
+        request_id: request.id,
+        batch_position: request.batchPosition,
+        batch_size: request.batchSize,
+        option_key: option.key,
+        option_title: option.title,
+        option_index: optionIndex + 1,
+        option_count: request.options.length,
+        active_conversation_channel: request.activeConversationChannel ?? null,
+      })
+    }
+
+    if (
+      !onRespondHumanInput
+      || nextSelectedOptionKey === undefined
+      || nextSelectedOptionKey === HUMAN_INPUT_OTHER_OPTION_KEY
+    ) {
+      return
+    }
+
+    const batchRequests = getHumanInputBatchRequests(request.batchId)
+    if (batchRequests.length <= 1) {
+      return
+    }
+
+    const hasAllResponses = batchRequests.every((candidate) => (
+      hasHumanInputComposerResponse(candidate, nextDrafts[candidate.id])
+    ))
+    if (!hasAllResponses) {
+      return
+    }
+
+    await submitHumanInputDrafts(request, nextDrafts)
+  }, [
+    agentId,
+    busyHumanInputRequestId,
+    disabled,
+    getHumanInputBatchRequests,
+    isSending,
+    onRespondHumanInput,
+    pendingHumanInputRequests,
+    submitHumanInputDrafts,
+    syncDraftHumanInputResponses,
+  ])
+
+  const handleDraftHumanInputFreeTextChange = useCallback((requestId: string, value: string) => {
+    const currentDrafts = draftHumanInputResponsesRef.current
+    const existing = currentDrafts[requestId]
+    const nextDraft = {
+      ...existing,
+      requestId,
+      freeText: value,
+    }
+    const nextDrafts = { ...currentDrafts }
+    if (!nextDraft.selectedOptionKey && !value.trim()) {
+      delete nextDrafts[requestId]
+    } else {
+      nextDrafts[requestId] = nextDraft
+    }
+    syncDraftHumanInputResponses(nextDrafts)
+  }, [syncDraftHumanInputResponses])
+
+  const handleSubmitHumanInputRequest = useCallback(async () => {
+    if (!activeHumanInputRequest || !onRespondHumanInput || disabled || isSending || busyHumanInputRequestId) {
+      return
+    }
+
+    const request = activeHumanInputRequest
+    const batchRequests = getHumanInputBatchRequests(request.batchId)
+    const currentDrafts = draftHumanInputResponsesRef.current
+    const currentDraft = currentDrafts[request.id]
+    const currentResponse = buildSubmittedHumanInputResponse(request, currentDraft)
+    if (!currentResponse) {
+      return
+    }
+
+    // Preserve the draft shape during batch completeness checks. Replacing the
+    // draft with the submitted payload would drop the "__other__" selection flag,
+    // causing inline free-text answers to look unanswered inside multi-question batches.
+    const nextDrafts = { ...currentDrafts }
+
+    if (batchRequests.length > 1) {
+      const nextUnanswered = batchRequests.find((candidate) => !hasHumanInputComposerResponse(candidate, nextDrafts[candidate.id]))
+      if (nextUnanswered) {
+        const nextPendingAction = pendingActionRequests.find((candidate) => (
+          candidate.kind === 'human_input'
+          && candidate.requests.some((pendingRequest) => pendingRequest.id === nextUnanswered.id)
+        ))
+        syncDraftHumanInputResponses(nextDrafts)
+        if (nextPendingAction) {
+          setActivePendingActionId(nextPendingAction.id)
+        }
+        setActiveHumanInputRequestId(nextUnanswered.id)
+        return
+      }
+    }
+    await submitHumanInputDrafts(request, nextDrafts)
+  }, [
+    activeHumanInputRequest,
+    busyHumanInputRequestId,
+    disabled,
+    getHumanInputBatchRequests,
+    isSending,
+    onRespondHumanInput,
+    pendingActionRequests,
+    submitHumanInputDrafts,
+    syncDraftHumanInputResponses,
+  ])
+
+  const handleDismissHumanInputRequest = useCallback(async (requestId: string) => {
+    if (!onDismissHumanInput || disabled || isSending || busyHumanInputRequestId) {
+      return
+    }
+    try {
+      setBusyHumanInputRequestId(requestId)
+      await onDismissHumanInput(requestId)
+      const currentDrafts = draftHumanInputResponsesRef.current
+      if (!currentDrafts[requestId]) {
+        return
+      }
+      const remaining = { ...currentDrafts }
+      delete remaining[requestId]
+      syncDraftHumanInputResponses(remaining)
+    } finally {
+      setBusyHumanInputRequestId(null)
+    }
+  }, [busyHumanInputRequestId, disabled, isSending, onDismissHumanInput, syncDraftHumanInputResponses])
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
@@ -918,18 +1047,10 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    const activeRequest = pendingHumanInputRequests.find((request) => request.id === activeHumanInputRequestId)
-      ?? pendingHumanInputRequests[0]
-      ?? null
-    if (activeRequest && onRespondHumanInput) {
+    if (activePendingAction?.kind === 'human_input' && activeHumanInputRequest && onRespondHumanInput) {
       if (trimmed && attachmentsSnapshot.length === 0) {
-        const submitted = await submitHumanInputResponse(activeRequest, {
-          requestId: activeRequest.id,
-          freeText: trimmed,
-        })
-        if (submitted) {
-          return
-        }
+        handleDraftHumanInputFreeTextChange(activeHumanInputRequest.id, trimmed)
+        await handleSubmitHumanInputRequest()
       }
       return
     }
@@ -959,41 +1080,18 @@ export const AgentComposer = memo(function AgentComposer({
       requestAnimationFrame(() => adjustTextareaHeight(true))
     }
   }, [
-    activeHumanInputRequestId,
+    activeHumanInputRequest,
+    activePendingAction?.kind,
     adjustTextareaHeight,
     attachments,
     body,
     disabled,
+    handleDraftHumanInputFreeTextChange,
+    handleSubmitHumanInputRequest,
     isSending,
     onRespondHumanInput,
     onSubmit,
-    pendingHumanInputRequests,
-    submitHumanInputResponse,
   ])
-
-  const handleSelectHumanInputOption = useCallback(async (requestId: string, optionKey: string) => {
-    const request = pendingHumanInputRequests.find((candidate) => candidate.id === requestId)
-    if (!request) {
-      return
-    }
-    const optionIndex = request.options.findIndex((candidate) => candidate.key === optionKey)
-    if (agentId && optionIndex >= 0) {
-      const option = request.options[optionIndex]
-      track(AnalyticsEvent.HUMAN_INPUT_OPTION_SELECTED, {
-        agent_id: agentId,
-        batch_id: request.batchId,
-        request_id: request.id,
-        batch_position: request.batchPosition,
-        batch_size: request.batchSize,
-        option_key: option.key,
-        option_title: option.title,
-        option_index: optionIndex + 1,
-        option_count: request.options.length,
-        active_conversation_channel: request.activeConversationChannel ?? null,
-      })
-    }
-    await submitHumanInputResponse(request, { requestId, selectedOptionKey: optionKey })
-  }, [agentId, pendingHumanInputRequests, submitHumanInputResponse])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -1116,6 +1214,14 @@ export const AgentComposer = memo(function AgentComposer({
   const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights || insightsLoading)
   const taskCount = processingTasks.length
   const showPlanningStrip = isPlanningMode
+  const showHumanInputActionPanel = activePendingAction?.kind === 'human_input'
+  const composerSurfaceClassName = `composer-surface${
+    showHumanInputActionPanel
+      ? showWorkingPanel || showPlanningStrip
+        ? ' overflow-hidden rounded-b-[1.25rem]'
+        : ' overflow-hidden rounded-[1.25rem]'
+      : ''
+  }`
   const composerActionsDisabled = disabled || isSending
   const sendDisabled = composerActionsDisabled || stopProcessingBusy || (!body.trim() && attachments.length === 0)
   const sendTitle = stopProcessingBusy
@@ -1197,7 +1303,7 @@ export const AgentComposer = memo(function AgentComposer({
       data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
       data-panel-visible={showWorkingPanel ? 'true' : 'false'}
     >
-      <div className="composer-surface">
+      <div className={composerSurfaceClassName}>
         {/* Working panel - integrated above input */}
         {showWorkingPanel ? (
           <div
@@ -1348,6 +1454,7 @@ export const AgentComposer = memo(function AgentComposer({
           <div>
             <PendingActionComposerPanel
               actions={pendingActionRequests}
+              agentName={agentName ?? agentFirstName}
               activeActionId={activePendingActionId}
               onActiveActionChange={handleActivePendingActionChange}
               disabled={disabled || isSending}
@@ -1356,6 +1463,9 @@ export const AgentComposer = memo(function AgentComposer({
               busyHumanInputRequestId={busyHumanInputRequestId}
               onActiveHumanInputRequestChange={handleActiveHumanInputRequestChange}
               onSelectHumanInputOption={handleSelectHumanInputOption}
+              onDraftHumanInputFreeTextChange={handleDraftHumanInputFreeTextChange}
+              onSubmitHumanInputRequest={handleSubmitHumanInputRequest}
+              onDismissHumanInputRequest={handleDismissHumanInputRequest}
               onResolveSpawnRequest={onResolveSpawnRequest}
               onFulfillRequestedSecrets={onFulfillRequestedSecrets}
               onRemoveRequestedSecrets={onRemoveRequestedSecrets}
@@ -1365,97 +1475,99 @@ export const AgentComposer = memo(function AgentComposer({
         ) : null}
 
         {/* Main input form */}
-        <form className="flex flex-col" onSubmit={handleSubmit}>
-          {isDragActive ? (
-            <div className="agent-chat-drop-overlay" aria-hidden="true">
-              <div className="agent-chat-drop-overlay__panel">Drop files to upload</div>
-            </div>
-          ) : null}
-          <div className="composer-input-surface flex flex-col rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3 transition">
-            <input
-              ref={fileInputRef}
-              type="file"
-              className="sr-only"
-              multiple
-              disabled={disabled || isSending}
-              onChange={handleAttachmentChange}
-            />
-            <div className="flex items-start gap-3">
-              <textarea
-                name="body"
-                rows={1}
-                required={attachments.length === 0}
-                className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
-                placeholder={composerPlaceholder}
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                onKeyDown={handleKeyDown}
-                onFocus={() => {
-                  onFocus?.()
-                  if (!isTouchDevice) return
-                  if (focusScrollTimeoutRef.current !== null) {
-                    window.clearTimeout(focusScrollTimeoutRef.current)
-                  }
-                  focusScrollTimeoutRef.current = window.setTimeout(scrollToBottom, 60)
-                }}
-                disabled={disabled}
-                ref={textareaRef}
+        {!showHumanInputActionPanel ? (
+          <form className="flex flex-col" onSubmit={handleSubmit}>
+            {isDragActive ? (
+              <div className="agent-chat-drop-overlay" aria-hidden="true">
+                <div className="agent-chat-drop-overlay__panel">Drop files to upload</div>
+              </div>
+            ) : null}
+            <div className="composer-input-surface flex flex-col rounded-[1.25rem] border border-slate-200/60 bg-white px-4 py-3 transition">
+              <input
+                ref={fileInputRef}
+                type="file"
+                className="sr-only"
+                multiple
+                disabled={disabled || isSending}
+                onChange={handleAttachmentChange}
               />
-            </div>
-            {showPipedreamAppsControl ? (
-              <ComposerPipedreamAppsControl
-                settingsUrl={pipedreamAppsSettingsUrl as string}
-                searchUrl={pipedreamAppSearchUrl as string}
-                disabled={composerActionsDisabled}
-              >
-                {(appsAction) => renderComposerUtilityRow(appsAction)}
-              </ComposerPipedreamAppsControl>
-            ) : (
-              renderComposerUtilityRow()
-            )}
-            {attachments.length > 0 ? (
-              <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
-                {attachments.map((file, index) => (
-                  <span
-                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                    className="inline-flex max-w-full items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/60 px-3 py-1 text-indigo-700 transition-colors hover:bg-indigo-50"
-                  >
-                    <span className="max-w-[160px] truncate font-medium" title={file.name}>
-                      {file.name}
+              <div className="flex items-start gap-3">
+                <textarea
+                  name="body"
+                  rows={1}
+                  required={attachments.length === 0}
+                  className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
+                  placeholder={composerPlaceholder}
+                  value={body}
+                  onChange={(event) => setBody(event.target.value)}
+                  onKeyDown={handleKeyDown}
+                  onFocus={() => {
+                    onFocus?.()
+                    if (!isTouchDevice) return
+                    if (focusScrollTimeoutRef.current !== null) {
+                      window.clearTimeout(focusScrollTimeoutRef.current)
+                    }
+                    focusScrollTimeoutRef.current = window.setTimeout(scrollToBottom, 60)
+                  }}
+                  disabled={disabled}
+                  ref={textareaRef}
+                />
+              </div>
+              {showPipedreamAppsControl ? (
+                <ComposerPipedreamAppsControl
+                  settingsUrl={pipedreamAppsSettingsUrl as string}
+                  searchUrl={pipedreamAppSearchUrl as string}
+                  disabled={composerActionsDisabled}
+                >
+                  {(appsAction) => renderComposerUtilityRow(appsAction)}
+                </ComposerPipedreamAppsControl>
+              ) : (
+                renderComposerUtilityRow()
+              )}
+              {attachments.length > 0 ? (
+                <div className="flex flex-wrap gap-2 pt-0.5 text-xs">
+                  {attachments.map((file, index) => (
+                    <span
+                      key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+                      className="inline-flex max-w-full items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50/60 px-3 py-1 text-indigo-700 transition-colors hover:bg-indigo-50"
+                    >
+                      <span className="max-w-[160px] truncate font-medium" title={file.name}>
+                        {file.name}
+                      </span>
+                      <button
+                        type="button"
+                        className="-mr-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600"
+                        onClick={() => removeAttachment(index)}
+                        disabled={disabled || isSending}
+                        aria-label={`Remove ${file.name}`}
+                      >
+                        <X className="h-3 w-3" aria-hidden="true" />
+                      </button>
                     </span>
+                  ))}
+                </div>
+              ) : null}
+              {feedbackMessage ? (
+                <div
+                  className="composer-submit-error"
+                  role={showSubmitErrorAlert ? 'alert' : undefined}
+                  aria-live={showSubmitErrorAlert ? 'polite' : undefined}
+                >
+                  <span className="composer-submit-error-text">{feedbackMessage}</span>
+                  {!disabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
                     <button
                       type="button"
-                      className="-mr-0.5 inline-flex items-center justify-center rounded-full p-0.5 text-indigo-400 transition-colors hover:bg-indigo-100 hover:text-indigo-600"
-                      onClick={() => removeAttachment(index)}
-                      disabled={disabled || isSending}
-                      aria-label={`Remove ${file.name}`}
+                      className="composer-submit-error-upgrade"
+                      onClick={() => void handleSubmitErrorUpgrade()}
                     >
-                      <X className="h-3 w-3" aria-hidden="true" />
+                      Upgrade plan
                     </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {feedbackMessage ? (
-              <div
-                className="composer-submit-error"
-                role={showSubmitErrorAlert ? 'alert' : undefined}
-                aria-live={showSubmitErrorAlert ? 'polite' : undefined}
-              >
-                <span className="composer-submit-error-text">{feedbackMessage}</span>
-                {!disabledReason && showSubmitErrorUpgrade && isProprietaryMode && canManageAgent ? (
-                  <button
-                    type="button"
-                    className="composer-submit-error-upgrade"
-                    onClick={() => void handleSubmitErrorUpgrade()}
-                  >
-                    Upgrade plan
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
-        </form>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          </form>
+        ) : null}
       </div>
     </div>
   )

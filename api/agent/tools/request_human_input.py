@@ -82,7 +82,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "Create a tracked human-input request when you need the human to pick an option, "
                 "answer a question, or provide open-ended feedback. If you pass options, the user "
                 "can choose one OR reply in their own words. If you omit options, the user will "
-                "reply with free text only. The request always appears in the web chat composer panel. "
+                "reply with free text only. The request always appears in the web chat human input panel. "
                 "This tool does not send email or SMS by itself. If the target is email or SMS and you want "
                 "to notify that channel, call this tool with will_continue_work=true and send a normal "
                 "email or SMS that includes the exact question(s) and options. If you call send_email or "

@@ -6,6 +6,7 @@ from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings, tag
 import litellm
 
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.comms.human_input_requests import (
     attach_originating_step_from_result,
     create_human_input_request,
@@ -293,7 +294,7 @@ class HumanInputRequestTests(TestCase):
         function = tool["function"]
         description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
-        self.assertIn("always appears in the web chat composer panel", description)
+        self.assertIn("always appears in the web chat human input panel", description)
         self.assertIn("does not send email or SMS by itself", description)
         self.assertIn("same tool-call batch as request_human_input", description)
         self.assertIn("already include the questions", description)
@@ -1690,6 +1691,42 @@ class HumanInputRequestApiTests(TestCase):
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(self.request_obj.selected_option_key, "ship")
 
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_dismiss_endpoint_cancels_request_returns_event_and_queues_processing(self, mock_delay):
+        before = get_human_inbound_generation(self.agent.id)
+        expected = before + 1
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/dismiss/",
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["event"]["kind"], "message")
+        self.assertEqual(
+            payload["event"]["message"]["bodyText"],
+            "Dismissed question: What should I do next?\nContinue without an answer.",
+        )
+        self.assertEqual(payload["pending_human_input_requests"], [])
+        self.assertEqual(payload["pending_action_requests"], [])
+
+        self.request_obj.refresh_from_db()
+        self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
+        self.assertEqual(
+            self.request_obj.raw_reply_text,
+            "Dismissed question: What should I do next?\nContinue without an answer.",
+        )
+        self.assertTrue(self.request_obj.raw_reply_message_id)
+        self.assertIsNotNone(self.request_obj.resolved_at)
+        self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=expected,
+        )
+
     def test_batch_response_endpoint_submits_group_once(self):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
@@ -1925,6 +1962,71 @@ class HumanInputRequestApiTests(TestCase):
             [request["id"] for request in batch_action["requests"]],
             [str(first_request.id), str(second_request.id)],
         )
+
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_dismissed_batch_request_is_removed_and_remaining_batch_reindexes(self, _mock_delay):
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Collect multiple answers",
+            credits_cost=0,
+        )
+        first_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do first?",
+            options_json=[
+                {"key": "ship", "title": "Ship it", "description": "Move forward now."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        second_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=self.conversation,
+            originating_step=step,
+            question="What should I do second?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/human-input-requests/{first_request.id}/dismiss/",
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        batch_action = next(
+            action
+            for action in payload["pending_action_requests"]
+            if action["id"] == f"human_input:{step.id}"
+        )
+        self.assertEqual(batch_action["count"], 1)
+        self.assertEqual(
+            [request["id"] for request in batch_action["requests"]],
+            [str(second_request.id)],
+        )
+        self.assertEqual(batch_action["requests"][0]["batchPosition"], 1)
+        self.assertEqual(batch_action["requests"][0]["batchSize"], 1)
+        self.assertNotIn(str(first_request.id), [request["id"] for request in payload["pending_human_input_requests"]])
+
+        timeline_response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(timeline_response.status_code, 200)
+        timeline_payload = timeline_response.json()
+        timeline_batch_action = next(
+            action
+            for action in timeline_payload["pending_action_requests"]
+            if action["id"] == f"human_input:{step.id}"
+        )
+        self.assertEqual(timeline_batch_action["count"], 1)
+        self.assertEqual(timeline_batch_action["requests"][0]["id"], str(second_request.id))
+        self.assertEqual(timeline_batch_action["requests"][0]["batchPosition"], 1)
+        self.assertEqual(timeline_batch_action["requests"][0]["batchSize"], 1)
+        self.assertNotIn(str(first_request.id), [request["id"] for request in timeline_payload["pending_human_input_requests"]])
 
     def test_timeline_pending_requests_clear_after_cross_channel_resolution(self):
         resolve_human_input_request_for_message(

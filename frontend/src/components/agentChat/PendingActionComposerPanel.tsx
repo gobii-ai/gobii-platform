@@ -17,6 +17,7 @@ type HumanInputDraft = {
 
 type PendingActionComposerPanelProps = {
   actions: PendingActionRequest[]
+  agentName?: string | null
   activeActionId: string | null
   onActiveActionChange: (actionId: string) => void
   disabled?: boolean
@@ -24,7 +25,10 @@ type PendingActionComposerPanelProps = {
   draftHumanInputResponses?: Record<string, HumanInputDraft>
   busyHumanInputRequestId?: string | null
   onActiveHumanInputRequestChange: (requestId: string) => void
-  onSelectHumanInputOption: (requestId: string, optionKey: string) => Promise<void> | void
+  onSelectHumanInputOption: (requestId: string, optionKey: string) => void
+  onDraftHumanInputFreeTextChange: (requestId: string, value: string) => void
+  onSubmitHumanInputRequest: () => Promise<void> | void
+  onDismissHumanInputRequest: (requestId: string) => Promise<void> | void
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
@@ -126,6 +130,7 @@ function orderHumanInputRequests(requests: PendingHumanInputRequest[]) {
 
 export function PendingActionComposerPanel({
   actions,
+  agentName = null,
   activeActionId,
   onActiveActionChange,
   disabled = false,
@@ -134,6 +139,9 @@ export function PendingActionComposerPanel({
   busyHumanInputRequestId = null,
   onActiveHumanInputRequestChange,
   onSelectHumanInputOption,
+  onDraftHumanInputFreeTextChange,
+  onSubmitHumanInputRequest,
+  onDismissHumanInputRequest,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
@@ -367,11 +375,15 @@ export function PendingActionComposerPanel({
         {activeAction.kind === 'human_input' ? (
           <HumanInputComposerPanel
             requests={activeAction.requests}
+            agentName={agentName}
             activeRequestId={activeHumanInputRequestId}
             draftResponses={draftHumanInputResponses}
             disabled={disabled}
             busyRequestId={busyHumanInputRequestId}
             onSelectOption={onSelectHumanInputOption}
+            onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
+            onSubmitRequest={onSubmitHumanInputRequest}
+            onDismissRequest={onDismissHumanInputRequest}
           />
         ) : null}
 

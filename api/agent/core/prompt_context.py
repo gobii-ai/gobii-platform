@@ -4448,7 +4448,7 @@ def _get_system_instruction(
             "## Delivery & Response Behavior\n\n"
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
-            "request_human_input only creates tracked questions that are visible in the web chat composer panel; "
+            "request_human_input only creates tracked questions that are visible in the web chat; "
             "it does not send email or SMS by itself. If you want to notify a user on email/SMS, call "
             "request_human_input with will_continue_work=true, then send a normal email/SMS containing those questions. "
             "If request_human_input and send_email/send_sms are in the same tool-call batch, the send_email/send_sms "

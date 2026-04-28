@@ -384,9 +384,9 @@ def _build_request_result(
 
     if message is None:
         message = (
-            "Created 1 human input request. It is visible in the web chat composer panel."
+            "Created 1 human input request. It is visible in the web chat human input panel."
             if request_count == 1
-            else f"Created {request_count} human input requests. They are visible in the web chat composer panel."
+            else f"Created {request_count} human input requests. They are visible in the web chat human input panel."
         )
 
     result = {
@@ -697,6 +697,14 @@ def _emit_pending_human_input_updates(agent_id) -> None:
 
     emit_pending_human_input_requests_update(agent)
     emit_pending_action_requests_update(agent)
+
+
+def _queue_human_input_processing(agent_id) -> None:
+    inbound_generation = bump_human_inbound_generation(agent_id)
+    __import__("api.agent.tasks", fromlist=["process_agent_events_task"]).process_agent_events_task.delay(
+        str(agent_id),
+        inbound_generation=inbound_generation,
+    )
 
 
 def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInputRequest) -> dict[str, Any]:
@@ -1829,14 +1837,7 @@ def submit_human_input_responses_batch(
                 ]
             )
 
-        def _queue_processing() -> None:
-            inbound_generation = bump_human_inbound_generation(agent.id)
-            __import__("api.agent.tasks", fromlist=["process_agent_events_task"]).process_agent_events_task.delay(
-                str(agent.id),
-                inbound_generation=inbound_generation,
-            )
-
-        transaction.on_commit(_queue_processing)
+        transaction.on_commit(lambda: _queue_human_input_processing(agent.id))
         transaction.on_commit(
             lambda: Analytics.track_event(
                 user_id=analytics_user_id,
@@ -1867,3 +1868,67 @@ def submit_human_input_response(
         ],
         actor_user_id=actor_user_id,
     )
+
+
+def dismiss_human_input_request(
+    request_obj: PersistentAgentHumanInputRequest,
+    *,
+    actor_user_id: int | str | None = None,
+) -> PersistentAgentMessage:
+    if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
+        raise ValueError("This request is no longer pending.")
+
+    response_target = _build_console_response_target(request_obj.agent, actor_user_id)
+    if response_target is None:
+        response_target = _build_request_conversation_response_target(request_obj)
+
+    body = f"Dismissed question: {request_obj.question}\nContinue without an answer."
+    raw_payload: dict[str, Any] = {
+        "source": "console_human_input_dismissed",
+        "human_input_request_ids": [str(request_obj.id)],
+        "human_input_dismissed": True,
+        "dismissed_question": request_obj.question,
+    }
+
+    with transaction.atomic():
+        _ensure_conversation_participants(
+            response_target.conversation,
+            response_target.human_endpoint,
+            response_target.agent_endpoint,
+        )
+
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=response_target.human_endpoint,
+            to_endpoint=response_target.agent_endpoint,
+            conversation=response_target.conversation,
+            owner_agent=request_obj.agent,
+            body=body,
+            raw_payload=raw_payload,
+        )
+
+        request_obj.selected_option_key = ""
+        request_obj.selected_option_title = ""
+        request_obj.free_text = ""
+        request_obj.raw_reply_text = body
+        request_obj.raw_reply_message = message
+        request_obj.resolution_source = ""
+        request_obj.resolved_at = timezone.now()
+        request_obj.status = PersistentAgentHumanInputRequest.Status.CANCELLED
+        request_obj.save(
+            update_fields=[
+                "selected_option_key",
+                "selected_option_title",
+                "free_text",
+                "raw_reply_text",
+                "raw_reply_message",
+                "resolution_source",
+                "resolved_at",
+                "status",
+                "updated_at",
+            ]
+        )
+
+        transaction.on_commit(lambda: _queue_human_input_processing(request_obj.agent_id))
+
+    return message
