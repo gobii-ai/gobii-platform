@@ -114,6 +114,27 @@ class GoogleAnalyticsRenderingTests(TestCase):
         self.assertIn("enabled: false,", content)
         self.assertNotIn('analytics.load("segment-web-test");', content)
 
+    @override_settings(
+        DEBUG=False,
+        GOBII_RELEASE_ENV="production",
+        GOBII_PROPRIETARY_MODE=True,
+        LINKEDIN_PARTNER_ID="partner-123",
+        LINKEDIN_SIGNUP_CONVERSION_ID="123456",
+    )
+    def test_base_template_tags_inline_linkedin_signup_conversion_for_deduplication(self):
+        session = self.client.session
+        session["show_signup_tracking"] = True
+        session["signup_event_id"] = "evt123"
+        session.save()
+
+        response = self.client.get(reverse("pages:home"))
+        self.assertEqual(response.status_code, 200)
+
+        content = response.content.decode("utf-8")
+        self.assertIn("window.lintrk('track', {", content)
+        self.assertIn("conversion_id: 123456,", content)
+        self.assertIn("event_id: 'evt123'", content)
+
     @override_settings(DEBUG=False, GA_MEASUREMENT_ID="G-TEST123", GOBII_PROPRIETARY_MODE=True)
     def test_app_shell_includes_shared_tracking_helpers(self):
         response = self.client.get("/app")

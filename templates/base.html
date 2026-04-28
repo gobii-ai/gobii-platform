@@ -589,7 +589,10 @@
       (function () {
         {% if settings.LINKEDIN_SIGNUP_CONVERSION_ID  %}
         if (typeof window.lintrk === 'function') {
-          window.lintrk('track', { conversion_id: {{ settings.LINKEDIN_SIGNUP_CONVERSION_ID  }} });
+          window.lintrk('track', {
+            conversion_id: {{ settings.LINKEDIN_SIGNUP_CONVERSION_ID  }},
+            event_id: '{{ signup_event_id|default:""|escapejs }}'
+          });
         }
         {% endif %}
       })();
