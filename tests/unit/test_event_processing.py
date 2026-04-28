@@ -537,10 +537,13 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("## Planning Mode", system_message["content"])
         self.assertIn("## REQUIRED: Your very first action must be sending a welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
+        self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
+        self.assertIn("do not do substantive task work before planning ends", system_message["content"])
         self.assertIn(
-            "Do not ask planning questions about which communication channel (email, SMS, web chat, etc.) to use",
+            "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
             system_message["content"],
         )
+        self.assertNotIn("delivery cadence", system_message["content"])
         self.assertNotIn("## Signup Preview Handoff", system_message["content"])
         self.assertNotIn("## Signup Preview First-Run Override", system_message["content"])
         self.assertNotIn("limited preview", system_message["content"])

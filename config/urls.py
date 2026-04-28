@@ -27,6 +27,7 @@ from console.api_views import (
     AgentFsNodeUploadAPIView,
     AgentMessageCreateAPIView,
     AgentHumanInputRequestBatchResponseAPIView,
+    AgentHumanInputRequestDismissAPIView,
     AgentHumanInputRequestResponseAPIView,
     AgentPlanningSkipAPIView,
     AgentContactRequestResolveAPIView,
@@ -366,6 +367,11 @@ urlpatterns = [
         "console/api/agents/<uuid:agent_id>/human-input-requests/<uuid:request_id>/respond/",
         AgentHumanInputRequestResponseAPIView.as_view(),
         name="console_agent_human_input_request_respond",
+    ),
+    path(
+        "console/api/agents/<uuid:agent_id>/human-input-requests/<uuid:request_id>/dismiss/",
+        AgentHumanInputRequestDismissAPIView.as_view(),
+        name="console_agent_human_input_request_dismiss",
     ),
     path(
         "console/api/agents/<uuid:agent_id>/spawn-requests/<uuid:spawn_request_id>/decision/",

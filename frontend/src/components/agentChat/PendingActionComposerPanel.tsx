@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
-import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
+import type { PendingActionRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
+import { orderHumanInputRequests } from './humanInputOrdering'
 import { PendingContactRequestsPanel, type PendingContactDraft } from './PendingContactRequestsPanel'
 import { PendingRequestedSecretsPanel } from './PendingRequestedSecretsPanel'
 import { PendingSpawnRequestPanel } from './PendingSpawnRequestPanel'
@@ -17,6 +18,7 @@ type HumanInputDraft = {
 
 type PendingActionComposerPanelProps = {
   actions: PendingActionRequest[]
+  agentName?: string | null
   activeActionId: string | null
   onActiveActionChange: (actionId: string) => void
   disabled?: boolean
@@ -24,7 +26,10 @@ type PendingActionComposerPanelProps = {
   draftHumanInputResponses?: Record<string, HumanInputDraft>
   busyHumanInputRequestId?: string | null
   onActiveHumanInputRequestChange: (requestId: string) => void
-  onSelectHumanInputOption: (requestId: string, optionKey: string) => Promise<void> | void
+  onSelectHumanInputOption: (requestId: string, optionKey: string) => void
+  onDraftHumanInputFreeTextChange: (requestId: string, value: string) => void
+  onSubmitHumanInputRequest: () => Promise<void> | void
+  onDismissHumanInputRequest: (requestId: string) => Promise<void> | void
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
@@ -106,26 +111,9 @@ function actionIcon(action: PendingActionRequest) {
   }
 }
 
-function orderHumanInputRequests(requests: PendingHumanInputRequest[]) {
-  const batchOrder = new Map<string, number>()
-  requests.forEach((request, index) => {
-    if (!batchOrder.has(request.batchId)) {
-      batchOrder.set(request.batchId, index)
-    }
-  })
-
-  return [...requests].sort((left, right) => {
-    const leftBatchOrder = batchOrder.get(left.batchId) ?? 0
-    const rightBatchOrder = batchOrder.get(right.batchId) ?? 0
-    if (leftBatchOrder !== rightBatchOrder) {
-      return leftBatchOrder - rightBatchOrder
-    }
-    return left.batchPosition - right.batchPosition
-  })
-}
-
 export function PendingActionComposerPanel({
   actions,
+  agentName = null,
   activeActionId,
   onActiveActionChange,
   disabled = false,
@@ -134,6 +122,9 @@ export function PendingActionComposerPanel({
   busyHumanInputRequestId = null,
   onActiveHumanInputRequestChange,
   onSelectHumanInputOption,
+  onDraftHumanInputFreeTextChange,
+  onSubmitHumanInputRequest,
+  onDismissHumanInputRequest,
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
@@ -367,11 +358,15 @@ export function PendingActionComposerPanel({
         {activeAction.kind === 'human_input' ? (
           <HumanInputComposerPanel
             requests={activeAction.requests}
+            agentName={agentName}
             activeRequestId={activeHumanInputRequestId}
             draftResponses={draftHumanInputResponses}
             disabled={disabled}
             busyRequestId={busyHumanInputRequestId}
             onSelectOption={onSelectHumanInputOption}
+            onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
+            onSubmitRequest={onSubmitHumanInputRequest}
+            onDismissRequest={onDismissHumanInputRequest}
           />
         ) : null}
 

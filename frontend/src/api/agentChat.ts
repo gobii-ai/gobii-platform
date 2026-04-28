@@ -454,6 +454,27 @@ export async function respondToHumanInputRequest(
   }
 }
 
+export async function dismissHumanInputRequest(
+  agentId: string,
+  requestId: string,
+): Promise<HumanInputResponseResult> {
+  const url = `/console/api/agents/${agentId}/human-input-requests/${requestId}/dismiss/`
+  const response = await jsonFetch<{
+    event?: TimelineEvent
+    pending_human_input_requests?: unknown[]
+    pending_action_requests?: unknown[]
+  }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({}),
+  })
+  return {
+    event: response.event,
+    pendingHumanInputRequests: normalizePendingHumanInputRequests(response.pending_human_input_requests),
+    pendingActionRequests: normalizePendingActionRequests(response.pending_action_requests),
+  }
+}
+
 export async function respondToHumanInputRequestsBatch(
   agentId: string,
   payload: HumanInputBatchResponsePayload,
