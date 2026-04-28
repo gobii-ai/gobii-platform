@@ -11,6 +11,7 @@ type AgentChatNotificationOptions = {
   enabled: boolean
   currentContext: ConsoleContext | null
   activeAgentId: string | null
+  availableAgentIds?: string[]
   onOpenAgent: (agentId: string) => void
 }
 
@@ -72,18 +73,18 @@ export function shouldDispatchAgentChatNotification({
   event,
   currentContext,
   activeAgentId,
+  availableAgentIds,
 }: {
   event: AgentMessageNotification
   currentContext: ConsoleContext | null
   activeAgentId: string | null
+  availableAgentIds?: readonly string[]
 }): boolean {
   if (!currentContext) {
     return false
   }
-  if (
-    event.workspace.type !== currentContext.type
-    || event.workspace.id !== currentContext.id
-  ) {
+  const knownAgentIds = new Set(availableAgentIds ?? [])
+  if (event.agent_id !== activeAgentId && !knownAgentIds.has(event.agent_id)) {
     return false
   }
   if (event.agent_id !== activeAgentId) {
@@ -104,6 +105,7 @@ export function useAgentChatNotifications({
   enabled,
   currentContext,
   activeAgentId,
+  availableAgentIds = [],
   onOpenAgent,
 }: AgentChatNotificationOptions) {
   const [notificationPermission, setNotificationPermission] = useState<NotificationPermissionState>(() =>
@@ -225,7 +227,12 @@ export function useAgentChatNotifications({
   }, [ensureAudioContext])
 
   const handleMessageNotificationEvent = useCallback((event: AgentMessageNotification) => {
-    if (!enabled || !shouldDispatchAgentChatNotification({ event, currentContext, activeAgentId })) {
+    if (!enabled || !shouldDispatchAgentChatNotification({
+      event,
+      currentContext,
+      activeAgentId,
+      availableAgentIds,
+    })) {
       return
     }
 
@@ -261,6 +268,7 @@ export function useAgentChatNotifications({
     }
   }, [
     activeAgentId,
+    availableAgentIds,
     currentContext,
     enabled,
     playNotificationSound,

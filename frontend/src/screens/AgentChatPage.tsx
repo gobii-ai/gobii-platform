@@ -479,7 +479,9 @@ type PersistAgentRosterPreferenceOptions<K extends AgentRosterPreferenceField> =
   preferenceKey: string
   setState: Dispatch<SetStateAction<AgentRosterPreferenceState[K]>>
   parsePersistedValue: (value: unknown) => AgentRosterPreferenceState[K]
+  currentValue?: AgentRosterPreferenceState[K] | undefined
   beforePersist?: (() => void) | undefined
+  rollbackOnError?: boolean | undefined
   areEqual?: AgentRosterPreferenceComparator<K> | undefined
 }
 
@@ -1385,7 +1387,11 @@ export function AgentChatPage({
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
   const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
-  const [agentChatNotificationsEnabled, setAgentChatNotificationsEnabled] = useState(true)
+  const [agentChatNotificationsEnabled, setAgentChatNotificationsEnabled] = useState<boolean>(() => (
+    rosterQuery.data?.agentChatNotificationsEnabled === undefined
+      ? false
+      : parseBooleanPreference(rosterQuery.data.agentChatNotificationsEnabled)
+  ))
   const hasHydratedAgentRosterSortModeRef = useRef(false)
   const hasHydratedInsightsPanelExpandedPreferenceRef = useRef(false)
   const hasHydratedAgentChatNotificationsEnabledRef = useRef(false)
@@ -1445,7 +1451,9 @@ export function AgentChatPage({
         preferenceKey,
         setState,
         parsePersistedValue,
+        currentValue,
         beforePersist,
+        rollbackOnError = true,
         areEqual,
       }: PersistAgentRosterPreferenceOptions<K>,
     ) {
@@ -1461,7 +1469,12 @@ export function AgentChatPage({
         const persistedValue = parsePersistedValue(response.preferences[preferenceKey])
         setState(persistedValue)
         updateAgentRosterPreferenceInCache(field, persistedValue, areEqual)
-      }).catch(() => undefined)
+      }).catch(() => {
+        if (rollbackOnError && currentValue !== undefined) {
+          setState(currentValue)
+          updateAgentRosterPreferenceInCache(field, currentValue, areEqual)
+        }
+      })
     },
     [updateAgentRosterPreferenceInCache],
   )
@@ -1473,9 +1486,10 @@ export function AgentChatPage({
         preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
         setState: setAgentRosterSortMode,
         parsePersistedValue: parseAgentRosterSortMode,
+        currentValue: agentRosterSortMode,
       })
     },
-    [persistAgentRosterPreference],
+    [agentRosterSortMode, persistAgentRosterPreference],
   )
 
   const handleToggleAgentFavorite = useCallback(
@@ -1489,6 +1503,7 @@ export function AgentChatPage({
         preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
         setState: setFavoriteAgentIds,
         parsePersistedValue: parseFavoriteAgentIdsPreference,
+        currentValue: favoriteAgentIds,
         areEqual: favoriteAgentIdsPreferenceEquals,
       })
     },
@@ -1502,9 +1517,10 @@ export function AgentChatPage({
         preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
         setState: setInsightsPanelExpandedPreference,
         parsePersistedValue: parseNullableBooleanPreference,
+        currentValue: insightsPanelExpandedPreference,
       })
     },
-    [persistAgentRosterPreference],
+    [insightsPanelExpandedPreference, persistAgentRosterPreference],
   )
 
   useEffect(() => {
@@ -2046,6 +2062,10 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  const visibleRosterAgentIds = useMemo(
+    () => rosterAgents.map((agent) => agent.id),
+    [rosterAgents],
+  )
   const openAgentChat = useCallback(
     (nextAgentId: string, pendingMeta: Omit<AgentSwitchMeta, 'agentId'> = {}) => {
       if (nextAgentId === activeAgentIdRef.current) {
@@ -2077,28 +2097,37 @@ export function AgentChatPage({
     enabled: agentChatNotificationsEnabled,
     currentContext: effectiveContext,
     activeAgentId,
+    availableAgentIds: visibleRosterAgentIds,
     onOpenAgent: openAgentChat,
   })
   const persistAgentChatNotificationsEnabled = useCallback(
-    (nextAgentChatNotificationsEnabled: boolean) => {
+    (
+      nextAgentChatNotificationsEnabled: boolean,
+      options: { rollbackOnError?: boolean } = {},
+    ) => {
       persistAgentRosterPreference(nextAgentChatNotificationsEnabled, {
         field: 'agentChatNotificationsEnabled',
         preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
         setState: setAgentChatNotificationsEnabled,
         parsePersistedValue: parseBooleanPreference,
+        currentValue: agentChatNotificationsEnabled,
+        rollbackOnError: options.rollbackOnError,
       })
     },
-    [persistAgentRosterPreference],
+    [agentChatNotificationsEnabled, persistAgentRosterPreference],
   )
 
   useEffect(() => {
+    if (rosterQuery.data?.agentChatNotificationsEnabled === undefined) {
+      return
+    }
     if (!agentChatNotificationsEnabled) {
       notificationPermissionPromptAttemptedRef.current = false
       return
     }
     if (notificationPermission === 'denied') {
       notificationPermissionPromptAttemptedRef.current = false
-      persistAgentChatNotificationsEnabled(false)
+      persistAgentChatNotificationsEnabled(false, { rollbackOnError: false })
       return
     }
     if (
@@ -2112,6 +2141,7 @@ export function AgentChatPage({
   }, [
     agentChatNotificationsEnabled,
     notificationPermission,
+    rosterQuery.data?.agentChatNotificationsEnabled,
     persistAgentChatNotificationsEnabled,
     requestNotificationPermission,
   ])

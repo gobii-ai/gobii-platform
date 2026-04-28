@@ -88,6 +88,7 @@ class FakeAudioContext {
 type HarnessProps = {
   enabled?: boolean
   activeAgentId?: string | null
+  availableAgentIds?: string[]
   currentContext?: { type: 'personal' | 'organization'; id: string; name: string } | null
   onOpenAgent?: (agentId: string) => void
 }
@@ -97,6 +98,7 @@ let latestHookState: ReturnType<typeof useAgentChatNotifications> | null = null
 function HookHarness({
   enabled = true,
   activeAgentId = 'agent-1',
+  availableAgentIds = ['agent-1', 'agent-2'],
   currentContext = { type: 'personal', id: 'user-1', name: 'Test User' },
   onOpenAgent = () => undefined,
 }: HarnessProps) {
@@ -104,6 +106,7 @@ function HookHarness({
     enabled,
     currentContext,
     activeAgentId,
+    availableAgentIds,
     onOpenAgent,
   })
 
@@ -229,12 +232,44 @@ describe('useAgentChatNotifications', () => {
     })
   })
 
-  it('ignores notifications from a different workspace', () => {
-    render(<HookHarness currentContext={{ type: 'organization', id: 'org-1', name: 'Acme' }} />)
+  it('ignores notifications for agents outside the visible roster', () => {
+    render(<HookHarness availableAgentIds={['agent-1']} />)
 
-    latestHookState?.handleMessageNotificationEvent(buildNotificationEvent())
+    latestHookState?.handleMessageNotificationEvent(buildNotificationEvent({
+      agent_id: 'agent-3',
+    }))
 
     expect(FakeNotification.instances).toHaveLength(0)
+  })
+
+  it('notifies shared collaborators even when the event workspace id differs from the current context', async () => {
+    setPageFocus({ visible: false, focused: false })
+    render(
+      <HookHarness
+        currentContext={{ type: 'personal', id: 'user-1', name: 'Test User' }}
+        availableAgentIds={['shared-agent-1']}
+        activeAgentId="agent-1"
+      />,
+    )
+    window.dispatchEvent(new Event('pointerdown'))
+    await waitFor(() => {
+      expect(FakeAudioContext.instances).toHaveLength(1)
+    })
+
+    latestHookState?.handleMessageNotificationEvent(buildNotificationEvent({
+      agent_id: 'shared-agent-1',
+      workspace: { type: 'personal', id: 'owner-user-99' },
+      message: {
+        id: 'message-shared-1',
+        body_preview: 'Shared agent update.',
+        timestamp: '2026-04-28T12:03:00Z',
+        channel: 'web',
+      },
+    }))
+
+    await waitFor(() => {
+      expect(FakeNotification.instances).toHaveLength(1)
+    })
   })
 
   it('dedupes repeated notifications for the same message id', async () => {
@@ -316,14 +351,16 @@ describe('useAgentChatNotifications', () => {
       }),
       currentContext: { type: 'personal', id: 'user-1', name: 'Test User' },
       activeAgentId: 'agent-1',
+      availableAgentIds: ['agent-1', 'agent-2'],
     })).toBe(true)
 
     expect(shouldDispatchAgentChatNotification({
       event: buildNotificationEvent({
-        workspace: { type: 'organization', id: 'org-1' },
+        agent_id: 'agent-3',
       }),
       currentContext: { type: 'personal', id: 'user-1', name: 'Test User' },
       activeAgentId: 'agent-1',
+      availableAgentIds: ['agent-1', 'agent-2'],
     })).toBe(false)
   })
 })

@@ -569,6 +569,8 @@ describe('AgentChatPage trial onboarding', () => {
         planningState: 'skipped',
       },
     ]
+    FakeNotification.permission = 'default'
+    FakeNotification.nextPermission = 'granted'
     updateUserPreferencesMock.mockResolvedValue({
       preferences: {
         agent_chat_notifications_enabled: true,
@@ -581,6 +583,7 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('false')
     })
+    expect(FakeNotification.requestPermissionMock).not.toHaveBeenCalled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Toggle notifications' }))
 
