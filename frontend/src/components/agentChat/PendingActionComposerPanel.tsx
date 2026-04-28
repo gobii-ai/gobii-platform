@@ -3,8 +3,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
-import type { PendingActionRequest, PendingHumanInputRequest } from '../../types/agentChat'
+import type { PendingActionRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
+import { orderHumanInputRequests } from './humanInputOrdering'
 import { PendingContactRequestsPanel, type PendingContactDraft } from './PendingContactRequestsPanel'
 import { PendingRequestedSecretsPanel } from './PendingRequestedSecretsPanel'
 import { PendingSpawnRequestPanel } from './PendingSpawnRequestPanel'
@@ -108,24 +109,6 @@ function actionIcon(action: PendingActionRequest) {
     default:
       return MessageSquareQuote
   }
-}
-
-function orderHumanInputRequests(requests: PendingHumanInputRequest[]) {
-  const batchOrder = new Map<string, number>()
-  requests.forEach((request, index) => {
-    if (!batchOrder.has(request.batchId)) {
-      batchOrder.set(request.batchId, index)
-    }
-  })
-
-  return [...requests].sort((left, right) => {
-    const leftBatchOrder = batchOrder.get(left.batchId) ?? 0
-    const rightBatchOrder = batchOrder.get(right.batchId) ?? 0
-    if (leftBatchOrder !== rightBatchOrder) {
-      return leftBatchOrder - rightBatchOrder
-    }
-    return left.batchPosition - right.batchPosition
-  })
 }
 
 export function PendingActionComposerPanel({

@@ -4,6 +4,7 @@ import { ArrowUp } from 'lucide-react'
 
 import type { PendingHumanInputRequest } from '../../types/agentChat'
 import { InlineInfoTooltipButton } from './InlineInfoTooltipButton'
+import { orderHumanInputRequests } from './humanInputOrdering'
 
 export const HUMAN_INPUT_OTHER_OPTION_KEY = '__other__'
 
@@ -35,24 +36,6 @@ function shouldShowSubmitShortcutHint(): boolean {
   return window.innerWidth >= 768
 }
 
-function orderRequests(requests: PendingHumanInputRequest[]) {
-  const batchOrder = new Map<string, number>()
-  requests.forEach((request, index) => {
-    if (!batchOrder.has(request.batchId)) {
-      batchOrder.set(request.batchId, index)
-    }
-  })
-
-  return [...requests].sort((left, right) => {
-    const leftBatchOrder = batchOrder.get(left.batchId) ?? 0
-    const rightBatchOrder = batchOrder.get(right.batchId) ?? 0
-    if (leftBatchOrder !== rightBatchOrder) {
-      return leftBatchOrder - rightBatchOrder
-    }
-    return left.batchPosition - right.batchPosition
-  })
-}
-
 function canSubmitRequest(
   request: PendingHumanInputRequest,
   draft: HumanInputDraftResponse | undefined,
@@ -79,7 +62,7 @@ export function HumanInputComposerPanel({
   onSubmitRequest,
   onDismissRequest,
 }: HumanInputComposerPanelProps) {
-  const orderedRequests = useMemo(() => orderRequests(requests), [requests])
+  const orderedRequests = useMemo(() => orderHumanInputRequests(requests), [requests])
   const activeRequest = orderedRequests.find((request) => request.id === activeRequestId) ?? orderedRequests[0] ?? null
   const activeDraft = activeRequest ? draftResponses[activeRequest.id] : undefined
   const isBusy = Boolean(activeRequest && busyRequestId === activeRequest.id)

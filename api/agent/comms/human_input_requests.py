@@ -1912,7 +1912,9 @@ def dismiss_human_input_request(
         request_obj.free_text = ""
         request_obj.raw_reply_text = body
         request_obj.raw_reply_message = message
-        request_obj.resolution_source = ""
+        request_obj.resolution_source = (
+            PersistentAgentHumanInputRequest.ResolutionSource.DIRECT
+        )
         request_obj.resolved_at = timezone.now()
         request_obj.status = PersistentAgentHumanInputRequest.Status.CANCELLED
         request_obj.save(

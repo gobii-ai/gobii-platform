@@ -1719,6 +1719,10 @@ class HumanInputRequestApiTests(TestCase):
             self.request_obj.raw_reply_text,
             "Dismissed question: What should I do next?\nContinue without an answer.",
         )
+        self.assertEqual(
+            self.request_obj.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.DIRECT,
+        )
         self.assertTrue(self.request_obj.raw_reply_message_id)
         self.assertIsNotNone(self.request_obj.resolved_at)
         self.assertEqual(get_human_inbound_generation(self.agent.id), expected)

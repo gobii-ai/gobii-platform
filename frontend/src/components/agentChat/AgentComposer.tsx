@@ -8,6 +8,7 @@ import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
+import { orderHumanInputRequests } from './humanInputOrdering'
 import { PlanningModeStrip } from './PlanningModeStrip'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
@@ -636,9 +637,11 @@ export const AgentComposer = memo(function AgentComposer({
   }, [adjustTextareaHeight])
 
   const pendingHumanInputRequests = useMemo(
-    () => pendingActionRequests
-      .filter((request) => request.kind === 'human_input')
-      .flatMap((request) => request.requests),
+    () => orderHumanInputRequests(
+      pendingActionRequests
+        .filter((request) => request.kind === 'human_input')
+        .flatMap((request) => request.requests),
+    ),
     [pendingActionRequests],
   )
 
@@ -684,7 +687,6 @@ export const AgentComposer = memo(function AgentComposer({
       const latestBatchId = pendingHumanInputRequests[0]?.batchId
       const latestBatchRequests = pendingHumanInputRequests
         .filter((request) => request.batchId === latestBatchId)
-        .sort((left, right) => left.batchPosition - right.batchPosition)
       setActiveHumanInputRequestId(latestBatchRequests[0]?.id ?? pendingHumanInputRequests[0]?.id ?? null)
     }
   }, [activeHumanInputRequestId, pendingHumanInputRequests])
@@ -812,9 +814,7 @@ export const AgentComposer = memo(function AgentComposer({
         ?? nextAction.requests[0]
         ?? null
       setActiveHumanInputRequestId(nextRequest?.id ?? null)
-      return
     }
-    setBody('')
   }, [activeHumanInputRequestId, pendingActionRequests])
 
   const syncDraftHumanInputResponses = useCallback((nextDrafts: Record<string, HumanInputComposerResponse>) => {
@@ -825,7 +825,6 @@ export const AgentComposer = memo(function AgentComposer({
   const getHumanInputBatchRequests = useCallback((batchId: string) => (
     pendingHumanInputRequests
       .filter((candidate) => candidate.batchId === batchId)
-      .sort((left, right) => left.batchPosition - right.batchPosition)
   ), [pendingHumanInputRequests])
 
   const submitHumanInputDrafts = useCallback(async (
@@ -1047,13 +1046,6 @@ export const AgentComposer = memo(function AgentComposer({
       return
     }
     const attachmentsSnapshot = attachments.slice()
-    if (activePendingAction?.kind === 'human_input' && activeHumanInputRequest && onRespondHumanInput) {
-      if (trimmed && attachmentsSnapshot.length === 0) {
-        handleDraftHumanInputFreeTextChange(activeHumanInputRequest.id, trimmed)
-        await handleSubmitHumanInputRequest()
-      }
-      return
-    }
     if (onSubmit) {
       try {
         setIsSending(true)
@@ -1080,16 +1072,11 @@ export const AgentComposer = memo(function AgentComposer({
       requestAnimationFrame(() => adjustTextareaHeight(true))
     }
   }, [
-    activeHumanInputRequest,
-    activePendingAction?.kind,
     adjustTextareaHeight,
     attachments,
     body,
     disabled,
-    handleDraftHumanInputFreeTextChange,
-    handleSubmitHumanInputRequest,
     isSending,
-    onRespondHumanInput,
     onSubmit,
   ])
 
