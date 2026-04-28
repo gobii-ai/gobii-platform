@@ -96,6 +96,10 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
     async def agent_profile_event(self, event):
         await self.send_json({"type": "agent.profile", "payload": event.get("payload")})
 
+    async def message_notification_event(self, event):
+        # Notification events are session-scoped; agent-scoped sockets ignore them.
+        return
+
     async def human_input_requests_event(self, event):
         await self.send_json({"type": "human_input_requests.updated", "payload": event.get("payload")})
 
@@ -215,6 +219,9 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
     async def agent_profile_event(self, event):
         agent_id = self._extract_agent_id(event)
         await self.send_json({"type": "agent.profile", "agent_id": agent_id, "payload": event.get("payload")})
+
+    async def message_notification_event(self, event):
+        await self.send_json({"type": "message.notification", "payload": event.get("payload")})
 
     async def human_input_requests_event(self, event):
         await self._send_agent_event("human_input_requests.updated", event)

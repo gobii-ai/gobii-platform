@@ -172,6 +172,47 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         ):
             async_to_sync(_run)()
 
+    def test_session_consumer_forwards_message_notifications_from_profile_group(self) -> None:
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            channel_layer = get_channel_layer()
+            self.assertIsNotNone(channel_layer)
+
+            try:
+                await channel_layer.group_send(
+                    "agent-chat-user-123",
+                    {
+                        "type": "message_notification_event",
+                        "payload": {
+                            "agent_id": "agent-z",
+                            "agent_name": "Agent Z",
+                            "agent_avatar_url": "https://example.com/avatar.png",
+                            "workspace": {
+                                "type": "organization",
+                                "id": "org-1",
+                            },
+                            "message": {
+                                "id": "message-1",
+                                "body_preview": "Hello from Agent Z",
+                                "timestamp": "2026-04-28T12:00:00Z",
+                                "channel": "web",
+                            },
+                        },
+                    },
+                )
+
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "message.notification")
+                self.assertEqual(event["payload"]["agent_id"], "agent-z")
+                self.assertEqual(event["payload"]["message"]["id"], "message-1")
+            finally:
+                await communicator.disconnect()
+
+        async_to_sync(_run)()
+
     def test_remove_subscription_clears_state_without_channel_layer(self) -> None:
         consumer = AgentChatSessionConsumer()
         consumer.channel_layer = None

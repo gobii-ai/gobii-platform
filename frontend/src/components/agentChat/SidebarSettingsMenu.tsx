@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Bell,
   ChevronDown,
   ClipboardList,
   CreditCard,
@@ -26,6 +27,9 @@ export type SidebarSettingsInfo = {
   billingUrl?: string | null
   globalSecretsUrl?: string
   advancedMcpUrl?: string
+  notificationsEnabled?: boolean
+  notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
+  onNotificationsEnabledChange?: (enabled: boolean) => void
   taskCredits?: SidebarTaskCreditsInfo | null
 }
 
@@ -62,6 +66,22 @@ function formatDateValue(value: string | null | undefined): string {
   return dateFormatter.format(date)
 }
 
+function resolveNotificationStatusLabel(
+  enabled: boolean,
+  status: SidebarSettingsInfo['notificationStatus'],
+): string {
+  if (!enabled) {
+    return 'Off'
+  }
+  if (status === 'needs_permission') {
+    return 'Needs browser permission'
+  }
+  if (status === 'blocked') {
+    return 'Blocked in browser'
+  }
+  return 'On'
+}
+
 export function SidebarSettingsMenu({
   context = null,
   viewerEmail = null,
@@ -69,6 +89,9 @@ export function SidebarSettingsMenu({
   billingUrl = null,
   globalSecretsUrl = '/console/secrets/',
   advancedMcpUrl = '/console/advanced/mcp-servers/',
+  notificationsEnabled = true,
+  notificationStatus = 'off',
+  onNotificationsEnabledChange,
   taskCredits = null,
   variant = 'sidebar',
   collapsed = false,
@@ -115,6 +138,13 @@ export function SidebarSettingsMenu({
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
     : formatCreditValue(taskCredits?.remaining)
+  const notificationStatusLabel = resolveNotificationStatusLabel(
+    notificationsEnabled,
+    notificationStatus,
+  )
+  const handleNotificationToggle = useCallback(() => {
+    onNotificationsEnabledChange?.(!notificationsEnabled)
+  }, [notificationsEnabled, onNotificationsEnabledChange])
 
   return (
     <div
@@ -158,6 +188,28 @@ export function SidebarSettingsMenu({
                 <span>Billing</span>
               </a>
             ) : null}
+            <button
+              type="button"
+              className="sidebar-settings__notification-toggle"
+              role="switch"
+              aria-checked={notificationsEnabled}
+              onClick={handleNotificationToggle}
+            >
+              <span className="sidebar-settings__notification-copy">
+                <span className="sidebar-settings__notification-title">
+                  <Bell className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Notifications &amp; sound</span>
+                </span>
+                <span className="sidebar-settings__notification-status">{notificationStatusLabel}</span>
+              </span>
+              <span
+                className="sidebar-settings__switch"
+                data-checked={notificationsEnabled ? 'true' : 'false'}
+                aria-hidden="true"
+              >
+                <span className="sidebar-settings__switch-thumb" />
+              </span>
+            </button>
             <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
               <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
               <span>Global Secrets</span>

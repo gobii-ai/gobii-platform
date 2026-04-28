@@ -38,6 +38,9 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertIsNone(
             preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED),
         )
+        self.assertTrue(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED),
+        )
         self.assertEqual(
             preferences.get(UserPreference.KEY_USER_TIMEZONE),
             "",
@@ -178,6 +181,42 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         preferences = response.json().get("preferences", {})
         self.assertIsNone(preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED))
+
+    def test_patch_updates_agent_chat_notifications_enabled_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: False,
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertFalse(preferences.get(UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED))
+
+        stored = UserPreference.objects.get(user=self.user)
+        self.assertFalse(
+            (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED)
+        )
+
+    def test_patch_rejects_invalid_agent_chat_notifications_enabled_preference(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: "yes",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(UserPreference.objects.filter(user=self.user).exists())
 
     def test_patch_rejects_invalid_favorite_agent_ids(self):
         response = self.client.patch(

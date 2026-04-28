@@ -1,14 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 
 import { AgentChatPage } from './AgentChatPage'
 import { useSubscriptionStore } from '../stores/subscriptionStore'
+
+class FakeNotification {
+  static permission: NotificationPermission = 'granted'
+  static nextPermission: NotificationPermission = 'granted'
+  static requestPermissionMock = vi.fn(async () => {
+    FakeNotification.permission = FakeNotification.nextPermission
+    return FakeNotification.permission
+  })
+
+  static requestPermission() {
+    return FakeNotification.requestPermissionMock()
+  }
+}
 
 const {
   createAgentMock,
   updateAgentMock,
   fetchAgentSpawnIntentMock,
+  updateUserPreferencesMock,
   ensureAuthenticatedMock,
   rosterContext,
   rosterState,
@@ -19,6 +33,7 @@ const {
   createAgentMock: vi.fn(),
   updateAgentMock: vi.fn(),
   fetchAgentSpawnIntentMock: vi.fn(),
+  updateUserPreferencesMock: vi.fn(),
   ensureAuthenticatedMock: vi.fn(async () => true),
   rosterContext: {
     type: 'personal',
@@ -27,6 +42,7 @@ const {
   } as const,
   rosterState: {
     agents: [] as unknown[],
+    agentChatNotificationsEnabled: true,
   },
   llmIntelligence: {
     systemDefaultTier: 'standard',
@@ -105,9 +121,11 @@ vi.mock('../api/agentChat', () => ({
 }))
 
 vi.mock('../api/userPreferences', () => ({
+  parseBooleanPreference: vi.fn((value: unknown) => value === true),
   parseNullableBooleanPreference: vi.fn(() => null),
-  updateUserPreferences: vi.fn(),
+  updateUserPreferences: updateUserPreferencesMock,
   parseFavoriteAgentIdsPreference: vi.fn(() => []),
+  USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED: 'agent_chat_notifications_enabled',
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: 'agent_chat_insights_panel_expanded',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: 'agent_chat_roster_favorite_agent_ids',
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE: 'agent_chat_roster_sort_mode',
@@ -151,9 +169,15 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
     AgentChatLayout: ({
       spawnIntentLoading,
       signupPreviewState,
+      sidebarNotificationsEnabled,
+      sidebarNotificationStatus,
+      onSidebarNotificationsEnabledChange,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
+      sidebarNotificationsEnabled?: boolean
+      sidebarNotificationStatus?: string
+      onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
     }) => {
       const {
         isUpgradeModalOpen,
@@ -164,6 +188,14 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
         <div>
           <div data-testid="spawn-intent-loading">{String(Boolean(spawnIntentLoading))}</div>
           <div data-testid="signup-preview-state">{signupPreviewState ?? ''}</div>
+          <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
+          <div data-testid="notification-status">{sidebarNotificationStatus ?? ''}</div>
+          <button
+            type="button"
+            onClick={() => onSidebarNotificationsEnabledChange?.(!Boolean(sidebarNotificationsEnabled))}
+          >
+            Toggle notifications
+          </button>
           {isUpgradeModalOpen ? (
             <div
               data-testid="upgrade-modal"
@@ -213,6 +245,7 @@ vi.mock('../hooks/useAgentRoster', () => ({
       agentRosterSortMode: 'recent',
       favoriteAgentIds: [],
       insightsPanelExpanded: null,
+      agentChatNotificationsEnabled: rosterState.agentChatNotificationsEnabled,
       requestedAgentStatus: null,
       billingStatus: null,
       llmIntelligence,
@@ -371,6 +404,8 @@ describe('AgentChatPage trial onboarding', () => {
     })
     updateAgentMock.mockReset()
     fetchAgentSpawnIntentMock.mockReset()
+    updateUserPreferencesMock.mockReset()
+    updateUserPreferencesMock.mockResolvedValue({ preferences: {} })
     ensureAuthenticatedMock.mockClear()
     useSubscriptionStore.setState(buildInitialSubscriptionState())
     timelineState.data = undefined
@@ -379,8 +414,16 @@ describe('AgentChatPage trial onboarding', () => {
     timelineState.isLoading = false
     timelineState.error = null
     rosterState.agents = []
+    rosterState.agentChatNotificationsEnabled = true
     agentChatStoreState.signupPreviewState = 'none'
     agentChatStoreState.processingActive = false
+    FakeNotification.permission = 'granted'
+    FakeNotification.nextPermission = 'granted'
+    FakeNotification.requestPermissionMock.mockClear()
+    Object.defineProperty(window, 'Notification', {
+      configurable: true,
+      value: FakeNotification,
+    })
   })
 
   afterEach(() => {
@@ -498,6 +541,166 @@ describe('AgentChatPage trial onboarding', () => {
       expect(screen.getByTestId('signup-preview-state')).toHaveTextContent(
         'awaiting_signup_completion',
       )
+    })
+  })
+
+  it('hydrates and persists the notifications preference from roster data', async () => {
+    rosterState.agentChatNotificationsEnabled = false
+    rosterState.agents = [
+      {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatarUrl: null,
+        displayColorHex: null,
+        isActive: true,
+        processingActive: false,
+        miniDescription: '',
+        shortDescription: '',
+        auditUrl: null,
+        isOrgOwned: false,
+        isCollaborator: false,
+        canManageAgent: true,
+        canManageCollaborators: true,
+        preferredLlmTier: null,
+        email: null,
+        sms: null,
+        lastInteractionAt: null,
+        signupPreviewState: 'none',
+        planningState: 'skipped',
+      },
+    ]
+    updateUserPreferencesMock.mockResolvedValue({
+      preferences: {
+        agent_chat_notifications_enabled: true,
+      },
+    })
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('false')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle notifications' }))
+
+    await waitFor(() => {
+      expect(updateUserPreferencesMock).toHaveBeenCalledWith({
+        preferences: {
+          agent_chat_notifications_enabled: true,
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('true')
+    })
+  })
+
+  it('requests browser permission for enabled notifications and disables them if denied', async () => {
+    rosterState.agentChatNotificationsEnabled = true
+    rosterState.agents = [
+      {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatarUrl: null,
+        displayColorHex: null,
+        isActive: true,
+        processingActive: false,
+        miniDescription: '',
+        shortDescription: '',
+        auditUrl: null,
+        isOrgOwned: false,
+        isCollaborator: false,
+        canManageAgent: true,
+        canManageCollaborators: true,
+        preferredLlmTier: null,
+        email: null,
+        sms: null,
+        lastInteractionAt: null,
+        signupPreviewState: 'none',
+        planningState: 'skipped',
+      },
+    ]
+    FakeNotification.permission = 'default'
+    FakeNotification.nextPermission = 'denied'
+    updateUserPreferencesMock.mockResolvedValue({
+      preferences: {
+        agent_chat_notifications_enabled: false,
+      },
+    })
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(FakeNotification.requestPermissionMock).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(updateUserPreferencesMock).toHaveBeenCalledWith({
+        preferences: {
+          agent_chat_notifications_enabled: false,
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('false')
+    })
+  })
+
+  it('enables the toggle when the user allows browser notifications', async () => {
+    rosterState.agentChatNotificationsEnabled = false
+    rosterState.agents = [
+      {
+        id: 'agent-1',
+        name: 'Test Agent',
+        avatarUrl: null,
+        displayColorHex: null,
+        isActive: true,
+        processingActive: false,
+        miniDescription: '',
+        shortDescription: '',
+        auditUrl: null,
+        isOrgOwned: false,
+        isCollaborator: false,
+        canManageAgent: true,
+        canManageCollaborators: true,
+        preferredLlmTier: null,
+        email: null,
+        sms: null,
+        lastInteractionAt: null,
+        signupPreviewState: 'none',
+        planningState: 'skipped',
+      },
+    ]
+    FakeNotification.permission = 'default'
+    FakeNotification.nextPermission = 'granted'
+    updateUserPreferencesMock.mockResolvedValue({
+      preferences: {
+        agent_chat_notifications_enabled: true,
+      },
+    })
+
+    window.history.pushState({}, '', '/app/agents/agent-1')
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('false')
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Toggle notifications' }))
+
+    await waitFor(() => {
+      expect(FakeNotification.requestPermissionMock).toHaveBeenCalledTimes(1)
+    })
+    await waitFor(() => {
+      expect(updateUserPreferencesMock).toHaveBeenCalledWith({
+        preferences: {
+          agent_chat_notifications_enabled: true,
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('notifications-enabled')).toHaveTextContent('true')
     })
   })
 })

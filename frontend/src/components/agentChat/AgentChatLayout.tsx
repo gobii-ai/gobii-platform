@@ -126,6 +126,9 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   sidebarBillingUrl?: string | null
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
+  sidebarNotificationsEnabled?: boolean
+  sidebarNotificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
+  onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
@@ -279,6 +282,9 @@ export function AgentChatLayout({
   sidebarBillingUrl = null,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
+  sidebarNotificationsEnabled = true,
+  sidebarNotificationStatus = 'off',
+  onSidebarNotificationsEnabledChange,
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
@@ -810,6 +816,9 @@ export function AgentChatLayout({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl: sidebarBillingUrl,
+    notificationsEnabled: sidebarNotificationsEnabled,
+    notificationStatus: sidebarNotificationStatus,
+    onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -821,8 +830,11 @@ export function AgentChatLayout({
   }), [
     currentContext,
     isProprietaryMode,
+    onSidebarNotificationsEnabledChange,
     sidebarBillingUrl,
     sidebarCreditsResetOn,
+    sidebarNotificationStatus,
+    sidebarNotificationsEnabled,
     sidebarTodayCreditsUsed,
     taskQuota,
     viewerEmail,

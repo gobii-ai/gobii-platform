@@ -29,6 +29,7 @@ type AgentRosterPayload = {
   agent_roster_sort_mode?: AgentRosterSortMode
   favorite_agent_ids?: string[]
   insights_panel_expanded?: boolean | null
+  agent_chat_notifications_enabled?: boolean
   billingStatus?: BillingStatusInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
   agents: {
@@ -62,6 +63,7 @@ export async function fetchAgentRoster(
   agentRosterSortMode: AgentRosterSortMode
   favoriteAgentIds: string[]
   insightsPanelExpanded: boolean | null
+  agentChatNotificationsEnabled: boolean
   requestedAgentStatus?: 'deleted' | 'missing' | null
   billingStatus?: BillingStatusInfo | null
   llmIntelligence?: LlmIntelligenceConfig | null
@@ -97,6 +99,7 @@ export async function fetchAgentRoster(
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
       : [],
     insightsPanelExpanded: payload.insights_panel_expanded ?? null,
+    agentChatNotificationsEnabled: payload.agent_chat_notifications_enabled !== false,
     requestedAgentStatus: payload.requested_agent_status ?? null,
     billingStatus: payload.billingStatus ?? null,
     llmIntelligence: payload.llmIntelligence,

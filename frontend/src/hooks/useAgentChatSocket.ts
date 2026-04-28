@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { scheduleLoginRedirect } from '../api/http'
 import { useAgentChatStore } from '../stores/agentChatStore'
+import type { AgentMessageNotification } from '../types/agentChat'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
@@ -72,6 +73,7 @@ export function useAgentChatSocket(
     contextOverride?: AgentChatSocketContextOverride
     onCreditEvent?: (payload: Record<string, unknown>) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
+    onMessageNotificationEvent?: (payload: AgentMessageNotification) => void
   } = {},
 ): AgentChatSocketSnapshot {
   const queryClient = useQueryClient()
@@ -85,6 +87,9 @@ export function useAgentChatSocket(
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
+  const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
+    options.onMessageNotificationEvent ?? null,
+  )
 
   useEffect(() =>
     useAgentChatStore.subscribe((state) => {
@@ -98,7 +103,8 @@ export function useAgentChatSocket(
   useEffect(() => {
     creditEventRef.current = options.onCreditEvent ?? null
     profileEventRef.current = options.onAgentProfileEvent ?? null
-  }, [options.onCreditEvent, options.onAgentProfileEvent])
+    messageNotificationEventRef.current = options.onMessageNotificationEvent ?? null
+  }, [options.onCreditEvent, options.onAgentProfileEvent, options.onMessageNotificationEvent])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -400,6 +406,7 @@ export function useAgentChatSocket(
             receiveStreamEvent: receiveStreamRef.current,
             onCreditEvent: creditEventRef.current,
             onAgentProfileEvent: profileEventRef.current,
+            onMessageNotificationEvent: messageNotificationEventRef.current,
           })
           if (outcome.type === 'subscription_error') {
             if (outcome.agentId) {

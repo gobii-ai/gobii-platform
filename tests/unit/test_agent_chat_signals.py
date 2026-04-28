@@ -101,6 +101,15 @@ class AgentChatSignalTests(TestCase):
             self.collaborator_user_stream_group_name,
             self.collaborator_user_stream_channel_name,
         )
+        self.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="web",
+            address=build_web_agent_address(self.agent.id),
+        )
+        self.requester_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=build_web_user_address(self.user.id, self.agent.id),
+        )
 
     def tearDown(self):
         async_to_sync(self.channel_layer.group_discard)(self.group_name, self.timeline_channel_name)
@@ -287,6 +296,71 @@ class AgentChatSignalTests(TestCase):
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_visible_outbound_message_emits_message_notification_event(self, _mock_transition):
+        with self.captureOnCommitCallbacks(execute=True):
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                to_endpoint=self.requester_endpoint,
+                body="The agent finished the task.",
+                raw_payload={"source": "test"},
+            )
+
+        owner_notification = self._receive_with_timeout(self.owner_profile_channel_name)
+        collaborator_notification = self._receive_with_timeout(self.collaborator_profile_channel_name)
+
+        self.assertEqual(owner_notification.get("type"), "message_notification_event")
+        self.assertEqual(collaborator_notification.get("type"), "message_notification_event")
+        self.assertEqual(owner_notification.get("payload", {}).get("agent_id"), str(self.agent.id))
+        self.assertEqual(
+            owner_notification.get("payload", {}).get("message", {}).get("id"),
+            str(message.id),
+        )
+        self.assertEqual(
+            owner_notification.get("payload", {}).get("message", {}).get("body_preview"),
+            "The agent finished the task.",
+        )
+        self.assertEqual(
+            owner_notification.get("payload", {}).get("workspace"),
+            {
+                "type": "personal",
+                "id": str(self.user.id),
+            },
+        )
+
+    @tag("batch_agent_chat")
+    def test_inbound_message_does_not_emit_message_notification_event(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=False,
+                from_endpoint=self.requester_endpoint,
+                to_endpoint=self.agent_endpoint,
+                body="A user replied",
+                raw_payload={"source": "test"},
+            )
+
+        with self.assertRaises(AssertionError):
+            self._receive_with_timeout(self.owner_profile_channel_name, timeout=0.05)
+
+    @tag("batch_agent_chat")
+    def test_hidden_outbound_message_does_not_emit_message_notification_event(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                to_endpoint=self.requester_endpoint,
+                body="This should stay hidden",
+                raw_payload={"hide_in_chat": True, "source": "test"},
+            )
+
+        with self.assertRaises(AssertionError):
+            self._receive_with_timeout(self.owner_profile_channel_name, timeout=0.05)
+
+    @tag("batch_agent_chat")
     def test_avatar_update_emits_agent_profile_event(self):
         with self.captureOnCommitCallbacks(execute=True):
             self.agent.avatar.save("avatar.png", ContentFile(b"fake-avatar-bytes"), save=False)
@@ -401,20 +475,11 @@ class AgentChatSignalTests(TestCase):
             channel="web",
             address=build_web_user_address(self.user.id, self.agent.id),
         )
-        requester_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            channel="web",
-            address=build_web_user_address(self.user.id, self.agent.id),
-        )
-        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel="web",
-            address=build_web_agent_address(self.agent.id),
-        )
         requested_message = PersistentAgentMessage.objects.create(
             is_outbound=True,
             owner_agent=self.agent,
-            from_endpoint=agent_endpoint,
-            to_endpoint=requester_endpoint,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
             conversation=conversation,
             body="Need your input",
             raw_payload={"source": "test"},
