@@ -55,16 +55,16 @@ export function FileManagerHeader({
 
   const isEmbedded = variant === 'embedded'
   const uploadButtonClassName = isEmbedded
-    ? `inline-flex items-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-200 hover:bg-blue-900/30'}`
+    ? `inline-flex w-full items-center justify-center gap-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100 transition sm:w-auto ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:border-blue-200 hover:bg-blue-900/30'}`
     : `inline-flex items-center gap-2 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-700 transition ${isBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-blue-100'}`
   const folderButtonClassName = isEmbedded
-    ? 'inline-flex items-center gap-2 rounded-lg border border-emerald-300/40 bg-emerald-950/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-900/30 disabled:opacity-60'
+    ? 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-emerald-300/40 bg-emerald-950/20 px-3 py-2 text-sm font-semibold text-emerald-100 transition hover:border-emerald-200 hover:bg-emerald-900/30 disabled:opacity-60 sm:w-auto'
     : 'inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-60'
   const deleteButtonClassName = isEmbedded
-    ? 'inline-flex items-center gap-2 rounded-lg border border-rose-300/40 bg-rose-950/20 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-900/30 disabled:opacity-60'
+    ? 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-rose-300/40 bg-rose-950/20 px-3 py-2 text-sm font-semibold text-rose-100 transition hover:border-rose-200 hover:bg-rose-900/30 disabled:opacity-60 sm:w-auto'
     : 'inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-semibold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60'
   const refreshButtonClassName = isEmbedded
-    ? 'inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-slate-900/40 px-3 py-2 text-sm font-medium text-slate-100 transition hover:border-slate-200 hover:bg-slate-900/60 disabled:opacity-60'
+    ? 'inline-flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300/70 bg-slate-900/40 px-3 py-2 text-sm font-medium text-slate-100 transition hover:border-slate-200 hover:bg-slate-900/60 disabled:opacity-60 sm:w-auto'
     : 'inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-blue-50 disabled:opacity-60'
 
   return (

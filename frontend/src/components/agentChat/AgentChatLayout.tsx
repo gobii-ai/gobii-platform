@@ -454,6 +454,7 @@ export function AgentChatLayout({
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
     if (showEmbeddedSettings && mode !== 'gallery') {
+      setSidebarMode(mode)
       onBackFromEmbeddedSettings?.()
       return
     }

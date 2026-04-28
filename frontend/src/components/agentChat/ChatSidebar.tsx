@@ -134,6 +134,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   const handleStepLeft = useCallback(() => {
     if (showSettingsView) {
       onBackFromEmbeddedSettings?.()
+      onDesktopModeChange?.('list')
       return
     }
     onDesktopModeChange?.(getPreviousAgentChatSidebarMode(desktopMode))
@@ -459,7 +460,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             {contextSwitcher ? (
               <AgentChatContextSwitcher {...contextSwitcher} collapsed={collapsed} />
             ) : null}
-            {!collapsed && !showSettingsView ? (
+            {!collapsed ? (
               <button
                 type="button"
                 className="chat-sidebar-toggle"

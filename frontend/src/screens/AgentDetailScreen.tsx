@@ -2277,39 +2277,17 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         deleteError={deleteError}
       />
 
-      {isEmbedded && hasAnyChanges ? (
-        <div className="sticky bottom-4 z-20">
-          <div className="rounded-2xl border border-slate-300/70 bg-transparent px-4 py-3 shadow-none">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-slate-900">You have unsaved changes</p>
-                {saveError ? (
-                  <p className="mt-1 text-xs text-red-600">{saveError}</p>
-                ) : (
-                  <p className="mt-1 text-xs text-slate-500">Save now to update the chat shell and gallery immediately.</p>
-                )}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleResetAll}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:text-slate-900"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveAll}
-                  disabled={saving}
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-800 disabled:opacity-60"
-                >
-                  <Check className="h-4 w-4" aria-hidden="true" />
-                  {saving ? 'Saving…' : 'Save Changes'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+      {isEmbedded ? (
+        <SaveBar
+          visible={hasAnyChanges}
+          onCancel={handleResetAll}
+          onSave={handleSaveAll}
+          busy={saving}
+          error={saveError}
+          helperText="Save now to update the chat shell and gallery immediately."
+          variant="embedded"
+          placement="sticky"
+        />
       ) : null}
 
       {modal}
