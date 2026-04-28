@@ -701,6 +701,35 @@ const BOTTOM_EXIT_THRESHOLD_PX = 1
 const PROGRAMMATIC_SCROLL_GUARD_MS = 150
 const RESUME_TIMELINE_BACKFILL_MAX_NEWER_PAGES = DEFAULT_CONTIGUOUS_BACKFILL_MAX_PAGES
 
+// Gated diagnostic logging for the "random snap to bottom" investigation.
+// Enable in any environment by running `window.__DEBUG_SCROLL_SNAP__ = true` in DevTools.
+// Each call captures the trigger site plus current scroll geometry so we can tell whether
+// a snap originated from a re-pin (IntersectionObserver / handleScroll), a content-change
+// auto-follow (ResizeObserver), or a stale isNearBottom render.
+function isScrollSnapDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false
+  return Boolean((window as unknown as { __DEBUG_SCROLL_SNAP__?: boolean }).__DEBUG_SCROLL_SNAP__)
+}
+
+function logScrollSnap(event: string, details: Record<string, unknown> = {}): void {
+  if (!isScrollSnapDebugEnabled()) return
+  const container = typeof document !== 'undefined'
+    ? document.getElementById('timeline-shell')
+    : null
+  const geometry = container
+    ? {
+        scrollTop: container.scrollTop,
+        scrollHeight: container.scrollHeight,
+        clientHeight: container.clientHeight,
+        distanceFromBottom: container.scrollHeight - container.scrollTop - container.clientHeight,
+      }
+    : null
+  // eslint-disable-next-line no-console
+  console.log(`[scroll-snap] ${event}`, { ...details, geometry, t: Date.now() })
+  // eslint-disable-next-line no-console
+  console.trace(`[scroll-snap] ${event}`)
+}
+
 function isEditableEventTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) {
     return false
@@ -1481,7 +1510,7 @@ export function AgentChatPage({
     return autoScrollPinnedRef.current && isNearBottomRef.current && !userTouchActiveRef.current
   }, [])
 
-  const repinAutoScrollIfAtBottom = useCallback((container: HTMLElement | null) => {
+  const repinAutoScrollIfAtBottom = useCallback((container: HTMLElement | null, source: string = 'unknown') => {
     if (!container || autoScrollPinnedRef.current) {
       return
     }
@@ -1498,6 +1527,12 @@ export function AgentChatPage({
     if (timelineHasUnseenActivity) {
       forceScrollOnNextUpdateRef.current = true
     }
+    logScrollSnap('repinAutoScrollIfAtBottom', {
+      source,
+      distanceFromBottom,
+      timelineHasUnseenActivity,
+      userTouchActive: userTouchActiveRef.current,
+    })
     autoScrollPinnedRef.current = true
     setAutoScrollPinned(true)
   }, [setAutoScrollPinned, timelineHasUnseenActivity])
@@ -1551,9 +1586,16 @@ export function AgentChatPage({
           && typeof distanceFromBottom === 'number'
           && distanceFromBottom <= BOTTOM_REPIN_THRESHOLD_PX
 
+        logScrollSnap('IntersectionObserver:fire', {
+          isIntersecting: entry.isIntersecting,
+          distanceFromBottom,
+          atBottom,
+          autoScrollPinned: autoScrollPinnedRef.current,
+        })
+
         // Auto-restick only when the user is truly at the bottom.
         if (atBottom) {
-          repinAutoScrollIfAtBottom(container)
+          repinAutoScrollIfAtBottom(container, 'IntersectionObserver')
         }
       },
       {
@@ -1595,7 +1637,7 @@ export function AgentChatPage({
       }
       // Don't try to re-pin while user is actively touching — let their scroll intent take priority
       if (!userTouchActiveRef.current) {
-        repinAutoScrollIfAtBottom(container)
+        repinAutoScrollIfAtBottom(container, 'handleScroll')
       }
       const movedAwayFromBottom = typeof distanceFromBottom === 'number'
         && distanceFromBottom > BOTTOM_EXIT_THRESHOLD_PX
@@ -1606,6 +1648,13 @@ export function AgentChatPage({
         && nextScrollTop < lastScrollTop - 2
         && (userTouchActiveRef.current || Date.now() - lastProgrammaticScrollAtRef.current > PROGRAMMATIC_SCROLL_GUARD_MS)
       ) {
+        logScrollSnap('handleScroll:unpin', {
+          nextScrollTop,
+          lastScrollTop,
+          distanceFromBottom,
+          userTouchActive: userTouchActiveRef.current,
+          msSinceProgrammatic: Date.now() - lastProgrammaticScrollAtRef.current,
+        })
         unpinAutoScrollFromUserGesture()
       }
       lastScrollTop = nextScrollTop
@@ -1712,7 +1761,20 @@ export function AgentChatPage({
   const prevStreamingRef = useRef(timelineStreaming)
 
   if (timelineEvents !== prevEventsRef.current || timelineStreaming !== prevStreamingRef.current) {
-    shouldScrollOnNextUpdateRef.current = autoScrollPinned && isNearBottom
+    const willScroll = autoScrollPinned && isNearBottom
+    if (willScroll) {
+      logScrollSnap('renderDecision:shouldScrollOnNextUpdate', {
+        autoScrollPinned,
+        // Note: this is the React state, which can lag isNearBottomRef.current
+        isNearBottomReactState: isNearBottom,
+        isNearBottomRefCurrent: isNearBottomRef.current,
+        eventsChanged: timelineEvents !== prevEventsRef.current,
+        streamingChanged: timelineStreaming !== prevStreamingRef.current,
+        prevEventsLen: prevEventsRef.current?.length ?? 0,
+        nextEventsLen: timelineEvents?.length ?? 0,
+      })
+    }
+    shouldScrollOnNextUpdateRef.current = willScroll
     prevEventsRef.current = timelineEvents
     prevStreamingRef.current = timelineStreaming
   }
@@ -1730,6 +1792,11 @@ export function AgentChatPage({
     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
     // Already at bottom — skip to avoid triggering scroll events
     if (distanceFromBottom < 2) return
+    logScrollSnap('snapToBottom:execute', {
+      distanceFromBottom,
+      autoScrollPinned: autoScrollPinnedRef.current,
+      userTouchActive: userTouchActiveRef.current,
+    })
     container.scrollTop = container.scrollHeight
     isNearBottomRef.current = true
     setIsNearBottom(true)
@@ -1741,6 +1808,10 @@ export function AgentChatPage({
     const container = document.getElementById('timeline-shell')
     const sentinel = document.getElementById('timeline-bottom-sentinel')
     if (!container) return
+    logScrollSnap('jumpToBottom:execute', {
+      autoScrollPinned: autoScrollPinnedRef.current,
+      hasSentinel: Boolean(sentinel),
+    })
     lastProgrammaticScrollAtRef.current = Date.now()
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
@@ -1779,6 +1850,7 @@ export function AgentChatPage({
   }, [queryClient])
 
   const repinAndJumpToBottom = useCallback(() => {
+    logScrollSnap('repinAndJumpToBottom')
     autoScrollPinnedRef.current = true
     forceScrollOnNextUpdateRef.current = true
     setAutoScrollPinned(true)
@@ -1862,6 +1934,7 @@ export function AgentChatPage({
         const delta = height - prevComposerHeight.current
         // If composer grew and we're at the bottom, scroll down to keep content visible
         if (delta > 0 && shouldFollow) {
+          logScrollSnap('composerResize:adjustForGrowth', { delta, height })
           container.scrollTop += delta
         }
       }
@@ -1870,6 +1943,7 @@ export function AgentChatPage({
 
       // If pinned, ensure we stay at the bottom
       if (shouldFollow) {
+        logScrollSnap('composerResize:autoFollow', { height })
         executeAutoFollow()
         return
       }
@@ -1902,6 +1976,10 @@ export function AgentChatPage({
       // Skip while user is actively touching to prevent scroll fighting on mobile
       // Uses rAF-coalesced scrollToBottom to avoid ResizeObserver feedback loops
       if (shouldFollow) {
+        logScrollSnap('timelineResize:autoFollow', {
+          autoScrollPinned: autoScrollPinnedRef.current,
+          isNearBottomRef: isNearBottomRef.current,
+        })
         executeAutoFollow()
         return
       }
@@ -1937,11 +2015,13 @@ export function AgentChatPage({
     if (isNewAgent) {
       // New agent: no events yet, but ensure auto-scroll is pinned for when content arrives
       didInitialScrollRef.current = true
+      logScrollSnap('initialScroll:newAgentPin')
       setAutoScrollPinned(true)
       return
     }
     if (!initialLoading && timelineEvents.length && !didInitialScrollRef.current) {
       didInitialScrollRef.current = true
+      logScrollSnap('initialScroll:firstLoadPin', { eventCount: timelineEvents.length })
       setAutoScrollPinned(true)
       // Immediate scroll attempt
       jumpToBottom()
@@ -1954,6 +2034,7 @@ export function AgentChatPage({
   useLayoutEffect(() => {
     if (forceScrollOnNextUpdateRef.current) {
       // Force scroll (user-initiated actions like send, jump-to-latest) — always honor
+      logScrollSnap('layoutEffect:forceJump')
       forceScrollOnNextUpdateRef.current = false
       shouldScrollOnNextUpdateRef.current = false
       jumpToBottom()
@@ -1961,7 +2042,12 @@ export function AgentChatPage({
       // Auto scroll (new content while pinned) — use lightweight snap to avoid layout thrashing
       shouldScrollOnNextUpdateRef.current = false
       if (!userTouchActiveRef.current) {
+        logScrollSnap('layoutEffect:autoSnap', {
+          autoScrollPinned: autoScrollPinnedRef.current,
+        })
         snapToBottom()
+      } else {
+        logScrollSnap('layoutEffect:autoSnapSuppressedByTouch')
       }
     }
   }, [
@@ -2670,6 +2756,7 @@ export function AgentChatPage({
     const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
     if (!isTouch) return
 
+    logScrollSnap('composerFocus:repinAndJump')
     setAutoScrollPinned(true)
     forceScrollOnNextUpdateRef.current = true
     jumpToBottom()
