@@ -8,6 +8,7 @@ from django.views.generic import TemplateView, RedirectView, View
 from django.http import HttpResponse, Http404
 from django.core import signing
 from django.core.mail import send_mail
+from django.contrib import messages
 from django.utils.decorators import method_decorator
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
@@ -19,7 +20,7 @@ from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
 from django.db import DatabaseError
-from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, UserBilling
+from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, TrialPromo, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -27,6 +28,18 @@ from api.services.trial_abuse import (
     SIGNAL_SOURCE_CHECKOUT,
     evaluate_user_trial_eligibility,
     user_has_prior_individual_history,
+)
+from api.services.trial_promos import (
+    TrialPromoError,
+    build_trial_promo_checkout_metadata,
+    build_trial_promo_metadata,
+    can_user_start_trial_promo,
+    find_active_trial_promo_by_code,
+    get_session_trial_promo,
+    mark_trial_promo_redemption_checkout_started,
+    mark_trial_promo_redemption_failed,
+    reserve_trial_promo_redemption,
+    store_trial_promo_in_session,
 )
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
@@ -265,6 +278,50 @@ def _additional_tasks_price_id_for_plan(stripe_settings, plan_target: str) -> st
     if plan_target == "scale":
         return getattr(stripe_settings, "scale_additional_task_price_id", "") or ""
     return ""
+
+
+def _personal_plan_checkout_config(stripe_settings, plan_target: str) -> dict[str, str]:
+    normalized_plan = str(plan_target or "").strip().lower()
+    if normalized_plan == PlanNames.STARTUP:
+        return {
+            "plan": PlanNames.STARTUP,
+            "plan_label": "Pro",
+            "price_id": stripe_settings.startup_price_id,
+            "additional_tasks_price_id": getattr(stripe_settings, "startup_additional_task_price_id", "") or "",
+            "checkout_slug": "pro",
+        }
+    if normalized_plan == PlanNames.SCALE:
+        return {
+            "plan": PlanNames.SCALE,
+            "plan_label": "Scale",
+            "price_id": stripe_settings.scale_price_id,
+            "additional_tasks_price_id": getattr(stripe_settings, "scale_additional_task_price_id", "") or "",
+            "checkout_slug": "scale",
+        }
+    raise Http404("This special access plan is not configured.")
+
+
+def _apply_optional_payment_method_trial_checkout_fields(checkout_kwargs: dict, *, promo: TrialPromo) -> None:
+    checkout_kwargs["payment_method_collection"] = "if_required"
+    behavior = promo.no_payment_method_end_behavior
+    checkout_kwargs["subscription_data"]["trial_settings"] = {
+        "end_behavior": {
+            "missing_payment_method": behavior,
+        }
+    }
+    behavior_label = {
+        "create_invoice": "become past due until you add a payment method",
+        "cancel": "cancel automatically",
+        "pause": "pause until you add a payment method",
+    }.get(behavior, "wait for you to add a payment method")
+    checkout_kwargs["custom_text"] = {
+        "after_submit": {
+            "message": (
+                "Your special trial starts now. If no payment method is added by the end, "
+                f"your subscription will {behavior_label}."
+            )
+        }
+    }
 
 
 
@@ -638,14 +695,23 @@ def _emit_checkout_initiated_event(
         logger.exception("Failed to emit %s marketing event for %s", event_name, plan_code)
 
 
-def _track_redirected_to_checkout_event(request, *, plan_type: str, trial_enabled: bool) -> None:
+def _track_redirected_to_checkout_event(
+    request,
+    *,
+    plan_type: str,
+    trial_enabled: bool,
+    extra_properties: dict | None = None,
+) -> None:
+    properties = {
+        "plan_type": plan_type,
+        "trial_enabled": trial_enabled,
+    }
+    if extra_properties:
+        properties.update(extra_properties)
     _track_web_event_for_request(
         request,
         event=AnalyticsEvent.REDIRECTED_TO_CHECKOUT,
-        properties={
-            "plan_type": plan_type,
-            "trial_enabled": trial_enabled,
-        },
+        properties=properties,
     )
 
 
@@ -1779,6 +1845,261 @@ class DataDeletionPolicyView(TemplateView):
     """Static Data Deletion Policy page."""
 
     template_name = "data-deletion.html"
+
+
+class SpecialAccessView(TemplateView):
+    template_name = "special_access.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        code = (request.GET.get("code") or "").strip()
+        if code:
+            promo = find_active_trial_promo_by_code(code)
+            if promo is not None:
+                store_trial_promo_in_session(request, promo)
+                return redirect("pages:special_access")
+            self.invalid_code_error = "That special access code is not active."
+        return super().get(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        code = (request.POST.get("code") or "").strip()
+        promo = find_active_trial_promo_by_code(code)
+        if promo is None:
+            self.invalid_code_error = "That special access code is not active."
+            return self.render_to_response(self.get_context_data(**kwargs), status=400)
+        store_trial_promo_in_session(request, promo)
+        return redirect("pages:special_access")
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        promo = get_session_trial_promo(self.request)
+        plan_label = ""
+        redemptions_remaining = None
+        if promo is not None:
+            plan_label = promo.get_plan_display()
+            if promo.max_redemptions is not None:
+                used_count = promo.redemptions.filter(
+                    status__in=promo.redemptions.model.COUNTED_STATUSES,
+                ).count()
+                redemptions_remaining = max(promo.max_redemptions - used_count, 0)
+        context.update(
+            {
+                "promo": promo,
+                "invalid_code_error": getattr(self, "invalid_code_error", ""),
+                "plan_label": plan_label,
+                "redemptions_remaining": redemptions_remaining,
+                "start_url": reverse("pages:special_access_start"),
+            }
+        )
+        return context
+
+
+class SpecialAccessStartView(View):
+    http_method_names = ["get", "post"]
+
+    def dispatch(self, request, *args, **kwargs):
+        if not settings.GOBII_PROPRIETARY_MODE:
+            raise Http404()
+        return super().dispatch(request, *args, **kwargs)
+
+    def get(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def post(self, request, *args, **kwargs):
+        return self._handle(request)
+
+    def _handle(self, request):
+        promo = get_session_trial_promo(request)
+        if promo is None:
+            messages.error(request, "Enter your special access code to continue.")
+            return redirect("pages:special_access")
+
+        if not request.user.is_authenticated:
+            return redirect_to_login(
+                next=reverse("pages:special_access_start"),
+                login_url=_cta_auth_url_with_utms(request),
+            )
+
+        try:
+            return _start_trial_promo_checkout(request, promo)
+        except TrialPromoError as exc:
+            messages.error(request, exc.message)
+            return redirect("pages:special_access")
+
+
+def _start_trial_promo_checkout(request, promo: TrialPromo):
+    user = request.user
+
+    plan = reconcile_user_plan_from_stripe(user) or {}
+    plan_id = str(plan.get("id") or "").lower()
+    if plan_id and plan_id != PlanNames.FREE:
+        messages.info(request, "This account already has an active paid plan.")
+        return redirect(reverse("billing"))
+
+    decision = can_user_start_trial_promo(user=user, promo=promo, request=request)
+    if not decision.allowed:
+        raise TrialPromoError(
+            decision.reason or "trial_unavailable",
+            "This account is not eligible for this special trial.",
+        )
+
+    _prepare_stripe_or_404()
+    stripe_settings = get_stripe_settings()
+    plan_config = _personal_plan_checkout_config(stripe_settings, promo.plan)
+    price_id = plan_config["price_id"]
+    if not price_id:
+        raise Http404("This special access plan is not configured yet.")
+
+    try:
+        price_object = Price.objects.get(id=price_id)
+    except Price.DoesNotExist:
+        logger.warning("Price with ID '%s' does not exist in dj-stripe.", price_id)
+        raise Http404("This special access plan pricing is not ready.")
+
+    price = 0.0
+    if price_object.unit_amount is not None:
+        price = price_object.unit_amount / 100
+    price_currency = getattr(price_object, "currency", None)
+
+    customer = get_or_create_stripe_customer(user)
+    event_id = f"trial-promo-{uuid.uuid4()}"
+    checkout_source_url = urlsplit(
+        request.META.get("HTTP_REFERER") or request.build_absolute_uri(reverse("pages:special_access"))
+    )._replace(query="", fragment="").geturl()[:500]
+
+    success_url, post_checkout_redirect_used = _build_checkout_success_url(
+        request,
+        event_id=event_id,
+        price=price,
+        plan=plan_config["plan"],
+    )
+
+    base_metadata = {
+        "gobii_event_id": event_id,
+        "plan": plan_config["plan"],
+        "checkout_source_url": checkout_source_url,
+    }
+    promo_metadata = build_trial_promo_metadata(promo)
+    redemption = reserve_trial_promo_redemption(
+        promo=promo,
+        user=user,
+        event_id=event_id,
+        stripe_customer_id=customer.id,
+        metadata={**base_metadata, **promo_metadata},
+    )
+
+    flow_type = STRIPE_CHECKOUT_FLOW_TYPE_TRIAL
+    fingerprint_metadata = (
+        build_checkout_fingerprint_metadata(user)
+        if promo.trial_abuse_filtering_enabled
+        else None
+    )
+    checkout_metadata = build_trial_promo_checkout_metadata(
+        base_metadata,
+        flow_type=flow_type,
+        promo=promo,
+        redemption=redemption,
+        extra_metadata=fingerprint_metadata,
+    )
+    subscription_metadata = build_trial_promo_checkout_metadata(
+        base_metadata,
+        flow_type=flow_type,
+        promo=promo,
+        redemption=redemption,
+    )
+
+    line_items = [{"price": price_id, "quantity": 1}]
+    if _is_additional_tasks_auto_purchase_enabled(user):
+        additional_price_id = plan_config["additional_tasks_price_id"]
+        if additional_price_id:
+            line_items.append({"price": additional_price_id})
+
+    subscription_data = {
+        "metadata": subscription_metadata,
+        "trial_period_days": promo.trial_days,
+    }
+    checkout_kwargs = {
+        "customer": customer.id,
+        "api_key": stripe.api_key,
+        "success_url": success_url,
+        "cancel_url": request.build_absolute_uri(reverse("pages:special_access")),
+        "mode": "subscription",
+        "payment_method_types": PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES,
+        "allow_promotion_codes": False,
+        "metadata": checkout_metadata,
+        "subscription_data": subscription_data,
+        "line_items": line_items,
+        "idempotency_key": f"checkout-trial-promo-{customer.id}-{event_id}",
+    }
+
+    if promo.payment_method_required:
+        _apply_trial_checkout_fields(
+            checkout_kwargs,
+            include_trial=True,
+            trial_days=promo.trial_days,
+        )
+    else:
+        _apply_optional_payment_method_trial_checkout_fields(checkout_kwargs, promo=promo)
+
+    rewardful_referral = request.COOKIES.get("rewardful-referral", "")
+    if rewardful_referral:
+        checkout_kwargs["client_reference_id"] = rewardful_referral
+
+    _emit_checkout_initiated_event(
+        request=request,
+        user=user,
+        plan_code=plan_config["plan"],
+        plan_label=plan_config["plan_label"],
+        value=price,
+        currency=price_currency,
+        event_id=event_id,
+        post_checkout_redirect_used=post_checkout_redirect_used,
+    )
+
+    try:
+        session = _create_checkout_session_with_customer_context(
+            customer_id=customer.id,
+            flow_type=flow_type,
+            event_id=event_id,
+            plan=plan_config["plan"],
+            plan_label=plan_config["plan_label"],
+            value=price,
+            currency=price_currency,
+            checkout_source_url=checkout_source_url,
+            extra_customer_metadata={
+                **build_trial_promo_metadata(promo, redemption=redemption),
+                **(
+                    build_checkout_fingerprint_metadata(user, customer_context=True)
+                    if promo.trial_abuse_filtering_enabled
+                    else clear_checkout_fingerprint_metadata(customer_context=True)
+                ),
+            },
+            checkout_kwargs=checkout_kwargs,
+        )
+    except stripe.error.StripeError:
+        mark_trial_promo_redemption_failed(redemption)
+        raise
+
+    mark_trial_promo_redemption_checkout_started(
+        redemption,
+        checkout_session_id=getattr(session, "id", None),
+        metadata={"stripe_checkout_session_id": getattr(session, "id", "") or ""},
+    )
+    _track_redirected_to_checkout_event(
+        request,
+        plan_type=plan_config["checkout_slug"],
+        trial_enabled=True,
+        extra_properties={
+            "trial_promo_id": str(promo.pk),
+            "trial_promo_code": promo.code_label,
+            "trial_promo_name": promo.name,
+        },
+    )
+    return redirect(session.url)
 
 
 class AboutView(TemplateView):

@@ -4214,6 +4214,178 @@ class UserBilling(models.Model):
         verbose_name_plural = "User Billing"
 
 
+class TrialPromoPlanChoices(models.TextChoices):
+    STARTUP = PlanNames.STARTUP, "Pro"
+    SCALE = PlanNames.SCALE, "Scale"
+
+
+class TrialPromoNoPaymentMethodEndBehaviorChoices(models.TextChoices):
+    CREATE_INVOICE = "create_invoice", "Create invoice"
+    CANCEL = "cancel", "Cancel subscription"
+    PAUSE = "pause", "Pause subscription"
+
+
+class TrialPromo(models.Model):
+    """Configurable special-access trial offer backed by Stripe Checkout."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=120)
+    code_digest = models.CharField(max_length=64, unique=True, db_index=True)
+    code_label = models.CharField(
+        max_length=80,
+        blank=True,
+        default="",
+        help_text="Human-readable code label for admin and Stripe metadata.",
+    )
+    plan = models.CharField(
+        max_length=32,
+        choices=TrialPromoPlanChoices.choices,
+        default=TrialPromoPlanChoices.STARTUP,
+    )
+    trial_days = models.PositiveIntegerField(
+        validators=[MinValueValidator(1), MaxValueValidator(730)],
+        help_text="Stripe trials can be at most 730 days.",
+    )
+    payment_method_required = models.BooleanField(default=True)
+    no_payment_method_end_behavior = models.CharField(
+        max_length=32,
+        choices=TrialPromoNoPaymentMethodEndBehaviorChoices.choices,
+        default=TrialPromoNoPaymentMethodEndBehaviorChoices.CREATE_INVOICE,
+        help_text=(
+            "Applied only when payment method is not required. "
+            "create_invoice lets the subscription become past_due and recoverable."
+        ),
+    )
+    repeat_trials_allowed = models.BooleanField(
+        default=False,
+        help_text="When enabled, this promo can ignore same-user prior trial/subscription history.",
+    )
+    trial_abuse_filtering_enabled = models.BooleanField(default=True)
+    trial_credit_amount = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0.001"))],
+        help_text="Optional one-time task credit grant override for trial start.",
+    )
+    max_redemptions = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Maximum completed promo redemptions for this shared code. "
+            "Checkout starts are not counted until Stripe confirms completion."
+        ),
+    )
+    active_from = models.DateTimeField(null=True, blank=True)
+    active_until = models.DateTimeField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    headline = models.CharField(max_length=160, blank=True, default="")
+    description = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=("is_active", "active_from", "active_until"), name="trial_promo_active_idx"),
+            models.Index(fields=("plan",), name="trial_promo_plan_idx"),
+        ]
+        verbose_name = "Trial promo"
+        verbose_name_plural = "Trial promos"
+
+    @staticmethod
+    def normalize_code(code: str | None) -> str:
+        return str(code or "").strip().upper()
+
+    @classmethod
+    def digest_code(cls, code: str | None) -> str:
+        normalized = cls.normalize_code(code)
+        return hashlib.sha256(f"{settings.SECRET_KEY}:{normalized}".encode("utf-8")).hexdigest()
+
+    def set_code(self, code: str) -> None:
+        normalized = self.normalize_code(code)
+        if not normalized:
+            raise ValidationError("Trial promo code cannot be blank.")
+        self.code_digest = self.digest_code(normalized)
+        self.code_label = normalized
+
+    def is_available(self, *, now=None) -> bool:
+        now = now or timezone.now()
+        if not self.is_active:
+            return False
+        if self.active_from and self.active_from > now:
+            return False
+        if self.active_until and self.active_until <= now:
+            return False
+        return True
+
+    def __str__(self):
+        label = self.code_label or self.name
+        return f"{self.name} ({label})"
+
+
+class TrialPromoRedemptionStatusChoices(models.TextChoices):
+    CHECKOUT_STARTED = "checkout_started", "Checkout started"
+    CHECKOUT_COMPLETED = "checkout_completed", "Checkout completed"
+    CHECKOUT_EXPIRED = "checkout_expired", "Checkout expired"
+    CHECKOUT_FAILED = "checkout_failed", "Checkout failed"
+
+
+class TrialPromoRedemption(models.Model):
+    """Tracks a user's reserved/started Stripe Checkout for a trial promo."""
+
+    COUNTED_STATUSES = (
+        TrialPromoRedemptionStatusChoices.CHECKOUT_COMPLETED,
+    )
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    promo = models.ForeignKey(
+        TrialPromo,
+        on_delete=models.PROTECT,
+        related_name="redemptions",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="trial_promo_redemptions",
+    )
+    status = models.CharField(
+        max_length=32,
+        choices=TrialPromoRedemptionStatusChoices.choices,
+        default=TrialPromoRedemptionStatusChoices.CHECKOUT_STARTED,
+        db_index=True,
+    )
+    event_id = models.CharField(max_length=255, db_index=True)
+    stripe_customer_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    stripe_checkout_session_id = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+    )
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, default="", db_index=True)
+    metadata = models.JSONField(default=dict, blank=True)
+    checkout_started_at = models.DateTimeField(default=timezone.now)
+    checkout_completed_at = models.DateTimeField(null=True, blank=True)
+    checkout_expired_at = models.DateTimeField(null=True, blank=True)
+    checkout_failed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=("promo", "status"), name="trial_redemp_promo_status_idx"),
+            models.Index(fields=("user", "promo"), name="trial_redemp_user_promo_idx"),
+        ]
+        verbose_name = "Trial promo redemption"
+        verbose_name_plural = "Trial promo redemptions"
+
+    def __str__(self):
+        return f"{self.promo_id}:{self.user_id}:{self.status}"
+
+
 class StripeCheckoutContext(models.Model):
     """Immutable checkout context used to correlate delayed billing webhooks."""
 

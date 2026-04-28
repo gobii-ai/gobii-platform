@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}Special Access - Gobii{% endblock %}
+
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="Redeem special Gobii trial access.">
+{% endblock %}
+
+{% block content %}
+<main class="relative overflow-hidden">
+{#  <div class="absolute inset-0 opacity-30" style="background: radial-gradient(circle at 20% 20%, rgba(14,165,233,0.45), transparent 32%), radial-gradient(circle at 82% 12%, rgba(16,185,129,0.28), transparent 30%), linear-gradient(135deg, rgba(7,24,36,1), rgba(12,52,67,0.92));"></div>#}
+{#  <div class="absolute -left-20 top-24 h-64 w-64 rounded-full bg-cyan-400/20 blur-3xl"></div>#}
+{#  <div class="absolute -right-16 bottom-12 h-72 w-72 rounded-full bg-emerald-300/20 blur-3xl"></div>#}
+
+  <section class="relative mx-auto flex min-h-screen max-w-6xl flex-col px-6 py-20 sm:px-8 lg:px-10">
+    <div class="grid flex-1 items-center gap-12 py-16 lg:grid-cols-[1.05fr_0.95fr]">
+      <div>
+        <p class="mb-5 inline-flex rounded-full bg-[#e7fff7] px-4 py-2 text-xs font-bold uppercase tracking-[0.32em] text-emerald-800 ring-1 ring-emerald-200">
+          Special Access
+        </p>
+        {% if promo %}
+          <h1 class="max-w-3xl text-5xl font-semibold leading-tight tracking-tight sm:text-6xl">
+            {{ promo.headline|default:"Your private Gobii trial is ready." }}
+          </h1>
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
+            {% if promo.description %}
+              {{ promo.description }}
+            {% else %}
+              Start a {{ promo.trial_days }}-day {{ plan_label }} trial configured for this event. Your access code has been accepted.
+            {% endif %}
+          </p>
+
+          <div class="mt-10 grid gap-3 text-sm sm:grid-cols-3">
+            <div class="rounded-2xl bg-[#f0fbff] p-4 ring-1 ring-cyan-200">
+              <p class="font-semibold text-cyan-800">Plan</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ plan_label }}</p>
+            </div>
+            <div class="rounded-2xl bg-[#f0fff8] p-4 ring-1 ring-emerald-200">
+              <p class="font-semibold text-emerald-800">Trial</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{{ promo.trial_days }} days</p>
+            </div>
+            <div class="rounded-2xl bg-[#fff9ed] p-4 ring-1 ring-amber-200">
+              <p class="font-semibold text-amber-800">Card</p>
+              <p class="mt-1 text-2xl font-semibold text-slate-950">{% if promo.payment_method_required %}Required{% else %}Not Required{% endif %}</p>
+            </div>
+          </div>
+        {% else %}
+          <h1 class="max-w-3xl text-5xl font-semibold leading-tight tracking-tight sm:text-6xl">
+            Enter your Gobii access code for a special trial for your group.
+          </h1>
+          <p class="mt-6 max-w-2xl text-lg leading-8 text-slate-700">
+            If you received a code from our team, enter it here to unlock the trial configured for your group.
+          </p>
+        {% endif %}
+      </div>
+
+      <div class="rounded-[2rem] bg-white p-7 text-slate-950 shadow-2xl shadow-cyan-950/30 ring-1 ring-white/50">
+        {% if promo %}
+          <div class="mb-7 rounded-3xl bg-[#e7fff7] p-5 text-emerald-950 ring-1 ring-emerald-200">
+            <p class="text-sm font-semibold uppercase tracking-[0.24em] text-emerald-700">Code accepted</p>
+            <p class="mt-2 text-2xl font-semibold">{{ promo.name }}</p>
+            {% if redemptions_remaining is not None %}
+              <p class="mt-2 text-sm text-emerald-800">{{ redemptions_remaining }} shared starts remain for this access code.</p>
+            {% endif %}
+          </div>
+          <form method="post" action="{{ start_url }}">
+            {% csrf_token %}
+            <button type="submit" class="group flex w-full items-center justify-center gap-3 rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443]">
+            Start special trial
+            <span class="transition group-hover:translate-x-1">&rarr;</span>
+            </button>
+          </form>
+          <p class="mt-4 text-center text-sm text-slate-500">
+            {% if promo.payment_method_required %}
+              Stripe will collect a card before the trial starts.
+            {% else %}
+              You can add payment later. If you do not, billing recovery starts when the trial ends.
+            {% endif %}
+          </p>
+          <form method="post" action="{% url 'pages:special_access' %}" class="mt-8">
+            {% csrf_token %}
+            <label for="code" class="block text-sm font-semibold text-slate-700">Use a different code</label>
+            <div class="mt-2 flex gap-2">
+              <input id="code" name="code" type="text" autocomplete="off" class="min-w-0 flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-100" placeholder="ACCESS-CODE">
+              <button type="submit" class="rounded-xl bg-slate-900 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-700">Apply</button>
+            </div>
+          </form>
+        {% else %}
+          <form method="post" action="{% url 'pages:special_access' %}">
+            {% csrf_token %}
+            <label for="code" class="block text-sm font-semibold text-slate-700">Access code</label>
+            <input id="code" name="code" type="text" autocomplete="off" autofocus class="mt-2 w-full rounded-2xl border border-slate-300 px-5 py-4 text-lg font-semibold tracking-wide outline-none transition focus:border-cyan-500 focus:ring-4 focus:ring-cyan-100" placeholder="ACCESS-CODE">
+            {% if invalid_code_error %}
+              <p class="mt-3 rounded-xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700 ring-1 ring-red-100">{{ invalid_code_error }}</p>
+            {% endif %}
+            <button type="submit" class="mt-5 flex w-full items-center justify-center rounded-2xl bg-[#081f2d] px-6 py-4 text-base font-bold text-white transition hover:bg-[#0c3443]">
+              Unlock trial
+            </button>
+          </form>
+          <p class="mt-6 text-sm leading-6 text-slate-500">
+            Codes are issued directly by Gobii for conferences, demos, and partner programs.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+</main>
+{% endblock %}

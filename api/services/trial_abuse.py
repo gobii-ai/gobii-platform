@@ -431,6 +431,122 @@ def _track_trial_eligibility_assessment(
     )
 
 
+def _evaluate_cross_account_trial_abuse(user) -> tuple[str, list[str], dict[str, Any]]:
+    reason_codes: list[str] = []
+    evidence_summary: dict[str, Any] = {
+        "matched_signal_users": {},
+        "matched_signal_types": [],
+    }
+    auto_status = UserTrialEligibilityAutoStatusChoices.ELIGIBLE
+
+    signal_matches: dict[str, set[int]] = {}
+    per_user_signal_types: dict[int, set[str]] = defaultdict(set)
+
+    signal_types_to_check = [
+        UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
+        UserIdentitySignalTypeChoices.FPJS_REQUEST_ID,
+        UserIdentitySignalTypeChoices.FBP,
+        UserIdentitySignalTypeChoices.GA_CLIENT_ID,
+        UserIdentitySignalTypeChoices.IP_EXACT,
+        UserIdentitySignalTypeChoices.IP_PREFIX,
+    ]
+
+    for signal_type in signal_types_to_check:
+        user_ids = _user_ids_with_matching_signal_values(user, signal_type)
+        historical_user_ids = _filter_users_with_trial_or_subscription_history(user_ids)
+        if not historical_user_ids:
+            continue
+        signal_matches[signal_type] = historical_user_ids
+        for user_id in historical_user_ids:
+            per_user_signal_types[user_id].add(signal_type)
+
+    if signal_matches:
+        evidence_summary["matched_signal_types"] = sorted(signal_matches)
+        evidence_summary["matched_signal_users"] = {
+            str(user_id): sorted(matched_signal_types)
+            for user_id, matched_signal_types in per_user_signal_types.items()
+        }
+
+    strong_match = bool(
+        signal_matches.get(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID)
+        or signal_matches.get(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID)
+    )
+    if strong_match:
+        auto_status = UserTrialEligibilityAutoStatusChoices.NO_TRIAL
+        reason_codes.append("fpjs_history_match")
+    else:
+        medium_match = any(
+            len(
+                {
+                    signal_family
+                    for signal_type in signal_types
+                    if (signal_family := _medium_signal_family(signal_type))
+                }
+            )
+            >= 2
+            for signal_types in per_user_signal_types.values()
+        )
+        if medium_match:
+            auto_status = UserTrialEligibilityAutoStatusChoices.REVIEW
+            reason_codes.append("multi_signal_history_match")
+
+    return auto_status, reason_codes, evidence_summary
+
+
+def _apply_manual_trial_action(auto_status: str, manual_action: str) -> str:
+    if manual_action == UserTrialEligibilityManualActionChoices.ALLOW_TRIAL:
+        return UserTrialEligibilityAutoStatusChoices.ELIGIBLE
+    if manual_action == UserTrialEligibilityManualActionChoices.DENY_TRIAL:
+        return UserTrialEligibilityAutoStatusChoices.NO_TRIAL
+    return auto_status
+
+
+def evaluate_user_trial_identity_abuse(
+    user,
+    *,
+    request=None,
+    capture_source: str | None = None,
+) -> TrialEligibilityResult:
+    """Evaluate cross-account identity abuse without treating this user's own history as abuse."""
+    if not user or not getattr(user, "pk", None):
+        return TrialEligibilityResult(
+            eligible=True,
+            decision=UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
+            reason_codes=[],
+            evidence_summary={},
+            manual_action=UserTrialEligibilityManualActionChoices.INHERIT,
+        )
+
+    if request is not None and capture_source:
+        capture_request_identity_signals_and_attribution(
+            user,
+            request,
+            source=capture_source,
+            include_fpjs=False,
+        )
+
+    auto_status, reason_codes, evidence_summary = _evaluate_cross_account_trial_abuse(user)
+    eligibility = (
+        UserTrialEligibility.objects.filter(user=user)
+        .only("manual_action")
+        .first()
+    )
+    manual_action = (
+        eligibility.manual_action
+        if eligibility is not None
+        else UserTrialEligibilityManualActionChoices.INHERIT
+    )
+    effective_status = _apply_manual_trial_action(auto_status, manual_action)
+
+    return TrialEligibilityResult(
+        eligible=effective_status == UserTrialEligibilityAutoStatusChoices.ELIGIBLE,
+        decision=effective_status,
+        reason_codes=list(reason_codes),
+        evidence_summary=evidence_summary,
+        manual_action=manual_action,
+    )
+
+
 def evaluate_user_trial_eligibility(
     user,
     *,
@@ -455,68 +571,17 @@ def evaluate_user_trial_eligibility(
             include_fpjs=False,
         )
 
-    reason_codes: list[str] = []
-    evidence_summary: dict[str, Any] = {
-        "matched_signal_users": {},
-        "matched_signal_types": [],
-    }
-
     has_prior_history, history_reason = _user_has_prior_individual_history(user)
     auto_status = UserTrialEligibilityAutoStatusChoices.ELIGIBLE
     if has_prior_history:
         auto_status = UserTrialEligibilityAutoStatusChoices.NO_TRIAL
-        reason_codes.append(history_reason or "prior_subscription_history")
+        reason_codes = [history_reason or "prior_subscription_history"]
+        evidence_summary = {
+            "matched_signal_users": {},
+            "matched_signal_types": [],
+        }
     else:
-        signal_matches: dict[str, set[int]] = {}
-        per_user_signal_types: dict[int, set[str]] = defaultdict(set)
-
-        signal_types_to_check = [
-            UserIdentitySignalTypeChoices.FPJS_VISITOR_ID,
-            UserIdentitySignalTypeChoices.FPJS_REQUEST_ID,
-            UserIdentitySignalTypeChoices.FBP,
-            UserIdentitySignalTypeChoices.GA_CLIENT_ID,
-            UserIdentitySignalTypeChoices.IP_EXACT,
-            UserIdentitySignalTypeChoices.IP_PREFIX,
-        ]
-
-        for signal_type in signal_types_to_check:
-            user_ids = _user_ids_with_matching_signal_values(user, signal_type)
-            historical_user_ids = _filter_users_with_trial_or_subscription_history(user_ids)
-            if not historical_user_ids:
-                continue
-            signal_matches[signal_type] = historical_user_ids
-            for user_id in historical_user_ids:
-                per_user_signal_types[user_id].add(signal_type)
-
-        if signal_matches:
-            evidence_summary["matched_signal_types"] = sorted(signal_matches)
-            evidence_summary["matched_signal_users"] = {
-                str(user_id): sorted(matched_signal_types)
-                for user_id, matched_signal_types in per_user_signal_types.items()
-            }
-
-        strong_match = bool(
-            signal_matches.get(UserIdentitySignalTypeChoices.FPJS_VISITOR_ID)
-            or signal_matches.get(UserIdentitySignalTypeChoices.FPJS_REQUEST_ID)
-        )
-        if strong_match:
-            auto_status = UserTrialEligibilityAutoStatusChoices.NO_TRIAL
-            reason_codes.append("fpjs_history_match")
-        else:
-            medium_match = any(
-                len(
-                    {
-                        signal_family
-                        for signal_type in signal_types
-                        if (signal_family := _medium_signal_family(signal_type))
-                    }
-                )
-                >= 2
-                for signal_types in per_user_signal_types.values()
-            )
-            if medium_match:
-                auto_status = UserTrialEligibilityAutoStatusChoices.REVIEW
-                reason_codes.append("multi_signal_history_match")
+        auto_status, reason_codes, evidence_summary = _evaluate_cross_account_trial_abuse(user)
 
     eligibility, _ = UserTrialEligibility.objects.get_or_create(user=user)
     eligibility.auto_status = auto_status
