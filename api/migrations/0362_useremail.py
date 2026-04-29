@@ -12,7 +12,7 @@ class Migration(migrations.Migration):
             fields=[
                 ("id", models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name="ID")),
                 ("name", models.CharField(max_length=120)),
-                ("event_name", models.CharField(db_index=True, max_length=200)),
+                ("event_name", models.CharField(max_length=200, unique=True)),
                 ("is_active", models.BooleanField(db_index=True, default=True)),
                 ("created_at", models.DateTimeField(auto_now_add=True)),
                 ("updated_at", models.DateTimeField(auto_now=True)),

@@ -683,7 +683,7 @@ class UserEmail(models.Model):
     """Staff-managed analytics events that trigger Customer.io user emails."""
 
     name = models.CharField(max_length=120)
-    event_name = models.CharField(max_length=200, db_index=True)
+    event_name = models.CharField(max_length=200, unique=True)
     is_active = models.BooleanField(default=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
