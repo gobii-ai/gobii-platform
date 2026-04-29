@@ -1,0 +1,19 @@
+---
+title: "Tasks"
+sidebarTitle: "Tasks"
+description: "The smallest unit of work"
+---
+
+Tasks are the smallest unit of work on Gobii, and happen behind the scenes. When your Gobii is taking action on your behalf, multiple smaller units are generally required to meet to fulfill your request. For example:
+
+**User:** "Look up the weather in Rehoboth Beach, DE this weekend and find appropriate daytime activities for each day."
+
+**Gobii Agent:**
+
+  1) Search for weather information for Rehoboth Beach, DE
+  2) Extract the forecast data
+  3) Use LLM to match potential activities for the weather data extracted
+  4) Search for venues for each of the potential activities
+  5) Send email to the user with results
+
+End users do not need to be concerned with the specifics of tasks, but it's good to have an understanding of the concept as your agent may reference tasks it is completing.

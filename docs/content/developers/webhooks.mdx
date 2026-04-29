@@ -1,0 +1,78 @@
+---
+title: "Webhooks"
+sidebarTitle: "Webhooks"
+description: "The preferred way for receiving agent results"
+---
+
+### Task webhooks
+
+Add an optional `webhook` URL when creating a browser-use task to get a callback when the task finishes or is canceled.
+
+
+**Note:** URLs must be `http` or `https`. Include your own token (e.g., query param or header) if you need verification.
+
+
+#### Where to send the request
+- Agent-scoped: `POST /api/v1/agents/browser-use/{agentId}/tasks/`
+- User-level: `POST /api/v1/tasks/browser-use/`
+
+```bash
+curl -X POST https://api.gobii.com/api/v1/agents/browser-use/{agentId}/tasks/ \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "prompt": {"detail": "Find pricing"},
+        "webhook": "https://example.com/hooks/gobii?token=abc123"
+      }'
+```
+
+Responses include the stored `webhook` plus delivery metadata:
+```json
+{
+  "id": "task-uuid",
+  "status": "pending",
+  "webhook": "https://example.com/hooks/gobii?token=abc123",
+  "webhook_last_called_at": null,
+  "webhook_last_status_code": null,
+  "webhook_last_error": null
+}
+```
+
+#### Delivery semantics
+- Fired once when status becomes `completed`, `failed`, or `cancelled`.
+- POST JSON with headers `Content-Type: application/json` and `User-Agent: Gobii-AgentWebhook/1.0`.
+- 10s timeout; no retries. Non-2xx responses are recorded but not retried.
+- Observability: the `webhook_last_*` fields on the task reflect the last attempt.
+
+#### Payload examples
+Success:
+```json
+{
+  "id": "task-uuid",
+  "status": "completed",
+  "agent_id": "agent-uuid",
+  "result": { "summary": "Found pricing." }
+}
+```
+
+Failure:
+```json
+{
+  "id": "task-uuid",
+  "status": "failed",
+  "agent_id": "agent-uuid",
+  "result": null,
+  "error_message": "Timed out waiting for page."
+}
+```
+
+Cancelled:
+```json
+{
+  "id": "task-uuid",
+  "status": "cancelled",
+  "agent_id": "agent-uuid",
+  "result": null,
+  "message": "Task has been cancelled."
+}
+```

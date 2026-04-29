@@ -1,0 +1,40 @@
+.gobii-pagefind-search {
+  min-width: 260px;
+}
+
+.gobii-pagefind-search .pagefind-ui {
+  --pagefind-ui-primary: var(--ifm-color-primary);
+  --pagefind-ui-text: var(--ifm-font-color-base);
+  --pagefind-ui-background: var(--ifm-navbar-background-color);
+  --pagefind-ui-border: var(--ifm-color-emphasis-300);
+  --pagefind-ui-border-width: 1px;
+  --pagefind-ui-border-radius: 8px;
+  --pagefind-ui-font: var(--ifm-font-family-base);
+  width: 100%;
+}
+
+.gobii-pagefind-search .pagefind-ui__form::before,
+.gobii-pagefind-search .pagefind-ui__suppressed {
+  display: none;
+}
+
+.gobii-pagefind-search .pagefind-ui__search-input {
+  height: 38px;
+  padding-left: 0.75rem;
+  font-size: 0.875rem;
+}
+
+.gobii-pagefind-search .pagefind-ui__drawer {
+  position: absolute;
+  top: 3rem;
+  right: 0;
+  z-index: 50;
+  width: min(680px, calc(100vw - 2rem));
+  max-height: calc(100vh - 5rem);
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  background: var(--ifm-background-surface-color);
+  box-shadow: var(--ifm-global-shadow-lw);
+}

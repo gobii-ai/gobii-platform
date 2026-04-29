@@ -1,0 +1,150 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch: {}
+
+concurrency:
+  group: docs-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  DOCS_SITE_URL: https://docs-staging.ship.gobii.ai
+  DOCS_IMAGE: ghcr.io/gobii-ai/gobii-docs
+
+jobs:
+  build:
+    name: Build Docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Build static docs
+        working-directory: docs
+        run: npm run build
+
+      - name: Verify required routes
+        working-directory: docs
+        run: |
+          set -euo pipefail
+          required=(
+            build/index.html
+            build/getting-started/introduction.html
+            build/developers/developer-basics.html
+            build/api-reference/list-persistent-agents.html
+            build/api-reference/agents-api/get-agents.html
+            build/api-reference/agents-api/get-agents.md
+            build/GobiiAPI.yaml
+            build/api-reference/openapi.json
+            build/llms.txt
+            build/llms-full.txt
+            build/pagefind/pagefind-ui.js
+          )
+          for file in "${required[@]}"; do
+            test -s "$file"
+          done
+
+  publish:
+    name: Publish Docs Image
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    outputs:
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Resolve image metadata
+        id: meta
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          echo "short_sha=${short_sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push docs image
+        uses: docker/build-push-action@v7
+        with:
+          context: docs
+          file: docs/Dockerfile
+          push: true
+          tags: |
+            ${{ env.DOCS_IMAGE }}:sha-${{ github.sha }}
+            ${{ env.DOCS_IMAGE }}:sha-${{ steps.meta.outputs.short_sha }}
+            ${{ env.DOCS_IMAGE }}:staging
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
+          build-args: |
+            DOCS_SITE_URL=${{ env.DOCS_SITE_URL }}
+          cache-from: type=gha,scope=gobii-docs
+          cache-to: type=gha,mode=max,scope=gobii-docs
+          platforms: linux/amd64
+          provenance: false
+          sbom: false
+
+  deploy:
+    name: Dispatch Docs Staging Deployment
+    runs-on: ubuntu-latest
+    needs: [publish]
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gobii-ai
+          repositories: gobii
+
+      - name: Notify infra repo
+        uses: peter-evans/repository-dispatch@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          repository: gobii-ai/gobii
+          event-type: docs-staging-ready
+          client-payload: |
+            {
+              "owner": "${{ github.repository_owner }}",
+              "repo": "${{ github.event.repository.name }}",
+              "ref": "${{ github.ref }}",
+              "head_sha": "${{ github.sha }}",
+              "short_sha": "${{ needs.publish.outputs.short_sha }}",
+              "image": "${{ env.DOCS_IMAGE }}:sha-${{ github.sha }}",
+              "trigger_run_id": ${{ github.run_id }},
+              "trigger_run_attempt": ${{ github.run_attempt }},
+              "actor": "${{ github.actor }}"
+            }

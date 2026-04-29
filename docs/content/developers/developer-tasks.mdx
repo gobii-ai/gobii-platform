@@ -1,0 +1,21 @@
+---
+title: "Tasks (for Developers)"
+sidebarTitle: "browser-use Tasks"
+description: "Create and manage tasks for browser-use"
+---
+
+Developers can create single, ad-hoc tasks that do _not_ run continuously. These are useful for a singular action to be performed by an agent, without the overhead of creating and destructing an agent.
+
+For example, "Get the current weather in Washington, DC" would be an excellent use case for a Task. On the other hand, "Send me a weather report for the next day in Washington, DC, at 7pm" would be an agent use case.
+
+### browser-use Instances
+
+When working with Tasks, the developer may elect to create a browser-use profile that is preserved to provide a consistent browser environment between tasks. If this is not required, a user may simply request a task be performed without reference to a browser-use profile. See examples below.
+
+### Asynchronous vs Synchronous
+
+**NOTE:** We _strongly_ encourage issuing requests as asynchronous requests.
+
+Tasks can be synchronous in nature, or asynchronous. A task request without a `wait` parameter is asynchronous automatically. You will receive a response with a task ID. Preferably, the developer will supply a webhook URL to receive results at. Alternatively, you may periodically check the task status via the REST API. When using Gobii Cloud, we ask that you self-limit status checks to no more than once every 30 seconds.
+
+To operate as a synchronous task, send the `wait` key with an integer for the number of seconds to wait for a response (maximum time of 900 seconds). The request will either receive a response or timeout. In the latter case, you may `GET` a list of your tasks, and see the result when completed.

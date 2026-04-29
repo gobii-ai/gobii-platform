@@ -1,0 +1,63 @@
+---
+title: "Self-Hosted Deployment"
+sidebarTitle: "Quickstart"
+description: "Run Gobii on your own infrastructure with Docker Compose"
+---
+
+Run Gobii locally or in your own infrastructure with Docker Compose. This guide covers the initial setup, first-run wizard, optional services, and Bright Data integration.
+
+## Installation and Set-up
+
+### Prerequisites
+
+- Docker Desktop (or Docker Engine) with at least 12 GB RAM allocated.
+- Git.
+- An API key for the LLM provider you plan to use.
+
+### Clone and run
+
+```bash
+git clone https://github.com/gobii-ai/gobii-platform.git
+cd gobii-platform
+docker compose up --build
+```
+
+When the stack is up, open `http://localhost:8000`.
+
+### First-run wizard
+
+Complete the setup flow in the browser:
+- Create the first admin account.
+- Pick an LLM provider and model, then add the API key.
+- Sign in and create your first agent.
+
+You can update providers and models later in **Console → LLM Config**.
+
+## Optional services
+
+Gobii ships additional Compose profiles for self-hosted deployments:
+- `beat`: scheduled jobs and background dispatchers.
+- `email`: IMAP IDLE watchers for low-latency email triggers.
+- `obs`: Flower (Celery observability UI).
+
+Example:
+
+```bash
+docker compose --profile beat --profile email up --build
+```
+
+For inbound email configuration, see `advanced-usage/custom-email-settings`.
+
+## Integrations
+
+### Bright Data
+
+Bright Data is preconfigured as a platform MCP server in self-hosted deployments. You only need to supply the token:
+
+1. Set `BRIGHT_DATA_TOKEN` in your deployment environment.
+   - For Docker Compose, place it in a `.env` file and pass it into the `web` and `worker` services (or use an `env_file`).
+   - Optional: set `BRIGHT_DATA_WEB_UNLOCKER_ZONE` if you use Bright Data Web Unlocker.
+2. Restart the stack so the containers pick up the variable.
+3. In the Console, open **MCP Servers** and enable Bright Data tools for the agents that should use them.
+
+See `advanced-usage/mcp-servers` for more on MCP server management.

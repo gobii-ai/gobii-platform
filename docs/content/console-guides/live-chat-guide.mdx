@@ -1,0 +1,82 @@
+---
+title: "Live Chat Guide"
+sidebarTitle: "Live Chat Guide"
+description: "How to use Gobii live chat: messaging, files, switching agents, collaboration, and chat-level controls."
+---
+
+Live Chat is the main workspace for running agent work in real time.
+
+## Open live chat
+
+1. In Console, open **[Agents](https://gobii.ai/console/agents/)**.
+2. Select the agent.
+3. Open **Chat**.
+
+## Chat layout at a glance
+
+- **Sidebar (left)**: Agent list and agent switching.
+- **Timeline (center)**: Messages, tool activity, and results.
+- **Composer (bottom)**: Where you type messages and attach files.
+
+## Send a message
+
+1. Type your request in the composer.
+2. Add files if needed.
+3. Send the message.
+
+The timeline will show progress and results as the agent works.
+
+## Send files to the agent
+
+You can attach files directly in chat when sending a message.
+
+Typical flow:
+
+1. Add one or more files in the composer.
+2. Include a short instruction (for example, what to extract or generate).
+3. Send.
+
+Your chat attachments appear in the conversation and can be referenced by the agent during that request.
+
+For reusable files, use the dedicated **Agent Files** page (`https://gobii.ai/console/agents/<agent_id>/files/`).
+
+## Switch between agents
+
+Use the chat sidebar to switch agents quickly.
+
+1. Open the sidebar agent list.
+2. Select another agent.
+3. Wait for the chat to load the selected agent context.
+
+If you do not see an expected agent, confirm you are in the correct personal/organization context.
+
+## Collaborate with teammates
+
+Collaboration lets multiple people work with the same agent.
+
+- **Collaborators** can usually view and send messages.
+- Users with management permission can send collaborator invites from chat.
+
+If collaboration controls are missing, this usually means the current user does not have collaborator-management permission for that agent.
+
+## Change settings while in chat
+
+From chat, you can jump to the agent settings experience to change:
+
+- Agent behavior (name, charter, active state, limits, intelligence)
+- Access controls (allowlist, collaborators, channels)
+- Integrations (MCP servers, webhooks, peer links)
+
+For full details, see `console-guides/agent-settings`.
+
+## Common visibility/permission behavior
+
+- Some controls are hidden for collaborator-only access.
+- Billing-related prompts and actions depend on plan and role.
+- Organization context affects what an agent list and controls show.
+
+## Tips for better results
+
+- Be explicit about output format (table, bullet list, JSON, summary).
+- Attach files with clear filenames.
+- Ask one primary task per message for clearer execution.

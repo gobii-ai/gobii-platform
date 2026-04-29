@@ -1,0 +1,31 @@
+---
+title: "Structured Data"
+sidebarTitle: "Structured Data"
+---
+
+API requests can return data in a structured JSON format, if requested. To use this feature, in your API request, specify the `output_schema` like so:
+
+```json
+{
+  "prompt": "Go to https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html and return the book title and price as JSON",
+  "wait": 300,
+  "output_schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string"
+      },
+      "price": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "name",
+      "price"
+    ],
+    "additionalProperties": false
+  }
+}
+```
+
+`output_schema` should be a [JSON Schema](https://json-schema.org/) definition.
