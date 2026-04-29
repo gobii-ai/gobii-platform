@@ -48,3 +48,44 @@
 .openapi-explorer__request-form {
   border-radius: 8px;
 }
+
+.openapi__method-endpoint {
+  align-items: center;
+  border: 1px solid var(--ifm-color-emphasis-300);
+  border-radius: 8px;
+  display: flex;
+  gap: 0.65rem;
+  padding: 0.75rem;
+}
+
+.openapi__method-endpoint .badge {
+  border-radius: 6px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.openapi__method-endpoint-path {
+  font-size: 0.95rem;
+  margin: 0;
+}
+
+.openapi-left-panel__container > .openapi__divider:first-of-type {
+  margin-top: 1.25rem;
+}
+
+@media (max-width: 996px) {
+  .theme-api-markdown {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .openapi-left-panel__container,
+  .openapi-right-panel__container {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .openapi-right-panel__container {
+    margin-top: 2rem;
+  }
+}
