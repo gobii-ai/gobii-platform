@@ -1,0 +1,89 @@
+---
+title: "Developer Basics"
+sidebarTitle: "Basics"
+---
+
+## What the API does
+
+Gobii is the easiest way to run production `browser-use` instances in the cloud. Gobii exposes a REST API for managing always-on `browser-use` agents and submitting browser automation tasks to them, giving teams a managed way to trigger, monitor, and retrieve results from their agents programmatically. The core resources are **agents** (always-on browser-use workers) and **tasks** (a single request for browser-use).
+
+The Gobii API is the easiest way to have a production ready, `browser-use` environment in the cloud - whether on our infrastructure at [gobii.ai](https://gobii.ai), or your own. Gobii is entirely open source.
+
+## Key Concepts
+
+For developers, you may spawn always-on agents, or individual ad-hoc tasks. Both use the same infrastructure and have access to the same tools. Agents are better suited for repeating or evolving tasks to run until cancelled. Ad-hoc tasks are recommended for singular requests that will not repeat.
+
+|                            | Agents | Tasks    |
+| -------------------------- | ------ | -------- |
+| **Always-On**                  | ✅      | ❌        |
+| **browser-use**                | ✅      | ✅        |
+| **Tools**                      | ✅      | ✅        |
+| **MCP**                        | ✅      | ✅        |
+| **Consistent Browser Profile** | ✅      | Optional |
+
+## Base URLs
+
+- **Gobii Cloud:** `https://gobii.ai/api/v1`
+- **Self-hosted/local:** `http://localhost:8000/api/v1`
+
+   **Note:** You may configure self-hosted Gobii Platforms with a domain of your choice. For simplicity, our documentation will refer to self-hosted Gobii Platforms as the default localhost:8000
+
+Example `curl` that hits production with the full path:
+
+```bash
+curl -X GET \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/ping/
+```
+
+## Authentication
+
+- Send your API key in the `X-Api-Key` header: `X-Api-Key: <api_key>`.
+- Create and manage keys in the Console under **API Keys** (`/console/api-keys/`).
+
+## Environments
+
+- **Production:** Multi-tenant Gobii Cloud at `https://gobii.ai` with managed upgrades.
+- **Self-hosted/local:** Run the platform yourself; the base URL defaults to `http://localhost:8000` and all data stays within your deployment and use the LLM(s) of your choice.
+
+## Content & security conventions
+
+- Requests and responses use JSON with UTF-8 encoding; set `Content-Type: application/json` on writes.
+- All timestamps and scheduling use UTC.
+- Resource identifiers are UUIDs (for example: `<uuid:id>` paths on agents and tasks).
+- Required header: `X-Api-Key` for authentication; add `Content-Type: application/json` when sending bodies.
+
+## HTTP patterns
+
+- **Agents (`/agents/`):**
+  - `GET /agents/` lists agents (paginated).
+  - `POST /agents/` creates an agent (non-idempotent).
+  - `GET /agents/{agentId}/` retrieves a single agent.
+  - `PUT/PATCH /agents/{agentId}/` updates agent settings (idempotent).
+  - `DELETE /agents/{agentId}/` deletes an agent.
+- **Tasks (`/tasks/browser-use/` or `/agents/browser-use/{agentId}/tasks/`):**
+  - `POST` submits a task to an agent; use `wait` for sync responses or poll `/result/`.
+  - `GET` lists tasks (paginated) or retrieves a task.
+  - `PUT/PATCH` updates mutable fields like metadata; `DELETE` cancels/removes.
+- **Pagination:** Default page size is 10 with a `page_size` query param (max 100).
+
+## Quickstart: health check
+
+Verify connectivity and your API key with the `ping` endpoint:
+
+```bash
+curl -X GET \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/ping/
+```
+
+Sample response:
+
+```json
+{
+  "pong": true,
+  "user": "you@example.com"
+}
+```
+
+If you see `pong: true`, your key is valid and the API is reachable. Next, try `POST /tasks/` to run a browser automation task.

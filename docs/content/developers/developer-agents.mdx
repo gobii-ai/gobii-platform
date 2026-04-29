@@ -1,0 +1,204 @@
+---
+title: "Agent API"
+sidebarTitle: "Agent API"
+---
+
+Agents are always-on workers you configure once and reuse for multistep automations. Each agent keeps its own
+state, schedule, and communication endpoints so you can trigger actions over time and interact with the agent like a digital
+teammate. Results may be received via webhook (preferred), or retrieved via a `GET` request.
+
+Agents run primarily via `browser-use`, along with other AI tools. Additionally, agents may be configured to use MCP servers to expand capabilities.
+
+Core capabilities include:
+
+- **Create, list, update, or delete** persistent agents.
+- **Run on a schedule** using cron-like strings (`@daily`, `@every 30m`, or full cron expressions).
+- **Activate/deactivate** agents without losing configuration.
+- **Send messages and fetch timelines** to drive conversational workflows.
+- **Inspect processing state** and recent browser tasks tied to the agent.
+- **Receive [structured data](/developers/structured-data)** as a response
+
+## Base path
+
+All persistent agent routes live under `/api/v1/agents/`.
+
+- Production: `https://gobii.ai/api/v1/agents/`
+- Self-hosted/local: `http://localhost:8000/api/v1/agents/`
+
+Authentication: include your API key header on every request (`X-Api-Key: <api_key>`).
+
+## Resource shape
+
+Key fields you will see in responses:
+
+- `id` (UUID): Agent identifier used in all routes.
+- `name` (string): Display name. Must be unique per user or organization.
+- `charter` (string): Free-form instructions for what the agent should do.
+- `schedule` (string|null): Cron-like schedule such as `@daily` or `0 */4 * * *`. Omit or `null` for manual-only agents.
+- `is_active` (bool): Whether the agent currently runs or responds.
+- `life_state` (enum): `active` or `expired` (soft pause due to inactivity).
+- `whitelist_policy` (enum): Controls who can message the agent (`default` or `manual`).
+- `preferred_contact_endpoint_id` (UUID|null): Default email/SMS endpoint the agent uses to reach you.
+- `browser_use_agent_id` (UUID): The underlying browser automation worker.
+- `available_mcp_servers` / `personal_mcp_server_ids` (arrays): MCP server metadata and enabled personal servers.
+- Timestamps: `created_at`, `updated_at`, `last_interaction_at`.
+
+## Endpoint summary
+
+- `GET /agents/` — List agents (paginated).
+- `POST /agents/` — Create an agent.
+- `GET /agents/{id}/` — Retrieve details.
+- `PATCH /agents/{id}/` — Partial update (name, charter, schedule, whitelist policy, preferred contact, MCP servers, etc.).
+- `DELETE /agents/{id}/` — Delete an agent.
+- `POST /agents/{id}/activate/` — Mark active (also clears `life_state=expired`).
+- `POST /agents/{id}/deactivate/` — Pause without deleting.
+- `GET /agents/{id}/processing-status/` — Check whether the agent is currently processing work.
+- `POST /agents/{id}/schedule/preview/` — Validate a cron-like schedule and get a human-readable description.
+- `GET /agents/{id}/timeline/` — Scrollable list of recent message/task events.
+- `POST /agents/{id}/messages/` — Inject an inbound email/SMS message into the agent.
+- `GET /agents/{id}/web-tasks/?limit=50&status=complete` — Recent browser tasks executed by this agent.
+
+## Create an agent
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  -d '{
+    "name": "Ops Teammate",
+    "charter": "Monitor our status page and file an incident if downtime exceeds 2 minutes.",
+    "schedule": "@every 15m",
+    "whitelist_policy": "manual",
+    "template_code": null,
+    "enabled_personal_server_ids": []
+  }' \
+  https://gobii.ai/api/v1/agents/
+```
+
+Sample response:
+
+```json
+{
+  "id": "b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743",
+  "name": "Ops Teammate",
+  "charter": "Monitor our status page and file an incident if downtime exceeds 2 minutes.",
+  "short_description": "Monitor status pages and raise incidents when outages persist.",
+  "schedule": "@every 15m",
+  "schedule_snapshot": "@every 15m",
+  "is_active": true,
+  "life_state": "active",
+  "whitelist_policy": "manual",
+  "last_interaction_at": "2024-07-01T18:10:00Z",
+  "created_at": "2024-07-01T18:10:00Z",
+  "updated_at": "2024-07-01T18:10:00Z",
+  "user_id": "9c829c04-7ab7-44e5-9b51-059f44b54d0f",
+  "organization_id": null,
+  "browser_use_agent_id": "339251c0-7b57-4a22-8ba8-ddecf1ab9665",
+  "preferred_contact_endpoint_id": null,
+  "proactive_opt_in": true,
+  "proactive_last_trigger_at": null,
+  "available_mcp_servers": [],
+  "personal_mcp_server_ids": []
+}
+```
+
+## Retrieve or list agents
+
+List your agents (default page size 10, use `?page_size=` to increase up to 100):
+
+```bash
+curl -H "X-Api-Key: $GOBII_API_KEY" \
+  "https://gobii.ai/api/v1/agents/?page_size=20"
+```
+
+Fetch a single agent by id:
+
+```bash
+curl -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/
+```
+
+## Update or pause
+
+Patch mutable fields such as `name`, `charter`, `schedule`, `whitelist_policy`, or contact preferences:
+
+```bash
+curl -X PATCH \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  -d '{
+    "schedule": "0 */4 * * *",
+    "whitelist_policy": "default",
+    "preferred_contact_endpoint": "email"
+  }' \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/
+```
+
+Toggle availability without deleting the agent:
+
+```bash
+# Activate (also clears expired state)
+curl -X POST -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/activate/
+
+# Deactivate
+curl -X POST -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/deactivate/
+```
+
+## Messaging and timelines
+
+Send an inbound message (email or SMS) into the agent’s conversation thread:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  -d '{
+    "channel": "email",
+    "sender": "alerts@example.com",
+    "recipient": "agent@example.com",
+    "subject": "Status page alert",
+    "body": "Uptime check failed for api.example.com",
+    "metadata": {"source": "pagerduty"}
+  }' \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/messages/
+```
+
+Omit `recipient` to use the agent's primary email or SMS endpoint by default.
+
+Fetch the event timeline (message history plus processing markers).
+
+```bash
+curl -H "X-Api-Key: $GOBII_API_KEY" \
+  "https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/timeline/"
+```
+
+Check the current processing snapshot:
+
+```bash
+curl -H "X-Api-Key: $GOBII_API_KEY" \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/processing-status/
+```
+
+## Validate a schedule
+
+Quickly verify a cron-like schedule string and get a friendly description:
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  -d '{"schedule": "0 9 * * 1-5"}' \
+  https://gobii.ai/api/v1/agents/b5f0f2c8-1c2b-4bb5-836b-9b4e2f86b743/schedule/preview/
+```
+
+Example response:
+
+```json
+{
+  "valid": true,
+  "disabled": false,
+  "description": "At 09:00 on Monday, Tuesday, Wednesday, Thursday, and Friday"
+}
+```

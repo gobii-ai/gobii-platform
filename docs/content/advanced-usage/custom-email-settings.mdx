@@ -1,0 +1,109 @@
+---
+title: "Custom Email Settings"
+sidebarTitle: "Email Settings"
+description: "Use your own SMTP and IMAP for agent email"
+---
+
+Gobii can send and receive email using the default delivery provider. If you want an agent to use your own mailbox, configure SMTP (outbound) and IMAP (inbound) on the agent's Email Settings page.
+
+## OAuth vs manual SMTP/IMAP
+
+OAuth is not a separate email channel. It is a simpler way to authenticate the same SMTP/IMAP setup.
+
+- **OAuth (recommended for Gmail)**: Gobii connects your Gmail account and configures SMTP/IMAP auth for you.
+- **Manual SMTP/IMAP**: You enter host, port, security, auth mode, username, and password yourself.
+
+In both cases, the agent still sends via SMTP and receives via IMAP.
+In the current UI, guided OAuth setup is Gmail-focused. Other providers use manual SMTP/IMAP configuration.
+
+## Where to configure
+
+Open the Console and go to the agent:
+- Gobii Cloud: `https://gobii.ai/console/agents/<agent_id>/email/`
+- Self-hosted: `http://localhost:8000/console/agents/<agent_id>/email/`
+
+If your agent does not have an email address yet, set one first. The Email Settings page will use that address as the From/To mailbox for custom SMTP/IMAP.
+
+## SMTP (outbound) fields
+
+Required fields when outbound is enabled:
+- **Host**: SMTP server hostname
+- **Port**: Usually 587 (STARTTLS) or 465 (SSL)
+- **Security**: STARTTLS, SSL, or None
+- **Auth mode**: LOGIN, PLAIN, OAuth 2.0, or None
+- **Username**: Full email address
+- **Password**: Mailbox password or app password
+
+## IMAP (inbound) fields
+
+Required fields when inbound is enabled:
+- **Host**: IMAP server hostname
+- **Port**: Usually 993 (SSL) or 143 (STARTTLS)
+- **Security**: SSL, STARTTLS, or None
+- **Auth mode**: LOGIN, OAuth 2.0, or None
+- **Username**: Full email address
+- **Password**: Mailbox password or app password
+- **Folder**: Defaults to INBOX
+
+Optional:
+- **IMAP IDLE**: Enables low-latency triggers when supported by your deployment.
+- **Poll Interval**: How often IMAP is checked when IDLE is not used.
+
+## Disable IMAP service (self-hosted)
+
+The IMAP IDLE runner is optional. If you do not want low-latency IMAP IDLE triggers, do not run the `imap-idlers` service (compose profiles `imap`/`email`).
+
+## Example: Gmail
+
+For Gmail you can use either:
+
+- **OAuth setup** (recommended), or
+- **Manual SMTP/IMAP** with an app password.
+
+If using manual mode, use an app password when the account has 2FA enabled.
+
+SMTP (outbound):
+- Host: `smtp.gmail.com`
+- Port: `587`
+- Security: `STARTTLS`
+- Auth: `LOGIN`
+- Username: `your.name@gmail.com`
+- Password: `app_password`
+
+IMAP (inbound):
+- Host: `imap.gmail.com`
+- Port: `993`
+- Security: `SSL`
+- Username: `your.name@gmail.com`
+- Password: `app_password`
+- Folder: `INBOX`
+
+## Example: Outlook (Office 365)
+
+Make sure Authenticated SMTP is enabled for the mailbox.
+
+SMTP (outbound):
+- Host: `smtp.office365.com`
+- Port: `587`
+- Security: `STARTTLS`
+- Auth: `LOGIN`
+- Username: `your.name@company.com`
+- Password: `mailbox_password` (or app password if required)
+
+IMAP (inbound):
+- Host: `outlook.office365.com`
+- Port: `993`
+- Security: `SSL`
+- Username: `your.name@company.com`
+- Password: `mailbox_password` (or app password if required)
+- Folder: `INBOX`
+
+## Test and save
+
+When you click **Save Settings**, Gobii runs SMTP/IMAP connectivity checks before finalizing the save. If a check fails, the page shows the exact SMTP/IMAP error so you can fix settings and try again.
+
+## Common issues
+
+- **Auth errors**: Use an app password and confirm SMTP auth is enabled for the mailbox.
+- **No inbound messages**: Ensure IMAP is enabled for the mailbox and the folder is correct.
+- **Connection timeouts**: Double-check the host, port, and security settings.

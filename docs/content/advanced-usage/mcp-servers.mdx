@@ -1,0 +1,48 @@
+---
+title: "MCP Servers"
+sidebarTitle: "MCP Servers"
+---
+
+Model Context Protocol (MCP) servers let your agents access external tools and services beyond the default browser automation stack. Use MCP servers to connect data sources, SaaS tools, or custom services and then enable those tools per agent.
+
+## Where to manage MCP servers
+
+Manage MCP servers in the Console:
+- Gobii Cloud: `https://gobii.ai/console/advanced/mcp-servers/`
+- Self-hosted: `http://localhost:8000/console/advanced/mcp-servers/`
+
+From there you can add a server, configure auth, and assign it to agents.
+
+## Server scopes
+
+MCP servers are scoped so you can control who can use them:
+- **Platform**: Managed servers available to all agents in the deployment. These are always enabled.
+- **Organization**: Shared across an organization. Assign to org agents explicitly.
+- **Personal**: User-owned servers. Enable per personal agent.
+
+## Connection types
+
+Depending on your deployment, you can connect MCP servers in two ways:
+- **Remote server URL**: Point to a hosted MCP server.
+- **Local command** (self-hosted): Run a local MCP server by providing a command and args.
+
+## Authentication (OAuth and headers)
+
+If the server requires OAuth:
+1. Create or edit the MCP server.
+2. Save it.
+3. Click **Connect** and complete the OAuth flow.
+4. The server status will show as connected.
+
+For non-OAuth servers you can provide headers or environment variables as needed.
+
+## Assigning servers to agents
+
+You can assign MCP servers from either place:
+1. **Agent page**: Open an agent, scroll to **MCP Servers**, then enable or disable servers.
+2. **MCP Servers page**: Open a server and use the **Assignments** view to pick which agents can use it.
+
+## Tips
+
+- If a server shows **OAuth connection required**, complete the OAuth flow before using it.
+- Disable unused servers to reduce surface area and keep agent tooling focused.

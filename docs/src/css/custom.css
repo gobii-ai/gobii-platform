@@ -1,0 +1,50 @@
+:root {
+  --ifm-color-primary: #2f7cef;
+  --ifm-color-primary-dark: #176ce6;
+  --ifm-color-primary-darker: #1366da;
+  --ifm-color-primary-darkest: #1054b3;
+  --ifm-color-primary-light: #4a8df1;
+  --ifm-color-primary-lighter: #5896f2;
+  --ifm-color-primary-lightest: #82b1f6;
+  --ifm-code-font-size: 0.92rem;
+  --ifm-navbar-height: 4rem;
+  --ifm-border-radius: 8px;
+}
+
+[data-theme='dark'] {
+  --ifm-background-color: #090b0f;
+  --ifm-background-surface-color: #10141d;
+  --ifm-navbar-background-color: #090b0f;
+  --ifm-footer-background-color: #090b0f;
+}
+
+.navbar__logo {
+  height: 1.75rem;
+}
+
+.navbar__logo img {
+  object-fit: contain;
+}
+
+.theme-doc-markdown {
+  max-width: 860px;
+}
+
+.gobii-doc-card {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 1rem 0;
+  background: var(--ifm-background-surface-color);
+}
+
+.gobii-doc-card img {
+  display: block;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+
+.openapi-tabs__schema-container,
+.openapi-explorer__request-form {
+  border-radius: 8px;
+}

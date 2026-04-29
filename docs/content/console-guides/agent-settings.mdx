@@ -1,0 +1,145 @@
+---
+title: "Agent Settings Guide"
+sidebarTitle: "Agent Settings"
+description: "How to update your agent's behavior, access, integrations, and ownership settings."
+---
+
+Agent Settings is where you control how an agent behaves, who can access it, and what it can connect to.
+
+## Open Agent Settings
+
+1. In Console, open **[Agents](https://gobii.ai/console/agents/)**.
+2. Select the agent you want to edit.
+3. Open the **Settings** view for that agent.
+
+When you make edits, use **Save Changes** to apply them.
+
+## Key terms on this page
+
+- **Contact channels**: The communication routes your agent can use, usually email and SMS.
+- **Primary channels**: The main email/SMS identities your agent sends from and receives on.
+- **Allowlist**: A list of approved contacts allowed to interact with the agent based on your rules.
+- **Collaborators**: Teammates who can access and work with the same agent.
+- **MCP servers**: External tool connections that expand what the agent can do.
+- **Peer links**: Direct links between agents so they can coordinate in controlled ways.
+- **Outbound webhooks**: Automated notifications sent from Gobii to another system when events happen.
+- **Charter**: The agent's core instruction or purpose statement.
+
+## General Settings
+
+Use this section to update the agent's core behavior.
+
+### Change agent name or charter
+
+1. In **General Settings**, edit the name or charter text.
+2. Click **Save Changes**.
+
+The name is what you and your team will see in lists and chat. The charter defines what the agent is supposed to do and how it should approach work.
+
+### Pause or reactivate an agent
+
+1. In **General Settings**, find the active/paused control.
+2. Toggle to pause or reactivate.
+3. Click **Save Changes**.
+
+### Change daily task credit behavior
+
+1. In **General Settings**, find daily credit settings.
+2. Adjust the limit or behavior.
+3. Click **Save Changes**.
+
+Task credits are consumed as the agent performs work. This setting helps control how much work an agent can do over time.
+
+### Change intelligence level
+
+If intelligence controls are available on your plan:
+
+1. In **General Settings**, find the intelligence selector.
+2. Choose the desired level.
+3. Click **Save Changes**.
+
+Higher intelligence can improve performance on complex tasks, but may use credits faster.
+
+## Contacts & Access
+
+Use this section to control who can communicate with the agent and how.
+
+### Configure primary channels
+
+1. In **Contacts & Access**, review primary email/SMS details.
+2. Use **Email Settings** (`https://gobii.ai/console/agents/<agent_id>/email/`) or the SMS setup flow shown in the console when available.
+3. Complete the channel setup, then return to the agent.
+
+Use this when you want to change how people reach the agent, or how the agent reaches others.
+
+### Add or remove allowlist entries
+
+1. In **Contacts & Access**, open allowlist controls.
+2. Add or remove contacts as needed.
+3. Save if prompted.
+
+Allowlist rules help prevent unexpected outreach by limiting communication to approved contacts.
+
+### Add or remove collaborators
+
+1. In **Contacts & Access**, open collaborator controls.
+2. Invite collaborators or remove existing ones.
+3. Save if prompted.
+
+Collaborators are useful when more than one person needs to manage or use the same agent.
+
+## Integrations
+
+Use this section to connect the agent to external systems and workflows.
+
+### Enable or disable MCP servers
+
+1. In **Integrations**, find MCP server assignments (managed globally at [Advanced → MCP Servers](https://gobii.ai/console/advanced/mcp-servers/)).
+2. Turn specific servers on or off for this agent.
+3. Click **Save Changes**.
+
+MCP servers provide tool access beyond default behavior. Enabling only what you need keeps behavior focused.
+
+### Manage peer links
+
+1. In **Integrations**, open peer link settings.
+2. Add, edit, or remove links between agents.
+3. Save if prompted.
+
+Peer links are typically used when agents need structured collaboration rather than separate, isolated workflows.
+
+### Manage outbound webhooks
+
+1. In **Integrations**, open webhook settings.
+2. Add, edit, or remove webhook entries.
+3. Save if prompted.
+
+Webhooks are commonly used to push updates into other systems (for example, internal tools or automation platforms).
+
+
+## Actions
+
+Use this section for ownership and account-level actions.
+
+### Reassign organization ownership context
+
+1. In **Actions**, open organization assignment options.
+2. Choose the target organization (or remove assignment when allowed).
+3. Confirm and save.
+
+Reassignment changes which workspace owns and governs the agent.
+
+### Transfer ownership
+
+1. In **Actions**, open transfer controls.
+2. Enter the recipient details.
+3. Send the transfer invite and wait for acceptance.
+
+Ownership transfer is used when long-term control of the agent should move to another person.
+
+### Delete an agent
+
+1. In **Actions**, open the delete option in the danger zone.
+2. Confirm the deletion prompt.
+
+Deleting an agent is intended to be permanent. Confirm carefully before completing this action.
