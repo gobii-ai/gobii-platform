@@ -20,6 +20,19 @@ function slugify(value) {
     .toLowerCase();
 }
 
+function removeDuplicateSummary(source) {
+  const title = source.match(/^title: "([^"]+)"$/m)?.[1];
+  if (!title) {
+    return source;
+  }
+
+  const escapedTitle = title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return source.replace(
+    new RegExp(`(</MethodEndpoint>\\n+)${escapedTitle}\\n+(<Heading\\n  id=\\{"request"\\})`),
+    '$1$2'
+  );
+}
+
 const spec = YAML.parse(fs.readFileSync(specPath, 'utf8'));
 const groups = new Map();
 const labelsById = new Map();
@@ -87,5 +100,6 @@ for (const [id, label] of labelsById) {
 
   let doc = fs.readFileSync(docPath, 'utf8');
   doc = doc.replace(/^sidebar_label: ".*"$/m, `sidebar_label: "${label.replace(/"/g, '\\"')}"`);
+  doc = removeDuplicateSummary(doc);
   fs.writeFileSync(docPath, doc);
 }
