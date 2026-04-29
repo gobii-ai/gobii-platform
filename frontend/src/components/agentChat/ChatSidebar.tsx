@@ -209,7 +209,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   )
 
   const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
-  const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher
+  const showHeaderPageSwitcher = !collapsed && showGalleryShellSwitcher && galleryMode
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents

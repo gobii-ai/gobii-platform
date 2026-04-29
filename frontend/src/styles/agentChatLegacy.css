@@ -6044,7 +6044,7 @@
 }
 
 .chat-sidebar-settings-theme {
-  --chat-sidebar-settings-banner-surface: rgba(2, 6, 23, 0.8);
+  --chat-sidebar-settings-banner-surface: rgba(15, 23, 42, 0.82);
   --chat-sidebar-settings-surface: rgba(2, 6, 23, 0.44);
   --chat-sidebar-settings-surface-soft: rgba(2, 6, 23, 0.32);
   --chat-sidebar-settings-surface-strong: var(--chat-sidebar-settings-banner-surface);
@@ -7663,22 +7663,10 @@
   flex-direction: column;
   overflow: hidden;
   border-radius: 1rem;
-  border: 1px solid rgba(239, 221, 251, 0.26);
-  box-shadow: 0 18px 32px rgba(15, 23, 42, 0.22);
-}
-
-.chat-sidebar-gallery-card {
-  background:
-    linear-gradient(180deg, rgba(244, 232, 252, 0.16) 0%, rgba(244, 232, 252, 0.05) 24%, transparent 48%),
-    linear-gradient(180deg, rgba(125, 85, 151, 0.98), rgba(110, 72, 136, 0.985));
-  border-color: rgba(239, 221, 251, 0.32);
-  color: rgba(255, 255, 255, 0.94);
-}
-
-.agent-drawer-gallery-card {
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 243, 255, 0.98));
-  border-color: rgba(129, 140, 248, 0.2);
-  color: #0f172a;
+  border: 1px solid rgba(196, 181, 253, 0.16);
+  background: rgba(15, 23, 42, 0.82);
+  color: rgba(248, 245, 255, 0.94);
+  box-shadow: none;
 }
 
 .chat-sidebar-gallery-card[data-active='true'],
@@ -7715,11 +7703,6 @@
   color: rgba(255, 255, 255, 0.7);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
-}
-
-.agent-drawer-gallery-card-favorite {
-  background: rgba(99, 102, 241, 0.12);
-  color: #64748b;
 }
 
 .chat-sidebar-gallery-card-favorite:hover,
@@ -7795,20 +7778,15 @@
   overflow: hidden;
 }
 
-.chat-sidebar-gallery-card-hero {
-  background: linear-gradient(180deg, rgba(248, 240, 252, 0.18), rgba(221, 189, 241, 0.08));
-}
-
+.chat-sidebar-gallery-card-hero,
 .agent-drawer-gallery-card-hero {
-  background: linear-gradient(180deg, rgba(238, 242, 255, 0.95), rgba(248, 250, 252, 0.88));
+  background: rgba(30, 41, 59, 0.88);
 }
 
 .chat-sidebar-gallery-card-hero-glow {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.12), transparent 42%),
-    linear-gradient(180deg, rgba(15, 23, 42, 0.04), transparent 60%);
+  background: none;
   pointer-events: none;
 }
 
@@ -7821,10 +7799,6 @@
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.22);
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
-}
-
-.agent-drawer-gallery-card-avatar {
-  border-color: rgba(99, 102, 241, 0.18);
 }
 
 .chat-sidebar-gallery-card-avatar-image,
@@ -7883,7 +7857,7 @@
 }
 
 .agent-drawer-gallery-card-mini {
-  color: #475569;
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .chat-sidebar-gallery-card-tags,
@@ -7907,9 +7881,9 @@
 }
 
 .agent-drawer-gallery-card .chat-sidebar-gallery-card-tag {
-  background: rgba(99, 102, 241, 0.08);
-  border-color: rgba(129, 140, 248, 0.16);
-  color: #4338ca;
+  background: rgba(15, 23, 42, 0.18);
+  border-color: rgba(255, 255, 255, 0.12);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .chat-sidebar-gallery-card-footer,
@@ -7947,9 +7921,9 @@
 }
 
 .agent-drawer-gallery-card-primary-action {
-  background: rgba(79, 70, 229, 0.08);
-  border-color: rgba(79, 70, 229, 0.12);
-  color: #3730a3;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .chat-sidebar-gallery-card-primary-action:hover,
@@ -8008,21 +7982,21 @@
 }
 
 .agent-drawer-gallery-card-channel-action--email {
-  background: rgba(79, 70, 229, 0.08);
-  border-color: rgba(79, 70, 229, 0.12);
-  color: #3730a3;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .agent-drawer-gallery-card-channel-action--sms {
-  background: rgba(79, 70, 229, 0.08);
-  border-color: rgba(79, 70, 229, 0.12);
-  color: #3730a3;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .agent-drawer-gallery-card-channel-action--chat {
-  background: rgba(79, 70, 229, 0.08);
-  border-color: rgba(79, 70, 229, 0.12);
-  color: #3730a3;
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: rgba(255, 255, 255, 0.94);
 }
 
 .chat-sidebar-gallery-card-channel-action:disabled,
@@ -8899,10 +8873,8 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-drawer-gallery-card {
-  background:
-    linear-gradient(180deg, rgba(244, 232, 252, 0.16) 0%, rgba(244, 232, 252, 0.05) 24%, transparent 48%),
-    linear-gradient(180deg, rgba(125, 85, 151, 0.98), rgba(110, 72, 136, 0.985));
-  border-color: rgba(239, 221, 251, 0.32);
+  background: rgba(15, 23, 42, 0.82);
+  border-color: rgba(196, 181, 253, 0.16);
   color: rgba(255, 255, 255, 0.94);
 }
 
@@ -8913,7 +8885,7 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-drawer-gallery-card-hero {
-  background: linear-gradient(180deg, rgba(248, 240, 252, 0.18), rgba(221, 189, 241, 0.08));
+  background: rgba(30, 41, 59, 0.88);
 }
 
 .agent-mobile-sheet--sidebar .agent-drawer-gallery-card-avatar {
@@ -9254,7 +9226,7 @@
 .billing-screen--embedded {
   color-scheme: dark;
   color: rgba(248, 245, 255, 0.94);
-  --console-card-surface: rgba(2, 6, 23, 0.8);
+  --console-card-surface: rgba(15, 23, 42, 0.82);
   --console-card-border: 1px solid rgba(196, 181, 253, 0.16);
   --console-card-radius: 1.1rem;
   --console-card-shadow: none;
