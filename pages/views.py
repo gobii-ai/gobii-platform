@@ -1704,7 +1704,7 @@ class InstallScriptView(View):
     def get(self, request, *args, **kwargs):
         try:
             script = _load_install_script()
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             raise Http404("Installer script unavailable.") from exc
 
         response = HttpResponse(script, content_type="text/plain; charset=utf-8")
