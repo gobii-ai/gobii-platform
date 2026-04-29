@@ -195,6 +195,55 @@ function writeCompatibilityFiles() {
   writeText('robots.txt', `User-agent: *\nDisallow:\nSitemap: ${siteUrl}/sitemap.xml\n`);
 }
 
+function patchWebpackExports(source) {
+  const moduleStartPattern = /([,{])(\d+)\(([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*),([A-Za-z_$][\w$]*)\)\{/g;
+  const starts = [...source.matchAll(moduleStartPattern)];
+
+  if (starts.length === 0) {
+    return source;
+  }
+
+  let patched = '';
+  let cursor = 0;
+
+  for (let index = 0; index < starts.length; index += 1) {
+    const start = starts[index];
+    const next = starts[index + 1];
+    const segmentStart = start.index;
+    const segmentEnd = next?.index ?? source.length;
+    const moduleSource = source.slice(segmentStart, segmentEnd);
+    const exportsParam = start[4];
+
+    patched += source.slice(cursor, segmentStart);
+    patched += moduleSource.replace(/(^|[^.$\w])exports\./g, `$1${exportsParam}.`);
+    cursor = segmentEnd;
+  }
+
+  patched += source.slice(cursor);
+  return patched;
+}
+
+function patchJavaScriptAssets() {
+  const assetsDir = path.join(buildDir, 'assets', 'js');
+  if (!fs.existsSync(assetsDir)) {
+    return;
+  }
+
+  for (const entry of fs.readdirSync(assetsDir, {withFileTypes: true})) {
+    if (!entry.isFile() || !entry.name.endsWith('.js')) {
+      continue;
+    }
+
+    const filePath = path.join(assetsDir, entry.name);
+    const source = fs.readFileSync(filePath, 'utf8');
+    const patched = patchWebpackExports(source);
+
+    if (patched !== source) {
+      fs.writeFileSync(filePath, patched, 'utf8');
+    }
+  }
+}
+
 const contentDocs = collectContentDocs();
 const apiDocs = collectApiDocs();
 writeMarkdownCopies(contentDocs, apiDocs);
@@ -202,5 +251,6 @@ writeLegacyApiRedirects(apiDocs);
 writeLlms(contentDocs, apiDocs);
 writeCompatibilityFiles();
 writeOpenApiJson();
+patchJavaScriptAssets();
 
 console.log(`Wrote compatibility files for ${contentDocs.length} docs pages and ${apiDocs.length} API operations.`);

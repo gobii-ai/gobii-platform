@@ -3,15 +3,17 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "prestart": "npm run gen-api-docs",
     "start": "docusaurus start --host 0.0.0.0",
     "prebuild": "npm run gen-api-docs",
     "build": "docusaurus build && pagefind --site build && node scripts/postbuild.mjs",
     "serve": "docusaurus serve --host 0.0.0.0",
     "clear": "docusaurus clear",
-    "gen-api-docs": "docusaurus gen-api-docs all"
+    "gen-api-docs": "node scripts/prepare-openapi.mjs && docusaurus gen-api-docs all && node scripts/polish-api-sidebar.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.0",
+    "@docusaurus/plugin-content-docs": "3.10.0",
     "@docusaurus/preset-classic": "3.10.0",
     "clsx": "2.1.1",
     "docusaurus-plugin-openapi-docs": "5.0.1",
@@ -20,7 +22,6 @@
     "prism-react-renderer": "2.4.1",
     "yaml": "2.8.3"
   },
-  "devDependencies": {},
   "overrides": {
     "webpack": "5.105.4"
   }
