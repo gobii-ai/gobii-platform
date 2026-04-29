@@ -1738,6 +1738,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
   const stackedSectionBodyClassName = isEmbedded ? 'px-0 pt-5 space-y-6' : 'p-6 sm:p-8 space-y-6'
   const embeddedUtilityLinkClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white sm:w-auto'
   const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
+  const embeddedDestructiveButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
   const standaloneHeaderActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-blue-50'
   const embeddedHeaderActions = (
     <>
@@ -1972,7 +1973,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         <button
                           type="button"
                           onClick={handleAvatarRemove}
-                          className={isEmbedded ? 'inline-flex items-center gap-2 rounded-lg border border-red-300/70 bg-transparent px-3 py-2 text-sm font-semibold text-red-700 transition-colors hover:border-red-400' : 'inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300'}
+                          className={isEmbedded ? embeddedDestructiveButtonClassName : 'inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300'}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
                           Remove
@@ -2799,15 +2800,21 @@ function IntegrationsSection({
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
   const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
   const sectionBodyClassName = embedded ? 'space-y-6 px-0 py-5' : 'p-6 sm:p-8 space-y-6'
-  const cardClassName = embedded ? 'rounded-xl border border-slate-200/70 bg-transparent p-4 space-y-4' : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
-  const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent' : 'overflow-hidden border border-gray-200 rounded-xl'
-  const tableHeadClassName = embedded ? 'bg-transparent' : 'bg-gray-50'
-  const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-gray-200' : 'bg-white divide-y divide-gray-200'
+  const cardClassName = embedded ? 'rounded-xl border border-slate-200/20 bg-slate-950/35 p-4 space-y-4' : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
+  const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35' : 'overflow-hidden border border-gray-200 rounded-xl'
+  const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
+  const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
   const neutralButtonClassName = embedded
-    ? 'inline-flex items-center gap-2 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60 disabled:opacity-50'
+    ? 'inline-flex items-center gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:opacity-50'
     : 'inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
+  const destructiveButtonClassName = embedded
+    ? 'inline-flex items-center gap-1.5 rounded-md border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
+    : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50'
+  const warningButtonClassName = embedded
+    ? 'inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-200/40 hover:bg-amber-900/45 disabled:opacity-50'
+    : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50'
   const emptyStateClassName = embedded
-    ? 'rounded-xl border border-dashed border-slate-300 px-4 py-4 text-sm text-gray-600 bg-transparent'
+    ? 'rounded-xl border border-dashed border-slate-200/25 bg-slate-950/20 px-4 py-4 text-sm text-slate-300'
     : 'p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600'
 
   return (
@@ -2834,7 +2841,7 @@ function IntegrationsSection({
             <h4 className="text-sm font-semibold text-gray-700">Inherited Servers</h4>
               <ul className="space-y-2">
                 {mcpServers.inherited.map((server) => (
-                  <li key={server.id} className={embedded ? 'flex items-start justify-between gap-3 rounded-lg border border-slate-200/70 bg-transparent px-4 py-3' : 'flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3'}>
+                  <li key={server.id} className={embedded ? 'flex items-start justify-between gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-4 py-3' : 'flex items-start justify-between gap-3 border border-gray-200 bg-gray-50 rounded-lg px-4 py-3'}>
                     <div>
                       <p className="text-sm font-medium text-gray-800">{server.displayName}</p>
                       {server.description && <p className="text-sm text-gray-600">{server.description}</p>}
@@ -2854,7 +2861,7 @@ function IntegrationsSection({
                   {mcpServers.organization.map((server) => {
                     const checked = selectedOrgServers.has(server.id)
                     return (
-                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/70 bg-transparent px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
+                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2882,7 +2889,7 @@ function IntegrationsSection({
                   {mcpServers.personal.map((server) => {
                     const checked = selectedPersonalServers.has(server.id)
                     return (
-                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/70 bg-transparent px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
+                      <label key={server.id} className={embedded ? 'flex items-start gap-3 rounded-lg border border-slate-200/20 bg-slate-950/25 px-3 py-3' : 'flex items-start gap-3 border border-gray-200 rounded-lg px-3 py-3'}>
                         <input
                           type="checkbox"
                           className="mt-1 h-4 w-4 text-blue-600 border-gray-300 rounded"
@@ -2901,7 +2908,7 @@ function IntegrationsSection({
                   <div className="flex justify-end">
                     <a
                       href={mcpServers.manageUrl}
-                      className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-medium text-gray-800 transition-colors hover:border-slate-400 hover:text-slate-900' : 'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50'}
+                      className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white' : 'inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-200 bg-white text-gray-800 shadow-sm transition-colors hover:bg-gray-50'}
                     >
                       <ServerCog className="h-4 w-4" aria-hidden="true" />
                       Manage All Servers
@@ -2992,7 +2999,7 @@ function IntegrationsSection({
                             </button>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50"
+                              className={destructiveButtonClassName}
                               onClick={() => {
                                 onConfirmAction({
                                   title: 'Remove peer link',
@@ -3072,13 +3079,13 @@ function IntegrationsSection({
                             <button
                               type="button"
                               onClick={() => onWebhookEdit(webhook)}
-                              className={embedded ? 'inline-flex items-center gap-1.5 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60' : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50'}
+                              className={neutralButtonClassName}
                             >
                               Edit
                             </button>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                              className={destructiveButtonClassName}
                               onClick={() =>
                                 onConfirmAction({
                                   title: 'Delete webhook',
@@ -3159,7 +3166,7 @@ function IntegrationsSection({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
-                          <div className={embedded ? 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-slate-200/70 bg-transparent' : 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200'}>
+                          <div className={embedded ? 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-slate-200/20 bg-slate-950/25' : 'flex min-w-0 items-stretch overflow-hidden rounded-lg border border-gray-200'}>
                             <input
                               type="text"
                               value={webhook.url ?? ''}
@@ -3167,13 +3174,13 @@ function IntegrationsSection({
                               placeholder="URL available after save"
                               aria-label={`Webhook URL for ${webhook.name}`}
                               onFocus={(event) => event.currentTarget.select()}
-                              className={embedded ? 'min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0' : 'min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0'}
+                              className={embedded ? 'min-w-0 flex-1 border-0 bg-transparent px-3 py-2 text-sm text-slate-100 placeholder:text-slate-500 focus:ring-0' : 'min-w-0 flex-1 border-0 bg-gray-50 px-3 py-2 text-sm text-gray-700 placeholder:text-gray-400 focus:ring-0'}
                             />
                             <button
                               type="button"
                               onClick={() => onInboundWebhookCopy(webhook)}
                               disabled={!webhook.url}
-                              className={embedded ? 'inline-flex shrink-0 items-center gap-1.5 border-l border-slate-200/70 bg-transparent px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-slate-100/60 disabled:cursor-not-allowed disabled:text-gray-400' : 'inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400'}
+                              className={embedded ? 'inline-flex shrink-0 items-center gap-1.5 border-l border-slate-200/20 bg-slate-950/10 px-3 py-2 text-xs font-medium text-slate-100 transition hover:bg-slate-900/45 disabled:cursor-not-allowed disabled:text-slate-500' : 'inline-flex shrink-0 items-center gap-1.5 border-l border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400'}
                             >
                               {copiedInboundWebhookId === webhook.id ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : <Copy className="w-3.5 h-3.5" aria-hidden="true" />}
                               {copyLabel}
@@ -3191,13 +3198,13 @@ function IntegrationsSection({
                             <button
                               type="button"
                               onClick={() => onInboundWebhookEdit(webhook)}
-                              className={embedded ? 'inline-flex items-center gap-1.5 rounded-md border border-slate-300/70 bg-transparent px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-slate-100/60' : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50'}
+                              className={neutralButtonClassName}
                             >
                               Edit
                             </button>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50"
+                              className={warningButtonClassName}
                               disabled={webhook.temp}
                               onClick={() =>
                                 onConfirmAction({
@@ -3213,7 +3220,7 @@ function IntegrationsSection({
                             </button>
                             <button
                               type="button"
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-red-200 text-red-600 hover:bg-red-50"
+                              className={destructiveButtonClassName}
                               onClick={() =>
                                 onConfirmAction({
                                   title: 'Delete inbound webhook',
@@ -3627,7 +3634,7 @@ function ActionsSection({
               <form method="post" className="flex">
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
-                <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-300/70 bg-transparent px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100/60' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
+                <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
                   Cancel Invitation
                 </button>
               </form>
@@ -3685,7 +3692,7 @@ function ActionsSection({
               <button
                 type="button"
                 onClick={onDeleteAgent}
-                className="py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                className={embedded ? 'inline-flex items-center gap-x-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-4 py-2 text-sm font-medium text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 focus:outline-none focus:ring-2 focus:ring-rose-400/60 focus:ring-offset-0' : 'py-2 px-4 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-red-300 bg-red-50 text-red-700 hover:bg-red-100 hover:border-red-400 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2'}
               >
                 <Trash2 className="w-4 h-4" aria-hidden="true" />
                 Delete Agent

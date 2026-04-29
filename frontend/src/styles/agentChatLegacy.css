@@ -6151,8 +6151,16 @@
   background-color: rgba(30, 64, 175, 0.22);
 }
 
+.chat-sidebar-settings-theme .bg-blue-50 {
+  background-color: rgba(30, 64, 175, 0.18);
+}
+
 .chat-sidebar-settings-theme .bg-indigo-50 {
   background-color: rgba(79, 70, 229, 0.18);
+}
+
+.chat-sidebar-settings-theme .bg-emerald-50 {
+  background-color: rgba(20, 83, 45, 0.22);
 }
 
 .chat-sidebar-settings-theme .bg-red-50 {

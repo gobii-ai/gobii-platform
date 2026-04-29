@@ -35,6 +35,15 @@ function renderStatus(row: AllowlistTableRow) {
 
 export function AllowlistContactsTable({ rows, disabled = false, embedded = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
   const [rowSelection, setRowSelection] = useState<RowSelectionState>({})
+  const embeddedTableWrapperClassName = 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
+  const embeddedTableHeadClassName = 'bg-slate-950/45'
+  const embeddedTableBodyClassName = 'bg-transparent'
+  const embeddedDestructiveButtonClassName =
+    'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-1.5 text-xs font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50 disabled:opacity-50'
+  const embeddedBulkBannerClassName =
+    'flex flex-col gap-3 rounded-xl border border-sky-300/20 bg-sky-950/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'
+  const embeddedBulkButtonClassName =
+    'inline-flex items-center justify-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-3 py-2 text-sm font-semibold text-sky-100 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
 
   useEffect(() => {
     const selectableIds = new Set(rows.filter(isRowSelectable).map((row) => row.id))
@@ -93,7 +102,13 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
           const Icon = row.original.channel.toLowerCase() === 'sms' ? Phone : Mail
           return (
             <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700">
+              <span
+                className={
+                  embedded
+                    ? 'mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg border border-sky-300/15 bg-sky-950/45 text-sky-200'
+                    : 'mt-0.5 flex h-9 w-9 items-center justify-center rounded-lg bg-blue-50 text-blue-700'
+                }
+              >
                 <Icon className="h-4 w-4" aria-hidden="true" />
               </span>
               <div>
@@ -145,7 +160,7 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
               type="button"
               onClick={() => onRemoveRow(row.original)}
               disabled={disabled}
-              className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-rose-300/70 bg-transparent px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50/70 disabled:opacity-50' : 'inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50'}
+              className={embedded ? embeddedDestructiveButtonClassName : 'inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50'}
             >
               <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
               {row.original.kind === 'invite' ? 'Cancel invite' : 'Remove'}
@@ -154,7 +169,7 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
         },
       },
     ]
-  }, [disabled, onRemoveRow])
+  }, [disabled, embedded, onRemoveRow, embeddedDestructiveButtonClassName])
 
   const table = useReactTable({
     data: rows,
@@ -171,15 +186,15 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
   return (
     <div className="space-y-4">
       {selectedRows.length > 0 && (
-        <div className="flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm text-slate-700">
+        <div className={embedded ? embeddedBulkBannerClassName : 'flex flex-col gap-3 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'}>
+          <div className={embedded ? 'text-sm text-slate-100' : 'text-sm text-slate-700'}>
             {selectedRows.length} contact{selectedRows.length === 1 ? '' : 's'} selected
           </div>
           <button
             type="button"
             onClick={() => onRemoveRows(selectedRows)}
             disabled={disabled}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+            className={embedded ? embeddedBulkButtonClassName : 'inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50'}
           >
             <Trash2 className="h-4 w-4" aria-hidden="true" />
             Remove selected
@@ -187,12 +202,12 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
         </div>
       )}
 
-      <div className={embedded ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent' : 'overflow-hidden rounded-xl border border-slate-200'}>
+      <div className={embedded ? embeddedTableWrapperClassName : 'overflow-hidden rounded-xl border border-slate-200'}>
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse">
-            <thead className={embedded ? 'bg-transparent' : 'bg-white'}>
+            <thead className={embedded ? embeddedTableHeadClassName : 'bg-white'}>
               {table.getHeaderGroups().map((headerGroup) => (
-                <tr key={headerGroup.id} className="border-b border-slate-200">
+                <tr key={headerGroup.id} className={embedded ? 'border-b border-slate-200/15' : 'border-b border-slate-200'}>
                   {headerGroup.headers.map((header) => (
                     <th key={header.id} scope="col" className="px-4 py-3 text-left align-middle">
                       {header.isPlaceholder ? null : flexRender(header.column.columnDef.header, header.getContext())}
@@ -201,10 +216,10 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
                 </tr>
               ))}
             </thead>
-            <tbody className={embedded ? 'bg-transparent' : 'bg-white'}>
+            <tbody className={embedded ? embeddedTableBodyClassName : 'bg-white'}>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={columns.length} className="px-4 py-10 text-center text-sm text-slate-500">
+                  <td colSpan={columns.length} className={embedded ? 'px-4 py-10 text-center text-sm text-slate-300' : 'px-4 py-10 text-center text-sm text-slate-500'}>
                     No additional contacts configured yet.
                   </td>
                 </tr>
@@ -213,8 +228,8 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
                   <tr
                     key={row.id}
                     className={[
-                      'border-b border-slate-100 last:border-b-0',
-                      row.getIsSelected() ? 'bg-blue-50/50' : '',
+                      embedded ? 'border-b border-slate-200/10 last:border-b-0' : 'border-b border-slate-100 last:border-b-0',
+                      row.getIsSelected() ? (embedded ? 'bg-sky-950/35' : 'bg-blue-50/50') : '',
                       row.original.pendingType === 'remove' || row.original.pendingType === 'cancel_invite' ? 'opacity-60' : '',
                     ].join(' ')}
                   >
