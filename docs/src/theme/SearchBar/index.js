@@ -3,6 +3,19 @@ import ExecutionEnvironment from '@docusaurus/ExecutionEnvironment';
 
 import './styles.css';
 
+function stripHtmlExtension(url) {
+  return url?.replace(/\.html(?=$|#|\?)/, '') ?? url;
+}
+
+function normalizeResultUrls(result) {
+  result.url = stripHtmlExtension(result.url);
+  result.sub_results = result.sub_results?.map((subResult) => ({
+    ...subResult,
+    url: stripHtmlExtension(subResult.url),
+  }));
+  return result;
+}
+
 export default function SearchBar() {
   const ref = useRef(null);
 
@@ -29,6 +42,7 @@ export default function SearchBar() {
         element: ref.current,
         showSubResults: true,
         showImages: false,
+        processResult: normalizeResultUrls,
         resetStyles: false,
       });
     };
