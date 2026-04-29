@@ -184,26 +184,6 @@ export function SidebarSettingsMenu({
           <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
           <div className="sidebar-settings__links">
-            {canShowBilling ? (
-              onOpenBilling ? (
-                <button
-                  type="button"
-                  className="sidebar-settings__link"
-                  onClick={() => {
-                    handleOpenChange(false)
-                    onOpenBilling()
-                  }}
-                >
-                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Billing</span>
-                </button>
-              ) : (
-                <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
-                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Billing</span>
-                </a>
-              )
-            ) : null}
             <button
               type="button"
               className="sidebar-settings__notification-toggle"
@@ -226,6 +206,27 @@ export function SidebarSettingsMenu({
                 <span className="sidebar-settings__switch-thumb" />
               </span>
             </button>
+            <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+            {canShowBilling ? (
+              onOpenBilling ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenBilling()
+                  }}
+                >
+                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Billing</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Billing</span>
+                </a>
+              )
+            ) : null}
             <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
               <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
               <span>Global Secrets</span>
