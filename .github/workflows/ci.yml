@@ -22,10 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -39,10 +39,10 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -64,15 +64,15 @@ jobs:
       TEST_OUTPUT_DIR: test-results
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
       - name: Set up uv (with cache)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           ignore-nothing-to-cache: true
@@ -95,7 +95,7 @@ jobs:
 
       - name: Upload test results artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-sandbox-server
           path: test-results/**
@@ -386,22 +386,22 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
       - name: Set up uv (with cache)
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
           ignore-nothing-to-cache: true
 
       - name: Restore venv cache
         id: restore-venv
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .venv
           key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
@@ -426,7 +426,7 @@ jobs:
 
       - name: Save venv cache
         if: steps.restore-venv.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .venv
           key: venv-${{ runner.os }}-py3.12-${{ hashFiles('uv.lock') }}
@@ -450,7 +450,7 @@ jobs:
 
       - name: Upload test results artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-${{ matrix.batch }}
           path: test-results/**
@@ -466,7 +466,7 @@ jobs:
     needs: [tests, sandbox-server-tests]
     steps:
       - name: Download all test result artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: test-results-*
           merge-multiple: true
@@ -496,10 +496,10 @@ jobs:
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -567,15 +567,15 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: tibdex/github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app_id: ${{ secrets.GH_APP_ID }}
-          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          installation_retrieval_mode: repository
-          installation_retrieval_payload: gobii-ai/gobii
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gobii-ai
+          repositories: gobii
 
       - name: Notify infra repo
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
           repository: gobii-ai/gobii
@@ -601,15 +601,15 @@ jobs:
     steps:
       - name: Generate GitHub App token
         id: app-token
-        uses: tibdex/github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
-          app_id: ${{ secrets.GH_APP_ID }}
-          private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
-          installation_retrieval_mode: repository
-          installation_retrieval_payload: gobii-ai/gobii
+          app-id: ${{ secrets.GH_APP_ID }}
+          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          owner: gobii-ai
+          repositories: gobii
 
       - name: Notify infra repo
-        uses: peter-evans/repository-dispatch@v3
+        uses: peter-evans/repository-dispatch@v4
         with:
           token: ${{ steps.app-token.outputs.token }}
           repository: gobii-ai/gobii
