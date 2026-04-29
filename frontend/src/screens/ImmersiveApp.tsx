@@ -4,6 +4,7 @@ import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
+import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -13,10 +14,11 @@ const DEFAULT_CLOSE_PATH = '/console/agents/'
 type AppRoute =
   | { kind: 'command-center' }
   | { kind: 'agent-select' }
+  | { kind: 'billing' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -88,6 +90,10 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'agent-select' }
   }
 
+  if (parts[0] === 'billing') {
+    return { kind: 'billing' }
+  }
+
   return { kind: 'not-found' }
 }
 
@@ -97,6 +103,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   }
   if (route.kind === 'agent-select') {
     return 'agent_select'
+  }
+  if (route.kind === 'billing') {
+    return 'billing'
   }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'agent_chat' : 'agent_new'
@@ -111,6 +120,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'agent-select') {
     return '/app/agents'
   }
+  if (route.kind === 'billing') {
+    return '/app/billing'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? '/app/agents/:id' : '/app/agents/new'
   }
@@ -122,7 +134,10 @@ function getAnalyticsTitle(route: AppRoute): string {
     return 'Command Center · Gobii'
   }
   if (route.kind === 'agent-select') {
-    return 'Select a conversation · Gobii'
+    return 'My Agents · Gobii'
+  }
+  if (route.kind === 'billing') {
+    return 'Billing · Gobii'
   }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
@@ -329,6 +344,12 @@ function NotFound() {
 }
 
 function navigateTo(path: string) {
+  const currentPath = `${window.location.pathname}${window.location.search}${window.location.hash}`
+  if (currentPath === path) {
+    window.history.replaceState({}, '', path)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    return
+  }
   window.history.pushState({}, '', path)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
@@ -352,6 +373,7 @@ export function ImmersiveApp({
   const [returnTo, setReturnTo] = useState(() => resolveReturnTo(location.search))
   const [viewerUserId, setViewerUserId] = useState<number | null>(null)
   const [viewerEmail, setViewerEmail] = useState<string | null>(null)
+  const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
   const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
@@ -453,7 +475,20 @@ export function ImmersiveApp({
   }, [])
 
   const handleContextSwitch = useCallback((_context: ConsoleContext) => {
+    setSelectionRefreshKey((current) => current + 1)
+    if (route.kind === 'billing') {
+      navigateTo('/app/billing')
+      return
+    }
     navigateTo('/app/agents')
+  }, [route.kind])
+
+  const handleSelectionPageChange = useCallback((page: 'agents' | 'billing') => {
+    navigateTo(page === 'billing' ? '/app/billing' : '/app/agents')
+  }, [])
+
+  const handleOpenBilling = useCallback(() => {
+    navigateTo('/app/billing')
   }, [])
 
   return (
@@ -473,6 +508,7 @@ export function ImmersiveApp({
             showContextSwitcher
             persistContextSession={false}
             onContextSwitch={handleContextSwitch}
+            onOpenBilling={handleOpenBilling}
           />
         ) : null}
         {route.kind === 'agent-select' ? (
@@ -488,6 +524,28 @@ export function ImmersiveApp({
             showContextSwitcher
             persistContextSession={false}
             onContextSwitch={handleContextSwitch}
+            selectionPage="agents"
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+          />
+        ) : null}
+        {route.kind === 'billing' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="billing"
+            selectionShellPanel={<ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
           />
         ) : null}
         {route.kind === 'command-center' ? (

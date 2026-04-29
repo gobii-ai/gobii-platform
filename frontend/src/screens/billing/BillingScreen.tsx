@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useState } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { AlertTriangle, CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
 import { getCsrfToken, jsonRequest } from '../../api/http'
@@ -136,8 +136,11 @@ function isDraftDirty(initialData: BillingInitialData, draft: BillingDraftState)
   return addonsDirty || dedicatedDirty || seatsDirty
 }
 
-export function BillingScreen({ initialData }: BillingScreenProps) {
+export function BillingScreen({ initialData, variant = 'standalone' }: BillingScreenProps) {
   const isOrg = initialData.contextType === 'organization'
+  const isEmbedded = variant === 'embedded'
+  const rootClassName = isEmbedded ? 'billing-screen billing-screen--embedded grid w-full gap-6' : 'billing-screen app-shell'
+  const mainClassName = isEmbedded ? 'billing-screen__main grid gap-6' : 'billing-screen__main app-main'
   const trialEndsLabel = useMemo(() => {
     const iso = initialData.trial?.trialEndsAtIso
     if (!iso) return null
@@ -270,6 +273,32 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     form.submit()
     form.remove()
   }, [initialData.endpoints.stripePortalUrl])
+
+  useEffect(() => {
+    const appId = initialData.contextType === 'personal' ? initialData.churnKey?.appId : null
+    if (!appId || typeof document === 'undefined') {
+      return
+    }
+    if (typeof window.churnkey?.init === 'function') {
+      return
+    }
+    const existingScript = document.querySelector<HTMLScriptElement>(
+      `script[data-churnkey-app-id="${appId}"], script[src*="assets.churnkey.co/js/app.js?appId=${appId}"]`,
+    )
+    if (existingScript) {
+      return
+    }
+    const script = document.createElement('script')
+    script.src = `https://assets.churnkey.co/js/app.js?appId=${encodeURIComponent(appId)}`
+    script.async = true
+    script.dataset.churnkeyAppId = appId
+    const firstScript = document.getElementsByTagName('script')[0]
+    if (firstScript?.parentNode) {
+      firstScript.parentNode.insertBefore(script, firstScript)
+      return
+    }
+    document.body.appendChild(script)
+  }, [initialData])
 
   const submitSave = useCallback(async (payload: Record<string, unknown>) => {
     if (saving) return
@@ -539,24 +568,26 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
   }, [])
 
   return (
-    <div className="app-shell">
-      <div className="card card--header">
-        <div className="card__body card__body--header flex flex-col gap-4 py-4 sm:py-3">
-          <div className="flex items-center gap-3">
-            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/90 text-blue-700 shadow-sm">
-              <CreditCard className="h-6 w-6" aria-hidden="true" />
-            </div>
-            <div className="min-w-0">
-              <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Billing</h1>
-              <p className="text-slate-700 font-medium">
-                {isOrg ? `Organization: ${initialData.organization.name}` : 'Personal subscription and add-ons.'}
-              </p>
+    <div className={rootClassName}>
+      {!isEmbedded ? (
+        <div className="card card--header">
+          <div className="card__body card__body--header flex flex-col gap-4 py-4 sm:py-3">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/90 text-blue-700 shadow-sm">
+                <CreditCard className="h-6 w-6" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Billing</h1>
+                <p className="text-slate-700 font-medium">
+                  {isOrg ? `Organization: ${initialData.organization.name}` : 'Personal subscription and add-ons.'}
+                </p>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      ) : null}
 
-      <main className="app-main">
+      <main className={mainClassName}>
         <BillingHeader
           initialData={initialData}
           onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
@@ -613,8 +644,8 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       </main>
 
       {hasAnyChanges && !summaryActionsVisible && nearTop ? (
-        <div className="fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
-          <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-lg">
+        <div className="billing-screen__floating-actions-shell fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
+          <div className="billing-screen__floating-actions mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-lg">
             <div className="min-w-0 text-sm font-semibold">
               You have unsaved changes.
             </div>

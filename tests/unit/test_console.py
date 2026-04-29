@@ -44,6 +44,49 @@ class ConsoleViewsTest(TestCase):
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
 
+    @tag("batch_console_agents")
+    def test_billing_initial_data_api_returns_personal_payload(self):
+        response = self.client.get(reverse("console_billing_initial_data"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["contextType"], "personal")
+        self.assertEqual(payload["canManageBilling"], True)
+        self.assertEqual(payload["endpoints"]["updateUrl"], reverse("console_billing_update"))
+        self.assertEqual(payload["extraTasks"]["endpoints"]["updateUrl"], reverse("update_billing_settings"))
+
+    @tag("batch_console_agents")
+    def test_billing_initial_data_api_honors_organization_context_override(self):
+        from api.models import Organization, OrganizationMembership
+
+        organization = Organization.objects.create(
+            name="Billing Org",
+            slug="billing-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 2
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        response = self.client.get(
+            reverse("console_billing_initial_data"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(organization.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["contextType"], "organization")
+        self.assertEqual(payload["organization"]["id"], str(organization.id))
+        self.assertEqual(payload["organization"]["name"], organization.name)
+        self.assertEqual(payload["canManageBilling"], True)
+        self.assertEqual(payload["endpoints"]["updateUrl"], reverse("console_billing_update"))
+
     def _get_agent_list_payload(self, response):
         """Parse the embedded JSON payload that hydrates the React agent list."""
         soup = BeautifulSoup(response.content, 'html.parser')

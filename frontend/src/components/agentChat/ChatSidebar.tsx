@@ -8,6 +8,11 @@ import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
+import {
+  SelectionShellPageSwitcher,
+  SELECTION_SHELL_PAGE_LABELS,
+  type SelectionShellPage,
+} from './SelectionShellPageSwitcher'
 import { AgentEmptyState, AgentListItem, AgentListSectionHeader, AgentSearchInput, AgentSortToggle } from './ChatSidebarParts'
 import { SidebarSettingsMenu, type SidebarSettingsInfo } from './SidebarSettingsMenu'
 import {
@@ -39,6 +44,9 @@ type ChatSidebarProps = {
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
   settings?: SidebarSettingsInfo
+  galleryShellPage?: SelectionShellPage
+  galleryShellPanel?: ReactNode
+  onGalleryShellPageChange?: (page: SelectionShellPage) => void
   showEmbeddedSettings?: boolean
   embeddedSettingsPanel?: ReactNode
   embeddedSettingsTitle?: string
@@ -64,6 +72,9 @@ export const ChatSidebar = memo(function ChatSidebar({
   onRosterSortModeChange,
   contextSwitcher,
   settings,
+  galleryShellPage = 'agents',
+  galleryShellPanel = null,
+  onGalleryShellPageChange,
   showEmbeddedSettings = false,
   embeddedSettingsPanel = null,
   embeddedSettingsTitle = 'Agent Settings',
@@ -80,6 +91,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   const [drawerViewMode, setDrawerViewMode] = useState<AgentDrawerViewMode>('list')
 
   const showSettingsView = showEmbeddedSettings && Boolean(embeddedSettingsPanel)
+  const showGalleryShellSwitcher = Boolean(onGalleryShellPageChange)
+  const showCustomGalleryShellPanel = galleryShellPage !== 'agents' && Boolean(galleryShellPanel)
   const collapsed = desktopMode === 'collapsed' && !showSettingsView
   const galleryMode = desktopMode === 'gallery' || showSettingsView
   const showSearch = agents.length >= SEARCH_THRESHOLD
@@ -130,6 +143,12 @@ export const ChatSidebar = memo(function ChatSidebar({
       setDrawerViewMode('gallery')
     }
   }, [showSettingsView])
+
+  useEffect(() => {
+    if (showCustomGalleryShellPanel) {
+      setDrawerViewMode('gallery')
+    }
+  }, [showCustomGalleryShellPanel])
 
   const handleStepLeft = useCallback(() => {
     if (showSettingsView) {
@@ -188,6 +207,9 @@ export const ChatSidebar = memo(function ChatSidebar({
     () => agents.find((agent) => agent.id === activeAgentId) ?? null,
     [agents, activeAgentId],
   )
+
+  const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
+  const showHeaderPageSwitcher = galleryMode && !showSettingsView && !collapsed && showGalleryShellSwitcher
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
@@ -367,7 +389,11 @@ export const ChatSidebar = memo(function ChatSidebar({
             }
             setDrawerOpen(false)
           }}
-          title={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
+          title={
+            showSettingsView
+              ? embeddedSettingsTitle
+              : (drawerViewMode === 'gallery' && galleryShellPage === 'billing' ? shellTitle : 'Switch agent')
+          }
           icon={PanelLeft}
           bodyPadding={false}
           headerAccessory={!showSettingsView && mobileContextSwitcher ? (
@@ -376,7 +402,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           ariaLabel={showSettingsView ? embeddedSettingsTitle : 'Switch agent'}
         >
           {showSettingsView ? embeddedSettingsPanel : null}
-          {!showSettingsView && showSearch ? (
+          {!showSettingsView && !showCustomGalleryShellPanel && showSearch ? (
             <AgentSearchInput
               variant="drawer"
               value={searchQuery}
@@ -384,14 +410,14 @@ export const ChatSidebar = memo(function ChatSidebar({
               onClear={() => setSearchQuery('')}
             />
           ) : null}
-          {!showSettingsView && showSortToggle ? (
+          {!showSettingsView && !showCustomGalleryShellPanel && showSortToggle ? (
             <AgentSortToggle
               variant="drawer"
               value={rosterSortMode}
               onChange={(mode) => onRosterSortModeChange?.(mode)}
             />
           ) : null}
-          {!showSettingsView && hasAgents ? (
+          {!showSettingsView && !showCustomGalleryShellPanel && hasAgents ? (
             <div className="agent-drawer-view-toggle" role="group" aria-label="Agent roster view">
               <button
                 type="button"
@@ -414,24 +440,38 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
+          {!showSettingsView && drawerViewMode === 'gallery' && showGalleryShellSwitcher ? (
+            <div className="agent-drawer-shell-switcher">
+              <SelectionShellPageSwitcher
+                currentPage={galleryShellPage}
+                onSelectPage={onGalleryShellPageChange!}
+              />
+            </div>
+          ) : null}
           {!showSettingsView && drawerViewMode === 'gallery' ? (
-            <ChatSidebarGallery
-              variant="drawer"
-              agents={filteredAgents}
-              favoriteAgentIds={favoriteAgentIds}
-              activeAgentId={activeAgentId}
-              switchingAgentId={switchingAgentId}
-              hasAgents={hasAgents}
-              loading={loading}
-              errorMessage={errorMessage}
-              searchQuery={searchQuery}
-              onSelectAgent={handleAgentSelect}
-              onConfigureAgent={onConfigureAgent}
-              onToggleAgentFavorite={onToggleAgentFavorite}
-              onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
-              createAgentButtonDisabled={createAgentButtonDisabled}
-              createAgentDisabledReason={createAgentDisabledReason}
-            />
+            showCustomGalleryShellPanel ? (
+              <div className="agent-drawer-gallery-scroll">
+                {galleryShellPanel}
+              </div>
+            ) : (
+              <ChatSidebarGallery
+                variant="drawer"
+                agents={filteredAgents}
+                favoriteAgentIds={favoriteAgentIds}
+                activeAgentId={activeAgentId}
+                switchingAgentId={switchingAgentId}
+                hasAgents={hasAgents}
+                loading={loading}
+                errorMessage={errorMessage}
+                searchQuery={searchQuery}
+                onSelectAgent={handleAgentSelect}
+                onConfigureAgent={onConfigureAgent}
+                onToggleAgentFavorite={onToggleAgentFavorite}
+                onCreateAgent={onCreateAgent ? handleCreateAgent : undefined}
+                createAgentButtonDisabled={createAgentButtonDisabled}
+                createAgentDisabledReason={createAgentDisabledReason}
+              />
+            )
           ) : !showSettingsView ? (
             <div className="agent-drawer-list" role="list">
               {renderListContent('drawer', false)}
@@ -450,11 +490,25 @@ export const ChatSidebar = memo(function ChatSidebar({
       data-sidebar-mode={desktopMode}
     >
       <div className="chat-sidebar-inner">
-        <div className="chat-sidebar-header" data-collapsed={collapsed ? 'true' : 'false'}>
-          {!collapsed ? (
-            <a href="/" className="chat-sidebar-logo-link">
-              <img src={sidebarLogoSrc} alt={sidebarLogoAlt} className="chat-sidebar-logo" />
-            </a>
+        <div
+          className="chat-sidebar-header"
+          data-collapsed={collapsed ? 'true' : 'false'}
+          data-has-center={showHeaderPageSwitcher ? 'true' : 'false'}
+        >
+          <div className="chat-sidebar-header-start">
+            {!collapsed ? (
+              <a href="/" className="chat-sidebar-logo-link">
+                <img src={sidebarLogoSrc} alt={sidebarLogoAlt} className="chat-sidebar-logo" />
+              </a>
+            ) : null}
+          </div>
+          {showHeaderPageSwitcher ? (
+            <div className="chat-sidebar-header-center">
+              <SelectionShellPageSwitcher
+                currentPage={galleryShellPage}
+                onSelectPage={onGalleryShellPageChange!}
+              />
+            </div>
           ) : null}
           <div className="chat-sidebar-header-actions">
             {contextSwitcher ? (
@@ -486,14 +540,20 @@ export const ChatSidebar = memo(function ChatSidebar({
         </div>
 
         <div className="chat-sidebar-section">
-          <div className="chat-sidebar-section-header">
-            <span className="chat-sidebar-section-title">{showSettingsView ? embeddedSettingsTitle : 'Agents'}</span>
-            {!collapsed && hasAgents && !showSettingsView ? (
-              <span className="chat-sidebar-section-count">{agents.length}</span>
-            ) : null}
-          </div>
+          {showSettingsView ? (
+            <div className="chat-sidebar-section-header">
+              <span className="chat-sidebar-section-title">{embeddedSettingsTitle}</span>
+            </div>
+          ) : showCustomGalleryShellPanel ? null : (
+            <div className="chat-sidebar-section-header">
+              <span className="chat-sidebar-section-title">Agents</span>
+              {!collapsed && hasAgents ? (
+                <span className="chat-sidebar-section-count">{agents.length}</span>
+              ) : null}
+            </div>
+          )}
 
-          {!collapsed && !showSettingsView && (showSearch || showSortToggle) ? (
+          {!collapsed && !showSettingsView && !showCustomGalleryShellPanel && (showSearch || showSortToggle) ? (
             <div
               className="chat-sidebar-controls"
               data-gallery={galleryMode ? 'true' : 'false'}
@@ -519,6 +579,10 @@ export const ChatSidebar = memo(function ChatSidebar({
           {showSettingsView ? (
             <div className="min-h-0 flex-1 overflow-y-auto">
               {embeddedSettingsPanel}
+            </div>
+          ) : showCustomGalleryShellPanel ? (
+            <div className="chat-sidebar-gallery-scroll">
+              {galleryShellPanel}
             </div>
           ) : galleryMode ? (
             <ChatSidebarGallery

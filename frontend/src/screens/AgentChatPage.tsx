@@ -49,6 +49,7 @@ import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelli
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
+import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
@@ -108,6 +109,7 @@ const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_LIGHT_TEXTURE_URL = new URL(noiseLightTextureUrl, import.meta.url).toString()
+const SELECTION_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
 
@@ -234,6 +236,32 @@ function resolveCreateAgentDisabledMessage(reason?: string | null, actionable = 
 
 function resolveSendMessageDisabledMessage(): string {
   return 'Resolve billing before sending more messages.'
+}
+
+function readSelectionSidebarModePreference(): 'collapsed' | 'list' | 'gallery' | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const stored = window.sessionStorage.getItem(SELECTION_SIDEBAR_MODE_STORAGE_KEY)
+    if (stored === 'collapsed' || stored === 'list' || stored === 'gallery') {
+      return stored
+    }
+  } catch {
+    return null
+  }
+  return null
+}
+
+function writeSelectionSidebarModePreference(mode: 'collapsed' | 'list' | 'gallery'): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+  try {
+    window.sessionStorage.setItem(SELECTION_SIDEBAR_MODE_STORAGE_KEY, mode)
+  } catch {
+    // Ignore storage failures; shell mode will simply fall back to defaults.
+  }
 }
 
 const AGENT_LIMIT_ERROR_PATTERN = /agent limit reached|do not have any persistent agents available/i
@@ -793,6 +821,10 @@ export type AgentChatPageProps = {
   showContextSwitcher?: boolean
   persistContextSession?: boolean
   onContextSwitch?: (context: ConsoleContext) => void
+  selectionPage?: SelectionShellPage
+  selectionShellPanel?: ReactNode
+  onSelectionPageChange?: (page: SelectionShellPage) => void
+  onOpenBilling?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -835,6 +867,10 @@ export function AgentChatPage({
   showContextSwitcher = false,
   persistContextSession = true,
   onContextSwitch,
+  selectionPage = 'agents',
+  selectionShellPanel = null,
+  onSelectionPageChange,
+  onOpenBilling,
 }: AgentChatPageProps) {
   const initialThemeColorRef = useRef<string | null>(null)
   const fishFaviconSvgRef = useRef<string | null>(null)
@@ -906,7 +942,11 @@ export function AgentChatPage({
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
-  const [selectionSidebarMode, setSelectionSidebarMode] = useState(getInitialAgentChatSidebarMode)
+  const [selectionSidebarMode, setSelectionSidebarMode] = useState(() => (
+    agentId === undefined
+      ? (selectionPage === 'agents' ? (readSelectionSidebarModePreference() ?? 'gallery') : 'gallery')
+      : getInitialAgentChatSidebarMode()
+  ))
   const [pendingAgentEmails, setPendingAgentEmails] = useState<Record<string, string>>({})
   const contactRefreshAttemptsRef = useRef<Record<string, number>>({})
   const effectiveContext = contextData?.context ?? null
@@ -929,6 +969,18 @@ export function AgentChatPage({
   useEffect(() => {
     activeAgentIdRef.current = activeAgentId
   }, [activeAgentId])
+
+  useEffect(() => {
+    if (agentId !== undefined) {
+      return
+    }
+    if (selectionPage !== 'agents' && selectionSidebarMode !== 'gallery') {
+      setSelectionSidebarMode('gallery')
+      writeSelectionSidebarModePreference('gallery')
+      return
+    }
+    writeSelectionSidebarModePreference(selectionSidebarMode)
+  }, [agentId, selectionPage, selectionSidebarMode])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -3458,7 +3510,11 @@ export function AgentChatPage({
   const taskCreditsDismissKey = effectiveContext
     ? `${effectiveContext.type}:${effectiveContext.id}`
     : null
+  const isImmersiveShellPath = shellPathname.startsWith('/app')
   const billingUrl = useMemo(() => {
+    if (isImmersiveShellPath) {
+      return '/app/billing'
+    }
     if (!effectiveContext) {
       return '/console/billing/'
     }
@@ -3466,7 +3522,16 @@ export function AgentChatPage({
       return `/console/billing/?org_id=${effectiveContext.id}`
     }
     return '/console/billing/'
-  }, [effectiveContext])
+  }, [effectiveContext, isImmersiveShellPath])
+  const handleOpenBilling = useCallback(() => {
+    if (onOpenBilling) {
+      onOpenBilling()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(billingUrl)
+    }
+  }, [billingUrl, onOpenBilling])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
@@ -3494,6 +3559,7 @@ export function AgentChatPage({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl,
+    onOpenBilling: onOpenBilling ? handleOpenBilling : null,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3505,12 +3571,21 @@ export function AgentChatPage({
   }), [
     billingUrl,
     effectiveContext,
+    handleOpenBilling,
     isProprietaryMode,
+    onOpenBilling,
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
     viewerEmail,
   ])
+  const handleSelectionSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
+    writeSelectionSidebarModePreference(mode)
+    if (selectionPage !== 'agents' && mode !== 'gallery' && onSelectionPageChange) {
+      onSelectionPageChange('agents')
+    }
+    setSelectionSidebarMode(mode)
+  }, [onSelectionPageChange, selectionPage])
   const selectionSidebarProps = {
     agents: sidebarAgents,
     favoriteAgentIds,
@@ -3518,15 +3593,19 @@ export function AgentChatPage({
     loading: rosterLoading,
     errorMessage: rosterErrorMessage,
     onSelectAgent: handleSelectAgent,
+    onConfigureAgent: handleConfigureAgent,
     onToggleAgentFavorite: handleToggleAgentFavorite,
     onCreateAgent: handleCreateAgent,
     createAgentDisabledReason,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
     desktopMode: selectionSidebarMode,
-    onDesktopModeChange: setSelectionSidebarMode,
+    onDesktopModeChange: handleSelectionSidebarModeChange,
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
+    galleryShellPage: selectionPage,
+    galleryShellPanel: selectionPage === 'billing' ? selectionShellPanel : null,
+    onGalleryShellPageChange: onSelectionPageChange,
   }
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
     '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_LIGHT_TEXTURE_URL}")`,
@@ -4022,6 +4101,9 @@ export function AgentChatPage({
         </div>,
       )
     }
+    if (selectionPage === 'billing') {
+      return renderSelectionLayout(<div className="flex min-h-full w-full flex-1" />)
+    }
     return renderSelectionLayout(
       <div className="flex min-h-full w-full flex-1 flex-col gap-4 pb-6 pt-0">
         {highPriorityBanner ? (
@@ -4132,6 +4214,7 @@ export function AgentChatPage({
         contextSwitcher={contextSwitcher ?? undefined}
         currentContext={effectiveContext}
         sidebarBillingUrl={billingManageUrl}
+        onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}

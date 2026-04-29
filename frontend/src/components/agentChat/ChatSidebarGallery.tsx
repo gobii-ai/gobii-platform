@@ -1,4 +1,4 @@
-import { Mail, MessageSquare, Plus, Settings, Star, Stethoscope } from 'lucide-react'
+import { Mail, MessageSquare, Plus, Settings, Star } from 'lucide-react'
 
 import type { AgentRosterEntry } from '../../types/agentRoster'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -103,7 +103,6 @@ function GalleryCard({
   const showSmsAction = Boolean(agent.sms) && !isSignupPreviewAgent
   const showEmailAction = Boolean(agent.email) && !isSignupPreviewAgent
   const showConfigureAction = Boolean(agent.canManageAgent && (onConfigureAgent || agent.detailUrl)) && !isSignupPreviewAgent
-  const showAuditAction = Boolean(agent.auditUrl) && !isSignupPreviewAgent
   const miniDescription = (agent.miniDescription || '').trim()
   const showChatAction = Boolean(onSelectAgent)
 
@@ -115,18 +114,6 @@ function GalleryCard({
       role="listitem"
     >
       <div className={styles.topActionsClass}>
-        {showAuditAction && agent.auditUrl ? (
-          <a
-            className={styles.iconActionClass}
-            href={agent.auditUrl}
-            target="_blank"
-            rel="noreferrer"
-            title="Audit"
-            aria-label="Audit"
-          >
-            <Stethoscope className="h-3.5 w-3.5" />
-          </a>
-        ) : null}
         <button
           type="button"
           className={styles.favoriteClass}

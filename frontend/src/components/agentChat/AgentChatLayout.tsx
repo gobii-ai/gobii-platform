@@ -124,6 +124,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
   sidebarBillingUrl?: string | null
+  onOpenBilling?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -286,6 +287,7 @@ export function AgentChatLayout({
   contextSwitcher,
   currentContext = null,
   sidebarBillingUrl = null,
+  onOpenBilling,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -841,6 +843,7 @@ export function AgentChatLayout({
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
+    onOpenBilling,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -853,6 +856,7 @@ export function AgentChatLayout({
     currentContext,
     isProprietaryMode,
     onSidebarNotificationsEnabledChange,
+    onOpenBilling,
     sidebarBillingUrl,
     sidebarCreditsResetOn,
     sidebarNotificationStatus,

@@ -179,6 +179,7 @@ from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_tim
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
+from console.billing_initial_data import build_billing_initial_data
 from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
@@ -6486,6 +6487,13 @@ class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
         )
         payload = build_agent_detail_props_for_request(request, agent)
         return JsonResponse(payload)
+
+
+class BillingInitialDataAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(build_billing_initial_data(request))
 
 
 class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
