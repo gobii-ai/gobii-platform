@@ -508,6 +508,8 @@ export function ImmersiveApp({
             showContextSwitcher
             persistContextSession={false}
             onContextSwitch={handleContextSwitch}
+            selectionPage="agents"
+            onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
           />
         ) : null}

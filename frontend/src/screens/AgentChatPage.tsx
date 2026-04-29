@@ -4220,6 +4220,8 @@ export function AgentChatPage({
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}
         sidebarNotificationStatus={notificationStatus}
         onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
+        galleryShellPage={selectionPage}
+        onGalleryShellPageChange={isImmersiveShellPath ? onSelectionPageChange : undefined}
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}
         embeddedSettingsTitle={embeddedSettingsTitle}
