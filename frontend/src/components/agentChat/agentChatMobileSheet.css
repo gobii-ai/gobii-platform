@@ -32,6 +32,12 @@
   pointer-events: auto;
 }
 
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-backdrop--open {
+  background: rgba(7, 10, 24, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .agent-mobile-sheet-panel {
   position: relative;
   width: min(100%, 720px);
@@ -42,10 +48,30 @@
   background: #ffffff;
   border-radius: 1.5rem 1.5rem 0 0;
   padding: 0;
+  overflow: hidden;
   box-shadow: 0 -12px 30px rgba(15, 23, 42, 0.18);
   transform: translateY(var(--agent-mobile-sheet-translate));
   transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
   will-change: transform;
+}
+
+.agent-mobile-sheet-panel--sidebar {
+  background:
+    radial-gradient(ellipse at 25% 0%, rgba(64, 27, 104, 0.2) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 100%, rgba(64, 27, 104, 0.12) 0%, transparent 50%),
+    linear-gradient(175deg, #401b68 0%, #1c0f42 55%, #170d38 100%);
+  border: 1px solid rgba(196, 181, 253, 0.16);
+  box-shadow: 0 -18px 38px rgba(7, 10, 24, 0.48);
+}
+
+.agent-mobile-sheet-panel--sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at top left, rgba(221, 214, 254, 0.08), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 24%);
 }
 
 .agent-mobile-sheet-panel--open {
@@ -82,6 +108,10 @@
   background: rgba(37, 99, 235, 0.35);
 }
 
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-grabber-bar {
+  background: rgba(221, 214, 254, 0.34);
+}
+
 .agent-mobile-sheet-header {
   display: flex;
   align-items: flex-start;
@@ -89,6 +119,8 @@
   gap: 1rem;
   padding: 1.25rem 1rem 0;
   margin-bottom: 1rem;
+  position: relative;
+  z-index: 1;
 }
 
 .agent-mobile-sheet-heading {
@@ -133,16 +165,29 @@
   color: #b45309;
 }
 
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-icon {
+  background: rgba(167, 139, 250, 0.16);
+  color: #ddd6fe;
+}
+
 .agent-mobile-sheet-title {
   font-size: 1.05rem;
   font-weight: 600;
   color: #0f172a;
 }
 
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-title {
+  color: rgba(255, 255, 255, 0.96);
+}
+
 .agent-mobile-sheet-subtitle {
   font-size: 0.8rem;
   color: #475569;
   margin-top: 0.2rem;
+}
+
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-subtitle {
+  color: rgba(226, 232, 240, 0.72);
 }
 
 .agent-mobile-sheet-close {
@@ -163,9 +208,19 @@
   -webkit-tap-highlight-color: transparent;
 }
 
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-close {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+}
+
 .agent-mobile-sheet-close:hover {
   background: rgba(59, 130, 246, 0.2);
   color: #1d4ed8;
+}
+
+.agent-mobile-sheet--sidebar .agent-mobile-sheet-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
 }
 
 .agent-mobile-sheet-close:active {
@@ -182,6 +237,8 @@
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y;
+  position: relative;
+  z-index: 1;
 }
 
 .agent-mobile-sheet-body--padded {

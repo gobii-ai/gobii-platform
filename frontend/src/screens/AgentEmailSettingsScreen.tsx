@@ -15,12 +15,17 @@ import {
   type EmailSettingsSaveRequest,
 } from '../api/agentEmailSettings'
 import { HttpError } from '../api/http'
+import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
+import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 
 type AgentEmailSettingsScreenProps = {
   agentId: string
   emailSettingsUrl: string
   ensureAccountUrl: string
   testUrl: string
+  variant?: 'standalone' | 'embedded'
+  onBack?: () => void
+  onSaved?: (payload: { endpointAddress: string | null }) => void
 }
 
 type ProviderKey = 'gmail' | 'custom'
@@ -229,7 +234,38 @@ export function AgentEmailSettingsScreen({
   emailSettingsUrl,
   ensureAccountUrl,
   testUrl,
+  variant = 'standalone',
+  onBack,
+  onSaved,
 }: AgentEmailSettingsScreenProps) {
+  const isEmbedded = variant === 'embedded'
+  const helpButtonClassName = isEmbedded
+    ? 'inline-flex w-full items-center justify-center rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100 sm:w-auto'
+    : 'rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white'
+  const selectionCardClassName = isEmbedded
+    ? 'rounded-lg border border-blue-300/30 bg-blue-950/20 p-3 text-sm text-slate-100'
+    : 'rounded-lg border border-blue-200 p-3 text-sm'
+  const infoCalloutClassName = isEmbedded
+    ? 'rounded-lg border border-blue-300/30 bg-blue-950/20 px-4 py-3 text-sm text-blue-100'
+    : 'rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900'
+  const warningCalloutClassName = isEmbedded
+    ? 'rounded-lg border border-amber-300/30 bg-amber-950/20 px-3 py-2 text-sm text-amber-100'
+    : 'rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800'
+  const neutralCardClassName = isEmbedded
+    ? 'rounded-lg border border-slate-300/70 bg-slate-900/40 p-3 text-sm text-slate-200'
+    : 'rounded-lg bg-white p-3 text-sm text-slate-700'
+  const oauthPrimaryButtonClassName = isEmbedded
+    ? 'rounded-lg border border-blue-300/40 bg-blue-950/20 px-3 py-2 text-sm font-semibold text-blue-100'
+    : 'rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white'
+  const oauthSecondaryButtonClassName = isEmbedded
+    ? 'rounded-lg border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-semibold text-slate-100'
+    : 'rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-800'
+  const primaryActionButtonClassName = isEmbedded
+    ? 'rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60'
+    : 'rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60'
+  const secondaryActionButtonClassName = isEmbedded
+    ? 'rounded-lg border border-rose-300/40 bg-rose-950/20 px-4 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60'
+    : 'rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-60'
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-email-settings', agentId, emailSettingsUrl], [agentId, emailSettingsUrl])
   const [draft, setDraft] = useState<DraftState | null>(null)
@@ -482,8 +518,9 @@ export function AgentEmailSettingsScreen({
             ? `Reverted to default email settings (${restoredAddress}).`
             : 'Reverted to default email settings.',
         )
+        onSaved?.({ endpointAddress: restoredAddress || null })
         const nextUrl = response.settings.agent.backUrl || settings.agent.backUrl
-        if (nextUrl) {
+        if (!isEmbedded && nextUrl) {
           window.location.assign(nextUrl)
         }
         return
@@ -499,14 +536,17 @@ export function AgentEmailSettingsScreen({
         return
       }
       const saveResponse = await saveMutation.mutateAsync(payload)
+      const savedAddress = saveResponse.settings.endpoint.address || saveResponse.settings.defaultEndpoint.address || null
+      onSaved?.({ endpointAddress: savedAddress })
+      setBanner(savedAddress ? `Email settings saved for ${savedAddress}.` : 'Email settings saved.')
       const nextUrl = saveResponse.settings.agent.backUrl || settings?.agent.backUrl
-      if (nextUrl) {
+      if (!isEmbedded && nextUrl) {
         window.location.assign(nextUrl)
       }
     } catch (error) {
       setErrorBanner(describeHttpError(error))
     }
-  }, [draft, emailSettingsUrl, isResetPending, resetMutation, saveMutation, settings, testMutation])
+  }, [draft, emailSettingsUrl, isEmbedded, isResetPending, onSaved, resetMutation, saveMutation, settings, testMutation])
 
   const handleResetToDefault = useCallback(() => {
     if (!settings) {
@@ -551,53 +591,56 @@ export function AgentEmailSettingsScreen({
 
   if (settingsQuery.error && !settings) {
     return (
-      <div className="rounded-xl bg-amber-50 p-6 text-sm text-amber-800">
+      <div className={isEmbedded ? 'rounded-xl border border-amber-300/30 bg-amber-950/20 p-6 text-sm text-amber-100' : 'rounded-xl bg-amber-50 p-6 text-sm text-amber-800'}>
         Failed to load email settings. {describeHttpError(settingsQuery.error)}
       </div>
     )
   }
 
   if (settingsQuery.isLoading || !settings || !draft) {
-    return <div className="rounded-xl bg-white p-6 text-sm text-slate-700">Loading email settings...</div>
+    return (
+      <div className={isEmbedded ? 'rounded-xl border border-slate-200/70 bg-transparent p-6 text-sm text-slate-200' : 'rounded-xl bg-white p-6 text-sm text-slate-700'}>
+        Loading email settings...
+      </div>
+    )
   }
 
   return (
     <div className="space-y-5">
-      <div className="rounded-xl bg-white p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">Agent Email Setup</h1>
-            <p className="mt-1 text-sm text-slate-600">
-              {settings.agent.name}: configure, test, and save in one flow.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <a href={settings.agent.helpUrl} target="_blank" rel="noreferrer" className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white">
-              Help
-            </a>
-            <a href={settings.agent.backUrl} className="rounded-lg border border-blue-200 px-3 py-2 text-sm font-semibold text-blue-700">
-              Back to Agent
-            </a>
-          </div>
-        </div>
-      </div>
+      <SettingsBanner
+        variant={isEmbedded ? 'embedded' : 'standalone'}
+        leading={isEmbedded ? <EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to settings" /> : undefined}
+        eyebrow={isEmbedded ? 'Email settings' : undefined}
+        title={isEmbedded ? settings.agent.name : 'Agent Email Setup'}
+        subtitle={isEmbedded ? undefined : `${settings.agent.name}: configure, test, and save in one flow.`}
+        supportingContent={!isEmbedded ? (
+          <a href={settings.agent.backUrl} className="inline-flex items-center gap-2 text-sm font-semibold text-blue-700 transition-colors hover:text-blue-800">
+            Back to Agent
+          </a>
+        ) : undefined}
+        actions={(
+          <a href={settings.agent.helpUrl} target="_blank" rel="noreferrer" className={helpButtonClassName}>
+            Help
+          </a>
+        )}
+      />
 
-      {banner && <div className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800">{banner}</div>}
+      {banner && <div className={isEmbedded ? 'rounded-xl border border-emerald-300/30 bg-emerald-950/20 px-4 py-3 text-sm text-emerald-100' : 'rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-800'}>{banner}</div>}
       {errorBanner && (
-        <div className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800 inline-flex items-start gap-2">
+        <div className={isEmbedded ? 'inline-flex items-start gap-2 rounded-xl border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100' : 'inline-flex items-start gap-2 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800'}>
           <AlertTriangle className="mt-0.5 h-4 w-4" aria-hidden="true" />
           <span>{errorBanner}</span>
         </div>
       )}
 
-      <div className="rounded-xl bg-white p-5 shadow-sm">
+      <div className={isEmbedded ? 'rounded-xl border border-slate-200/70 bg-transparent p-5 shadow-none' : 'rounded-xl bg-white p-5 shadow-sm'}>
         <div className="space-y-4">
-            <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-              <p className="text-sm font-semibold text-slate-800">Regular Gobii Address</p>
-              <p className="mt-1 text-sm text-slate-900">
+            <div className={isEmbedded ? 'rounded-lg border border-blue-300/30 bg-blue-950/20 px-4 py-3' : 'rounded-lg border border-blue-200 bg-blue-50 px-4 py-3'}>
+              <p className={isEmbedded ? 'text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-slate-800'}>Regular Gobii Address</p>
+              <p className={isEmbedded ? 'mt-1 text-sm text-slate-100' : 'mt-1 text-sm text-slate-900'}>
                 {settings.defaultEndpoint.exists ? settings.defaultEndpoint.address : 'Not configured'}
               </p>
-              <p className="mt-1 text-xs text-slate-700">
+              <p className={isEmbedded ? 'mt-1 text-xs text-slate-400' : 'mt-1 text-xs text-slate-700'}>
                 This `{defaultEmailDomainLabel}` address stays active for inbound messages.
               </p>
             </div>
@@ -618,7 +661,7 @@ export function AgentEmailSettingsScreen({
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className="rounded-lg border border-blue-200 p-3 text-sm">
+              <label className={selectionCardClassName}>
                 <input
                   type="checkbox"
                   checked={draft.isOutboundEnabled}
@@ -638,7 +681,7 @@ export function AgentEmailSettingsScreen({
                 />
                 Enable outbound (SMTP)
               </label>
-              <label className="rounded-lg border border-blue-200 p-3 text-sm">
+              <label className={selectionCardClassName}>
                 <input
                   type="checkbox"
                   checked={draft.isInboundEnabled}
@@ -661,7 +704,7 @@ export function AgentEmailSettingsScreen({
             </div>
 
             {!hasMailDirection && (
-              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <div className={infoCalloutClassName}>
                 Choose inbound and/or outbound first.
               </div>
             )}
@@ -702,7 +745,7 @@ export function AgentEmailSettingsScreen({
             )}
 
             {hasMailDirection && !hasProvider && (
-              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <div className={infoCalloutClassName}>
                 Select a provider to continue.
               </div>
             )}
@@ -719,11 +762,13 @@ export function AgentEmailSettingsScreen({
                       )
                     }
                     className={`rounded-lg border p-3 text-left text-sm ${
-                      draft.connectionType === 'oauth' ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-blue-200'
+                      draft.connectionType === 'oauth'
+                        ? (isEmbedded ? 'border-blue-200 bg-blue-900/30 text-blue-50' : 'border-blue-500 bg-blue-50 text-blue-900')
+                        : (isEmbedded ? 'border-slate-300/70 bg-transparent text-slate-200' : 'border-blue-200')
                     }`}
                   >
                     <div className="font-semibold">OAuth (recommended)</div>
-                    <div className="mt-1 text-slate-700">Connect using Google OAuth and skip app passwords.</div>
+                    <div className={isEmbedded ? 'mt-1 text-slate-300' : 'mt-1 text-slate-700'}>Connect using Google OAuth and skip app passwords.</div>
                   </button>
                   <button
                     type="button"
@@ -733,34 +778,36 @@ export function AgentEmailSettingsScreen({
                       )
                     }
                     className={`rounded-lg border p-3 text-left text-sm ${
-                      draft.connectionType === 'manual' ? 'border-blue-500 bg-blue-50 text-blue-900' : 'border-blue-200'
+                      draft.connectionType === 'manual'
+                        ? (isEmbedded ? 'border-blue-200 bg-blue-900/30 text-blue-50' : 'border-blue-500 bg-blue-50 text-blue-900')
+                        : (isEmbedded ? 'border-slate-300/70 bg-transparent text-slate-200' : 'border-blue-200')
                     }`}
                   >
                     <div className="font-semibold">Manual SMTP/IMAP</div>
-                    <div className="mt-1 text-slate-700">Use an app password.</div>
+                    <div className={isEmbedded ? 'mt-1 text-slate-300' : 'mt-1 text-slate-700'}>Use an app password.</div>
                   </button>
                 </div>
               </div>
             )}
 
             {hasMailDirection && draft.provider === 'gmail' && !hasConnectionType && (
-              <div className="rounded-lg bg-blue-50 px-4 py-3 text-sm text-blue-900">
+              <div className={infoCalloutClassName}>
                 Choose a connection type to continue.
               </div>
             )}
 
             {hasMailDirection && draft.provider === 'gmail' && draft.connectionType === 'oauth' && (
-              <div className="rounded-lg bg-blue-50 p-4 space-y-3">
+              <div className={isEmbedded ? 'rounded-lg border border-blue-300/30 bg-blue-950/20 p-4 space-y-3' : 'rounded-lg bg-blue-50 p-4 space-y-3'}>
                 <div className="space-y-2 text-sm">
-                  <div className="inline-flex items-center gap-2 text-slate-700">
-                    {oauthConnected ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Mail className="h-4 w-4 text-blue-700" />}
+                  <div className={isEmbedded ? 'inline-flex items-center gap-2 text-slate-200' : 'inline-flex items-center gap-2 text-slate-700'}>
+                    {oauthConnected ? <CheckCircle2 className={isEmbedded ? 'h-4 w-4 text-emerald-300' : 'h-4 w-4 text-emerald-600'} /> : <Mail className={isEmbedded ? 'h-4 w-4 text-blue-300' : 'h-4 w-4 text-blue-700'} />}
                     <span>{oauthConnected ? 'Gmail OAuth connected' : 'OAuth connection required before saving'}</span>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       onClick={handleConnectOAuth}
-                      className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
+                      className={oauthPrimaryButtonClassName}
                       disabled={ensureAccountMutation.isPending}
                     >
                       {ensureAccountMutation.isPending ? 'Preparing...' : 'Connect Gmail OAuth'}
@@ -768,7 +815,7 @@ export function AgentEmailSettingsScreen({
                     <button
                       type="button"
                       onClick={handleDisconnectOAuth}
-                      className="rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-800"
+                      className={oauthSecondaryButtonClassName}
                       disabled={!oauthConnected}
                     >
                       Disconnect OAuth
@@ -779,9 +826,9 @@ export function AgentEmailSettingsScreen({
             )}
 
             {hasMailDirection && draft.provider === 'gmail' && draft.connectionType === 'manual' && (
-              <div className="rounded-lg bg-white p-3 text-sm text-slate-700">
-                <div className="inline-flex items-center gap-2 font-semibold text-slate-900">
-                  <ShieldCheck className="h-4 w-4 text-blue-700" />
+              <div className={neutralCardClassName}>
+                <div className={isEmbedded ? 'inline-flex items-center gap-2 font-semibold text-slate-100' : 'inline-flex items-center gap-2 font-semibold text-slate-900'}>
+                  <ShieldCheck className={isEmbedded ? 'h-4 w-4 text-blue-300' : 'h-4 w-4 text-blue-700'} />
                   Gmail app password checklist
                 </div>
                 <ol className="mt-2 list-decimal list-inside space-y-1">
@@ -792,7 +839,7 @@ export function AgentEmailSettingsScreen({
                       href="https://myaccount.google.com/apppasswords"
                       target="_blank"
                       rel="noreferrer"
-                      className="font-semibold text-blue-700 underline"
+                      className={isEmbedded ? 'font-semibold text-blue-300 underline' : 'font-semibold text-blue-700 underline'}
                     >
                       App Password
                     </a>
@@ -1023,7 +1070,7 @@ export function AgentEmailSettingsScreen({
                           className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                         />
                       </div>
-                      <label className="sm:col-span-2 rounded-lg border border-blue-200 px-3 py-2 text-sm text-slate-700">
+                      <label className={isEmbedded ? 'sm:col-span-2 rounded-lg border border-blue-300/30 bg-blue-950/20 px-3 py-2 text-sm text-slate-100' : 'sm:col-span-2 rounded-lg border border-blue-200 px-3 py-2 text-sm text-slate-700'}>
                         <input
                           type="checkbox"
                           checked={draft.imapIdleEnabled}
@@ -1042,7 +1089,7 @@ export function AgentEmailSettingsScreen({
             )}
 
             {oauthRequired && !oauthConnected && (
-              <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <div className={warningCalloutClassName}>
                 Connect Gmail OAuth before saving.
               </div>
             )}
@@ -1052,7 +1099,7 @@ export function AgentEmailSettingsScreen({
                 type="button"
                 onClick={handleSave}
                 disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending || !canSubmit}
-                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                className={primaryActionButtonClassName}
               >
                 {testMutation.isPending || saveMutation.isPending || resetMutation.isPending
                   ? 'Saving...'
@@ -1064,7 +1111,7 @@ export function AgentEmailSettingsScreen({
                 type="button"
                 onClick={() => void handleResetToDefault()}
                 disabled={testMutation.isPending || saveMutation.isPending || resetMutation.isPending}
-                className="rounded-lg border border-red-200 px-4 py-2 text-sm font-semibold text-red-700 disabled:opacity-60"
+                className={secondaryActionButtonClassName}
               >
                 {resetMutation.isPending ? 'Reverting...' : 'Revert to Default Email'}
               </button>
@@ -1072,13 +1119,13 @@ export function AgentEmailSettingsScreen({
             {((testResults.smtp && !testResults.smtp.ok) || (testResults.imap && !testResults.imap.ok)) && (
               <div className="grid gap-3 sm:grid-cols-2">
                 {testResults.smtp && !testResults.smtp.ok && (
-                  <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                  <div className={isEmbedded ? 'rounded-lg border border-amber-300/30 bg-amber-950/20 p-3 text-sm text-amber-100' : 'rounded-lg bg-amber-50 p-3 text-sm text-amber-800'}>
                     <div className="font-semibold">SMTP failed</div>
                     <div className="mt-1">{testResults.smtp.error}</div>
                   </div>
                 )}
                 {testResults.imap && !testResults.imap.ok && (
-                  <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+                  <div className={isEmbedded ? 'rounded-lg border border-amber-300/30 bg-amber-950/20 p-3 text-sm text-amber-100' : 'rounded-lg bg-amber-50 p-3 text-sm text-amber-800'}>
                     <div className="font-semibold">IMAP failed</div>
                     <div className="mt-1">{testResults.imap.error}</div>
                   </div>
@@ -1108,10 +1155,10 @@ export function AgentEmailSettingsScreen({
               </label>
               {guidanceError && <p className="mt-2 text-xs text-amber-700">{guidanceError}</p>}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setShowGuidance(false)} className="rounded-lg border border-blue-300 px-3 py-2 text-sm font-semibold text-blue-800">
+                <button type="button" onClick={() => setShowGuidance(false)} className={oauthSecondaryButtonClassName}>
                   Cancel
                 </button>
-                <button type="button" onClick={() => void handleContinueFromGuidance()} className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold text-white">
+                <button type="button" onClick={() => void handleContinueFromGuidance()} className={oauthPrimaryButtonClassName}>
                   Continue to Google
                 </button>
               </div>

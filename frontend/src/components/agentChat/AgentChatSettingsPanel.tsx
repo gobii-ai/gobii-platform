@@ -24,6 +24,7 @@ type AgentChatSettingsPanelProps = {
   llmTierError?: string | null
   canManageAgent?: boolean
   context?: ConsoleContext | null
+  onOpenFullSettings?: () => void
   onClose: () => void
 }
 
@@ -54,6 +55,7 @@ export function AgentChatSettingsPanel({
   llmTierError = null,
   canManageAgent = true,
   context = null,
+  onOpenFullSettings,
   onClose,
 }: AgentChatSettingsPanelProps) {
   const [isMobile, setIsMobile] = useState(false)
@@ -405,10 +407,16 @@ export function AgentChatSettingsPanel({
         >
           {updating || llmTierSaving ? 'Saving...' : 'Save'}
         </button>
-        <a href={agentSettingsUrl} className="agent-settings-link" target="_blank" rel="noreferrer">
-          More Settings
-          <ExternalLink size={14} />
-        </a>
+        {onOpenFullSettings ? (
+          <button type="button" className="agent-settings-link" onClick={onOpenFullSettings}>
+            More Settings
+          </button>
+        ) : (
+          <a href={agentSettingsUrl} className="agent-settings-link" target="_blank" rel="noreferrer">
+            More Settings
+            <ExternalLink size={14} />
+          </a>
+        )}
       </div>
     </div>
   )

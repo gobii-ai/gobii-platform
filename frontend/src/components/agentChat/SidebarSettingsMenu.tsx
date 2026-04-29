@@ -25,6 +25,7 @@ export type SidebarSettingsInfo = {
   viewerEmail?: string | null
   isProprietaryMode: boolean
   billingUrl?: string | null
+  onOpenBilling?: (() => void) | null
   globalSecretsUrl?: string
   advancedMcpUrl?: string
   notificationsEnabled?: boolean
@@ -87,6 +88,7 @@ export function SidebarSettingsMenu({
   viewerEmail = null,
   isProprietaryMode,
   billingUrl = null,
+  onOpenBilling = null,
   globalSecretsUrl = '/console/secrets/',
   advancedMcpUrl = '/console/advanced/mcp-servers/',
   notificationsEnabled = true,
@@ -133,7 +135,7 @@ export function SidebarSettingsMenu({
     }
     return viewerEmail?.trim() || context?.name || 'Personal workspace'
   }, [context, viewerEmail])
-  const canShowBilling = Boolean(isProprietaryMode && billingUrl)
+  const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
   const canShowTaskCredits = Boolean(isProprietaryMode && taskCredits)
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
@@ -182,12 +184,6 @@ export function SidebarSettingsMenu({
           <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
 
           <div className="sidebar-settings__links">
-            {canShowBilling ? (
-              <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
-                <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
-                <span>Billing</span>
-              </a>
-            ) : null}
             <button
               type="button"
               className="sidebar-settings__notification-toggle"
@@ -210,6 +206,27 @@ export function SidebarSettingsMenu({
                 <span className="sidebar-settings__switch-thumb" />
               </span>
             </button>
+            <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+            {canShowBilling ? (
+              onOpenBilling ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenBilling()
+                  }}
+                >
+                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Billing</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={billingUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <CreditCard className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Billing</span>
+                </a>
+              )
+            ) : null}
             <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
               <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
               <span>Global Secrets</span>

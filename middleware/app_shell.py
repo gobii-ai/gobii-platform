@@ -14,6 +14,7 @@ from util.fish_collateral import is_fish_collateral_enabled
 
 APP_PATH_PREFIX = "/app"
 APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
+APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 
 
@@ -266,7 +267,12 @@ class AppShellMiddleware:
 
     @staticmethod
     def _requires_login(path: str) -> bool:
-        return path == APP_PROTECTED_PATH_PREFIX or path.startswith(f"{APP_PROTECTED_PATH_PREFIX}/")
+        return (
+            path == APP_PROTECTED_PATH_PREFIX
+            or path.startswith(f"{APP_PROTECTED_PATH_PREFIX}/")
+            or path == APP_BILLING_PATH_PREFIX
+            or path.startswith(f"{APP_BILLING_PATH_PREFIX}/")
+        )
 
     def _etag_matches(self, request_etag: str | None) -> bool:
         if not request_etag or not self._cached_etag:

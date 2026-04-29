@@ -44,6 +44,49 @@ class ConsoleViewsTest(TestCase):
         self.client = Client()
         self.client.login(email='test@example.com', password='testpass123')
 
+    @tag("batch_console_agents")
+    def test_billing_initial_data_api_returns_personal_payload(self):
+        response = self.client.get(reverse("console_billing_initial_data"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["contextType"], "personal")
+        self.assertEqual(payload["canManageBilling"], True)
+        self.assertEqual(payload["endpoints"]["updateUrl"], reverse("console_billing_update"))
+        self.assertEqual(payload["extraTasks"]["endpoints"]["updateUrl"], reverse("update_billing_settings"))
+
+    @tag("batch_console_agents")
+    def test_billing_initial_data_api_honors_organization_context_override(self):
+        from api.models import Organization, OrganizationMembership
+
+        organization = Organization.objects.create(
+            name="Billing Org",
+            slug="billing-org",
+            created_by=self.user,
+        )
+        organization.billing.purchased_seats = 2
+        organization.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        response = self.client.get(
+            reverse("console_billing_initial_data"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(organization.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["contextType"], "organization")
+        self.assertEqual(payload["organization"]["id"], str(organization.id))
+        self.assertEqual(payload["organization"]["name"], organization.name)
+        self.assertEqual(payload["canManageBilling"], True)
+        self.assertEqual(payload["endpoints"]["updateUrl"], reverse("console_billing_update"))
+
     def _get_agent_list_payload(self, response):
         """Parse the embedded JSON payload that hydrates the React agent list."""
         soup = BeautifulSoup(response.content, 'html.parser')
@@ -2098,6 +2141,134 @@ class ConsoleViewsTest(TestCase):
         self.assertEqual(payload['settings']['dailyCredits']['limit'], 5.0)
         self.assertFalse(payload['status']['dailyCredits']['softTargetExceeded'])
         self.assertFalse(payload['status']['dailyCredits']['hardLimitReached'])
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_api_get(self):
+        from api.models import PersistentAgent, BrowserUseAgent, Organization, OrganizationMembership
+
+        organization = Organization.objects.create(
+            name='Settings API Org',
+            slug='settings-api-org',
+            plan='free',
+            created_by=self.user,
+        )
+        organization_billing = organization.billing
+        organization_billing.purchased_seats = 1
+        organization_billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Full Settings Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name='Full Settings Agent',
+            charter='Test full settings API',
+            browser_use_agent=browser_agent,
+        )
+
+        url = reverse('console_agent_settings', kwargs={'agent_id': agent.id})
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload['agent']['id'], str(agent.id))
+        self.assertEqual(payload['agent']['name'], agent.name)
+        self.assertEqual(payload['urls']['detail'], reverse('agent_detail', kwargs={'pk': agent.id}))
+        self.assertIn('allowlist', payload)
+        self.assertIn('collaborators', payload)
+        self.assertIn('mcpServers', payload)
+        self.assertIn('webhooks', payload)
+
+    @tag("batch_console_agents_management")
+    def test_agent_settings_api_requires_manage_permissions(self):
+        from api.models import AgentCollaborator, PersistentAgent, BrowserUseAgent
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Managed Settings Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name='Managed Settings Agent',
+            charter='Restrict settings access',
+            browser_use_agent=browser_agent,
+        )
+
+        collaborator = get_user_model().objects.create_user(
+            username='collaborator-settings@example.com',
+            email='collaborator-settings@example.com',
+            password='testpass123',
+        )
+        AgentCollaborator.objects.create(agent=agent, user=collaborator)
+
+        collaborator_client = Client()
+        collaborator_client.force_login(collaborator)
+        response = collaborator_client.get(reverse('console_agent_settings', kwargs={'agent_id': agent.id}))
+
+        self.assertEqual(response.status_code, 403)
+
+    @tag("batch_console_agents_management")
+    def test_agent_chat_settings_shell_route_serves_chat_shell(self):
+        from api.models import PersistentAgent, BrowserUseAgent, Organization, OrganizationMembership
+
+        organization = Organization.objects.create(
+            name='Settings Shell Org',
+            slug='settings-shell-org',
+            plan='free',
+            created_by=self.user,
+        )
+        organization_billing = organization.billing
+        organization_billing.purchased_seats = 1
+        organization_billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=organization,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(organization.id)
+        session["context_name"] = organization.name
+        session.save()
+
+        browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name='Settings Shell Browser',
+        )
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            organization=organization,
+            name='Settings Shell Agent',
+            charter='Serve settings shell',
+            browser_use_agent=browser_agent,
+        )
+
+        for route_name in (
+            'agent_chat_shell_settings',
+            'agent_chat_shell_secrets',
+            'agent_chat_shell_email',
+            'agent_chat_shell_files',
+        ):
+            with self.subTest(route_name=route_name):
+                response = self.client.get(reverse(route_name, kwargs={'pk': agent.id}))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertContains(response, f'data-agent-id="{agent.id}"')
+                self.assertContains(response, 'data-app="agent-chat"')
 
     @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')

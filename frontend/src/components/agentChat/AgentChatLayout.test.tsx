@@ -48,7 +48,25 @@ vi.mock('./StreamingThinkingCard', () => ({
 }))
 
 vi.mock('./ChatSidebar', () => ({
-  ChatSidebar: () => null,
+  ChatSidebar: ({
+    desktopMode,
+    showEmbeddedSettings,
+    onBackFromEmbeddedSettings,
+  }: {
+    desktopMode?: string
+    showEmbeddedSettings?: boolean
+    onBackFromEmbeddedSettings?: () => void
+  }) => (
+    <div
+      data-testid="chat-sidebar"
+      data-mode={desktopMode ?? ''}
+      data-embedded-settings={String(Boolean(showEmbeddedSettings))}
+    >
+      <button type="button" data-testid="chat-sidebar-back" onClick={() => onBackFromEmbeddedSettings?.()}>
+        Back
+      </button>
+    </div>
+  ),
 }))
 
 vi.mock('./AgentChatBanner', () => ({
@@ -60,8 +78,18 @@ vi.mock('./AgentChatMobileSheet', () => ({
 }))
 
 vi.mock('./AgentChatSettingsPanel', () => ({
-  AgentChatSettingsPanel: ({ open }: { open: boolean }) => (
-    <div data-testid="agent-chat-settings-panel" data-open={String(open)} />
+  AgentChatSettingsPanel: ({
+    open,
+    onOpenFullSettings,
+  }: {
+    open: boolean
+    onOpenFullSettings?: () => void
+  }) => (
+    <div data-testid="agent-chat-settings-panel" data-open={String(open)}>
+      <button type="button" data-testid="agent-chat-settings-more" onClick={() => onOpenFullSettings?.()}>
+        More settings
+      </button>
+    </div>
   ),
 }))
 
@@ -269,5 +297,50 @@ describe('AgentChatLayout upgrade modal gating', () => {
     fireEvent.click(screen.getByTestId('timeline-message-link'))
 
     expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'true')
+  })
+
+  it('routes quick settings to the embedded full settings view callback', () => {
+    const handleOpenFullSettings = vi.fn()
+
+    render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/console/agents/agent-123/' } as any]}
+        onUpdateDailyCredits={vi.fn(async () => undefined)}
+        onOpenFullSettings={handleOpenFullSettings}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+    expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'true')
+
+    fireEvent.click(screen.getByTestId('agent-chat-settings-more'))
+
+    expect(handleOpenFullSettings).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'false')
+  })
+
+  it('forces the sidebar into gallery mode while embedded settings are visible', () => {
+    const { rerender } = render(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        events={[]}
+      />,
+    )
+
+    expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-mode', 'list')
+
+    rerender(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        events={[]}
+        showEmbeddedSettings
+        embeddedSettingsPanel={<div>Settings</div>}
+      />,
+    )
+
+    expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-mode', 'gallery')
+    expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-embedded-settings', 'true')
   })
 })

@@ -17,6 +17,7 @@ type AgentChatMobileSheetProps = {
   ariaLabel?: string
   keepMounted?: boolean
   bodyPadding?: boolean
+  tone?: 'default' | 'sidebar'
 }
 
 export function AgentChatMobileSheet({
@@ -30,6 +31,7 @@ export function AgentChatMobileSheet({
   ariaLabel,
   keepMounted = false,
   bodyPadding = true,
+  tone = 'default',
 }: AgentChatMobileSheetProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
@@ -76,8 +78,17 @@ export function AgentChatMobileSheet({
     return null
   }
 
+  const rootClassName = [
+    'agent-mobile-sheet',
+    open ? 'agent-mobile-sheet--open' : '',
+    tone === 'sidebar' ? 'agent-mobile-sheet--sidebar' : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
   const panelClassName = [
     'agent-mobile-sheet-panel',
+    tone === 'sidebar' ? 'agent-mobile-sheet-panel--sidebar' : '',
     open ? 'agent-mobile-sheet-panel--open' : '',
     isExpanded ? 'agent-mobile-sheet-panel--expanded' : '',
     isDragging ? 'agent-mobile-sheet-panel--dragging' : '',
@@ -153,7 +164,7 @@ export function AgentChatMobileSheet({
   }
 
   return createPortal(
-    <div className={`agent-mobile-sheet ${open ? 'agent-mobile-sheet--open' : ''}`}>
+    <div className={rootClassName}>
       <div
         className={`agent-mobile-sheet-backdrop ${open ? 'agent-mobile-sheet-backdrop--open' : ''}`}
         role="presentation"

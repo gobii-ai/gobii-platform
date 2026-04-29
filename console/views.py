@@ -18,7 +18,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models, IntegrityError
+from django.db import transaction, models, IntegrityError, DatabaseError
 from django.db.models import Q
 from django.http import (
     FileResponse,
@@ -3241,7 +3241,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
     def get_context_data(self, **kwargs):
         """Add the primary email to the context."""
         context = super().get_context_data(**kwargs)
-        agent = self.get_object()
+        agent = self.object if getattr(self, "object", None) is not None else self.get_object()
         
         # Find the primary email endpoint for this agent
         primary_email = agent.comms_endpoints.filter(
@@ -3400,7 +3400,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 is_verified=True
             ).first()
             context['owner_phone'] = owner_phone.phone_number if owner_phone else None
-        except:
+        except (ImportError, DatabaseError):
             context['owner_phone'] = None
 
         # Provide organizations current user can reassign this agent into (owner/admin/solutions partner only)
@@ -4025,7 +4025,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
         return {
             'csrfToken': get_token(request),
             'urls': {
-                'detail': request.path,
+                'detail': reverse('agent_detail', args=[agent.id]),
                 'list': reverse('agents'),
                 'chat': build_immersive_chat_url(request, agent.id, return_to=request.get_full_path()),
                 'secrets': reverse('agent_secrets', args=[agent.id]),
@@ -5918,6 +5918,14 @@ class ManagedAgentAccessMixin(AgentOwnerContextOverrideMixin):
         )
         self._agent_cache = agent
         return agent
+
+
+def build_agent_detail_props_for_request(request: HttpRequest, agent: PersistentAgent) -> dict[str, Any]:
+    view = AgentDetailView()
+    view.setup(request, pk=str(agent.id))
+    view.object = agent
+    context = view.get_context_data(object=agent)
+    return context["agent_detail_props"]
 
 
 class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):

@@ -27,6 +27,7 @@ import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
+import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
   PendingActionRequest,
@@ -113,6 +114,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   rosterLoading?: boolean
   rosterError?: string | null
   onSelectAgent?: (agent: AgentRosterEntry) => void
+  onConfigureAgent?: (agent: AgentRosterEntry) => void
   onToggleAgentFavorite?: (agentId: string) => void
   onCreateAgent?: () => void
   createAgentDisabledReason?: string | null
@@ -123,6 +125,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
   sidebarBillingUrl?: string | null
+  onOpenBilling?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -131,6 +134,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
+  galleryShellPage?: SelectionShellPage
+  onGalleryShellPageChange?: (page: SelectionShellPage) => void
+  showEmbeddedSettings?: boolean
+  embeddedSettingsPanel?: ReactNode
+  embeddedSettingsTitle?: string
+  onBackFromEmbeddedSettings?: () => void
   dailyCredits?: DailyCreditsInfo | null
   dailyCreditsStatus?: DailyCreditsStatus | null
   dailyCreditsLoading?: boolean
@@ -138,6 +147,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onRefreshDailyCredits?: () => void
   onUpdateDailyCredits?: (payload: DailyCreditsUpdatePayload) => Promise<void>
   dailyCreditsUpdating?: boolean
+  onOpenFullSettings?: () => void
   hardLimitUpgradeUrl?: string | null
   hardLimitShowUpsell?: boolean
   contactCap?: ContactCapInfo | null
@@ -269,6 +279,7 @@ export function AgentChatLayout({
   rosterLoading,
   rosterError,
   onSelectAgent,
+  onConfigureAgent,
   onToggleAgentFavorite,
   onCreateAgent,
   createAgentDisabledReason = null,
@@ -279,6 +290,7 @@ export function AgentChatLayout({
   contextSwitcher,
   currentContext = null,
   sidebarBillingUrl = null,
+  onOpenBilling,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -287,6 +299,12 @@ export function AgentChatLayout({
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
+  galleryShellPage = 'agents',
+  onGalleryShellPageChange,
+  showEmbeddedSettings = false,
+  embeddedSettingsPanel,
+  embeddedSettingsTitle = 'Agent Settings',
+  onBackFromEmbeddedSettings,
   dailyCredits,
   dailyCreditsStatus,
   dailyCreditsLoading = false,
@@ -294,6 +312,7 @@ export function AgentChatLayout({
   onRefreshDailyCredits,
   onUpdateDailyCredits,
   dailyCreditsUpdating = false,
+  onOpenFullSettings,
   hardLimitUpgradeUrl = null,
   hardLimitShowUpsell = false,
   contactCap = null,
@@ -441,8 +460,13 @@ export function AgentChatLayout({
   }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
+    if (showEmbeddedSettings && mode !== 'gallery') {
+      setSidebarMode(mode)
+      onBackFromEmbeddedSettings?.()
+      return
+    }
     setSidebarMode(mode)
-  }, [])
+  }, [onBackFromEmbeddedSettings, showEmbeddedSettings])
 
   const handleSettingsOpen = useCallback(() => {
     setSettingsOpen(true)
@@ -452,6 +476,11 @@ export function AgentChatLayout({
   const handleSettingsClose = useCallback(() => {
     setSettingsOpen(false)
   }, [])
+
+  const handleOpenFullSettingsFromQuickPanel = useCallback(() => {
+    setSettingsOpen(false)
+    onOpenFullSettings?.()
+  }, [onOpenFullSettings])
 
   const handleAddonsOpen = useCallback((mode: 'contacts' | 'tasks') => {
     setAddonsMode(mode)
@@ -470,6 +499,12 @@ export function AgentChatLayout({
     window.addEventListener('resize', checkMobile)
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
+
+  useEffect(() => {
+    if (showEmbeddedSettings) {
+      setSidebarMode('gallery')
+    }
+  }, [showEmbeddedSettings])
 
   useEffect(() => {
     if (!isUpgradeModalOpen) {
@@ -813,6 +848,7 @@ export function AgentChatLayout({
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
+    onOpenBilling,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -825,6 +861,7 @@ export function AgentChatLayout({
     currentContext,
     isProprietaryMode,
     onSidebarNotificationsEnabledChange,
+    onOpenBilling,
     sidebarBillingUrl,
     sidebarCreditsResetOn,
     sidebarNotificationStatus,
@@ -846,6 +883,7 @@ export function AgentChatLayout({
         loading={rosterLoading}
         errorMessage={rosterError}
         onSelectAgent={onSelectAgent}
+        onConfigureAgent={onConfigureAgent}
         onToggleAgentFavorite={onToggleAgentFavorite}
         onCreateAgent={onCreateAgent}
         createAgentDisabledReason={createAgentDisabledReason}
@@ -854,6 +892,12 @@ export function AgentChatLayout({
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
         settings={sidebarSettings}
+        galleryShellPage={galleryShellPage}
+        onGalleryShellPageChange={onGalleryShellPageChange}
+        showEmbeddedSettings={showEmbeddedSettings}
+        embeddedSettingsPanel={embeddedSettingsPanel}
+        embeddedSettingsTitle={embeddedSettingsTitle}
+        onBackFromEmbeddedSettings={onBackFromEmbeddedSettings}
       />
 	      {showBanner && (
 	        <AgentChatBanner
@@ -915,6 +959,7 @@ export function AgentChatLayout({
         llmTierError={llmTierError}
         canManageAgent={canManageAgent}
         context={currentContext}
+        onOpenFullSettings={onOpenFullSettings ? handleOpenFullSettingsFromQuickPanel : undefined}
       />
       <AgentChatAddonsPanel
         open={addonsOpen}

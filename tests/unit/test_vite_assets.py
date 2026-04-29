@@ -133,6 +133,11 @@ class AppShellAuthenticationTests(TestCase):
         protected_paths = [
             "/app/agents/",
             "/app/agents/new",
+            "/app/billing",
+            f"/app/agents/{uuid.uuid4()}/settings",
+            f"/app/agents/{uuid.uuid4()}/secrets",
+            f"/app/agents/{uuid.uuid4()}/email",
+            f"/app/agents/{uuid.uuid4()}/files",
         ]
         for path in protected_paths:
             with self.subTest(path=path):
@@ -190,6 +195,38 @@ class AppShellAuthenticationTests(TestCase):
         self.client.force_login(user)
 
         response = self.client.get(f"/app/agents/{uuid.uuid4()}/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertContains(response, 'id="gobii-frontend-root"')
+
+    def test_authenticated_agent_subviews_serve_shell(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="appshell-settings@example.com",
+            email="appshell-settings@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        for suffix in ("settings", "secrets", "email", "files"):
+            with self.subTest(suffix=suffix):
+                response = self.client.get(f"/app/agents/{uuid.uuid4()}/{suffix}")
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+                self.assertContains(response, 'id="gobii-frontend-root"')
+
+    def test_authenticated_billing_serves_shell(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="appshell-billing@example.com",
+            email="appshell-billing@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/billing")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
