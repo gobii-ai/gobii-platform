@@ -10851,6 +10851,36 @@ class PersistentAgentMessage(models.Model):
         super().save(*args, **kwargs)
 
 
+class PersistentAgentMessageRead(models.Model):
+    """Per-user read state for outbound persistent agent messages."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    message = models.ForeignKey(
+        PersistentAgentMessage,
+        on_delete=models.CASCADE,
+        related_name="read_receipts",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="persistent_agent_message_reads",
+    )
+    read_at = models.DateTimeField()
+    read_source = models.CharField(max_length=32, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["message", "user"], name="uniq_pa_msg_read_message_user"),
+        ]
+        indexes = [
+            models.Index(fields=["user", "message"], name="pa_msg_read_user_msg_idx"),
+            models.Index(fields=["message", "user"], name="pa_msg_read_msg_user_idx"),
+        ]
+
+    def __str__(self):
+        return f"MSG_READ<{self.message_id}:{self.user_id}>"
+
+
 class PersistentAgentHumanInputRequest(models.Model):
     """Pending or answered human-input prompt tied to a conversation."""
 

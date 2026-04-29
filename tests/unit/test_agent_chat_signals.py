@@ -5,6 +5,7 @@ import json
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
+from allauth.account.models import EmailAddress
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.contrib.auth import get_user_model
@@ -12,12 +13,14 @@ from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
-from api.agent.comms.message_service import ingest_inbound_webhook_message
+from api.agent.comms.adapters import ParsedMessage
+from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.models import (
     AgentSpawnRequest,
     AgentCollaborator,
     BrowserUseAgent,
     BrowserUseAgentTask,
+    CommsChannel,
     CommsAllowlistRequest,
     PersistentAgent,
     PersistentAgentCompletion,
@@ -26,9 +29,11 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
+    PersistentAgentMessageRead,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    UserPhoneNumber,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -54,6 +59,13 @@ class AgentChatSignalTests(TestCase):
             username="signal-collaborator",
             email="signal-collaborator@example.com",
             password="password123",
+        )
+        EmailAddress.objects.create(user=cls.user, email=cls.user.email, verified=True, primary=True)
+        EmailAddress.objects.create(
+            user=cls.collaborator_user,
+            email=cls.collaborator_user.email,
+            verified=True,
+            primary=True,
         )
         cls.browser_agent = BrowserUseAgent.objects.create(user=cls.user, name="Signal Browser")
         cls.agent = PersistentAgent.objects.create(
@@ -338,6 +350,9 @@ class AgentChatSignalTests(TestCase):
             owner_notification.get("payload", {}).get("message", {}).get("body_preview"),
             "The agent finished the task.",
         )
+        self.assertTrue(owner_notification.get("payload", {}).get("has_unread_agent_message"))
+        self.assertEqual(owner_notification.get("payload", {}).get("latest_agent_message_id"), str(message.id))
+        self.assertIsNone(owner_notification.get("payload", {}).get("latest_agent_message_read_at"))
         self.assertEqual(
             owner_notification.get("payload", {}).get("workspace"),
             {
@@ -379,6 +394,239 @@ class AgentChatSignalTests(TestCase):
         self.assertNotIn("**", body_preview)
         self.assertTrue(body_preview.startswith("Finished task Finished task"))
         self.assertLessEqual(len(body_preview), 160)
+
+    @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_roster_flags_latest_visible_unread_message(self, _mock_transition):
+        visible_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Visible unread",
+            raw_payload={},
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Hidden unread",
+            raw_payload={"hide_in_chat": True},
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        agent_payload = next(item for item in response.json()["agents"] if item["id"] == str(self.agent.id))
+        self.assertTrue(agent_payload["has_unread_agent_message"])
+        self.assertEqual(agent_payload["latest_agent_message_id"], str(visible_message.id))
+        self.assertIsNone(agent_payload["latest_agent_message_read_at"])
+
+    @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_mark_latest_read_endpoint_marks_visible_outbound_message_read(self, _mock_transition):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Please review this",
+            raw_payload={},
+        )
+
+        self.client.force_login(self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(reverse("console_agent_latest_message_read", kwargs={"agent_id": self.agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        owner_profile = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(owner_profile.get("type"), "agent_profile_event")
+        self.assertEqual(owner_profile.get("payload", {}).get("latest_agent_message_id"), str(message.id))
+        self.assertFalse(owner_profile.get("payload", {}).get("has_unread_agent_message"))
+        self.assertEqual(self._drain_channel_events(self.collaborator_profile_channel_name), [])
+        read = PersistentAgentMessageRead.objects.get(message=message, user=self.user)
+        self.assertEqual(read.read_source, "chat_open")
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=message, user=self.collaborator_user).exists())
+        self.assertFalse(response.json()["has_unread_agent_message"])
+        self.assertEqual(response.json()["latest_agent_message_id"], str(message.id))
+        self.assertIsNotNone(response.json()["latest_agent_message_read_at"])
+
+        self.client.force_login(self.collaborator_user)
+        collaborator_response = self.client.get(reverse("console_agent_roster"))
+        self.assertEqual(collaborator_response.status_code, 200)
+        collaborator_agent = next(
+            item for item in collaborator_response.json()["agents"] if item["id"] == str(self.agent.id)
+        )
+        self.assertTrue(collaborator_agent["has_unread_agent_message"])
+        self.assertIsNone(collaborator_agent["latest_agent_message_read_at"])
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_inbound_human_message_marks_prior_agent_message_read(self, _mock_transition):
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Question for the user",
+            raw_payload={},
+        )
+        collaborator_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=build_web_user_address(self.collaborator_user.id, self.agent.id),
+        )
+        unrelated_newer_outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=collaborator_endpoint,
+            body="Newer question for someone else",
+            raw_payload={},
+        )
+
+        ingest_inbound_message(
+            CommsChannel.WEB,
+            ParsedMessage(
+                sender=self.requester_endpoint.address,
+                recipient=self.agent_endpoint.address,
+                subject=None,
+                body="Here is my answer",
+                attachments=[],
+                raw_payload={"source": "test"},
+                msg_channel=CommsChannel.WEB,
+            ),
+        )
+
+        read = PersistentAgentMessageRead.objects.get(message=outbound, user=self.user)
+        self.assertEqual(read.read_source, "inbound_reply")
+        self.assertFalse(
+            PersistentAgentMessageRead.objects.filter(
+                message=unrelated_newer_outbound,
+                user=self.user,
+            ).exists()
+        )
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=outbound, user=self.collaborator_user).exists())
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_inbound_email_marks_prior_agent_message_read_for_matching_user(self, _mock_transition):
+        agent_email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent-email@example.com",
+        )
+        collaborator_email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.collaborator_user.email,
+        )
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=agent_email_endpoint,
+            to_endpoint=collaborator_email_endpoint,
+            body="Question for collaborator",
+            raw_payload={},
+        )
+
+        ingest_inbound_message(
+            CommsChannel.EMAIL,
+            ParsedMessage(
+                sender=self.collaborator_user.email,
+                recipient=agent_email_endpoint.address,
+                subject=None,
+                body="Collaborator answer",
+                attachments=[],
+                raw_payload={"source": "test"},
+                msg_channel=CommsChannel.EMAIL,
+            ),
+        )
+
+        read = PersistentAgentMessageRead.objects.get(message=outbound, user=self.collaborator_user)
+        self.assertEqual(read.read_source, "inbound_reply")
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=outbound, user=self.user).exists())
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_inbound_email_from_unknown_user_does_not_mark_read(self, _mock_transition):
+        agent_email_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address="agent-email-unknown@example.com",
+        )
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=agent_email_endpoint,
+            to_endpoint=PersistentAgentCommsEndpoint.objects.create(
+                channel=CommsChannel.EMAIL,
+                address=self.user.email,
+            ),
+            body="Question for owner",
+            raw_payload={},
+        )
+
+        ingest_inbound_message(
+            CommsChannel.EMAIL,
+            ParsedMessage(
+                sender="unknown@example.com",
+                recipient=agent_email_endpoint.address,
+                subject=None,
+                body="Unknown answer",
+                attachments=[],
+                raw_payload={"source": "test"},
+                msg_channel=CommsChannel.EMAIL,
+            ),
+        )
+
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=outbound).exists())
+
+    @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_inbound_sms_marks_prior_agent_message_read_for_matching_user(self, _mock_transition):
+        phone_number = "+15551234567"
+        UserPhoneNumber.objects.create(
+            user=self.collaborator_user,
+            phone_number=phone_number,
+            is_verified=True,
+        )
+        agent_sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15557654321",
+        )
+        collaborator_sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address=phone_number,
+        )
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=agent_sms_endpoint,
+            to_endpoint=collaborator_sms_endpoint,
+            body="SMS question",
+            raw_payload={},
+        )
+
+        ingest_inbound_message(
+            CommsChannel.SMS,
+            ParsedMessage(
+                sender=phone_number,
+                recipient=agent_sms_endpoint.address,
+                subject=None,
+                body="SMS answer",
+                attachments=[],
+                raw_payload={"source": "test"},
+                msg_channel=CommsChannel.SMS,
+            ),
+        )
+
+        read = PersistentAgentMessageRead.objects.get(message=outbound, user=self.collaborator_user)
+        self.assertEqual(read.read_source, "inbound_reply")
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=outbound, user=self.user).exists())
 
     @tag("batch_agent_chat")
     def test_inbound_message_does_not_emit_message_notification_event(self):

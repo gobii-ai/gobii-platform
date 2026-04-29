@@ -41,6 +41,20 @@ export type TimelineResponse = {
   pending_action_requests?: PendingActionRequest[]
 }
 
+export type AgentMessageReadStatePayload = {
+  has_unread_agent_message?: unknown
+  latest_agent_message_id?: unknown
+  latest_agent_message_at?: unknown
+  latest_agent_message_read_at?: unknown
+}
+
+export type AgentMessageReadState = {
+  hasUnreadAgentMessage: boolean
+  latestAgentMessageId: string | null
+  latestAgentMessageAt: string | null
+  latestAgentMessageReadAt: string | null
+}
+
 export type AgentWebSessionSnapshot = {
   session_key: string
   ttl_seconds: number
@@ -174,6 +188,15 @@ function asPositiveInteger(value: unknown): number | null {
     return Number.isInteger(parsed) && parsed > 0 ? parsed : null
   }
   return null
+}
+
+export function normalizeAgentMessageReadState(payload: AgentMessageReadStatePayload): AgentMessageReadState {
+  return {
+    hasUnreadAgentMessage: Boolean(payload.has_unread_agent_message),
+    latestAgentMessageId: asNonEmptyString(payload.latest_agent_message_id),
+    latestAgentMessageAt: asNonEmptyString(payload.latest_agent_message_at),
+    latestAgentMessageReadAt: asNonEmptyString(payload.latest_agent_message_read_at),
+  }
 }
 
 function normalizeHumanInputOption(raw: unknown): PendingHumanInputRequest['options'][number] | null {
@@ -407,6 +430,14 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
     body: JSON.stringify({ body }),
   })
   return response.event
+}
+
+export async function markLatestAgentMessageRead(agentId: string): Promise<AgentMessageReadState> {
+  const payload = await jsonRequest<AgentMessageReadStatePayload>(`/console/api/agents/${agentId}/messages/latest/read/`, {
+    method: 'POST',
+    includeCsrf: true,
+  })
+  return normalizeAgentMessageReadState(payload)
 }
 
 export type HumanInputResponsePayload =

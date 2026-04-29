@@ -23,6 +23,11 @@ from api.models import (
     DeliveryStatus,
     PipedreamConnectSession,
 )
+from api.agent.comms.message_reads import (
+    READ_SOURCE_EMAIL_CLICK,
+    READ_SOURCE_EMAIL_OPEN,
+    mark_postmark_event_message_read,
+)
 from opentelemetry import trace
 import json
 import re
@@ -880,8 +885,10 @@ def open_and_link_webhook(request):
 
         if record_type == 'Open':
             Analytics.track_agent_email_opened(data)
+            mark_postmark_event_message_read(data, READ_SOURCE_EMAIL_OPEN)
         elif record_type == 'Click':
             Analytics.track_agent_email_link_clicked(data)
+            mark_postmark_event_message_read(data, READ_SOURCE_EMAIL_CLICK)
         else:
             logger.warning(f"Received email event webhook '{record_type}' which is not handled; disregarding it.")
 

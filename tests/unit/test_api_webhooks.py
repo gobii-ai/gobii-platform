@@ -10,12 +10,13 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentMessageRead,
     OutboundMessageAttempt,
     CommsChannel,
     BrowserUseAgent,
     DeliveryStatus,
 )
-from api.webhooks import email_webhook_postmark, email_webhook_mailgun, sms_status_webhook
+from api.webhooks import email_webhook_postmark, email_webhook_mailgun, sms_status_webhook, open_and_link_webhook
 from config import settings
 
 User = get_user_model()
@@ -110,6 +111,92 @@ class PostmarkEmailWebhookTest(TestCase):
         self.assertEqual(response.status_code, 200)
         parsed = mock_ingest.call_args[0][1]
         self.assertEqual(parsed.raw_payload.get("message_id"), "<postmark-inbound@example.com>")
+
+    @tag("batch_email")
+    def test_postmark_open_marks_matching_outbound_message_read(self):
+        recipient_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.owner.email,
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=recipient_endpoint,
+            is_outbound=True,
+            body="Please read this",
+            raw_payload={},
+        )
+        OutboundMessageAttempt.objects.create(
+            message=message,
+            provider="postmark",
+            provider_message_id="postmark-message-id",
+            status=DeliveryStatus.SENT,
+        )
+        request = self.factory.post(
+            "/api/webhooks/bi/email/",
+            data=json.dumps({
+                "RecordType": "Open",
+                "MessageID": "postmark-message-id",
+                "Recipient": self.owner.email,
+            }),
+            content_type="application/json",
+            headers={"x-gobii-postmark-key": settings.POSTMARK_INCOMING_WEBHOOK_TOKEN},
+        )
+
+        response: HttpResponse = open_and_link_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        read = PersistentAgentMessageRead.objects.get(message=message, user=self.owner)
+        self.assertEqual(read.read_source, "email_open")
+
+    @tag("batch_email")
+    def test_postmark_open_with_unknown_message_id_is_accepted(self):
+        request = self.factory.post(
+            "/api/webhooks/bi/email/",
+            data=json.dumps({"RecordType": "Open", "MessageID": "unknown-message-id"}),
+            content_type="application/json",
+            headers={"x-gobii-postmark-key": settings.POSTMARK_INCOMING_WEBHOOK_TOKEN},
+        )
+
+        response: HttpResponse = open_and_link_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+
+    @tag("batch_email")
+    def test_postmark_open_with_unresolved_recipient_does_not_mark_read(self):
+        recipient_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="external-recipient@example.com",
+        )
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=recipient_endpoint,
+            is_outbound=True,
+            body="Please read this",
+            raw_payload={},
+        )
+        OutboundMessageAttempt.objects.create(
+            message=message,
+            provider="postmark",
+            provider_message_id="unresolved-recipient-message-id",
+            status=DeliveryStatus.SENT,
+        )
+        request = self.factory.post(
+            "/api/webhooks/bi/email/",
+            data=json.dumps({
+                "RecordType": "Open",
+                "MessageID": "unresolved-recipient-message-id",
+                "Recipient": "external-recipient@example.com",
+            }),
+            content_type="application/json",
+            headers={"x-gobii-postmark-key": settings.POSTMARK_INCOMING_WEBHOOK_TOKEN},
+        )
+
+        response: HttpResponse = open_and_link_webhook(request)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=message).exists())
 
     @tag("batch_email")
     @patch("api.webhooks.ingest_inbound_message")

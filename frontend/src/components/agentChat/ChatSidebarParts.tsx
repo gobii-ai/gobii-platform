@@ -223,6 +223,7 @@ export function AgentListItem({
   const hoverDescription = longDescription && longDescription !== miniDescription ? longDescription : undefined
   const showFavoriteButton = Boolean(onToggleFavorite) && (variant === 'drawer' || !collapsed) && showFavoriteToggle
   const isWorking = Boolean(agent.processingActive)
+  const hasUnread = Boolean(agent.hasUnreadAgentMessage)
   const collapsedTitle = isWorking ? `${agent.name || 'Agent'} • Working` : agent.name || 'Agent'
 
   const handleToggleFavorite = (event: MouseEvent<HTMLElement>) => {
@@ -248,25 +249,37 @@ export function AgentListItem({
       data-switching={isSwitching ? 'true' : 'false'}
       data-enabled={agent.isActive ? 'true' : 'false'}
       data-working={isWorking ? 'true' : 'false'}
+      data-unread={hasUnread ? 'true' : 'false'}
       onClick={() => onSelect(agent)}
-      title={variant === 'sidebar' && collapsed ? collapsedTitle : undefined}
+      title={variant === 'sidebar' && collapsed ? (hasUnread ? `${collapsedTitle} • Unread` : collapsedTitle) : undefined}
       style={accentStyle}
       role="listitem"
       aria-current={isActive ? 'page' : undefined}
     >
-      <span className={styles.avatarWrapClass}>
-        <AgentAvatarBadge
-          name={agent.name || 'Agent'}
-          avatarUrl={agent.avatarUrl}
-          className={styles.avatarClass}
-          imageClassName={styles.imageClass}
-          textClassName={styles.textClass}
-        />
-        {variant === 'sidebar' && collapsed && isWorking ? (
-          <span className="chat-sidebar-agent-working-badge" aria-hidden="true">
-            <AgentWorkingIndicator label={false} />
-          </span>
-        ) : null}
+      <span className={variant === 'drawer' ? 'agent-drawer-item-leading' : 'chat-sidebar-agent-leading'}>
+        <span className={variant === 'drawer' ? 'agent-drawer-item-unread-slot' : 'chat-sidebar-agent-unread-slot'}>
+          {hasUnread ? (
+            <span
+              className={variant === 'drawer' ? 'agent-drawer-item-unread-dot' : 'chat-sidebar-agent-unread-dot'}
+              aria-label="Unread message"
+              title="Unread message"
+            />
+          ) : null}
+        </span>
+        <span className={styles.avatarWrapClass}>
+          <AgentAvatarBadge
+            name={agent.name || 'Agent'}
+            avatarUrl={agent.avatarUrl}
+            className={styles.avatarClass}
+            imageClassName={styles.imageClass}
+            textClassName={styles.textClass}
+          />
+          {variant === 'sidebar' && collapsed && isWorking ? (
+            <span className="chat-sidebar-agent-working-badge" aria-hidden="true">
+              <AgentWorkingIndicator label={false} />
+            </span>
+          ) : null}
+        </span>
       </span>
       {showMeta ? (
         <span className={styles.metaClass}>

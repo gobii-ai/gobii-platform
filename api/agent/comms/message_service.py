@@ -64,6 +64,11 @@ from .email_endpoint_routing import (
     get_agent_primary_endpoint,
     resolve_agent_email_sender_endpoint_for_message,
 )
+from .message_reads import (
+    READ_SOURCE_INBOUND_REPLY,
+    mark_latest_visible_outbound_message_read_before,
+    resolve_inbound_read_user,
+)
 from observability import traced
 from opentelemetry import baggage
 from config import settings
@@ -856,6 +861,18 @@ def ingest_inbound_message(
             raw_payload=parsed.raw_payload,
             owner_agent_id=agent_id,
         )
+        if channel_val in {CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS}:
+            agent_obj = PersistentAgent.objects.filter(id=message.owner_agent_id).first()
+            read_user = resolve_inbound_read_user(agent_obj, channel_val, parsed.sender)
+            if read_user is not None:
+                mark_latest_visible_outbound_message_read_before(
+                    agent_id=message.owner_agent_id,
+                    before=message.timestamp,
+                    user=read_user,
+                    conversation_id=message.conversation_id,
+                    recipient_endpoint_id=message.from_endpoint_id,
+                    source=READ_SOURCE_INBOUND_REPLY,
+                )
 
         try:
             from api.agent.comms.human_input_requests import resolve_human_input_request_for_message

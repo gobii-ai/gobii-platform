@@ -117,6 +117,10 @@ export type AgentMessageNotification = {
   agent_name: string
   agent_avatar_url: string | null
   workspace: AgentMessageNotificationWorkspace
+  has_unread_agent_message?: boolean
+  latest_agent_message_id?: string | null
+  latest_agent_message_at?: string | null
+  latest_agent_message_read_at?: string | null
   message: {
     id: string
     body_preview: string

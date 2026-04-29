@@ -40,4 +40,8 @@ export type AgentRosterEntry = {
   sms?: string | null
   signupPreviewState?: SignupPreviewState | null
   planningState?: PlanningState | null
+  hasUnreadAgentMessage?: boolean
+  latestAgentMessageId?: string | null
+  latestAgentMessageAt?: string | null
+  latestAgentMessageReadAt?: string | null
 }

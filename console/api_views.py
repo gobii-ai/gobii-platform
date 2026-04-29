@@ -43,6 +43,13 @@ from api.agent.comms.human_input_requests import (
     submit_human_input_responses_batch,
 )
 from api.agent.comms.message_service import ingest_inbound_message
+from api.agent.comms.message_reads import (
+    READ_SOURCE_CHAT_OPEN,
+    build_latest_agent_message_read_state,
+    mark_latest_visible_outbound_message_read,
+    serialize_agent_message_read_state,
+    serialize_latest_agent_message_read_state,
+)
 from api.agent.core.processing_flags import (
     clear_processing_stop_requested,
     clear_processing_work_state,
@@ -2457,6 +2464,10 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         agents += shared_agents
         enrich_agents_for_card_surface(agents, owner)
         processing_activity_by_agent_id = build_processing_activity_map(agents)
+        message_read_state_by_agent_id = build_latest_agent_message_read_state(
+            (agent.id for agent in agents),
+            request.user,
+        )
         user = request.user
         org_memberships = OrganizationMembership.objects.filter(
             user=user,
@@ -2541,6 +2552,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                     "signup_preview_state": agent.signup_preview_state,
                     "planning_state": agent.planning_state,
+                    **serialize_latest_agent_message_read_state(
+                        message_read_state_by_agent_id.get(str(agent.id), {})
+                    ),
                 }
             )
         return JsonResponse(
@@ -3636,6 +3650,21 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentLatestMessageReadAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        mark_latest_visible_outbound_message_read(agent, request.user, READ_SOURCE_CHAT_OPEN)
+        return JsonResponse(serialize_agent_message_read_state(agent, request.user))
 
 
 def _validate_console_chat_attachments(attachments: list[Any]) -> str | None:
