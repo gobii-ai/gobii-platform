@@ -6,6 +6,7 @@ import { SeatManager } from './SeatManager'
 
 type BillingHeaderProps = {
   initialData: BillingInitialData
+  variant?: 'standalone' | 'embedded'
   onChangePlan?: () => void
   onCancel?: () => void
   onResume?: () => void
@@ -18,6 +19,7 @@ type BillingHeaderProps = {
 
 export function BillingHeader({
   initialData,
+  variant = 'standalone',
   onChangePlan,
   onCancel,
   onResume,
@@ -28,6 +30,7 @@ export function BillingHeader({
   onCancelScheduledSeatChange,
 }: BillingHeaderProps) {
   const isOrg = initialData.contextType === 'organization'
+  const isEmbedded = variant === 'embedded'
   const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
   const planCurrency = isOrg
     ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
@@ -68,7 +71,13 @@ export function BillingHeader({
           <div className="flex flex-wrap items-center gap-2">
             <div className="text-2xl font-bold text-slate-900">{planName}</div>
             {isTrialing ? (
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+              <span
+                className={
+                  isEmbedded
+                    ? 'inline-flex items-center rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200'
+                    : 'inline-flex items-center rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800'
+                }
+              >
                 Free trial
               </span>
             ) : null}

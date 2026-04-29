@@ -595,6 +595,7 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
       <main className={mainClassName}>
         <BillingHeader
           initialData={initialData}
+          variant={variant}
           onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
           onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelFlow : undefined}
           onResume={!isOrg
