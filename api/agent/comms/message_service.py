@@ -869,6 +869,8 @@ def ingest_inbound_message(
                     agent_id=message.owner_agent_id,
                     before=message.timestamp,
                     user=read_user,
+                    conversation_id=message.conversation_id,
+                    recipient_endpoint_id=message.from_endpoint_id,
                     source=READ_SOURCE_INBOUND_REPLY,
                 )
 

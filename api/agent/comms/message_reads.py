@@ -106,6 +106,44 @@ def serialize_agent_message_read_state(agent: PersistentAgent, user: object) -> 
     return serialize_latest_agent_message_read_state(states.get(str(agent.id)))
 
 
+def build_agent_message_read_state_for_users(
+    agent: PersistentAgent,
+    user_ids: Iterable[object],
+) -> dict[int, dict[str, object]]:
+    normalized_user_ids = sorted({user_id for user_id in (_user_id(user_id) for user_id in user_ids) if user_id})
+    if not normalized_user_ids:
+        return {}
+
+    latest_message = (
+        latest_visible_outbound_message_queryset()
+        .filter(owner_agent=agent)
+        .values("id", "timestamp")
+        .first()
+    )
+    read_at_by_user_id: dict[int, object] = {}
+    if latest_message is not None:
+        read_at_by_user_id = {
+            int(row["user_id"]): row["read_at"]
+            for row in (
+                PersistentAgentMessageRead.objects
+                .filter(message_id=latest_message["id"], user_id__in=normalized_user_ids)
+                .values("user_id", "read_at")
+            )
+        }
+
+    result: dict[int, dict[str, object]] = {}
+    for user_id in normalized_user_ids:
+        read_at = read_at_by_user_id.get(user_id)
+        message_id = latest_message["id"] if latest_message else None
+        result[user_id] = {
+            "latest_agent_message_id": str(message_id) if message_id else None,
+            "latest_agent_message_at": latest_message["timestamp"] if latest_message else None,
+            "latest_agent_message_read_at": read_at,
+            "has_unread_agent_message": bool(message_id and read_at is None),
+        }
+    return result
+
+
 def mark_message_read(message: PersistentAgentMessage | None, user: object, source: str) -> bool:
     user_id = _user_id(user)
     if message is None or not message.is_outbound or not user_id:
@@ -143,14 +181,25 @@ def mark_latest_visible_outbound_message_read_before(
     agent_id: object,
     before,
     user: object,
+    conversation_id: object = None,
+    recipient_endpoint_id: object = None,
     source: str = READ_SOURCE_INBOUND_REPLY,
 ) -> PersistentAgentMessage | None:
     user_id = _user_id(user)
     if not agent_id or before is None or not user_id:
         return None
+    thread_filter = Q()
+    if conversation_id:
+        thread_filter |= Q(conversation_id=conversation_id)
+    if recipient_endpoint_id:
+        thread_filter |= Q(to_endpoint_id=recipient_endpoint_id)
+    if not thread_filter:
+        return None
+
     message = (
         latest_visible_outbound_message_queryset()
         .filter(owner_agent_id=agent_id, timestamp__lt=before)
+        .filter(thread_filter)
         .first()
     )
     if message is None:

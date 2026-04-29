@@ -36,7 +36,10 @@ from console.agent_audit.serializers import (
 )
 from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
 from util.text_sanitizer import sanitize_notification_preview_text
-from api.agent.comms.message_reads import serialize_agent_message_read_state
+from api.agent.comms.message_reads import (
+    build_agent_message_read_state_for_users,
+    serialize_latest_agent_message_read_state,
+)
 
 from .access import user_can_manage_agent_settings
 from .kanban_events import persist_kanban_event
@@ -106,10 +109,11 @@ def emit_agent_profile_update(
         payload_base["processing_active"] = normalized_processing_active
         _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID[str(agent.id)] = normalized_processing_active
     listener_user_ids = set(user_ids) if user_ids is not None else _resolve_profile_listener_user_ids(agent)
+    read_state_by_user_id = build_agent_message_read_state_for_users(agent, listener_user_ids)
     for user_id in listener_user_ids:
         payload = {
             **payload_base,
-            **serialize_agent_message_read_state(agent, user_id),
+            **serialize_latest_agent_message_read_state(read_state_by_user_id.get(user_id)),
         }
         _send(user_profile_group_name(user_id), "agent_profile_event", payload)
 
@@ -153,10 +157,12 @@ def emit_message_notification(message: PersistentAgentMessage) -> None:
             "channel": channel,
         },
     }
-    for user_id in _resolve_profile_listener_user_ids(agent):
+    listener_user_ids = _resolve_profile_listener_user_ids(agent)
+    read_state_by_user_id = build_agent_message_read_state_for_users(agent, listener_user_ids)
+    for user_id in listener_user_ids:
         payload = {
             **payload_base,
-            **serialize_agent_message_read_state(agent, user_id),
+            **serialize_latest_agent_message_read_state(read_state_by_user_id.get(user_id)),
         }
         _send(user_profile_group_name(user_id), "message_notification_event", payload)
 

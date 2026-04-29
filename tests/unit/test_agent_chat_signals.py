@@ -475,6 +475,18 @@ class AgentChatSignalTests(TestCase):
             body="Question for the user",
             raw_payload={},
         )
+        collaborator_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="web",
+            address=build_web_user_address(self.collaborator_user.id, self.agent.id),
+        )
+        unrelated_newer_outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=collaborator_endpoint,
+            body="Newer question for someone else",
+            raw_payload={},
+        )
 
         ingest_inbound_message(
             CommsChannel.WEB,
@@ -491,6 +503,12 @@ class AgentChatSignalTests(TestCase):
 
         read = PersistentAgentMessageRead.objects.get(message=outbound, user=self.user)
         self.assertEqual(read.read_source, "inbound_reply")
+        self.assertFalse(
+            PersistentAgentMessageRead.objects.filter(
+                message=unrelated_newer_outbound,
+                user=self.user,
+            ).exists()
+        )
         self.assertFalse(PersistentAgentMessageRead.objects.filter(message=outbound, user=self.collaborator_user).exists())
 
     @tag("batch_agent_chat")
