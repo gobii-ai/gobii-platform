@@ -823,6 +823,7 @@ export type AgentChatPageProps = {
   onContextSwitch?: (context: ConsoleContext) => void
   selectionPage?: SelectionShellPage
   selectionShellPanel?: ReactNode
+  selectionMainPanel?: ReactNode
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
 }
@@ -869,6 +870,7 @@ export function AgentChatPage({
   onContextSwitch,
   selectionPage = 'agents',
   selectionShellPanel = null,
+  selectionMainPanel = null,
   onSelectionPageChange,
   onOpenBilling,
 }: AgentChatPageProps) {
@@ -974,9 +976,25 @@ export function AgentChatPage({
     if (agentId !== undefined) {
       return
     }
-    if (selectionPage !== 'agents' && selectionSidebarMode !== 'gallery') {
-      setSelectionSidebarMode('gallery')
-      writeSelectionSidebarModePreference('gallery')
+    if (selectionPage !== 'agents') {
+      if (selectionSidebarMode !== 'gallery') {
+        setSelectionSidebarMode('gallery')
+      }
+      return
+    }
+    const storedSelectionMode = readSelectionSidebarModePreference()
+    if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
+      setSelectionSidebarMode(storedSelectionMode)
+      return
+    }
+  }, [agentId, selectionPage])
+
+  useEffect(() => {
+    if (agentId !== undefined || selectionPage !== 'agents') {
+      return
+    }
+    const storedSelectionMode = readSelectionSidebarModePreference()
+    if (storedSelectionMode && storedSelectionMode !== selectionSidebarMode) {
       return
     }
     writeSelectionSidebarModePreference(selectionSidebarMode)
@@ -4102,7 +4120,15 @@ export function AgentChatPage({
       )
     }
     if (selectionPage === 'billing') {
-      return renderSelectionLayout(<div className="flex min-h-full w-full flex-1" />)
+      return renderSelectionLayout(
+        selectionMainPanel ? (
+          <div className="flex min-h-full w-full flex-1 md:hidden">
+            {selectionMainPanel}
+          </div>
+        ) : (
+          <div className="flex min-h-full w-full flex-1" />
+        ),
+      )
     }
     return renderSelectionLayout(
       <div className="flex min-h-full w-full flex-1 flex-col gap-4 pb-6 pt-0">

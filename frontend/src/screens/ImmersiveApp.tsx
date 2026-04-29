@@ -546,6 +546,7 @@ export function ImmersiveApp({
             onContextSwitch={handleContextSwitch}
             selectionPage="billing"
             selectionShellPanel={<ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveBillingPage layout="main" refreshKey={selectionRefreshKey} />}
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
           />

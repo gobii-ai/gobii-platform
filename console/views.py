@@ -18,7 +18,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.shortcuts import redirect, get_object_or_404, render
 from django.urls import NoReverseMatch, reverse, reverse_lazy
 from django.contrib import messages
-from django.db import transaction, models, IntegrityError
+from django.db import transaction, models, IntegrityError, DatabaseError
 from django.db.models import Q
 from django.http import (
     FileResponse,
@@ -3400,7 +3400,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 is_verified=True
             ).first()
             context['owner_phone'] = owner_phone.phone_number if owner_phone else None
-        except ImportError:
+        except (ImportError, DatabaseError):
             context['owner_phone'] = None
 
         # Provide organizations current user can reassign this agent into (owner/admin/solutions partner only)

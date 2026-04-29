@@ -49,6 +49,7 @@ import type {
   PendingCollaboratorAction,
 } from '../components/agentSettings/contactTypes'
 import { useModal } from '../hooks/useModal'
+import { readStoredConsoleContext } from '../util/consoleContextStorage'
 import type { IntelligenceTierKey } from '../types/llmIntelligence'
 import type {
   AgentColorOption,
@@ -164,6 +165,20 @@ const generateTempId = () =>
   typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `temp-${Date.now()}-${Math.random().toString(36).slice(2)}`
 
 const normalizeAllowlistAddress = (value: string) => value.trim().toLowerCase()
+
+function buildContextAwareHeaders(headersInit?: HeadersInit): Headers {
+  const headers = new Headers(headersInit ?? undefined)
+  const context = readStoredConsoleContext()
+  if (context) {
+    if (!headers.has('X-Gobii-Context-Type')) {
+      headers.set('X-Gobii-Context-Type', context.type)
+    }
+    if (!headers.has('X-Gobii-Context-Id')) {
+      headers.set('X-Gobii-Context-Id', context.id)
+    }
+  }
+  return headers
+}
 
 function isCreatePendingAction<TAction extends { type: string }>(action: TAction): action is Extract<TAction, PendingCreateAction> {
   return action.type === 'create'
@@ -692,7 +707,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       }
       const response = await fetch(initialData.urls.detail, {
         method: 'POST',
-        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+        headers: buildContextAwareHeaders({ 'X-Requested-With': 'XMLHttpRequest' }),
         credentials: 'same-origin',
         body: formData,
       })
@@ -1595,7 +1610,8 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         }
         const response = await fetch(initialData.urls.detail, {
           method: 'POST',
-          headers: { 'X-Requested-With': 'XMLHttpRequest' },
+          headers: buildContextAwareHeaders({ 'X-Requested-With': 'XMLHttpRequest' }),
+          credentials: 'same-origin',
           body: formData,
         })
         const data = await response.json()
@@ -1629,10 +1645,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     try {
       const response = await fetch(initialData.urls.delete, {
         method: 'DELETE',
-        headers: {
+        headers: buildContextAwareHeaders({
           'X-CSRFToken': initialData.csrfToken,
           'X-Requested-With': 'XMLHttpRequest',
-        },
+        }),
         credentials: 'same-origin',
       })
       if (!response.ok) {
