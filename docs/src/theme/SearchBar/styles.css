@@ -19,9 +19,47 @@
 }
 
 .gobii-pagefind-search .pagefind-ui__search-input {
-  height: 38px;
-  padding-left: 0.75rem;
-  font-size: 0.875rem;
+  border-color: var(--ifm-color-emphasis-300);
+  height: 38px !important;
+  padding-left: 2.45rem !important;
+  padding-right: 0.9rem !important;
+  font-size: 0.875rem !important;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+}
+
+.gobii-pagefind-search .pagefind-ui__search-input:hover {
+  border-color: var(--ifm-color-emphasis-400);
+}
+
+.gobii-pagefind-search .pagefind-ui__search-input:focus {
+  border-color: var(--ifm-color-primary);
+  box-shadow: 0 0 0 3px var(--gobii-doc-focus-ring);
+}
+
+.gobii-pagefind-search .pagefind-ui__search-clear {
+  align-items: center;
+  border: 0 !important;
+  border-radius: 6px !important;
+  color: var(--ifm-color-emphasis-700) !important;
+  display: flex;
+  font-size: 0 !important;
+  height: 1.7rem !important;
+  justify-content: center;
+  padding: 0 !important;
+  right: 0.45rem !important;
+  transition: background-color 140ms ease, color 140ms ease;
+  width: 1.7rem !important;
+}
+
+.gobii-pagefind-search .pagefind-ui__search-clear::before {
+  content: '×';
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.gobii-pagefind-search .pagefind-ui__search-clear:hover {
+  background: var(--gobii-doc-subtle-active) !important;
+  color: var(--ifm-font-color-base) !important;
 }
 
 .gobii-pagefind-search .pagefind-ui__drawer {
@@ -36,5 +74,35 @@
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 8px;
   background: var(--ifm-background-surface-color);
-  box-shadow: var(--ifm-global-shadow-lw);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.16);
+}
+
+.gobii-pagefind-search .pagefind-ui__result {
+  border-radius: 8px;
+  padding: 0.55rem 0.65rem;
+}
+
+.gobii-pagefind-search .pagefind-ui__result:hover {
+  background: var(--gobii-doc-subtle-active);
+}
+
+.gobii-pagefind-search mark {
+  background: color-mix(in srgb, var(--ifm-color-primary) 22%, transparent);
+  border-radius: 4px;
+  color: inherit;
+  padding: 0 0.1rem;
+}
+
+@media (max-width: 600px) {
+  .gobii-pagefind-search {
+    min-width: 0;
+    width: min(46vw, 180px);
+  }
+
+  .gobii-pagefind-search .pagefind-ui__search-input {
+    height: 36px !important;
+    font-size: 0.84rem !important;
+    padding-left: 2.15rem !important;
+    padding-right: 0.75rem !important;
+  }
 }
