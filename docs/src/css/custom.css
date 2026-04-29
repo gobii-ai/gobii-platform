@@ -89,6 +89,93 @@ html {
   max-width: 860px;
 }
 
+.gobii-home {
+  margin: 0 auto;
+  max-width: 1120px;
+  padding: clamp(2.5rem, 7vw, 5.5rem) 1.25rem 4rem;
+}
+
+.gobii-home__hero {
+  align-items: end;
+  display: grid;
+  gap: 2rem;
+  min-height: min(58vh, 34rem);
+}
+
+.gobii-home__eyebrow {
+  color: var(--ifm-color-primary);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  margin-bottom: 0.85rem;
+  text-transform: uppercase;
+}
+
+.gobii-home h1 {
+  font-size: clamp(2.6rem, 7vw, 5.7rem);
+  letter-spacing: 0;
+  line-height: 0.95;
+  margin: 0;
+  max-width: 11ch;
+}
+
+.gobii-home__lede {
+  color: var(--ifm-color-emphasis-700);
+  font-size: clamp(1.04rem, 2vw, 1.24rem);
+  line-height: 1.65;
+  margin: 1.4rem 0 0;
+  max-width: 44rem;
+}
+
+.gobii-home__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.8rem;
+}
+
+.gobii-home__actions .button {
+  border-radius: 8px;
+}
+
+.gobii-home__links {
+  display: grid;
+  gap: 1px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 3rem;
+}
+
+.gobii-home__link {
+  border: 1px solid var(--gobii-doc-muted-border);
+  color: inherit;
+  min-height: 11rem;
+  padding: 1.1rem;
+  text-decoration: none;
+  transition: background-color 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+
+.gobii-home__link:hover {
+  background: var(--gobii-doc-subtle-active);
+  border-color: color-mix(in srgb, var(--ifm-color-primary) 42%, var(--gobii-doc-muted-border));
+  color: inherit;
+  text-decoration: none;
+  transform: translateY(-1px);
+}
+
+.gobii-home__link span {
+  color: var(--ifm-color-primary);
+  display: block;
+  font-weight: 800;
+  margin-bottom: 0.65rem;
+}
+
+.gobii-home__link p {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.92rem;
+  line-height: 1.55;
+  margin: 0;
+}
+
 @media (min-width: 997px) {
   .container:has(.theme-api-markdown) {
     max-width: none;
@@ -330,6 +417,14 @@ html {
 }
 
 @media (max-width: 996px) {
+  .gobii-home__hero {
+    min-height: auto;
+  }
+
+  .gobii-home__links {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .navbar__brand {
     min-width: 0;
   }
@@ -359,5 +454,11 @@ html {
 
   .openapi-right-panel__container {
     margin-top: 2rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .gobii-home__links {
+    grid-template-columns: 1fr;
   }
 }
