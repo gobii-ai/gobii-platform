@@ -27,6 +27,7 @@ import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
+import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
   PendingActionRequest,
@@ -133,6 +134,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   autoFocusComposer?: boolean
   kanbanSnapshot?: KanbanBoardSnapshot | null
   footer?: ReactNode
+  galleryShellPage?: SelectionShellPage
+  onGalleryShellPageChange?: (page: SelectionShellPage) => void
   showEmbeddedSettings?: boolean
   embeddedSettingsPanel?: ReactNode
   embeddedSettingsTitle?: string
@@ -296,6 +299,8 @@ export function AgentChatLayout({
   autoFocusComposer = false,
   kanbanSnapshot,
   footer,
+  galleryShellPage = 'agents',
+  onGalleryShellPageChange,
   showEmbeddedSettings = false,
   embeddedSettingsPanel,
   embeddedSettingsTitle = 'Agent Settings',
@@ -887,6 +892,8 @@ export function AgentChatLayout({
         onRosterSortModeChange={onAgentRosterSortModeChange}
         contextSwitcher={contextSwitcher}
         settings={sidebarSettings}
+        galleryShellPage={galleryShellPage}
+        onGalleryShellPageChange={onGalleryShellPageChange}
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}
         embeddedSettingsTitle={embeddedSettingsTitle}
