@@ -1,9 +1,11 @@
 import json
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.db import DatabaseError
 from django.test import Client, TestCase, override_settings, tag
+from django.utils import timezone
 import litellm
 
 from api.agent.core.processing_flags import get_human_inbound_generation
@@ -147,6 +149,7 @@ class HumanInputRequestTests(TestCase):
         originating_step=None,
         recipient_channel: str = "",
         recipient_address: str = "",
+        expires_at=None,
     ) -> PersistentAgentHumanInputRequest:
         target_agent = agent or self.agent
         return PersistentAgentHumanInputRequest.objects.create(
@@ -163,6 +166,7 @@ class HumanInputRequestTests(TestCase):
             recipient_channel=recipient_channel,
             recipient_address=recipient_address,
             requested_via_channel=requested_via_channel,
+            expires_at=expires_at,
             requested_message=self._create_prompt_message(
                 agent=target_agent,
                 conversation=conversation or self.conversation,
@@ -299,11 +303,15 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("same tool-call batch as request_human_input", description)
         self.assertIn("already include the questions", description)
         self.assertIn("Do not send a bare notification", description)
+        self.assertIn("plain text only", description)
+        self.assertIn("no Markdown or HTML", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
         self.assertIn("recipient", function["parameters"]["properties"])
         self.assertIn("will_continue_work", function["parameters"]["properties"])
+        self.assertEqual(function["parameters"]["properties"]["question"]["maxLength"], 500)
+        self.assertIn("Plain text only", function["parameters"]["properties"]["question"]["description"])
         self.assertIn(
             "use true when you will send an email/SMS containing these questions",
             function["parameters"]["properties"]["will_continue_work"]["description"],
@@ -313,8 +321,13 @@ class HumanInputRequestTests(TestCase):
             function["parameters"]["properties"]["requests"]["items"]["required"],
             ["question"],
         )
+        self.assertEqual(
+            function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
+            500,
+        )
 
     def test_execute_request_human_input_creates_free_text_request(self):
+        before = timezone.now()
         result = execute_request_human_input(
             self.agent,
             {
@@ -322,6 +335,7 @@ class HumanInputRequestTests(TestCase):
                 "options": [],
             },
         )
+        after = timezone.now()
 
         self.assertEqual(result["status"], "ok")
         self.assertNotIn("reference_code", result)
@@ -344,6 +358,8 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(request_obj.recipient_channel, "")
         self.assertEqual(request_obj.recipient_address, "")
         self.assertIsNone(request_obj.requested_message_id)
+        self.assertGreaterEqual(request_obj.expires_at, before + timedelta(days=3))
+        self.assertLessEqual(request_obj.expires_at, after + timedelta(days=3))
 
     def test_execute_request_human_input_will_continue_true_keeps_panel_request_active(self):
         result = execute_request_human_input(
@@ -376,7 +392,33 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("cannot exceed 6", result["message"])
 
+    def test_execute_request_human_input_accepts_500_character_question(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "x" * 500,
+                "options": [],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 1)
+
+    def test_execute_request_human_input_rejects_question_over_500_characters(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "x" * 501,
+                "options": [],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Question cannot exceed 500 characters.")
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
     def test_execute_request_human_input_creates_multiple_requests(self):
+        before = timezone.now()
         result = execute_request_human_input(
             self.agent,
             {
@@ -392,6 +434,7 @@ class HumanInputRequestTests(TestCase):
                 ],
             },
         )
+        after = timezone.now()
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["request_id"], result["request_ids"][0])
@@ -415,6 +458,25 @@ class HumanInputRequestTests(TestCase):
                 requested_message__isnull=False,
             ).exists()
         )
+        request_objects = PersistentAgentHumanInputRequest.objects.filter(agent=self.agent)
+        for request_obj in request_objects:
+            self.assertGreaterEqual(request_obj.expires_at, before + timedelta(days=3))
+            self.assertLessEqual(request_obj.expires_at, after + timedelta(days=3))
+
+    def test_execute_request_human_input_rejects_batch_question_over_500_characters(self):
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {"question": "What should happen first?"},
+                    {"question": "x" * 501},
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["message"], "Question cannot exceed 500 characters.")
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
 
     def test_execute_request_human_input_decodes_escaped_unicode_text(self):
         result = execute_request_human_input(
@@ -490,6 +552,60 @@ class HumanInputRequestTests(TestCase):
             sorted(request["batchSize"] for request in pending_requests),
             [2, 2],
         )
+
+    def test_expired_pending_requests_are_hidden_from_live_payloads(self):
+        expired_request = self._create_request(
+            question="Expired question?",
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+        active_request = self._create_request(
+            question="Active question?",
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+
+        pending_requests = list_pending_human_input_requests(self.agent)
+        actions = list_pending_action_requests(self.agent, self.user)
+
+        self.assertEqual([request["id"] for request in pending_requests], [str(active_request.id)])
+        self.assertEqual(
+            [
+                request["id"]
+                for action in actions
+                if action["kind"] == "human_input"
+                for request in action["requests"]
+            ],
+            [str(active_request.id)],
+        )
+        self.assertIn("expiresAt", pending_requests[0])
+        expired_request.refresh_from_db()
+        self.assertEqual(expired_request.status, PersistentAgentHumanInputRequest.Status.EXPIRED)
+
+    def test_expired_request_is_excluded_from_inbound_matching(self):
+        expired_request = self._create_request(
+            options=[{"key": "ship", "title": "Ship it", "description": "Move forward now."}],
+            expires_at=timezone.now() - timedelta(seconds=1),
+        )
+
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Ship it",
+            raw_payload={
+                "source": "console_human_input_response",
+                "human_input_request_id": str(expired_request.id),
+                "human_input_selected_option_key": "ship",
+                "human_input_selected_option_title": "Ship it",
+            },
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        expired_request.refresh_from_db()
+        self.assertEqual(expired_request.status, PersistentAgentHumanInputRequest.Status.EXPIRED)
 
     def test_execute_request_human_input_targets_explicit_recipient(self):
         collaborator = get_user_model().objects.create_user(
@@ -1690,6 +1806,21 @@ class HumanInputRequestApiTests(TestCase):
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.ANSWERED)
         self.assertEqual(self.request_obj.selected_option_key, "ship")
+
+    def test_response_endpoint_rejects_expired_request(self):
+        self.request_obj.expires_at = timezone.now() - timedelta(seconds=1)
+        self.request_obj.save(update_fields=["expires_at"])
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/respond/",
+            data=json.dumps({"selected_option_key": "ship"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "This request is no longer pending.")
+        self.request_obj.refresh_from_db()
+        self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.EXPIRED)
 
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_dismiss_endpoint_cancels_request_returns_event_and_queues_processing(self, mock_delay):

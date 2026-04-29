@@ -1,7 +1,10 @@
 from django.urls import reverse
 from django.utils import timezone
 
-from api.agent.comms.human_input_requests import list_pending_human_input_requests
+from api.agent.comms.human_input_requests import (
+    expire_pending_human_input_requests,
+    list_pending_human_input_requests,
+)
 from api.models import (
     AgentSpawnRequest,
     CommsAllowlistRequest,
@@ -105,6 +108,7 @@ def _expire_pending_contact_requests(agent: PersistentAgent) -> None:
 
 
 def expire_pending_action_requests(agent: PersistentAgent) -> None:
+    expire_pending_human_input_requests(agent)
     _expire_pending_spawn_requests(agent)
     _expire_pending_contact_requests(agent)
 

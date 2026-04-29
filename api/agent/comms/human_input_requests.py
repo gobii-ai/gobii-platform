@@ -1,6 +1,7 @@
 """Helpers for persistent-agent human input requests."""
 
 import logging
+from datetime import timedelta
 from dataclasses import dataclass
 from email.utils import parseaddr
 import json
@@ -8,6 +9,7 @@ import re
 from typing import Any
 
 from django.db import DatabaseError, transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
 
@@ -34,6 +36,8 @@ from util.text_sanitizer import normalize_llm_output
 OPTION_NUMBER_RE = re.compile(r"^\s*(?:option\s+)?(?P<number>\d{1,2})(?:[\)\.\:\-\s]|$)", re.IGNORECASE)
 BATCH_ANSWER_ENTRY_RE = re.compile(r"^\s*(?P<number>\d{1,2})[\)\.\:\-]\s*(?P<body>.*)$")
 MAX_OPTION_COUNT = 6
+MAX_HUMAN_INPUT_QUESTION_LENGTH = 500
+DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS = 3
 HUMAN_INPUT_LLM_MAX_CANDIDATES = 20
 HUMAN_INPUT_LLM_MATCH_CONFIDENCE_THRESHOLD = 0.8
 
@@ -93,6 +97,45 @@ def _coerce_string(value: Any) -> str:
 
 def _normalize_human_input_text(value: Any) -> str:
     return normalize_llm_output(str(value or "")).strip()
+
+
+def _validate_human_input_question(value: Any) -> tuple[str, dict[str, Any] | None]:
+    question = _normalize_human_input_text(value)
+    if len(question) > MAX_HUMAN_INPUT_QUESTION_LENGTH:
+        return "", {
+            "status": "error",
+            "message": f"Question cannot exceed {MAX_HUMAN_INPUT_QUESTION_LENGTH} characters.",
+        }
+    return question, None
+
+
+def _active_pending_expiration_q(now=None) -> Q:
+    current_time = now or timezone.now()
+    return Q(expires_at__isnull=True) | Q(expires_at__gt=current_time)
+
+
+def expire_pending_human_input_requests(agent: PersistentAgent) -> int:
+    now = timezone.now()
+    return PersistentAgentHumanInputRequest.objects.filter(
+        agent=agent,
+        status=PersistentAgentHumanInputRequest.Status.PENDING,
+        expires_at__lte=now,
+    ).update(
+        status=PersistentAgentHumanInputRequest.Status.EXPIRED,
+        updated_at=now,
+    )
+
+
+def _mark_human_input_request_expired_if_needed(
+    request_obj: PersistentAgentHumanInputRequest,
+) -> bool:
+    if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
+        return False
+    if not request_obj.is_expired(now=timezone.now()):
+        return False
+    request_obj.status = PersistentAgentHumanInputRequest.Status.EXPIRED
+    request_obj.save(update_fields=["status", "updated_at"])
+    return True
 
 
 def _get_or_create_endpoint(
@@ -503,13 +546,16 @@ def _create_human_input_request_for_target(
     recipient: HumanInputRecipient | None = None,
     originating_step_id: str | None = None,
 ) -> tuple[PersistentAgentHumanInputRequest | None, dict[str, Any] | None]:
-    normalized_question = _normalize_human_input_text(question)
+    normalized_question, question_error = _validate_human_input_question(question)
+    if question_error:
+        return None, question_error
     options = build_option_payloads(raw_options)
     input_mode = (
         PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT
         if options
         else PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY
     )
+    expires_at = timezone.now() + timedelta(days=DEFAULT_HUMAN_INPUT_REQUEST_EXPIRATION_DAYS)
     try:
         request_obj = PersistentAgentHumanInputRequest.objects.create(
             agent=agent,
@@ -521,6 +567,7 @@ def _create_human_input_request_for_target(
             recipient_channel=recipient.channel if recipient else "",
             recipient_address=recipient.address if recipient else "",
             requested_via_channel=target.channel,
+            expires_at=expires_at,
         )
     except DatabaseError as exc:
         logger.exception(
@@ -555,6 +602,10 @@ def create_human_input_request(
     raw_options: list[dict[str, Any]] | None,
     recipient: HumanInputRecipient | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    _, question_error = _validate_human_input_question(question)
+    if question_error:
+        return question_error
+
     normalized_recipient, error = _normalize_human_input_recipient(recipient)
     if error:
         return error
@@ -595,6 +646,11 @@ def create_human_input_requests_batch(
     requests: list[dict[str, Any]],
     recipient: HumanInputRecipient | dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    for request in requests:
+        _, question_error = _validate_human_input_question(request.get("question"))
+        if question_error:
+            return question_error
+
     normalized_recipient, error = _normalize_human_input_recipient(recipient)
     if error:
         return error
@@ -713,6 +769,7 @@ def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInput
         "question": request_obj.question,
         "options": request_obj.options_json if isinstance(request_obj.options_json, list) else [],
         "createdAt": request_obj.created_at.isoformat() if request_obj.created_at else None,
+        "expiresAt": request_obj.expires_at.isoformat() if request_obj.expires_at else None,
         "status": request_obj.status,
         "activeConversationChannel": request_obj.requested_via_channel,
         "inputMode": request_obj.input_mode,
@@ -720,11 +777,13 @@ def serialize_pending_human_input_request(request_obj: PersistentAgentHumanInput
 
 
 def list_pending_human_input_requests(agent: PersistentAgent) -> list[dict[str, Any]]:
+    expire_pending_human_input_requests(agent)
     request_objects = list(
         PersistentAgentHumanInputRequest.objects.filter(
             agent=agent,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
+        .filter(_active_pending_expiration_q())
         .order_by("-created_at")
     )
     ordered_for_batches = sorted(
@@ -880,7 +939,7 @@ def _get_pending_batch_for_request(
     queryset = PersistentAgentHumanInputRequest.objects.filter(
         agent_id=request_obj.agent_id,
         status=PersistentAgentHumanInputRequest.Status.PENDING,
-    )
+    ).filter(_active_pending_expiration_q())
     if request_obj.originating_step_id:
         queryset = queryset.filter(originating_step_id=request_obj.originating_step_id)
     else:
@@ -940,6 +999,7 @@ def _get_authorized_pending_requests_for_message(
             agent_id=message.owner_agent_id,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
+        .filter(_active_pending_expiration_q())
         .order_by("-created_at")
     )
 
@@ -964,6 +1024,7 @@ def _get_authorized_pending_requests_for_conversation(
             conversation_id=message.conversation_id,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
+        .filter(_active_pending_expiration_q())
         .order_by("-created_at")
     )
     return [
@@ -1485,6 +1546,7 @@ def _get_authorized_pending_request_by_id(
             agent_id=message.owner_agent_id,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
+        .filter(_active_pending_expiration_q())
         .first()
     )
     if request_obj is None or not _sender_is_authorized_for_request(request_obj, message):
@@ -1497,6 +1559,7 @@ def resolve_human_input_request_for_message(
 ) -> PersistentAgentHumanInputRequest | None:
     if not message or message.is_outbound or not message.owner_agent_id:
         return None
+    expire_pending_human_input_requests(message.owner_agent)
 
     raw_payload = message.raw_payload if isinstance(message.raw_payload, dict) else {}
     direct_request_id = _coerce_string(raw_payload.get("human_input_request_id")) or None
@@ -1734,6 +1797,8 @@ def submit_human_input_responses_batch(
     for response in responses:
         request_id = str(response.get("request_id") or "").strip()
         request_obj = requests_by_id[request_id]
+        if _mark_human_input_request_expired_if_needed(request_obj):
+            raise ValueError("This request is no longer pending.")
         if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
             raise ValueError("This request is no longer pending.")
         prepared_responses.append(
@@ -1875,6 +1940,8 @@ def dismiss_human_input_request(
     *,
     actor_user_id: int | str | None = None,
 ) -> PersistentAgentMessage:
+    if _mark_human_input_request_expired_if_needed(request_obj):
+        raise ValueError("This request is no longer pending.")
     if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
         raise ValueError("This request is no longer pending.")
 
