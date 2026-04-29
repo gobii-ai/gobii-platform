@@ -110,6 +110,7 @@ from ..tools.tool_manager import (
 )
 from .tool_results import (
     PREVIEW_TIER_COUNT,
+    SPAWN_WEB_TASK_RESULT_TOOL_NAME,
     ToolCallResultRecord,
     ToolResultPromptInfo,
     prepare_tool_results_for_prompt,
@@ -146,6 +147,10 @@ SQLITE_MESSAGES_SNAPSHOT_MAX_BYTES = 5_000_000
 SQLITE_MESSAGES_SNAPSHOT_MAX_RECORDS = 10_000
 MESSAGE_ONLY_TOOL_NAMES_TEXT = (
     "send_email, send_sms, send_chat_message, and send_agent_message"
+)
+BROWSER_TASK_RESULT_BLOCK_RE = re.compile(
+    r"<result>\s*(?P<payload>.*?)\s*</result>",
+    re.DOTALL | re.IGNORECASE,
 )
 
 
@@ -394,6 +399,67 @@ def _get_recent_completed_browser_tasks(
     return list(completed_tasks_qs[:visible_limit])
 
 
+def _extract_browser_task_embedded_result(raw_text: str) -> Optional[Any]:
+    """Parse a structured payload embedded in browser task freeform text."""
+    match = BROWSER_TASK_RESULT_BLOCK_RE.search(raw_text)
+    if not match:
+        return None
+
+    payload = match.group("payload").strip()
+    if not payload:
+        return None
+
+    try:
+        return json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+
+
+def _build_browser_task_result_payload(
+    task: BrowserUseAgentTask,
+    result_step: Optional[BrowserUseAgentTaskStep],
+) -> Dict[str, Any]:
+    """Normalize browser task completion data for storage in __tool_results."""
+    payload: Dict[str, Any] = {
+        "task_id": str(task.id),
+        "status": task.status,
+        "prompt": task.prompt or "",
+    }
+
+    if task.status == BrowserUseAgentTask.StatusChoices.FAILED:
+        payload["error_message"] = task.error_message or "Task failed."
+    elif task.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
+        payload["error_message"] = "Task has been cancelled."
+
+    if result_step is None or result_step.result_value is None:
+        return payload
+
+    result_value = result_step.result_value
+    if isinstance(result_value, str):
+        payload["raw_text"] = result_value
+        parsed_result = _extract_browser_task_embedded_result(result_value)
+        if parsed_result is not None:
+            payload["result"] = parsed_result
+    else:
+        payload["result"] = result_value
+    return payload
+
+
+def _build_browser_task_tool_result_record(
+    task: BrowserUseAgentTask,
+    result_step: Optional[BrowserUseAgentTaskStep],
+) -> ToolCallResultRecord:
+    """Project a completed browser task into the synthetic tool-result snapshot."""
+    normalized_payload = _build_browser_task_result_payload(task, result_step)
+    return ToolCallResultRecord(
+        step_id=f"browser_task_result:{task.id}",
+        tool_name=SPAWN_WEB_TASK_RESULT_TOOL_NAME,
+        created_at=task.updated_at,
+        result_text=json.dumps(normalized_payload, ensure_ascii=False),
+        result_id=str(task.id),
+    )
+
+
 def get_prompt_token_budget(agent: Optional[PersistentAgent]) -> int:
     """Return the configured prompt token budget for the agent's LLM tier.
 
@@ -485,7 +551,7 @@ have(small_result) → read it directly → insight                         # RI
 have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
 ```
 
-**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call. Browser task completions are pushed into unified history, so don't poll __tool_results/__files waiting for them. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
+**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call or when a completed browser task wakes you and adds a `spawn_web_task_result` row. Don't poll __tool_results/__files waiting for browser task completion before that wake-up. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
 
 ---
 
@@ -2442,7 +2508,7 @@ def _render_prompt_context_once(
         "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
         "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata. "
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
-        "Do not poll __tool_results/__files waiting for browser task completion: those completions wake you with new unified history events. "
+        "Do not poll __tool_results/__files waiting for browser task completion before wake-up: those completions wake you with new unified history events and then appear in __tool_results as `spawn_web_task_result` rows. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
@@ -5768,6 +5834,7 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
 
     tool_result_prompt_info: Dict[str, ToolResultPromptInfo] = {}
     tool_call_records: List[ToolCallResultRecord] = []
+    browser_task_result_record_ids: Dict[str, str] = {}
     recency_positions: Dict[str, int] = {}
     fresh_tool_call_step_id: Optional[str] = None
     if steps:
@@ -5803,6 +5870,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
             for position, record in enumerate(ordered_records[:PREVIEW_TIER_COUNT]):
                 recency_positions[record.step_id] = position
+
+    for task in completed_tasks:
+        result_steps = getattr(task, "result_steps_prefetched", None)
+        result_step = result_steps[0] if result_steps else None
+        browser_record = _build_browser_task_tool_result_record(task, result_step)
+        browser_task_result_record_ids[str(task.id)] = browser_record.step_id
+        tool_call_records.append(browser_record)
+
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
         recency_positions=recency_positions,
@@ -6027,11 +6102,12 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
         components = {
             "meta": f"[{t.updated_at.isoformat()}] Browser task (id={t.id}) completed with status '{t.status}': {t.prompt}"
         }
-        result_steps = getattr(t, "result_steps_prefetched", None)
-        result_step = result_steps[0] if result_steps else None
-        if result_step and result_step.result_value:
-            components["result"] = json.dumps(result_step.result_value)
-        
+        result_info = tool_result_prompt_info.get(
+            browser_task_result_record_ids.get(str(t.id), "")
+        )
+        if result_info is not None:
+            components["result_id"] = result_info.result_id
+
         structured_events.append((t.updated_at, "browser_task", components))
 
     # Create structured promptree groups for each event

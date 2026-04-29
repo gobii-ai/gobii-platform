@@ -231,20 +231,32 @@ class PromptContextBuilderTests(TestCase):
         step.refresh_from_db()
         return step
 
-    def _create_completed_browser_task(self, *, prompt: str, updated_at) -> BrowserUseAgentTask:
+    def _create_completed_browser_task(
+        self,
+        *,
+        prompt: str,
+        updated_at,
+        result_value=None,
+        status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        error_message: str | None = None,
+    ) -> BrowserUseAgentTask:
         task = BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,
             user=self.user,
             prompt=prompt,
-            status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+            status=status,
+            error_message=error_message,
         )
-        BrowserUseAgentTaskStep.objects.create(
-            task=task,
-            step_number=1,
-            description=f"Result for {prompt}",
-            is_result=True,
-            result_value={"task": prompt},
-        )
+        if result_value is None and status == BrowserUseAgentTask.StatusChoices.COMPLETED:
+            result_value = {"task": prompt}
+        if result_value is not None:
+            BrowserUseAgentTaskStep.objects.create(
+                task=task,
+                step_number=1,
+                description=f"Result for {prompt}",
+                is_result=True,
+                result_value=result_value,
+            )
         BrowserUseAgentTask.objects.filter(pk=task.pk).update(updated_at=updated_at)
         task.refresh_from_db()
         return task
@@ -1562,6 +1574,205 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn(newest_prompt, content)
         self.assertLess(content.index(older_prompt), content.index(newer_prompt))
         self.assertLess(content.index(newer_prompt), content.index(newest_prompt))
+
+    def test_completed_browser_task_results_are_stored_in_sqlite_without_inline_duplication(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        browser_result = (
+            "Successfully extracted all 2 registry items.\n\n"
+            "<result>\n"
+            "[\n"
+            "  {\"brand\": \"Philips Avent\", \"product_name\": \"Natural Glass Bottle\", \"category\": \"Feeding\"},\n"
+            "  {\"brand\": \"Momcozy\", \"product_name\": \"Milk Storage Bags\", \"category\": \"Feeding\"}\n"
+            "]\n"
+            "</result>"
+        )
+        task = self._create_completed_browser_task(
+            prompt="Extract all registry items as JSON.",
+            updated_at=timezone.now(),
+            result_value=browser_result,
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            content = self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            self.assertIn(str(task.id), content)
+            self.assertIn(expected_result_id, content)
+            self.assertNotIn("Natural Glass Bottle", content)
+            self.assertNotIn("Successfully extracted all 2 registry items.", content)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual(str(task.id), payload["task_id"])
+            self.assertEqual("completed", payload["status"])
+            self.assertEqual("Extract all registry items as JSON.", payload["prompt"])
+            self.assertEqual("Philips Avent", payload["result"][0]["brand"])
+            self.assertEqual("Natural Glass Bottle", payload["result"][0]["product_name"])
+            self.assertIn("Successfully extracted all 2 registry items.", payload["raw_text"])
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_failed_browser_tasks_are_snapshotted_into_sqlite(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        task = self._create_completed_browser_task(
+            prompt="Log in and download the CSV.",
+            updated_at=timezone.now(),
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+            error_message="Navigation timeout while loading dashboard.",
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            content = self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            self.assertIn(expected_result_id, content)
+            self.assertNotIn("Navigation timeout while loading dashboard.", content)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual(str(task.id), payload["task_id"])
+            self.assertEqual("failed", payload["status"])
+            self.assertEqual("Log in and download the CSV.", payload["prompt"])
+            self.assertEqual(
+                "Navigation timeout while loading dashboard.",
+                payload["error_message"],
+            )
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_failed_browser_tasks_default_error_message_is_snapshotted(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        task = self._create_completed_browser_task(
+            prompt="Submit the form.",
+            updated_at=timezone.now(),
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual("Task failed.", payload["error_message"])
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_cancelled_browser_tasks_use_error_message_field(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        task = self._create_completed_browser_task(
+            prompt="Download the report.",
+            updated_at=timezone.now(),
+            status=BrowserUseAgentTask.StatusChoices.CANCELLED,
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual("cancelled", payload["status"])
+            self.assertEqual("Task has been cancelled.", payload["error_message"])
+            self.assertNotIn("message", payload)
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
 
     def test_prompt_context_caps_older_internal_reasoning_but_keeps_current_streak(self):
         """Older reasoning stays capped once a newer visible step breaks the streak."""

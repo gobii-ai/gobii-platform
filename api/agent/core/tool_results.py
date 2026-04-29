@@ -59,6 +59,7 @@ MAX_TOOL_RESULT_BYTES = 5_000_000
 MAX_TOP_KEYS = 20
 
 EXCLUDED_TOOL_NAMES = {SQLITE_TOOL_NAME, "sqlite_query"}
+SPAWN_WEB_TASK_RESULT_TOOL_NAME = "spawn_web_task_result"
 
 # Tools that fetch external data with unknown structure - schema generation helps agent query it
 SCHEMA_ELIGIBLE_TOOL_PREFIXES = ("http_request", "mcp_")
@@ -84,10 +85,12 @@ class ToolCallResultRecord:
     tool_name: str
     created_at: datetime
     result_text: str
+    result_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class ToolResultPromptInfo:
+    result_id: str
     meta: str
     preview_text: Optional[str]
     is_inline: bool
@@ -137,7 +140,11 @@ def prepare_tool_results_for_prompt(
     rows: List[Tuple] = []
     csv_candidates: List[Tuple[str, str, ResultAnalysis]] = []
     short_id_map = _build_short_result_id_map(
-        [record.step_id for record in records if record.result_text]
+        [
+            record.step_id
+            for record in records
+            if record.result_text and not record.result_id
+        ]
     )
 
     for record in records:
@@ -147,9 +154,11 @@ def prepare_tool_results_for_prompt(
         if not result_text:
             continue
 
-        result_id = short_id_map.get(record.step_id, record.step_id)
+        result_id = record.result_id or short_id_map.get(record.step_id, record.step_id)
         legacy_result_id = None
-        if result_id != record.step_id and _UUID_RESULT_ID_RE.match(str(record.step_id)):
+        if record.result_id and record.result_id != record.step_id:
+            legacy_result_id = record.step_id
+        elif result_id != record.step_id and _UUID_RESULT_ID_RE.match(str(record.step_id)):
             legacy_result_id = record.step_id
 
         meta, stored_json, stored_text, analysis = _summarize_result(result_text, result_id, record.tool_name)
@@ -217,6 +226,7 @@ def prepare_tool_results_for_prompt(
         )
 
         prompt_info[record.step_id] = ToolResultPromptInfo(
+            result_id=result_id,
             meta=meta_text,
             preview_text=preview_text,
             is_inline=is_inline,
@@ -694,6 +704,9 @@ def _build_prompt_preview(
     - preview_text is a sample of the result
     - is_inline is True only for small results that fit entirely
     """
+    if tool_name == SPAWN_WEB_TASK_RESULT_TOOL_NAME:
+        return None, False
+
     # Small results are ALWAYS inlined - critical for tools like create_chart
     # where the result contains essential data (paths) that the agent needs
     # even if many subsequent tool calls push it outside the recency window.

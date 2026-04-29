@@ -39,8 +39,8 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
 
     def test_examples_discourage_browser_task_completion_polling(self):
         examples = prompt_context._get_sqlite_examples()
-        self.assertIn("Browser task completions are pushed into unified history", examples)
-        self.assertIn("don't poll __tool_results/__files waiting for them", examples)
+        self.assertIn("completed browser task wakes you and adds a `spawn_web_task_result` row", examples)
+        self.assertIn("Don't poll __tool_results/__files waiting for browser task completion before that wake-up", examples)
 
     def test_sqlite_retry_warning_flags_repeated_empty_probes(self):
         warning = prompt_context._build_sqlite_retry_warning(
