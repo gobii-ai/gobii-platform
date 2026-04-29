@@ -131,7 +131,7 @@ def _mark_human_input_request_expired_if_needed(
 ) -> bool:
     if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
         return False
-    if not request_obj.is_expired():
+    if not request_obj.is_expired(now=timezone.now()):
         return False
     request_obj.status = PersistentAgentHumanInputRequest.Status.EXPIRED
     request_obj.save(update_fields=["status", "updated_at"])

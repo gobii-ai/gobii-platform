@@ -10952,10 +10952,10 @@ class PersistentAgentHumanInputRequest(models.Model):
     def __str__(self) -> str:
         return f"HumanInputRequest<{self.id}:{self.status}>"
 
-    def is_expired(self) -> bool:
+    def is_expired(self, now=None) -> bool:
         if not self.expires_at:
             return False
-        return timezone.now() >= self.expires_at
+        return (now or timezone.now()) >= self.expires_at
 
 
 class PersistentAgentEmailFooter(models.Model):
