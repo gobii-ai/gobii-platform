@@ -30,6 +30,21 @@
   max-width: 860px;
 }
 
+@media (min-width: 997px) {
+  .container:has(.theme-api-markdown) {
+    max-width: none;
+  }
+
+  .theme-doc-markdown:has(.theme-api-markdown) {
+    max-width: none;
+  }
+
+  div[class*='docItemCol']:has(.theme-api-markdown) {
+    flex: 0 0 100%;
+    max-width: 100% !important;
+  }
+}
+
 .gobii-doc-card {
   border: 1px solid var(--ifm-color-emphasis-200);
   border-radius: 8px;
