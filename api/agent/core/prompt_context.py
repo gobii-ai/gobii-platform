@@ -426,10 +426,10 @@ def _build_browser_task_result_payload(
         "prompt": task.prompt or "",
     }
 
-    if task.status == BrowserUseAgentTask.StatusChoices.FAILED and task.error_message:
-        payload["error_message"] = task.error_message
+    if task.status == BrowserUseAgentTask.StatusChoices.FAILED:
+        payload["error_message"] = task.error_message or "Task failed."
     elif task.status == BrowserUseAgentTask.StatusChoices.CANCELLED:
-        payload["message"] = "Task has been cancelled."
+        payload["error_message"] = "Task has been cancelled."
 
     if result_step is None or result_step.result_value is None:
         return payload
@@ -439,10 +439,9 @@ def _build_browser_task_result_payload(
         payload["raw_text"] = result_value
         parsed_result = _extract_browser_task_embedded_result(result_value)
         if parsed_result is not None:
-            payload["parsed_result"] = parsed_result
-        return payload
-
-    payload["result"] = result_value
+            payload["result"] = parsed_result
+    else:
+        payload["result"] = result_value
     return payload
 
 

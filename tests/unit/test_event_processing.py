@@ -1629,8 +1629,8 @@ class PromptContextBuilderTests(TestCase):
             self.assertEqual(str(task.id), payload["task_id"])
             self.assertEqual("completed", payload["status"])
             self.assertEqual("Extract all registry items as JSON.", payload["prompt"])
-            self.assertEqual("Philips Avent", payload["parsed_result"][0]["brand"])
-            self.assertEqual("Natural Glass Bottle", payload["parsed_result"][0]["product_name"])
+            self.assertEqual("Philips Avent", payload["result"][0]["brand"])
+            self.assertEqual("Natural Glass Bottle", payload["result"][0]["product_name"])
             self.assertIn("Successfully extracted all 2 registry items.", payload["raw_text"])
         finally:
             reset_sqlite_db_path(token)
@@ -1684,6 +1684,92 @@ class PromptContextBuilderTests(TestCase):
                 "Navigation timeout while loading dashboard.",
                 payload["error_message"],
             )
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_failed_browser_tasks_default_error_message_is_snapshotted(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        task = self._create_completed_browser_task(
+            prompt="Submit the form.",
+            updated_at=timezone.now(),
+            status=BrowserUseAgentTask.StatusChoices.FAILED,
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual("Task failed.", payload["error_message"])
+        finally:
+            reset_sqlite_db_path(token)
+            sqlite_tmp.cleanup()
+
+    def test_cancelled_browser_tasks_use_error_message_field(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=0,
+        )
+
+        task = self._create_completed_browser_task(
+            prompt="Download the report.",
+            updated_at=timezone.now(),
+            status=BrowserUseAgentTask.StatusChoices.CANCELLED,
+        )
+
+        sqlite_tmp = tempfile.TemporaryDirectory()
+        db_path = f"{sqlite_tmp.name}/state.db"
+        token = set_sqlite_db_path(db_path)
+
+        try:
+            self._build_user_prompt_content()
+            expected_result_id = str(task.id)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT result_json
+                    FROM __tool_results
+                    WHERE result_id = ? AND tool_name = ?
+                    """,
+                    (expected_result_id, "spawn_web_task_result"),
+                ).fetchone()
+            finally:
+                conn.close()
+            self.assertIsNotNone(row)
+
+            payload = json.loads(row[0])
+            self.assertEqual("cancelled", payload["status"])
+            self.assertEqual("Task has been cancelled.", payload["error_message"])
+            self.assertNotIn("message", payload)
         finally:
             reset_sqlite_db_path(token)
             sqlite_tmp.cleanup()
