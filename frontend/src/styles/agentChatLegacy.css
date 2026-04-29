@@ -6044,9 +6044,10 @@
 }
 
 .chat-sidebar-settings-theme {
-  --chat-sidebar-settings-surface: rgba(15, 23, 42, 0.34);
-  --chat-sidebar-settings-surface-soft: rgba(15, 23, 42, 0.22);
-  --chat-sidebar-settings-surface-strong: rgba(15, 23, 42, 0.46);
+  --chat-sidebar-settings-banner-surface: rgba(2, 6, 23, 0.8);
+  --chat-sidebar-settings-surface: rgba(2, 6, 23, 0.44);
+  --chat-sidebar-settings-surface-soft: rgba(2, 6, 23, 0.32);
+  --chat-sidebar-settings-surface-strong: var(--chat-sidebar-settings-banner-surface);
   --chat-sidebar-settings-border: rgba(148, 163, 184, 0.18);
   --chat-sidebar-settings-border-strong: rgba(148, 163, 184, 0.26);
   --chat-sidebar-settings-text: rgba(248, 250, 252, 0.96);
@@ -6061,6 +6062,9 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 1.35rem;
   padding: 0.95rem 1rem 1.25rem;
+  background: var(--chat-sidebar-settings-banner-surface);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
 }
 
 .chat-sidebar-settings-theme .text-slate-900,
@@ -9244,15 +9248,16 @@
 .billing-screen--embedded {
   color-scheme: dark;
   color: rgba(248, 245, 255, 0.94);
+  --console-card-surface: rgba(2, 6, 23, 0.8);
+  --console-card-border: 1px solid rgba(196, 181, 253, 0.16);
+  --console-card-radius: 1.1rem;
+  --console-card-shadow: none;
+  --console-card-backdrop-filter: blur(18px);
+  --console-card-webkit-backdrop-filter: blur(18px);
 }
 
 .billing-screen--embedded .card {
-  background: rgba(26, 16, 60, 0.82);
-  border: 1px solid rgba(196, 181, 253, 0.16);
-  border-radius: 1.1rem;
-  box-shadow: none;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: var(--console-card-surface);
 }
 
 .billing-screen--embedded .text-slate-900 {

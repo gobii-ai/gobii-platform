@@ -25,7 +25,7 @@ export function SettingsBanner({
 }: SettingsBannerProps) {
   const isEmbedded = variant === 'embedded'
   const surfaceClassName = isEmbedded
-    ? 'border-slate-200/70 bg-slate-950/60 text-slate-100'
+    ? 'border-slate-200/70 bg-slate-950/80 text-slate-100'
     : 'border-gray-200/70 bg-white/78 text-gray-900'
   const contentLayoutClassName = isEmbedded
     ? 'flex min-w-0 flex-1 flex-col gap-4 xl:flex-row xl:items-start xl:justify-between'

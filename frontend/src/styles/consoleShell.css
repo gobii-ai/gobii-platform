@@ -63,10 +63,13 @@
 }
 
 .card {
-  background: white;
-  border-radius: 1rem;
+  background: var(--console-card-surface, white);
+  border: var(--console-card-border, none);
+  border-radius: var(--console-card-radius, 1rem);
   /* Removed 1px border as requested */
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.1);
+  box-shadow: var(--console-card-shadow, 0 8px 20px rgba(15, 23, 42, 0.1));
+  backdrop-filter: var(--console-card-backdrop-filter, none);
+  -webkit-backdrop-filter: var(--console-card-webkit-backdrop-filter, none);
   padding: 1.75rem;
   display: flex;
   flex-direction: column;

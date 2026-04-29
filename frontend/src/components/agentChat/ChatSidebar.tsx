@@ -209,7 +209,7 @@ export const ChatSidebar = memo(function ChatSidebar({
   )
 
   const shellTitle = SELECTION_SHELL_PAGE_LABELS[galleryShellPage] ?? 'Agents'
-  const showHeaderPageSwitcher = galleryMode && !showSettingsView && !collapsed && showGalleryShellSwitcher
+  const showHeaderPageSwitcher = !showSettingsView && !collapsed && showGalleryShellSwitcher
 
   const renderListContent = useCallback((variant: 'drawer' | 'sidebar', collapsedView: boolean) => {
     const sourceAgents = collapsedView ? collapsedFilteredAgents : filteredAgents
@@ -440,7 +440,7 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
-          {!showSettingsView && drawerViewMode === 'gallery' && showGalleryShellSwitcher ? (
+          {!showSettingsView && showGalleryShellSwitcher ? (
             <div className="agent-drawer-shell-switcher">
               <SelectionShellPageSwitcher
                 currentPage={galleryShellPage}
