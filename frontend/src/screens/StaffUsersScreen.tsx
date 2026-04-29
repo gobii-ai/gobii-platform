@@ -1,13 +1,15 @@
 import { useDeferredValue, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Activity, CheckCircle2, ExternalLink, Loader2, Search, ShieldCheck, UsersRound } from 'lucide-react'
+import { Activity, CheckCircle2, ExternalLink, Loader2, Mail, Search, Send, ShieldCheck, UsersRound } from 'lucide-react'
 
 import {
   createStaffUserTaskCreditGrant,
   fetchStaffUserDetail,
   markStaffUserEmailVerified,
   searchStaffUsers,
+  sendStaffUserEmailTrigger,
   type StaffUserDetail,
+  type StaffUserEmailTrigger,
 } from '../api/staffUsers'
 
 export type StaffUsersScreenProps = {
@@ -248,6 +250,60 @@ function AgentsCard({ detail }: { detail: StaffUserDetail }) {
   )
 }
 
+function UserEmailsCard({
+  detail,
+  sendingTriggerId,
+  onSend,
+}: {
+  detail: StaffUserDetail
+  sendingTriggerId: number | null
+  onSend: (trigger: StaffUserEmailTrigger) => void
+}) {
+  return (
+    <section className="card">
+      <div className="card__header">
+        <div>
+          <h2 className="card__title">User Emails</h2>
+          <p className="app-subtitle">Send configured Customer.io launch events through Analytics.</p>
+        </div>
+        <span className="app-status-indicator">{detail.userEmails.triggers.length} active</span>
+      </div>
+
+      {detail.userEmails.triggers.length ? (
+        <div className="grid gap-3 md:grid-cols-2">
+          {detail.userEmails.triggers.map((trigger) => {
+            const isSending = sendingTriggerId === trigger.id
+            return (
+              <div key={trigger.id} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-semibold text-slate-900">{trigger.name}</p>
+                    <p className="mt-1 truncate text-xs text-slate-500">{trigger.eventName}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onSend(trigger)}
+                    disabled={sendingTriggerId !== null}
+                    className="inline-flex items-center gap-2 rounded-2xl bg-sky-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSending ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                    Send
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : (
+        <div className="flex items-center gap-3 text-sm text-slate-600">
+          <Mail className="size-4 text-slate-400" />
+          No active user email triggers are configured.
+        </div>
+      )}
+    </section>
+  )
+}
+
 function TaskCreditsCard({
   detail,
   onSubmit,
@@ -359,6 +415,7 @@ export function StaffUsersScreen({ selectedUserId = null }: StaffUsersScreenProp
   const queryClient = useQueryClient()
   const [searchInput, setSearchInput] = useState('')
   const [feedback, setFeedback] = useState<string | null>(null)
+  const [sendingEmailTriggerId, setSendingEmailTriggerId] = useState<number | null>(null)
   const deferredSearchInput = useDeferredValue(searchInput.trim())
 
   const searchQuery = useQuery({
@@ -388,6 +445,20 @@ export function StaffUsersScreen({ selectedUserId = null }: StaffUsersScreenProp
     onSuccess: async () => {
       setFeedback('Task-credit grant created.')
       await queryClient.invalidateQueries({ queryKey: ['staff-user-detail', selectedUserId] })
+    },
+  })
+
+  const emailTriggerMutation = useMutation({
+    mutationFn: (trigger: StaffUserEmailTrigger) => {
+      setSendingEmailTriggerId(trigger.id)
+      return sendStaffUserEmailTrigger(selectedUserId as number, trigger.id)
+    },
+    onSuccess: async (payload) => {
+      setFeedback(`Sent ${payload.userEmail.name}.`)
+      await queryClient.invalidateQueries({ queryKey: ['staff-user-detail', selectedUserId] })
+    },
+    onSettled: () => {
+      setSendingEmailTriggerId(null)
     },
   })
 
@@ -426,6 +497,18 @@ export function StaffUsersScreen({ selectedUserId = null }: StaffUsersScreenProp
       return
     }
     verifyMutation.mutate()
+  }
+
+  const handleEmailSend = (trigger: StaffUserEmailTrigger) => {
+    if (selectedUserId === null || !detail) {
+      return
+    }
+    const target = detail.user.email || `user #${detail.user.id}`
+    const confirmed = window.confirm(`Send "${trigger.name}" to ${target}?\n\nThis will emit "${trigger.eventName}" through Analytics.`)
+    if (!confirmed) {
+      return
+    }
+    emailTriggerMutation.mutate(trigger)
   }
 
   return (
@@ -470,6 +553,7 @@ export function StaffUsersScreen({ selectedUserId = null }: StaffUsersScreenProp
               {feedback ? <p className="text-sm font-medium text-emerald-700">{feedback}</p> : null}
               {verifyMutation.error instanceof Error ? <p className="text-sm text-rose-700">{verifyMutation.error.message}</p> : null}
               {grantMutation.error instanceof Error ? <p className="text-sm text-rose-700">{grantMutation.error.message}</p> : null}
+              {emailTriggerMutation.error instanceof Error ? <p className="text-sm text-rose-700">{emailTriggerMutation.error.message}</p> : null}
             </form>
           </div>
         </section>
@@ -506,6 +590,7 @@ export function StaffUsersScreen({ selectedUserId = null }: StaffUsersScreenProp
             <OverviewCard detail={detail} isVerifying={verifyMutation.isPending} onVerify={handleVerify} />
             <BillingCard detail={detail} />
             <AgentsCard detail={detail} />
+            <UserEmailsCard detail={detail} sendingTriggerId={sendingEmailTriggerId} onSend={handleEmailSend} />
             <TaskCreditsCard detail={detail} onSubmit={handleGrantSubmit} submitting={grantMutation.isPending} />
           </>
         ) : null}

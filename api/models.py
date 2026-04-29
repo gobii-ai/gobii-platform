@@ -679,6 +679,24 @@ class UserFlagAssignment(models.Model):
         return f"{self.user_id}:{self.flag.slug}"
 
 
+class UserEmail(models.Model):
+    """Staff-managed analytics events that trigger Customer.io user emails."""
+
+    name = models.CharField(max_length=120)
+    event_name = models.CharField(max_length=200, db_index=True)
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("name", "event_name")
+        verbose_name = "User email"
+        verbose_name_plural = "User emails"
+
+    def __str__(self):
+        return self.name
+
+
 class UserPreference(models.Model):
     """Per-user application preferences persisted across devices."""
 

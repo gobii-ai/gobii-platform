@@ -14,7 +14,7 @@ from typing import Iterable
 
 
 _EXCLUDED_DIRS = {
-    "venv", ".venv", "node_modules", "migrations", "__pycache__", ".git",
+    "venv", ".venv", ".uv-cache", ".uv_cache", "node_modules", "migrations", "__pycache__", ".git",
     # sandbox_server has its own non-Django test suite (plain unittest)
     "sandbox_server",
     # misc/ contains example/utility scripts, not real tests

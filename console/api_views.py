@@ -112,6 +112,7 @@ from api.models import (
     OrganizationMembership,
     AgentCollaborator,
     UserPreference,
+    UserEmail,
     AddonEntitlement,
     TaskCredit,
     build_web_agent_address,
@@ -1654,6 +1655,20 @@ def _serialize_staff_user_detail(user) -> dict[str, Any]:
             "unlimited": bool(unlimited_credits),
             "recentGrants": recent_grants,
         },
+        "userEmails": {
+            "triggers": [
+                _serialize_staff_user_email(user_email)
+                for user_email in UserEmail.objects.filter(is_active=True).order_by("name", "event_name")
+            ],
+        },
+    }
+
+
+def _serialize_staff_user_email(user_email: UserEmail) -> dict[str, Any]:
+    return {
+        "id": user_email.id,
+        "name": user_email.name,
+        "eventName": user_email.event_name,
     }
 
 
@@ -1810,6 +1825,39 @@ class StaffUserTaskCreditGrantAPIView(SystemAdminAPIView):
         )
 
         return JsonResponse({"ok": True, "taskCredit": _serialize_task_credit(task_credit)}, status=201)
+
+
+class StaffUserEmailTriggerAPIView(SystemAdminAPIView):
+    """Send a configured analytics event for the selected user."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, user_id: int, user_email_id: int, *args: Any, **kwargs: Any):
+        user = get_object_or_404(User, pk=user_id)
+        user_email = get_object_or_404(UserEmail, pk=user_email_id, is_active=True)
+
+        properties = {
+            "medium": str(AnalyticsSource.CONSOLE),
+            "triggered_from": "staff_user_page",
+            "user_email_trigger_id": str(user_email.id),
+            "user_email_trigger_name": user_email.name,
+            "triggered_by_staff_user_id": str(request.user.id),
+            "triggered_by_staff_user_email": request.user.email or "",
+            "target_user_id": str(user.id),
+            "target_user_email": user.email or "",
+        }
+        Analytics.track(
+            user_id=user.id,
+            event=user_email.event_name,
+            properties=properties,
+        )
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "userEmail": _serialize_staff_user_email(user_email),
+            }
+        )
 
 
 class StaffAgentSearchAPIView(SystemAdminAPIView):
