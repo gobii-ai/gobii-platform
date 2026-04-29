@@ -1,7 +1,13 @@
 """Utilities for cleaning outbound message content."""
 
+import html
 import re
 import unicodedata
+
+import markdown
+from inscriptis import get_text
+from inscriptis.css_profiles import CSS_PROFILES
+from inscriptis.model.config import ParserConfig
 
 __all__ = [
     "strip_control_chars",
@@ -11,6 +17,7 @@ __all__ = [
     "strip_llm_artifacts",
     "strip_redundant_blockquote_quotes",
     "normalize_llm_output",
+    "sanitize_notification_preview_text",
 ]
 
 
@@ -57,6 +64,20 @@ _MARKDOWN_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")  # _ita
 _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")  # `code`
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")  # [text](url)
 _MARKDOWN_HEADER_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)  # # Header
+_NOTIFICATION_PREVIEW_LIST_MARKER_RE = re.compile(
+    r"^\s*(?:[*+\-\u2022]|\d+[.)])\s+",
+    re.MULTILINE,
+)
+_NOTIFICATION_PREVIEW_INLINE_BULLET_RE = re.compile(r"\s+\u2022\s+")
+_NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE = re.compile(
+    r"\\[nr]\s*(?=(?:[*+\-\u2022]|\d+[.)]|#{1,6}\s))"
+)
+_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS = ["extra", "sane_lists"]
+_NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG = ParserConfig(
+    css=CSS_PROFILES["strict"].copy(),
+    display_links=False,
+    display_anchors=False,
+)
 
 
 def strip_markdown_for_sms(value: str | None) -> str:
@@ -85,6 +106,63 @@ def strip_markdown_for_sms(value: str | None) -> str:
     text = _MARKDOWN_HEADER_RE.sub("", text)
 
     return text
+
+
+def _decode_unicode_character_escapes(value: str) -> str:
+    text = _UNICODE_ESCAPE_LONG_RE.sub(_decode_long_escape, value)
+
+    result = []
+    i = 0
+    while i < len(text):
+        match = _UNICODE_ESCAPE_RE.match(text, i)
+        if match:
+            code_point = int(match.group(1), 16)
+            if 0xD800 <= code_point <= 0xDBFF:
+                next_match = _UNICODE_ESCAPE_RE.match(text, match.end())
+                if next_match:
+                    next_code = int(next_match.group(1), 16)
+                    if 0xDC00 <= next_code <= 0xDFFF:
+                        combined = 0x10000 + (
+                            ((code_point - 0xD800) << 10) | (next_code - 0xDC00)
+                        )
+                        try:
+                            result.append(chr(combined))
+                            i = next_match.end()
+                            continue
+                        except (ValueError, OverflowError):
+                            pass
+            try:
+                result.append(chr(code_point))
+            except (ValueError, OverflowError):
+                result.append(match.group(0))
+            i = match.end()
+            continue
+        result.append(text[i])
+        i += 1
+
+    return "".join(result)
+
+
+def sanitize_notification_preview_text(value: str | None) -> str:
+    """Return plain text suitable for native browser notification bodies."""
+    if not isinstance(value, str):
+        return ""
+
+    text = _decode_unicode_character_escapes(value)
+    text = html.unescape(text)
+    text = _NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE.sub("\n", text)
+    text = strip_control_chars(text)
+    rendered = markdown.markdown(text, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
+    text = get_text(rendered, _NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG)
+    text = _MARKDOWN_LINK_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_STAR_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_CODE_RE.sub(r"\1", text)
+    text = _NOTIFICATION_PREVIEW_LIST_MARKER_RE.sub("", text)
+    text = _NOTIFICATION_PREVIEW_INLINE_BULLET_RE.sub(" ", text)
+    return " ".join(text.split())
 
 
 # Pattern for excessive newlines

@@ -8,6 +8,7 @@ from util.text_sanitizer import (
     strip_llm_artifacts,
     strip_redundant_blockquote_quotes,
     normalize_llm_output,
+    sanitize_notification_preview_text,
 )
 
 
@@ -385,6 +386,50 @@ class StripMarkdownForSmsTests(TestCase):
 
     def test_handles_none_input(self):
         result = strip_markdown_for_sms(None)
+        self.assertEqual(result, "")
+
+
+@tag("batch_text_sanitization")
+class NotificationPreviewTextTests(TestCase):
+    def test_strips_html_and_drops_script_content(self):
+        result = sanitize_notification_preview_text(
+            "<p>Hello <strong>there</strong></p><script>alert('x')</script>"
+        )
+
+        self.assertEqual(result, "Hello there")
+
+    def test_strips_common_markdown(self):
+        result = sanitize_notification_preview_text(
+            "# Done\n- **Finished** [details](https://example.com/details)"
+        )
+
+        self.assertEqual(result, "Done Finished details")
+
+    def test_preserves_markdown_autolinks(self):
+        result = sanitize_notification_preview_text("See <https://example.com/details> now")
+
+        self.assertEqual(result, "See https://example.com/details now")
+
+    def test_decodes_entities_escapes_and_normalizes_whitespace(self):
+        result = sanitize_notification_preview_text("Hello&nbsp;there\\n\\u2022 **Done**")
+
+        self.assertEqual(result, "Hello there Done")
+
+    def test_strips_entity_encoded_html(self):
+        result = sanitize_notification_preview_text("&lt;b&gt;hi&lt;/b&gt;")
+
+        self.assertEqual(result, "hi")
+
+    def test_preserves_generic_backslash_escapes(self):
+        result = sanitize_notification_preview_text(r"File is at C:\new\test")
+
+        self.assertEqual(result, r"File is at C:\new\test")
+
+    def test_returns_empty_for_markup_only_content(self):
+        result = sanitize_notification_preview_text(
+            "<script>alert('x')</script><style>body { color: red; }</style>"
+        )
+
         self.assertEqual(result, "")
 
 
