@@ -79,7 +79,6 @@ const config = {
         defaultMode: 'dark',
         respectPrefersColorScheme: true,
       },
-      languageTabs: [{ language: 'curl' }],
       image: 'images/gobii-fish-with-text-dark-purple.png',
       navbar: {
         logo: {
