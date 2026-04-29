@@ -36,6 +36,7 @@ from console.agent_audit.serializers import (
 )
 from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
 from util.text_sanitizer import sanitize_notification_preview_text
+from api.agent.comms.message_reads import serialize_agent_message_read_state
 
 from .access import user_can_manage_agent_settings
 from .kanban_events import persist_kanban_event
@@ -79,12 +80,17 @@ def _send(group: str, message_type: str, payload: dict, *, agent_id: str | None 
     async_to_sync(channel_layer.group_send)(group, message)
 
 
-def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool | None = None) -> None:
+def emit_agent_profile_update(
+    agent: PersistentAgent,
+    *,
+    processing_active: bool | None = None,
+    user_ids: set[int] | None = None,
+) -> None:
     """Broadcast latest agent identity metadata to connected chat clients."""
     if not agent or not getattr(agent, "id", None):
         return
 
-    payload = {
+    payload_base = {
         "agent_id": str(agent.id),
         "agent_name": agent.name or "Agent",
         "agent_color_hex": agent.get_display_color(),
@@ -97,9 +103,14 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
     }
     if processing_active is not None:
         normalized_processing_active = bool(processing_active)
-        payload["processing_active"] = normalized_processing_active
+        payload_base["processing_active"] = normalized_processing_active
         _LAST_PROCESSING_PROFILE_STATE_BY_AGENT_ID[str(agent.id)] = normalized_processing_active
-    for user_id in _resolve_profile_listener_user_ids(agent):
+    listener_user_ids = set(user_ids) if user_ids is not None else _resolve_profile_listener_user_ids(agent)
+    for user_id in listener_user_ids:
+        payload = {
+            **payload_base,
+            **serialize_agent_message_read_state(agent, user_id),
+        }
         _send(user_profile_group_name(user_id), "agent_profile_event", payload)
 
 
@@ -127,7 +138,7 @@ def emit_message_notification(message: PersistentAgentMessage) -> None:
     elif message.from_endpoint_id:
         channel = message.from_endpoint.channel
 
-    payload = {
+    payload_base = {
         "agent_id": str(agent.id),
         "agent_name": agent.name or "Agent",
         "agent_avatar_url": agent.get_avatar_thumbnail_url(),
@@ -143,6 +154,10 @@ def emit_message_notification(message: PersistentAgentMessage) -> None:
         },
     }
     for user_id in _resolve_profile_listener_user_ids(agent):
+        payload = {
+            **payload_base,
+            **serialize_agent_message_read_state(agent, user_id),
+        }
         _send(user_profile_group_name(user_id), "message_notification_event", payload)
 
 

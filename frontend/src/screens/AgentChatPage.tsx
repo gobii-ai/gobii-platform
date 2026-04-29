@@ -26,6 +26,9 @@ import {
   respondToHumanInputRequest,
   respondToHumanInputRequestsBatch,
   skipAgentPlanning,
+  markLatestAgentMessageRead,
+  normalizeAgentMessageReadState,
+  type AgentMessageReadState,
 } from '../api/agentChat'
 import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnIntent'
 import {
@@ -77,7 +80,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -436,6 +439,38 @@ function touchRosterEntryLastInteraction(
     ...current,
     agents: nextAgents,
   }
+}
+
+function applyRosterMessageReadState(
+  current: AgentRosterQueryData | undefined,
+  agentId: string,
+  readState: AgentMessageReadState,
+): AgentRosterQueryData | undefined {
+  if (!isAgentRosterQueryData(current) || !current.agents?.length) {
+    return current
+  }
+
+  let changed = false
+  const nextAgents = current.agents.map((agent) => {
+    if (agent.id !== agentId) {
+      return agent
+    }
+    if (
+      Boolean(agent.hasUnreadAgentMessage) === Boolean(readState.hasUnreadAgentMessage)
+      && (agent.latestAgentMessageId ?? null) === (readState.latestAgentMessageId ?? null)
+      && (agent.latestAgentMessageAt ?? null) === (readState.latestAgentMessageAt ?? null)
+      && (agent.latestAgentMessageReadAt ?? null) === (readState.latestAgentMessageReadAt ?? null)
+    ) {
+      return agent
+    }
+    changed = true
+    return {
+      ...agent,
+      ...readState,
+    }
+  })
+
+  return changed ? { ...current, agents: nextAgents } : current
 }
 
 function prunePendingAvatarTracking(
@@ -883,6 +918,7 @@ export function AgentChatPage({
   ))
   const [activeAgentId, setActiveAgentId] = useState<string | null>(agentId ?? null)
   const activeAgentIdRef = useRef<string | null>(activeAgentId)
+  const pendingReadMarkerByAgentRef = useRef<Record<string, string>>({})
   const routeAgentId = typeof agentId === 'string' ? agentId : null
   const shellSubview = useMemo(() => getAgentChatShellSubview(shellPathname), [shellPathname])
   const queryClient = useQueryClient()
@@ -1348,6 +1384,14 @@ export function AgentChatPage({
       const hasProcessingActive = Object.prototype.hasOwnProperty.call(rawPayload, 'processing_active')
       const hasSignupPreviewState = Object.prototype.hasOwnProperty.call(rawPayload, 'signup_preview_state')
       const hasPlanningState = Object.prototype.hasOwnProperty.call(rawPayload, 'planning_state')
+      const hasUnreadAgentMessage = Object.prototype.hasOwnProperty.call(rawPayload, 'has_unread_agent_message')
+      const hasLatestAgentMessageId = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_id')
+      const hasLatestAgentMessageAt = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_at')
+      const hasLatestAgentMessageReadAt = Object.prototype.hasOwnProperty.call(rawPayload, 'latest_agent_message_read_at')
+      const hasMessageReadState = hasUnreadAgentMessage
+        || hasLatestAgentMessageId
+        || hasLatestAgentMessageAt
+        || hasLatestAgentMessageReadAt
       if (
         !hasName
         && !hasColor
@@ -1357,6 +1401,7 @@ export function AgentChatPage({
         && !hasProcessingActive
         && !hasSignupPreviewState
         && !hasPlanningState
+        && !hasMessageReadState
       ) {
         return
       }
@@ -1443,6 +1488,25 @@ export function AgentChatPage({
               const nextPlanningState = normalizePlanningState(rawPayload.planning_state)
               if (nextPlanningState !== (next.planningState ?? 'skipped')) {
                 next.planningState = nextPlanningState
+                changed = true
+              }
+            }
+            if (hasMessageReadState) {
+              const readState = normalizeAgentMessageReadState(rawPayload)
+              if (readState.hasUnreadAgentMessage !== Boolean(next.hasUnreadAgentMessage)) {
+                next.hasUnreadAgentMessage = readState.hasUnreadAgentMessage
+                changed = true
+              }
+              if (readState.latestAgentMessageId !== (next.latestAgentMessageId ?? null)) {
+                next.latestAgentMessageId = readState.latestAgentMessageId
+                changed = true
+              }
+              if (readState.latestAgentMessageAt !== (next.latestAgentMessageAt ?? null)) {
+                next.latestAgentMessageAt = readState.latestAgentMessageAt
+                changed = true
+              }
+              if (readState.latestAgentMessageReadAt !== (next.latestAgentMessageReadAt ?? null)) {
+                next.latestAgentMessageReadAt = readState.latestAgentMessageReadAt
                 changed = true
               }
             }
@@ -2194,6 +2258,49 @@ export function AgentChatPage({
     availableAgentIds: visibleRosterAgentIds,
     onOpenAgent: openAgentChat,
   })
+  const handleAgentMessageNotificationEvent = useCallback((event: AgentMessageNotification) => {
+    const readState = normalizeAgentMessageReadState({
+      has_unread_agent_message: event.has_unread_agent_message ?? true,
+      latest_agent_message_id: event.latest_agent_message_id ?? event.message.id,
+      latest_agent_message_at: event.latest_agent_message_at ?? event.message.timestamp,
+      latest_agent_message_read_at: event.latest_agent_message_read_at ?? null,
+    })
+    queryClient.setQueriesData<AgentRosterQueryData>(
+      { queryKey: ['agent-roster'] },
+      (current) => applyRosterMessageReadState(current, event.agent_id, readState),
+    )
+    handleMessageNotificationEvent(event)
+  }, [handleMessageNotificationEvent, queryClient])
+  useEffect(() => {
+    if (!activeAgentId || !activeRosterMeta?.hasUnreadAgentMessage) {
+      return
+    }
+    const markerKey = activeRosterMeta.latestAgentMessageId ?? 'latest'
+    if (pendingReadMarkerByAgentRef.current[activeAgentId] === markerKey) {
+      return
+    }
+    pendingReadMarkerByAgentRef.current[activeAgentId] = markerKey
+    markLatestAgentMessageRead(activeAgentId)
+      .then((readState) => {
+        queryClient.setQueriesData<AgentRosterQueryData>(
+          { queryKey: ['agent-roster'] },
+          (current) => applyRosterMessageReadState(current, activeAgentId, readState),
+        )
+      })
+      .catch((error) => {
+        console.warn('Failed to mark agent message read', error)
+      })
+      .finally(() => {
+        if (pendingReadMarkerByAgentRef.current[activeAgentId] === markerKey) {
+          delete pendingReadMarkerByAgentRef.current[activeAgentId]
+        }
+      })
+  }, [
+    activeAgentId,
+    activeRosterMeta?.hasUnreadAgentMessage,
+    activeRosterMeta?.latestAgentMessageId,
+    queryClient,
+  ])
   const persistAgentChatNotificationsEnabled = useCallback(
     (
       nextAgentChatNotificationsEnabled: boolean,
@@ -2269,7 +2376,7 @@ export function AgentChatPage({
     contextOverride: contextReady ? effectiveContext : null,
     onCreditEvent: handleCreditEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
-    onMessageNotificationEvent: handleMessageNotificationEvent,
+    onMessageNotificationEvent: handleAgentMessageNotificationEvent,
   })
   useEffect(() => {
     if (!agentContextReady) return

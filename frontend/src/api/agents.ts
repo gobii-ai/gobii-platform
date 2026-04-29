@@ -62,6 +62,10 @@ type AgentRosterPayload = {
     last_interaction_at: string | null
     signup_preview_state?: SignupPreviewState | null
     planning_state?: PlanningState | null
+    has_unread_agent_message?: boolean
+    latest_agent_message_id?: string | null
+    latest_agent_message_at?: string | null
+    latest_agent_message_read_at?: string | null
   }[]
 }
 
@@ -110,6 +114,10 @@ export async function fetchAgentRoster(
     lastInteractionAt: agent.last_interaction_at,
     signupPreviewState: agent.signup_preview_state ?? null,
     planningState: agent.planning_state ?? null,
+    hasUnreadAgentMessage: Boolean(agent.has_unread_agent_message),
+    latestAgentMessageId: agent.latest_agent_message_id ?? null,
+    latestAgentMessageAt: agent.latest_agent_message_at ?? null,
+    latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
   }))
   return {
     context: payload.context,
