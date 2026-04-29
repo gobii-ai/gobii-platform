@@ -5,12 +5,14 @@ const sidebars = {
   docsSidebar: [
     {
       type: 'category',
-      label: 'Getting Started',
+      label: '👋 Getting Started',
+      collapsed: false,
       items: ['getting-started/introduction'],
     },
     {
       type: 'category',
-      label: 'Core Concepts',
+      label: '✨ Core Concepts',
+      collapsed: false,
       items: [
         'core-concepts/agents',
         'core-concepts/agent-contacts',
@@ -21,7 +23,8 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Advanced Usage',
+      label: '🧭 Advanced Usage',
+      collapsed: false,
       items: [
         'core-concepts/intelligence-selector',
         'core-concepts/organizations',
@@ -32,7 +35,8 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Console Guides',
+      label: '🖥️ Console Guides',
+      collapsed: false,
       items: [
         'console-guides/overview',
         'console-guides/live-chat-guide',
@@ -43,7 +47,8 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Developers',
+      label: '🛠️ Developers',
+      collapsed: false,
       items: [
         'developers/developer-basics',
         'developers/developer-agents',
@@ -54,17 +59,18 @@ const sidebars = {
     },
     {
       type: 'category',
-      label: 'Self-Hosted',
+      label: '🏠 Self-Hosted',
+      collapsed: false,
       items: ['self-hosted/overview'],
     },
     {
       type: 'category',
-      label: 'API Reference',
+      label: '⚙️ API Reference',
       link: {
         type: 'doc',
         id: 'api-reference/gobii-api',
       },
-      collapsed: false,
+      collapsed: true,
       items: apiSidebar.apisidebar.slice(1),
     },
   ],
