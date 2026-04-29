@@ -1,5 +1,7 @@
 import { Check, Info, XCircle } from 'lucide-react'
 
+import { sharedSettingsGlassFrameClassName, standaloneSettingsSurfaceClassName } from '../agentSettings/settingsSurfaceClasses'
+
 type SaveBarVariant = 'standalone' | 'embedded'
 type SaveBarPlacement = 'fixed' | 'sticky'
 
@@ -10,9 +12,15 @@ export type SaveBarProps = {
   busy?: boolean
   error?: string | null
   id?: string
+  title?: string
   helperText?: string | null
   variant?: SaveBarVariant
   placement?: SaveBarPlacement
+  showCancel?: boolean
+  cancelLabel?: string
+  saveLabel?: string
+  busyLabel?: string
+  showSaveIcon?: boolean
 }
 
 export function SaveBar({
@@ -22,9 +30,15 @@ export function SaveBar({
   busy,
   error,
   id,
+  title = 'You have unsaved changes',
   helperText = null,
   variant = 'standalone',
   placement = 'fixed',
+  showCancel = true,
+  cancelLabel = 'Cancel',
+  saveLabel = 'Save Changes',
+  busyLabel = 'Saving…',
+  showSaveIcon = true,
 }: SaveBarProps) {
   if (!visible) {
     return null
@@ -35,8 +49,8 @@ export function SaveBar({
   const rootClassName = isFixed ? 'fixed inset-x-0 bottom-0 z-40 pointer-events-none' : 'sticky bottom-4 z-20'
   const frameClassName = isFixed ? 'pointer-events-auto mx-auto w-full max-w-5xl px-4 pb-4' : 'w-full'
   const surfaceClassName = isEmbedded
-    ? 'rounded-2xl border border-slate-200/25 bg-slate-950/60 px-4 py-3 text-slate-100 shadow-[0_18px_38px_rgba(7,10,24,0.32)] backdrop-blur-xl'
-    : 'rounded-2xl border border-gray-200/70 bg-white/78 px-4 py-3 text-gray-900 shadow-[0_18px_38px_rgba(15,23,42,0.18)] backdrop-blur-xl'
+    ? 'overflow-hidden rounded-2xl bg-slate-950/80 px-4 py-3 text-slate-100 backdrop-blur-xl'
+    : `${sharedSettingsGlassFrameClassName} px-4 py-3 shadow-[0_18px_38px_rgba(15,23,42,0.18)] ${standaloneSettingsSurfaceClassName}`
   const copyClassName = isEmbedded ? 'text-sm text-slate-200' : 'text-sm text-gray-700'
   const helperClassName = isEmbedded ? 'mt-1 text-xs text-slate-300' : 'mt-1 text-xs text-gray-500'
   const errorClassName = isEmbedded ? 'mt-1 flex items-center gap-2 text-xs text-rose-300' : 'mt-1 flex items-center gap-2 text-xs text-red-600'
@@ -57,7 +71,7 @@ export function SaveBar({
             <div className={copyClassName}>
               <div className="flex items-center gap-2">
                 <Info className={iconClassName} aria-hidden="true" />
-                <span className="font-medium">You have unsaved changes</span>
+                <span className="font-medium">{title}</span>
               </div>
               {error ? (
                 <div className={errorClassName}>
@@ -69,21 +83,23 @@ export function SaveBar({
               ) : null}
             </div>
             <div className={actionRowClassName}>
-              <button
-                type="button"
-                onClick={onCancel}
-                className={cancelButtonClassName}
-              >
-                Cancel
-              </button>
+              {showCancel ? (
+                <button
+                  type="button"
+                  onClick={onCancel}
+                  className={cancelButtonClassName}
+                >
+                  {cancelLabel}
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={onSave}
                 disabled={busy}
                 className={saveButtonClassName}
               >
-                <Check className="h-4 w-4" aria-hidden="true" />
-                {busy ? 'Saving…' : 'Save Changes'}
+                {showSaveIcon ? <Check className="h-4 w-4" aria-hidden="true" /> : null}
+                {busy ? busyLabel : saveLabel}
               </button>
             </div>
           </div>

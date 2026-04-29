@@ -1265,6 +1265,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     submitWebhookAction,
     onSaved,
   ])
+
   const openConfirmAction = useCallback(
     (config: ConfirmActionConfig) => {
       showModal((onClose) => <ConfirmActionDialog {...config} onClose={onClose} />)

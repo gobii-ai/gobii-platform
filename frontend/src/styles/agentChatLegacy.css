@@ -6063,8 +6063,6 @@
   border-radius: 1.35rem;
   padding: 0.95rem 1rem 1.25rem;
   background: var(--chat-sidebar-settings-banner-surface);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
 }
 
 .chat-sidebar-settings-theme .text-slate-900,
@@ -9260,8 +9258,8 @@
   --console-card-border: 1px solid rgba(196, 181, 253, 0.16);
   --console-card-radius: 1.1rem;
   --console-card-shadow: none;
-  --console-card-backdrop-filter: blur(18px);
-  --console-card-webkit-backdrop-filter: blur(18px);
+  --console-card-backdrop-filter: none;
+  --console-card-webkit-backdrop-filter: none;
 }
 
 .billing-screen--embedded .card {

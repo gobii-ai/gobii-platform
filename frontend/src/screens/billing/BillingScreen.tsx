@@ -3,6 +3,7 @@ import { AlertTriangle, CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
 
 import { getCsrfToken, jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { SaveBar } from '../../components/common/SaveBar'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
 import { type PlanTier, useSubscriptionStore } from '../../stores/subscriptionStore'
 import { track } from '../../util/analytics'
@@ -196,6 +197,10 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
     dispatch({ type: 'seat.setTarget', value: initialData.seats.purchased })
     dispatch({ type: 'seat.cancelSchedule' })
   }, [initialData, isOrg])
+
+  const scrollToBillingSummary = useCallback(() => {
+    document.getElementById('billing-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [])
 
   const requestDedicatedRemove = useCallback((proxy: DedicatedIpProxy) => {
     if (!dedicatedInteractable) return
@@ -643,22 +648,19 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
         <ExtraTasksSection initialData={initialData} />
       </main>
 
-      {hasAnyChanges && !summaryActionsVisible && nearTop ? (
-        <div className="billing-screen__floating-actions-shell fixed inset-x-0 bottom-0 z-40 px-4 pb-4 sm:px-6">
-          <div className="billing-screen__floating-actions mx-auto flex w-full max-w-5xl items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-white shadow-lg">
-            <div className="min-w-0 text-sm font-semibold">
-              You have unsaved changes.
-            </div>
-            <button
-              type="button"
-              onClick={() => document.getElementById('billing-summary')?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
-              className="inline-flex flex-none items-center justify-center rounded-xl bg-white/10 px-4 py-2 text-sm font-semibold text-white transition hover:bg-white/15"
-            >
-              Review and update
-            </button>
-          </div>
-        </div>
-      ) : null}
+      <SaveBar
+        visible={hasAnyChanges && !summaryActionsVisible && nearTop}
+        onCancel={resetDraft}
+        onSave={isEmbedded ? scrollToBillingSummary : handleSave}
+        busy={saving}
+        error={saveError}
+        title={isEmbedded ? 'You have unsaved changes.' : undefined}
+        variant={isEmbedded ? 'embedded' : 'standalone'}
+        placement={isEmbedded ? 'sticky' : 'fixed'}
+        showCancel={!isEmbedded}
+        saveLabel={isEmbedded ? 'Review and update' : undefined}
+        showSaveIcon={!isEmbedded}
+      />
 
       {isUpgradeModalOpen && !isOrg && isProprietaryMode ? (
         <SubscriptionUpgradeModal
