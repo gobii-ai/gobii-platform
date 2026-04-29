@@ -35,6 +35,7 @@ from console.agent_audit.serializers import (
     serialize_tool_call,
 )
 from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
+from util.text_sanitizer import sanitize_notification_preview_text
 
 from .access import user_can_manage_agent_settings
 from .kanban_events import persist_kanban_event
@@ -103,7 +104,7 @@ def emit_agent_profile_update(agent: PersistentAgent, *, processing_active: bool
 
 
 def _build_message_notification_preview(message: PersistentAgentMessage) -> str:
-    body = " ".join((message.body or "").split())
+    body = sanitize_notification_preview_text(message.body)
     if body:
         return Truncator(body).chars(160)
     return "New agent message"

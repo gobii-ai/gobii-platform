@@ -150,6 +150,22 @@ class AgentChatSignalTests(TestCase):
         except asyncio.TimeoutError as exc:  # pragma: no cover - defensive assertion clarity
             self.fail(f"Timed out waiting for channel message: {exc}")
 
+    def _emit_outbound_message_notification_preview(self, body: str) -> str:
+        with patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False):
+            with self.captureOnCommitCallbacks(execute=True):
+                PersistentAgentMessage.objects.create(
+                    owner_agent=self.agent,
+                    is_outbound=True,
+                    from_endpoint=self.agent_endpoint,
+                    to_endpoint=self.requester_endpoint,
+                    body=body,
+                    raw_payload={"source": "test"},
+                )
+
+        notification = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(notification.get("type"), "message_notification_event")
+        return notification.get("payload", {}).get("message", {}).get("body_preview")
+
     @tag("batch_agent_chat")
     def test_tool_call_creation_emits_timeline_event(self):
         step = PersistentAgentStep.objects.create(agent=self.agent, description="Call tool")
@@ -329,6 +345,40 @@ class AgentChatSignalTests(TestCase):
                 "id": str(self.user.id),
             },
         )
+
+    @tag("batch_agent_chat")
+    def test_outbound_message_notification_preview_strips_html(self):
+        body_preview = self._emit_outbound_message_notification_preview(
+            "<p>Hello <strong>there</strong></p><script>alert('x')</script>"
+        )
+
+        self.assertEqual(body_preview, "Hello there")
+
+    @tag("batch_agent_chat")
+    def test_outbound_message_notification_preview_strips_markdown(self):
+        body_preview = self._emit_outbound_message_notification_preview(
+            "# Done\n**Finished** [details](https://example.com/details)"
+        )
+
+        self.assertEqual(body_preview, "Done Finished details")
+
+    @tag("batch_agent_chat")
+    def test_outbound_message_notification_preview_falls_back_when_sanitized_empty(self):
+        body_preview = self._emit_outbound_message_notification_preview(
+            "<script>alert('x')</script><style>body { color: red; }</style>"
+        )
+
+        self.assertEqual(body_preview, "New agent message")
+
+    @tag("batch_agent_chat")
+    def test_outbound_message_notification_preview_truncates_after_sanitizing(self):
+        body = "<p>**" + ("Finished task " * 20) + "**</p>"
+        body_preview = self._emit_outbound_message_notification_preview(body)
+
+        self.assertNotIn("<p>", body_preview)
+        self.assertNotIn("**", body_preview)
+        self.assertTrue(body_preview.startswith("Finished task Finished task"))
+        self.assertLessEqual(len(body_preview), 160)
 
     @tag("batch_agent_chat")
     def test_inbound_message_does_not_emit_message_notification_event(self):

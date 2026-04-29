@@ -1,5 +1,6 @@
 """Utilities for cleaning outbound message content."""
 
+import html
 import re
 import unicodedata
 
@@ -11,6 +12,7 @@ __all__ = [
     "strip_llm_artifacts",
     "strip_redundant_blockquote_quotes",
     "normalize_llm_output",
+    "sanitize_notification_preview_text",
 ]
 
 
@@ -57,6 +59,21 @@ _MARKDOWN_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")  # _ita
 _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")  # `code`
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")  # [text](url)
 _MARKDOWN_HEADER_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)  # # Header
+_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
+_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_MARKDOWN_REFERENCE_LINK_RE = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
+_MARKDOWN_AUTOLINK_RE = re.compile(r"<((?:https?://|mailto:)[^>\s]+)>", re.IGNORECASE)
+_MARKDOWN_FENCE_RE = re.compile(r"^\s*`{3,}[a-zA-Z0-9_-]*\s*$", re.MULTILINE)
+_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
+    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$",
+    re.MULTILINE,
+)
+_MARKDOWN_LEADING_MARKER_RE = re.compile(
+    r"^\s*(?:#{1,6}\s+|>\s*|[-*+\u2022]\s+|\d+[.)]\s+)",
+    re.MULTILINE,
+)
+_MARKDOWN_STRIKETHROUGH_RE = re.compile(r"~~(.+?)~~")
+_MARKDOWN_PIPE_RE = re.compile(r"\s*\|\s*")
 
 
 def strip_markdown_for_sms(value: str | None) -> str:
@@ -85,6 +102,52 @@ def strip_markdown_for_sms(value: str | None) -> str:
     text = _MARKDOWN_HEADER_RE.sub("", text)
 
     return text
+
+
+def _strip_html_for_notification_preview(value: str) -> str:
+    if not _HTML_TAG_RE.search(value):
+        return value
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(value, "html.parser")
+    for element in soup(["script", "style", "template"]):
+        element.decompose()
+    return soup.get_text(" ")
+
+
+def _strip_markdown_for_notification_preview(value: str) -> str:
+    text = _MARKDOWN_AUTOLINK_RE.sub(r"\1", value)
+    text = _MARKDOWN_IMAGE_RE.sub(r"\1", text)
+    text = _MARKDOWN_LINK_RE.sub(r"\1", text)
+    text = _MARKDOWN_REFERENCE_LINK_RE.sub(r"\1", text)
+    text = _MARKDOWN_TABLE_SEPARATOR_RE.sub(" ", text)
+    text = _MARKDOWN_FENCE_RE.sub(" ", text)
+    text = _MARKDOWN_LEADING_MARKER_RE.sub("", text)
+    text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_STAR_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_STRIKETHROUGH_RE.sub(r"\1", text)
+    text = _MARKDOWN_CODE_RE.sub(r"\1", text)
+    text = _MARKDOWN_PIPE_RE.sub(" ", text)
+    return text.replace("`", "")
+
+
+def sanitize_notification_preview_text(value: str | None) -> str:
+    """Return plain text suitable for native browser notification bodies."""
+    if not isinstance(value, str):
+        return ""
+
+    text = decode_unicode_escapes(value)
+    text = strip_control_chars(text)
+    text = _MARKDOWN_AUTOLINK_RE.sub(r"\1", text)
+    text = _strip_html_for_notification_preview(text)
+    text = html.unescape(text)
+    text = _strip_markdown_for_notification_preview(text)
+    text = html.unescape(text)
+    text = normalize_whitespace(text)
+    return " ".join(text.split())
 
 
 # Pattern for excessive newlines
