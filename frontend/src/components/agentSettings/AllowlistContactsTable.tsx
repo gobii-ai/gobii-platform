@@ -17,20 +17,30 @@ function isRowSelectable(row: AllowlistTableRow) {
   return row.pendingType !== 'remove' && row.pendingType !== 'cancel_invite'
 }
 
-function renderStatus(row: AllowlistTableRow) {
+function renderStatus(row: AllowlistTableRow, embedded: boolean) {
+  const pendingAmberClassName = embedded
+    ? 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200'
+    : 'inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800'
+  const pendingRoseClassName = embedded
+    ? 'inline-flex rounded-full border border-rose-300/20 bg-rose-950/35 px-2.5 py-1 text-xs font-semibold text-rose-200'
+    : 'inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700'
+  const activeClassName = embedded
+    ? 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2.5 py-1 text-xs font-semibold text-emerald-200'
+    : 'inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700'
+
   if (row.pendingType === 'create') {
-    return <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">Pending create</span>
+    return <span className={pendingAmberClassName}>Pending create</span>
   }
   if (row.pendingType === 'remove') {
-    return <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Pending removal</span>
+    return <span className={pendingRoseClassName}>Pending removal</span>
   }
   if (row.pendingType === 'cancel_invite') {
-    return <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Pending cancel</span>
+    return <span className={pendingRoseClassName}>Pending cancel</span>
   }
   if (row.kind === 'invite') {
-    return <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">Invite pending</span>
+    return <span className={pendingAmberClassName}>Invite pending</span>
   }
-  return <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Allowed</span>
+  return <span className={activeClassName}>Allowed</span>
 }
 
 export function AllowlistContactsTable({ rows, disabled = false, embedded = false, onRemoveRow, onRemoveRows }: AllowlistContactsTableProps) {
@@ -78,7 +88,7 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
               }
             }}
             onChange={table.getToggleAllRowsSelectedHandler()}
-            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+            className={embedded ? 'h-4 w-4 rounded border-slate-300/40 bg-slate-950/70 text-blue-500 focus:ring-blue-500 focus:ring-offset-0' : 'h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500'}
             aria-label="Select all contacts"
             disabled={disabled}
           />
@@ -89,7 +99,7 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
             checked={row.getIsSelected()}
             disabled={disabled || !row.getCanSelect()}
             onChange={row.getToggleSelectedHandler()}
-            className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
+            className={embedded ? 'h-4 w-4 rounded border-slate-300/40 bg-slate-950/70 text-blue-500 focus:ring-blue-500 focus:ring-offset-0 disabled:opacity-50' : 'h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50'}
             aria-label={`Select ${row.original.address}`}
           />
         ),
@@ -140,7 +150,7 @@ export function AllowlistContactsTable({ rows, disabled = false, embedded = fals
       {
         id: 'status',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>,
-        cell: ({ row }) => renderStatus(row.original),
+        cell: ({ row }) => renderStatus(row.original, embedded),
       },
       {
         id: 'actions',

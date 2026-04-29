@@ -2567,6 +2567,11 @@ type AllowlistManagerProps = {
 
 function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, embedded = false }: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
+  const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
+  const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
+  const embeddedInfoIconClassName = 'flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200/20 bg-slate-900/45 text-slate-300'
+  const embeddedPrimaryActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-semibold text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
+
   return (
     <div className="space-y-5">
       <div className="space-y-1">
@@ -2578,9 +2583,9 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       </div>
 
       {!state.emailVerified && (
-        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className={embedded ? embeddedInfoBannerClassName : 'flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3'}>
           <Mail className="w-4 h-4 text-amber-600 mt-0.5 flex-shrink-0" aria-hidden="true" />
-          <div className="text-sm text-amber-800">
+          <div className={embedded ? 'text-sm text-amber-100' : 'text-sm text-amber-800'}>
             <span className="font-medium">Email verification required.</span>{' '}
             External contacts won't be able to reach your agent until you{' '}
             <a href="/accounts/email/" className="underline hover:text-amber-900">verify your email address</a>.
@@ -2589,11 +2594,11 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       )}
 
       {state.pendingContactRequests > 0 && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+        <div className={embedded ? 'rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3' : 'rounded-lg border border-amber-200 bg-amber-50 px-4 py-3'}>
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 text-amber-600" aria-hidden="true" />
-              <span className="text-sm font-medium text-amber-800">
+              <span className={embedded ? 'text-sm font-medium text-amber-100' : 'text-sm font-medium text-amber-800'}>
                 {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
               </span>
             </div>
@@ -2605,12 +2610,12 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
       )}
 
       {(state.ownerEmail || state.ownerPhone) && (
-        <div className={embedded ? 'rounded-xl border border-slate-200/70 bg-transparent px-4 py-4' : 'rounded-xl border border-slate-200 bg-white px-4 py-4'}>
+        <div className={embedded ? embeddedInfoCardClassName : 'rounded-xl border border-slate-200 bg-white px-4 py-4'}>
           <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Owner Endpoints</div>
           <p className="mt-1 text-xs text-slate-600">Owner endpoints are always allowed in default mode.</p>
           {state.ownerEmail && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+              <span className={embedded ? embeddedInfoIconClassName : 'flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600'}>
                 <Mail className="w-4 h-4" aria-hidden="true" />
               </span>
               <span className="font-medium">{state.ownerEmail}</span>
@@ -2618,7 +2623,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
           )}
           {state.ownerPhone && (
             <div className="mt-3 flex items-center gap-2 text-sm text-slate-700">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+              <span className={embedded ? embeddedInfoIconClassName : 'flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600'}>
                 <Phone className="w-4 h-4" aria-hidden="true" />
               </span>
               <span className="font-medium">{state.ownerPhone}</span>
@@ -2646,7 +2651,7 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
               type="button"
               onClick={onAddContact}
               disabled={saving || contactCapReached}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50"
+              className={embedded ? embeddedPrimaryActionClassName : 'inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-50'}
             >
               <Plus className="h-4 w-4" aria-hidden="true" />
               Add Contact
@@ -2681,6 +2686,7 @@ type CollaboratorManagerProps = {
 function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, onAdd, onRemove, onConfirmAction, embedded = false }: CollaboratorManagerProps) {
   const canManage = state.canManage
   const totalLimit = state.maxContacts ?? 'Unlimited'
+  const embeddedPrimaryActionClassName = 'rounded-lg border border-emerald-300/25 bg-emerald-900/50 px-4 py-2 text-sm font-semibold text-emerald-50 transition-colors hover:border-emerald-200/40 hover:bg-emerald-900/70 disabled:opacity-50'
 
   return (
     <div className="space-y-5">
@@ -2706,7 +2712,7 @@ function CollaboratorManager({ state, rows, projectedTotalCount, error, busy, on
               type="button"
               onClick={onAdd}
               disabled={busy || !canManage}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              className={embedded ? embeddedPrimaryActionClassName : 'rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:opacity-50'}
             >
               <span className="inline-flex items-center gap-2">
                 <UserPlus className="h-4 w-4" aria-hidden="true" />
@@ -2804,6 +2810,9 @@ function IntegrationsSection({
   const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35' : 'overflow-hidden border border-gray-200 rounded-xl'
   const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
   const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
+  const primaryActionButtonClassName = embedded
+    ? 'inline-flex items-center gap-2 rounded-lg border border-sky-300/25 bg-sky-900/55 px-4 py-2 text-sm font-medium text-sky-50 transition-colors hover:border-sky-200/40 hover:bg-sky-900/75 disabled:opacity-50'
+    : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50'
   const neutralButtonClassName = embedded
     ? 'inline-flex items-center gap-2 rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-1.5 text-xs font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:opacity-50'
     : 'inline-flex items-center gap-2 px-3 py-1.5 text-xs font-medium rounded-md border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50'
@@ -2813,6 +2822,15 @@ function IntegrationsSection({
   const warningButtonClassName = embedded
     ? 'inline-flex items-center gap-1.5 rounded-md border border-amber-300/25 bg-amber-950/30 px-3 py-1.5 text-xs font-medium text-amber-200 transition-colors hover:border-amber-200/40 hover:bg-amber-900/45 disabled:opacity-50'
     : 'inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-amber-200 text-amber-700 hover:bg-amber-50 disabled:opacity-50'
+  const pendingBadgeClassName = embedded
+    ? 'inline-flex rounded-full border border-amber-300/20 bg-amber-950/35 px-2 py-0.5 text-[11px] font-medium text-amber-200'
+    : 'text-xs text-amber-600'
+  const activeStatusClassName = embedded
+    ? 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2 py-0.5 text-[11px] font-medium text-emerald-200'
+    : 'text-green-600'
+  const inactiveStatusClassName = embedded
+    ? 'inline-flex rounded-full border border-slate-300/20 bg-slate-900/35 px-2 py-0.5 text-[11px] font-medium text-slate-300'
+    : 'text-gray-500'
   const emptyStateClassName = embedded
     ? 'rounded-xl border border-dashed border-slate-200/25 bg-slate-950/20 px-4 py-4 text-sm text-slate-300'
     : 'p-4 bg-gray-50 border border-dashed border-gray-300 rounded-xl text-sm text-gray-600'
@@ -2932,7 +2950,7 @@ function IntegrationsSection({
             </div>
             <button
               type="button"
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700 disabled:opacity-50"
+              className={primaryActionButtonClassName}
               onClick={onPeerLinkAdd}
               disabled={peerLinks.candidates.length === 0}
             >
@@ -2973,10 +2991,10 @@ function IntegrationsSection({
                         <td className="px-4 py-3 text-sm text-gray-800">
                           <div className="font-medium">{entry.counterpartName ?? '(Agent unavailable)'}</div>
                           <div className="text-xs text-gray-500 mt-1">Linked {entry.createdOnLabel}</div>
-                          {pendingLabel && <div className="text-xs text-amber-600">{pendingLabel}</div>}
+                          {pendingLabel && <div className="mt-1"><span className={pendingBadgeClassName}>{pendingLabel}</span></div>}
                           <div className="text-xs mt-1">
                             Status:{' '}
-                            <span className={entry.isEnabled ? 'text-green-600' : 'text-gray-500'}>
+                            <span className={entry.isEnabled ? activeStatusClassName : inactiveStatusClassName}>
                               {entry.isEnabled ? 'Enabled' : 'Disabled'}
                             </span>
                           </div>
@@ -3037,7 +3055,7 @@ function IntegrationsSection({
             <button
               type="button"
               onClick={onWebhookCreate}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
+              className={primaryActionButtonClassName}
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
               Add Outbound Webhook
@@ -3070,7 +3088,7 @@ function IntegrationsSection({
                         <td className="px-4 py-3 text-sm text-gray-800">
                           <div className="flex flex-col">
                             <span>{webhook.name}</span>
-                            {pendingLabel && <span className="text-xs text-amber-600">{pendingLabel}</span>}
+                            {pendingLabel && <span className={`mt-1 w-fit ${pendingBadgeClassName}`}>{pendingLabel}</span>}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 break-all">{webhook.url}</td>
@@ -3123,7 +3141,7 @@ function IntegrationsSection({
             <button
               type="button"
               onClick={onInboundWebhookCreate}
-              className="inline-flex items-center gap-2 px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-lg shadow-sm hover:bg-blue-700"
+              className={primaryActionButtonClassName}
             >
               <Plus className="w-4 h-4" aria-hidden="true" />
               Add Inbound Webhook
@@ -3162,7 +3180,7 @@ function IntegrationsSection({
                         <td className="px-4 py-3 text-sm text-gray-800">
                           <div className="flex flex-col">
                             <span>{webhook.name}</span>
-                            {pendingLabel && <span className="text-xs text-amber-600">{pendingLabel}</span>}
+                            {pendingLabel && <span className={`mt-1 w-fit ${pendingBadgeClassName}`}>{pendingLabel}</span>}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600">
@@ -3188,7 +3206,7 @@ function IntegrationsSection({
                           </div>
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-700">
-                          <span className={webhook.isActive ? 'text-green-600' : 'text-gray-500'}>
+                          <span className={webhook.isActive ? activeStatusClassName : inactiveStatusClassName}>
                             {webhook.isActive ? 'Active' : 'Inactive'}
                           </span>
                         </td>
@@ -3680,7 +3698,7 @@ function ActionsSection({
         <section className={embedded ? 'px-0 py-5' : 'p-6 sm:p-8'}>
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
-              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50">
+              <div className={embedded ? 'flex h-12 w-12 items-center justify-center rounded-full border border-rose-300/25 bg-rose-950/35 text-rose-200' : 'flex items-center justify-center w-12 h-12 rounded-full bg-red-100 border-4 border-red-50'}>
                 <ShieldAlert className="w-6 h-6 text-red-600" aria-hidden="true" />
               </div>
             </div>

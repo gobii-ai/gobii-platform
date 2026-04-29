@@ -13,21 +13,31 @@ type CollaboratorsTableProps = {
   onRemove: (row: CollaboratorTableRow) => void
 }
 
-function renderStatus(row: CollaboratorTableRow) {
+function renderStatus(row: CollaboratorTableRow, embedded: boolean) {
+  const pendingAmberClassName = embedded
+    ? 'inline-flex items-center gap-1 rounded-full border border-amber-300/20 bg-amber-950/35 px-2.5 py-1 text-xs font-semibold text-amber-200'
+    : 'inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800'
+  const pendingRoseClassName = embedded
+    ? 'inline-flex rounded-full border border-rose-300/20 bg-rose-950/35 px-2.5 py-1 text-xs font-semibold text-rose-200'
+    : 'inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700'
+  const activeClassName = embedded
+    ? 'inline-flex rounded-full border border-emerald-300/20 bg-emerald-950/35 px-2.5 py-1 text-xs font-semibold text-emerald-200'
+    : 'inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700'
+
   if (row.pendingType === 'create') {
-    return <span className="inline-flex rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">Pending create</span>
+    return <span className={pendingAmberClassName}>Pending create</span>
   }
   if (row.pendingType === 'remove') {
-    return <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Pending removal</span>
+    return <span className={pendingRoseClassName}>Pending removal</span>
   }
   if (row.pendingType === 'cancel_invite') {
-    return <span className="inline-flex rounded-full bg-rose-100 px-2.5 py-1 text-xs font-semibold text-rose-700">Pending cancel</span>
+    return <span className={pendingRoseClassName}>Pending cancel</span>
   }
   if (row.kind === 'active') {
-    return <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-700">Active</span>
+    return <span className={activeClassName}>Active</span>
   }
   return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">
+    <span className={pendingAmberClassName}>
       <Clock3 className="h-3 w-3" aria-hidden="true" />
       Pending invite
     </span>
@@ -83,7 +93,7 @@ export function CollaboratorsTable({
       {
         id: 'status',
         header: () => <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Status</span>,
-        cell: ({ row }) => renderStatus(row.original),
+        cell: ({ row }) => renderStatus(row.original, embedded),
       },
       {
         id: 'actions',
