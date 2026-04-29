@@ -8,62 +8,63 @@ paths:
     get:
       operationId: listPersistentAgents
       parameters:
-      - name: page
-        required: false
-        in: query
-        description: A page number within the paginated result set.
-        schema:
-          type: integer
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
+        - name: page
+          required: false
+          in: query
+          description: A page number within the paginated result set.
+          schema:
+            type: integer
+        - name: page_size
+          required: false
+          in: query
+          description: Number of results to return per page.
+          schema:
+            type: integer
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedPersistentAgentListList'
-          description: ''
+                $ref: "#/components/schemas/PaginatedPersistentAgentListList"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agents - List
+      summary: Get agents
     post:
       operationId: createPersistentAgent
       summary: Create an Agent
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Create
@@ -71,248 +72,251 @@ paths:
     get:
       operationId: getPersistentAgent
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Get
+      summary: Get Agent
     put:
       operationId: updatePersistentAgent
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Update
+      summary: Update Agent
     patch:
       operationId: partialUpdatePersistentAgent
       description: Update an agent's configuration
-      summary: Update an Agent
+      summary: Update Agent
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedPersistentAgentDetail'
+              $ref: "#/components/schemas/PatchedPersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedPersistentAgentDetail'
+              $ref: "#/components/schemas/PatchedPersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedPersistentAgentDetail'
+              $ref: "#/components/schemas/PatchedPersistentAgentDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Update (Partial)
     delete:
       operationId: deletePersistentAgent
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '204':
+        "204":
           description: No response body
       x-mint:
         metadata:
           sidebarTitle: Agent - Delete
+      summary: Delete Agent
   /agents/{id}/activate/:
     post:
       operationId: activatePersistentAgent
       description: Activates an agent processing.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Activate
+      summary: Activate Agent
   /agents/{id}/deactivate/:
     post:
       operationId: deactivatePersistentAgent
       description: Deactivates an agent from processing.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Deactivate
+      summary: Deactivate Agent
   /agents/{id}/messages/:
     post:
       operationId: sendPersistentAgentMessage
-      description: Send a message to an agent. Messages can provide additional information,
-        make requests, and so forth to an agent just as you would communicate with
-        an agent outside of the API.
+      description: Send a message to an agent. Messages can provide additional information, make requests, and so forth to an agent just as you would communicate with an agent outside of the API.
       summary: Message Agent
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent - Message
@@ -322,26 +326,26 @@ paths:
       description: Gets the processing status of an agent's current timeline
       summary: Get Agent Processing Status
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Processing Status
@@ -349,67 +353,68 @@ paths:
     post:
       operationId: previewPersistentAgentSchedule
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PersistentAgentDetail'
+              $ref: "#/components/schemas/PersistentAgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Agent Schedule - Preview
+      summary: Preview Agent Schedule
   /agents/{id}/timeline/:
     get:
       operationId: getPersistentAgentTimeline
       description: Gets the agent's current timeline
       summary: Get Agent Timeline
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Timeline - Get
@@ -417,60 +422,61 @@ paths:
     get:
       operationId: listWebTasks
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-          description: Unique identifier for the agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+            description: Unique identifier for the agent.
+          required: true
       tags:
-      - Agents API
+        - Agents API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PersistentAgentDetail'
-          description: ''
+                $ref: "#/components/schemas/PersistentAgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Web Tasks - List
+      summary: List Web Tasks
   /agents/browser-use/:
     get:
       operationId: listAgents
       description: List all browser-use profiles for the API key.
       summary: List browser-use Profiles
       parameters:
-      - name: page
-        required: false
-        in: query
-        description: A page number within the paginated result set.
-        schema:
-          type: integer
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
+        - name: page
+          required: false
+          in: query
+          description: A page number within the paginated result set.
+          schema:
+            type: integer
+        - name: page_size
+          required: false
+          in: query
+          description: Number of results to return per page.
+          schema:
+            type: integer
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedAgentListList'
-          description: ''
+                $ref: "#/components/schemas/PaginatedAgentListList"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Profiles - List
@@ -478,33 +484,34 @@ paths:
       operationId: createAgent
       description: ViewSet for managing BrowserUseAgents.
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDetail'
-          description: ''
+                $ref: "#/components/schemas/AgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Profile - Create
+      summary: Create browser-use Profile
   /agents/browser-use/{agentId}/tasks/:
     get:
       operationId: listTasks
@@ -512,89 +519,91 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - name: page
-        required: false
-        in: query
-        description: A page number within the paginated result set.
-        schema:
-          type: integer
-      - name: page_size
-        required: false
-        in: query
-        description: Number of results to return per page.
-        schema:
-          type: integer
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - name: page
+          required: false
+          in: query
+          description: A page number within the paginated result set.
+          schema:
+            type: integer
+        - name: page_size
+          required: false
+          in: query
+          description: Number of results to return per page.
+          schema:
+            type: integer
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedTaskListList'
-          description: ''
+                $ref: "#/components/schemas/PaginatedTaskListList"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Tasks - List
+      summary: List Tasks
     post:
       operationId: assignTask
       description: Override create to handle wait parameter results.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
-        '402':
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InsufficientCreditsResponse'
-          description: ''
-        '400':
+                $ref: "#/components/schemas/ValidationErrorResponse"
+          description: ""
+        "402":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
-          description: ''
+                $ref: "#/components/schemas/InsufficientCreditsResponse"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Create
+      summary: Create Task
   /agents/browser-use/{agentId}/tasks/{id}/:
     get:
       operationId: getTask
@@ -602,154 +611,158 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Get
+      summary: Get Task
     put:
       operationId: updateTask
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Update
+      summary: Update Task
     patch:
       operationId: updateTaskStatusPartial
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Update
+      summary: Update Task
     delete:
       operationId: deleteTask
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '204':
+        "204":
           description: No response body
       x-mint:
         metadata:
           sidebarTitle: Task - Delete
+      summary: Delete Task
   /agents/browser-use/{agentId}/tasks/{id}/cancel/:
     post:
       operationId: cancelTask
@@ -757,40 +770,41 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelTaskResponse'
-          description: ''
-        '409':
+                $ref: "#/components/schemas/CancelTaskResponse"
+          description: ""
+        "409":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelTaskConflictResponse'
-          description: ''
+                $ref: "#/components/schemas/CancelTaskConflictResponse"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Cancel
+      summary: Cancel Task
   /agents/browser-use/{agentId}/tasks/{id}/result/:
     get:
       operationId: getTaskResult
@@ -798,60 +812,61 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: agentId
-        schema:
-          type: string
-          format: uuid
-        required: true
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: agentId
+          schema:
+            type: string
+            format: uuid
+          required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task Result - Get
+      summary: Get Task Result
   /agents/browser-use/{id}/:
     get:
       operationId: getAgent
       description: ViewSet for managing BrowserUseAgents.
       summary: Get browser-use Profile
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        description: A UUID string identifying this browser use agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: A UUID string identifying this browser use agent.
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDetail'
-          description: ''
+                $ref: "#/components/schemas/AgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Profile - Get
@@ -859,120 +874,123 @@ paths:
       operationId: updateAgent
       description: ViewSet for managing BrowserUseAgents.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        description: A UUID string identifying this browser use agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: A UUID string identifying this browser use agent.
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/AgentDetail'
+              $ref: "#/components/schemas/AgentDetail"
         required: true
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDetail'
-          description: ''
+                $ref: "#/components/schemas/AgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Profile - Update
+      summary: Update browser-use Profile
     patch:
       operationId: updateAgentStatusPartial
       description: ViewSet for managing BrowserUseAgents.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        description: A UUID string identifying this browser use agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: A UUID string identifying this browser use agent.
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedAgentDetail'
+              $ref: "#/components/schemas/PatchedAgentDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedAgentDetail'
+              $ref: "#/components/schemas/PatchedAgentDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedAgentDetail'
+              $ref: "#/components/schemas/PatchedAgentDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AgentDetail'
-          description: ''
+                $ref: "#/components/schemas/AgentDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Profile - Update (Partial)
+      summary: Update browser-use Profile
     delete:
       operationId: deleteAgent
       description: ViewSet for managing BrowserUseAgents.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        description: A UUID string identifying this browser use agent.
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          description: A UUID string identifying this browser use agent.
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '204':
+        "204":
           description: No response body
       x-mint:
         metadata:
           sidebarTitle: Profile - Delete
+      summary: Delete browser-use Profile
   /ping/:
     get:
       operationId: ping
       description: Test API connectivity with a simple ping endpoint
-      summary: 'Ping API '
+      summary: Ping API
       tags:
-      - Utilities
+        - Utilities
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PingResponse'
-          description: ''
+                $ref: "#/components/schemas/PingResponse"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Ping
@@ -980,20 +998,20 @@ paths:
     get:
       operationId: listAllTasks
       description: List all browser-use tasks for the specified browser-use profile.
-      summary: List all browser-use tasks for profile
+      summary: List browser-use Tasks
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskList'
-          description: ''
+                $ref: "#/components/schemas/TaskList"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Tasks - List
@@ -1001,44 +1019,45 @@ paths:
       operationId: assignTask2
       description: Override create to handle wait parameter results.
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '201':
+        "201":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
-        '402':
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
+        "400":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/InsufficientCreditsResponse'
-          description: ''
-        '400':
+                $ref: "#/components/schemas/ValidationErrorResponse"
+          description: ""
+        "402":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationErrorResponse'
-          description: ''
+                $ref: "#/components/schemas/InsufficientCreditsResponse"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Create
+      summary: Create Task
   /tasks/browser-use/{id}/:
     get:
       operationId: getTask2
@@ -1046,130 +1065,134 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Get
+      summary: Get Task
     put:
       operationId: updateTask2
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/TaskDetail'
+              $ref: "#/components/schemas/TaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Update
+      summary: Update Task
     patch:
       operationId: updateTaskStatusPartial2
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
           application/x-www-form-urlencoded:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
           multipart/form-data:
             schema:
-              $ref: '#/components/schemas/PatchedTaskDetail'
+              $ref: "#/components/schemas/PatchedTaskDetail"
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Update
+      summary: Update Task
     delete:
       operationId: deleteTask2
       description: |-
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '204':
+        "204":
           description: No response body
       x-mint:
         metadata:
           sidebarTitle: Task - Delete
+      summary: Delete Task
   /tasks/browser-use/{id}/cancel/:
     post:
       operationId: cancelTask2
@@ -1177,34 +1200,35 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelTaskResponse'
-          description: ''
-        '409':
+                $ref: "#/components/schemas/CancelTaskResponse"
+          description: ""
+        "409":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CancelTaskConflictResponse'
-          description: ''
+                $ref: "#/components/schemas/CancelTaskConflictResponse"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task - Cancel
+      summary: Cancel Task
   /tasks/browser-use/{id}/result/:
     get:
       operationId: getTaskResult2
@@ -1212,28 +1236,29 @@ paths:
         ViewSet for managing BrowserUseAgentTasks.
         Supports both agent-specific and user-wide task operations.
       parameters:
-      - in: path
-        name: id
-        schema:
-          type: string
-          format: uuid
-        required: true
+        - in: path
+          name: id
+          schema:
+            type: string
+            format: uuid
+          required: true
       tags:
-      - browser-use Tasks API
+        - browser-use Tasks API
       security:
-      - ApiKeyAuth: []
-      - cookieAuth: []
-      - tokenAuth: []
+        - ApiKeyAuth: []
+        - cookieAuth: []
+        - tokenAuth: []
       responses:
-        '200':
+        "200":
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TaskDetail'
-          description: ''
+                $ref: "#/components/schemas/TaskDetail"
+          description: ""
       x-mint:
         metadata:
           sidebarTitle: Task Result - Get
+      summary: Get Task Result
 components:
   schemas:
     AgentDetail:
@@ -1268,7 +1293,7 @@ components:
           description: Human-readable brief description of what the agent does.
           readOnly: true
       required:
-      - name
+        - name
     AgentList:
       type: object
       properties:
@@ -1292,16 +1317,15 @@ components:
           description: Human-readable brief description of what the agent does.
           readOnly: true
       required:
-      - name
+        - name
     CancelTaskConflictResponse:
       type: object
       properties:
         detail:
           type: string
-          description: Error message indicating that the task is not in a cancellable
-            state.
+          description: Error message indicating that the task is not in a cancellable state.
       required:
-      - detail
+        - detail
     CancelTaskResponse:
       type: object
       properties:
@@ -1312,19 +1336,19 @@ components:
           type: string
           description: Message indicating the result of the cancellation.
       required:
-      - message
-      - status
+        - message
+        - status
     InsufficientCreditsResponse:
       type: object
       properties:
         message:
           type: string
       required:
-      - message
+        - message
     LifeStateEnum:
       enum:
-      - active
-      - expired
+        - active
+        - expired
       type: string
       description: |-
         * `active` - Active
@@ -1332,8 +1356,8 @@ components:
     PaginatedAgentListList:
       type: object
       required:
-      - count
-      - results
+        - count
+        - results
       properties:
         count:
           type: integer
@@ -1351,12 +1375,12 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/AgentList'
+            $ref: "#/components/schemas/AgentList"
     PaginatedPersistentAgentListList:
       type: object
       required:
-      - count
-      - results
+        - count
+        - results
       properties:
         count:
           type: integer
@@ -1374,12 +1398,12 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/PersistentAgentList'
+            $ref: "#/components/schemas/PersistentAgentList"
     PaginatedTaskListList:
       type: object
       required:
-      - count
-      - results
+        - count
+        - results
       properties:
         count:
           type: integer
@@ -1397,7 +1421,7 @@ components:
         results:
           type: array
           items:
-            $ref: '#/components/schemas/TaskList'
+            $ref: "#/components/schemas/TaskList"
     PatchedAgentDetail:
       type: object
       properties:
@@ -1451,8 +1475,7 @@ components:
         schedule:
           type: string
           nullable: true
-          description: Cron-like schedule expression or interval (e.g., '@daily',
-            '@every 30m').
+          description: Cron-like schedule expression or interval (e.g., '@daily', '@every 30m').
           maxLength: 128
         schedule_snapshot:
           type: string
@@ -1464,7 +1487,7 @@ components:
           description: Whether this agent is currently active
         life_state:
           allOf:
-          - $ref: '#/components/schemas/LifeStateEnum'
+            - $ref: "#/components/schemas/LifeStateEnum"
           description: |-
             Lifecycle state for soft-expiration. 'paused' is represented by is_active=False.
 
@@ -1472,7 +1495,7 @@ components:
             * `expired` - Expired
         whitelist_policy:
           allOf:
-          - $ref: '#/components/schemas/WhitelistPolicyEnum'
+            - $ref: "#/components/schemas/WhitelistPolicyEnum"
           description: |-
             Controls who can message this agent and who the agent may contact. Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default).
 
@@ -1519,12 +1542,10 @@ components:
           type: string
           writeOnly: true
           nullable: true
-          description: Preferred contact endpoint to use for the agent. Must be either
-            'email' or 'sms' or a valid endpoint id.
+          description: Preferred contact endpoint to use for the agent. Must be either 'email' or 'sms' or a valid endpoint id.
         proactive_opt_in:
           type: boolean
-          description: Enable Gobii to proactively start conversations offering related
-            help for this agent.
+          description: Enable Gobii to proactively start conversations offering related help for this agent.
         proactive_last_trigger_at:
           type: string
           format: date-time
@@ -1568,8 +1589,7 @@ components:
           type: string
           format: uuid
           readOnly: true
-          description: ID of the browser-use agent to use for this task. If not specified,
-            the task will be created for the authenticated user's agent.
+          description: ID of the browser-use agent to use for this task. If not specified, the task will be created for the authenticated user's agent.
         organization_id:
           type: string
           format: uuid
@@ -1583,7 +1603,7 @@ components:
           description: Optional JSON schema to define structured output from the agent
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+            - $ref: "#/components/schemas/StatusEnum"
           readOnly: true
         created_at:
           type: string
@@ -1602,16 +1622,12 @@ components:
           maximum: 1350
           minimum: 0
           writeOnly: true
-          description: Number of seconds to wait for the task to complete before returning.
-            Defaults to 0 (no wait). Providing a value will run the task synchronously.
+          description: Number of seconds to wait for the task to complete before returning. Defaults to 0 (no wait). Providing a value will run the task synchronously.
         secrets:
           type: object
           additionalProperties: {}
           writeOnly: true
-          description: 'Domain-specific secrets for the task. REQUIRED FORMAT: {''https://example.com'':
-            {''x_api_key'': ''value'', ''x_username'': ''user''}}. Each domain can
-            have multiple secrets. Secret keys will be available as placeholders in
-            the prompt for the specified domains.'
+          description: "Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
         credits_cost:
           type: string
           format: decimal
@@ -1660,8 +1676,7 @@ components:
         schedule:
           type: string
           nullable: true
-          description: Cron-like schedule expression or interval (e.g., '@daily',
-            '@every 30m').
+          description: Cron-like schedule expression or interval (e.g., '@daily', '@every 30m').
           maxLength: 128
         schedule_snapshot:
           type: string
@@ -1673,7 +1688,7 @@ components:
           description: Whether this agent is currently active
         life_state:
           allOf:
-          - $ref: '#/components/schemas/LifeStateEnum'
+            - $ref: "#/components/schemas/LifeStateEnum"
           description: |-
             Lifecycle state for soft-expiration. 'paused' is represented by is_active=False.
 
@@ -1681,7 +1696,7 @@ components:
             * `expired` - Expired
         whitelist_policy:
           allOf:
-          - $ref: '#/components/schemas/WhitelistPolicyEnum'
+            - $ref: "#/components/schemas/WhitelistPolicyEnum"
           description: |-
             Controls who can message this agent and who the agent may contact. Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default).
 
@@ -1728,12 +1743,10 @@ components:
           type: string
           writeOnly: true
           nullable: true
-          description: Preferred contact endpoint to use for the agent. Must be either
-            'email' or 'sms' or a valid endpoint id.
+          description: Preferred contact endpoint to use for the agent. Must be either 'email' or 'sms' or a valid endpoint id.
         proactive_opt_in:
           type: boolean
-          description: Enable Gobii to proactively start conversations offering related
-            help for this agent.
+          description: Enable Gobii to proactively start conversations offering related help for this agent.
         proactive_last_trigger_at:
           type: string
           format: date-time
@@ -1763,7 +1776,7 @@ components:
             type: string
           readOnly: true
       required:
-      - name
+        - name
     PersistentAgentList:
       type: object
       properties:
@@ -1784,15 +1797,14 @@ components:
           type: string
           readOnly: true
           nullable: true
-          description: Cron-like schedule expression or interval (e.g., '@daily',
-            '@every 30m').
+          description: Cron-like schedule expression or interval (e.g., '@daily', '@every 30m').
         is_active:
           type: boolean
           readOnly: true
           description: Whether this agent is currently active
         life_state:
           allOf:
-          - $ref: '#/components/schemas/LifeStateEnum'
+            - $ref: "#/components/schemas/LifeStateEnum"
           readOnly: true
           description: |-
             Lifecycle state for soft-expiration. 'paused' is represented by is_active=False.
@@ -1801,7 +1813,7 @@ components:
             * `expired` - Expired
         whitelist_policy:
           allOf:
-          - $ref: '#/components/schemas/WhitelistPolicyEnum'
+            - $ref: "#/components/schemas/WhitelistPolicyEnum"
           readOnly: true
           description: |-
             Controls who can message this agent and who the agent may contact. Manual: only addresses/numbers listed on the agent's allowlist (includes owner/org members by default).
@@ -1848,8 +1860,7 @@ components:
         proactive_opt_in:
           type: boolean
           readOnly: true
-          description: Enable Gobii to proactively start conversations offering related
-            help for this agent.
+          description: Enable Gobii to proactively start conversations offering related help for this agent.
         proactive_last_trigger_at:
           type: string
           format: date-time
@@ -1865,15 +1876,15 @@ components:
           type: string
           format: email
       required:
-      - pong
-      - user
+        - pong
+        - user
     StatusEnum:
       enum:
-      - pending
-      - in_progress
-      - completed
-      - failed
-      - cancelled
+        - pending
+        - in_progress
+        - completed
+        - failed
+        - cancelled
       type: string
       description: |-
         * `pending` - Pending
@@ -1896,8 +1907,7 @@ components:
           type: string
           format: uuid
           readOnly: true
-          description: ID of the browser-use agent to use for this task. If not specified,
-            the task will be created for the authenticated user's agent.
+          description: ID of the browser-use agent to use for this task. If not specified, the task will be created for the authenticated user's agent.
         organization_id:
           type: string
           format: uuid
@@ -1911,7 +1921,7 @@ components:
           description: Optional JSON schema to define structured output from the agent
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+            - $ref: "#/components/schemas/StatusEnum"
           readOnly: true
         created_at:
           type: string
@@ -1930,16 +1940,12 @@ components:
           maximum: 1350
           minimum: 0
           writeOnly: true
-          description: Number of seconds to wait for the task to complete before returning.
-            Defaults to 0 (no wait). Providing a value will run the task synchronously.
+          description: Number of seconds to wait for the task to complete before returning. Defaults to 0 (no wait). Providing a value will run the task synchronously.
         secrets:
           type: object
           additionalProperties: {}
           writeOnly: true
-          description: 'Domain-specific secrets for the task. REQUIRED FORMAT: {''https://example.com'':
-            {''x_api_key'': ''value'', ''x_username'': ''user''}}. Each domain can
-            have multiple secrets. Secret keys will be available as placeholders in
-            the prompt for the specified domains.'
+          description: "Domain-specific secrets for the task. REQUIRED FORMAT: {'https://example.com': {'x_api_key': 'value', 'x_username': 'user'}}. Each domain can have multiple secrets. Secret keys will be available as placeholders in the prompt for the specified domains."
         credits_cost:
           type: string
           format: decimal
@@ -1988,7 +1994,7 @@ components:
           description: Optional JSON schema to define structured output from the agent
         status:
           allOf:
-          - $ref: '#/components/schemas/StatusEnum'
+            - $ref: "#/components/schemas/StatusEnum"
           readOnly: true
         created_at:
           type: string
@@ -2004,8 +2010,7 @@ components:
           pattern: ^-?\d{0,9}(?:\.\d{0,3})?$
           readOnly: true
           nullable: true
-          description: Credits charged for this task; defaults to configured per‑task
-            cost.
+          description: Credits charged for this task; defaults to configured per‑task cost.
         webhook:
           type: string
           format: uri
@@ -2018,11 +2023,11 @@ components:
         detail:
           type: string
       required:
-      - detail
+        - detail
     WhitelistPolicyEnum:
       enum:
-      - default
-      - manual
+        - default
+        - manual
       type: string
       description: |-
         * `default` - Default (Owner or Org Members)
@@ -2042,5 +2047,9 @@ components:
       name: Authorization
       description: Token-based authentication with required prefix "Token"
 servers:
-- url: https://gobii.ai/api/v1
-  description: Production server
+  - url: https://gobii.ai/api/v1
+    description: Production server
+tags:
+  - name: Agents API
+  - name: browser-use Tasks API
+  - name: Utilities

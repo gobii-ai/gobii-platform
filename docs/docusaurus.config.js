@@ -36,6 +36,7 @@ const config = {
             sidebarOptions: {
               groupPathsBy: 'tag',
               categoryLinkSource: 'tag',
+              sidebarCollapsed: false,
             },
           },
         },
@@ -51,6 +52,7 @@ const config = {
           path: 'content',
           routeBasePath: '/',
           sidebarPath: require.resolve('./sidebars.js'),
+          docItemComponent: '@theme/ApiItem',
           editUrl: 'https://github.com/gobii-ai/gobii-platform/tree/main/docs/',
           showLastUpdateTime: true,
         },
