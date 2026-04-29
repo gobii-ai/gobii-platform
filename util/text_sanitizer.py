@@ -1,8 +1,12 @@
 """Utilities for cleaning outbound message content."""
 
-import html
 import re
 import unicodedata
+
+import markdown
+from inscriptis import get_text
+from inscriptis.css_profiles import CSS_PROFILES
+from inscriptis.model.config import ParserConfig
 
 __all__ = [
     "strip_control_chars",
@@ -59,21 +63,17 @@ _MARKDOWN_ITALIC_UNDER_RE = re.compile(r"(?<!_)_(?!_)(.+?)(?<!_)_(?!_)")  # _ita
 _MARKDOWN_CODE_RE = re.compile(r"`([^`]+)`")  # `code`
 _MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")  # [text](url)
 _MARKDOWN_HEADER_RE = re.compile(r"^#{1,6}\s*", re.MULTILINE)  # # Header
-_HTML_TAG_RE = re.compile(r"</?[a-zA-Z][^>]*>")
-_MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
-_MARKDOWN_REFERENCE_LINK_RE = re.compile(r"\[([^\]]+)\]\[[^\]]*\]")
-_MARKDOWN_AUTOLINK_RE = re.compile(r"<((?:https?://|mailto:)[^>\s]+)>", re.IGNORECASE)
-_MARKDOWN_FENCE_RE = re.compile(r"^\s*`{3,}[a-zA-Z0-9_-]*\s*$", re.MULTILINE)
-_MARKDOWN_TABLE_SEPARATOR_RE = re.compile(
-    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$",
+_NOTIFICATION_PREVIEW_LIST_MARKER_RE = re.compile(
+    r"^\s*(?:[*+\-\u2022]|\d+[.)])\s+",
     re.MULTILINE,
 )
-_MARKDOWN_LEADING_MARKER_RE = re.compile(
-    r"^\s*(?:#{1,6}\s+|>\s*|[-*+\u2022]\s+|\d+[.)]\s+)",
-    re.MULTILINE,
+_NOTIFICATION_PREVIEW_INLINE_BULLET_RE = re.compile(r"\s+\u2022\s+")
+_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS = ["extra", "sane_lists"]
+_NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG = ParserConfig(
+    css=CSS_PROFILES["strict"].copy(),
+    display_links=False,
+    display_anchors=False,
 )
-_MARKDOWN_STRIKETHROUGH_RE = re.compile(r"~~(.+?)~~")
-_MARKDOWN_PIPE_RE = re.compile(r"\s*\|\s*")
 
 
 def strip_markdown_for_sms(value: str | None) -> str:
@@ -104,36 +104,6 @@ def strip_markdown_for_sms(value: str | None) -> str:
     return text
 
 
-def _strip_html_for_notification_preview(value: str) -> str:
-    if not _HTML_TAG_RE.search(value):
-        return value
-
-    from bs4 import BeautifulSoup
-
-    soup = BeautifulSoup(value, "html.parser")
-    for element in soup(["script", "style", "template"]):
-        element.decompose()
-    return soup.get_text(" ")
-
-
-def _strip_markdown_for_notification_preview(value: str) -> str:
-    text = _MARKDOWN_AUTOLINK_RE.sub(r"\1", value)
-    text = _MARKDOWN_IMAGE_RE.sub(r"\1", text)
-    text = _MARKDOWN_LINK_RE.sub(r"\1", text)
-    text = _MARKDOWN_REFERENCE_LINK_RE.sub(r"\1", text)
-    text = _MARKDOWN_TABLE_SEPARATOR_RE.sub(" ", text)
-    text = _MARKDOWN_FENCE_RE.sub(" ", text)
-    text = _MARKDOWN_LEADING_MARKER_RE.sub("", text)
-    text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
-    text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
-    text = _MARKDOWN_ITALIC_STAR_RE.sub(r"\1", text)
-    text = _MARKDOWN_ITALIC_UNDER_RE.sub(r"\1", text)
-    text = _MARKDOWN_STRIKETHROUGH_RE.sub(r"\1", text)
-    text = _MARKDOWN_CODE_RE.sub(r"\1", text)
-    text = _MARKDOWN_PIPE_RE.sub(" ", text)
-    return text.replace("`", "")
-
-
 def sanitize_notification_preview_text(value: str | None) -> str:
     """Return plain text suitable for native browser notification bodies."""
     if not isinstance(value, str):
@@ -141,12 +111,16 @@ def sanitize_notification_preview_text(value: str | None) -> str:
 
     text = decode_unicode_escapes(value)
     text = strip_control_chars(text)
-    text = _MARKDOWN_AUTOLINK_RE.sub(r"\1", text)
-    text = _strip_html_for_notification_preview(text)
-    text = html.unescape(text)
-    text = _strip_markdown_for_notification_preview(text)
-    text = html.unescape(text)
-    text = normalize_whitespace(text)
+    rendered = markdown.markdown(text, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
+    text = get_text(rendered, _NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG)
+    text = _MARKDOWN_LINK_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
+    text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_STAR_RE.sub(r"\1", text)
+    text = _MARKDOWN_ITALIC_UNDER_RE.sub(r"\1", text)
+    text = _MARKDOWN_CODE_RE.sub(r"\1", text)
+    text = _NOTIFICATION_PREVIEW_LIST_MARKER_RE.sub("", text)
+    text = _NOTIFICATION_PREVIEW_INLINE_BULLET_RE.sub(" ", text)
     return " ".join(text.split())
 
 
