@@ -59,6 +59,7 @@ jobs:
             build/api-reference/agents-api/get-agents.html
             build/api-reference/agents-api/get-agents.md
             build/GobiiAPI.yaml
+            build/legacy-redirects.conf
             build/api-reference/openapi.json
             build/llms.txt
             build/llms-full.txt
@@ -67,6 +68,42 @@ jobs:
           for file in "${required[@]}"; do
             test -s "$file"
           done
+
+      - name: Verify nginx routing
+        working-directory: docs
+        run: |
+          set -euo pipefail
+          image="gobii-docs-ci:${GITHUB_SHA}"
+          container="gobii-docs-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker build --build-arg DOCS_SITE_URL="${DOCS_SITE_URL}" -t "$image" .
+          docker run -d --rm --name "$container" -p 8080:8080 "$image"
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
+
+          for _ in {1..20}; do
+            if curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          code_for() {
+            curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080$1"
+          }
+
+          redirect_for() {
+            curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' "http://127.0.0.1:8080$1"
+          }
+
+          test "$(code_for /)" = "200"
+          test "$(code_for /healthz)" = "200"
+          test "$(code_for /api-reference/list-persistent-agents)" = "200"
+          test "$(redirect_for /index.html)" = "301 http://127.0.0.1:8080/"
+          test "$(redirect_for /api-reference)" = "301 http://127.0.0.1:8080/api-reference/list-persistent-agents"
+          test "$(redirect_for /api-reference/agents-api/get-agents)" = "301 http://127.0.0.1:8080/api-reference/list-persistent-agents"
+          test "$(redirect_for '/api-reference/agents-api/get-agents?utm_source=x')" = "301 http://127.0.0.1:8080/api-reference/list-persistent-agents?utm_source=x"
+          test "$(redirect_for /api-reference/agents-api/get-agents.html)" = "301 http://127.0.0.1:8080/api-reference/list-persistent-agents"
+          test "$(redirect_for /getting-started/introduction.html)" = "301 http://127.0.0.1:8080/getting-started/introduction"
+          test "$(redirect_for /getting-started/introduction/)" = "301 http://127.0.0.1:8080/getting-started/introduction"
 
   publish:
     name: Publish Docs Image
