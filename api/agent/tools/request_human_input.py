@@ -3,6 +3,7 @@
 from typing import Any
 
 from api.agent.comms.human_input_requests import (
+    MAX_HUMAN_INPUT_QUESTION_LENGTH,
     MAX_OPTION_COUNT,
     create_human_input_request,
     create_human_input_requests_batch,
@@ -61,7 +62,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "properties": {
             "question": {
                 "type": "string",
-                "description": "Primary question or prompt for the user.",
+                "maxLength": MAX_HUMAN_INPUT_QUESTION_LENGTH,
+                "description": "Primary question or prompt for the user. Plain text only; do not use Markdown or HTML.",
             },
             "options": {
                 "type": "array",
@@ -90,14 +92,17 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "already include the questions because this tool cannot inject them into another tool call. "
                 "Do not send a bare notification like 'please answer the questions'; the recipient may not "
                 "have web chat open. The user's reply on that channel will be processed as answers. "
-                "Keep questions concise and make sure it is only the question without extra fluff."
+                f"Questions must be plain text only, with no Markdown or HTML, and cannot exceed "
+                f"{MAX_HUMAN_INPUT_QUESTION_LENGTH} characters. Keep questions concise and make sure "
+                "it is only the question without extra fluff."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "question": {
                         "type": "string",
-                        "description": "Primary question or prompt for the user.",
+                        "maxLength": MAX_HUMAN_INPUT_QUESTION_LENGTH,
+                        "description": "Primary question or prompt for the user. Plain text only; do not use Markdown or HTML.",
                     },
                     "options": {
                         "type": "array",

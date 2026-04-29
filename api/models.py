@@ -10938,6 +10938,7 @@ class PersistentAgentHumanInputRequest(models.Model):
         blank=True,
     )
     resolved_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -10950,6 +10951,11 @@ class PersistentAgentHumanInputRequest(models.Model):
 
     def __str__(self) -> str:
         return f"HumanInputRequest<{self.id}:{self.status}>"
+
+    def is_expired(self) -> bool:
+        if not self.expires_at:
+            return False
+        return timezone.now() >= self.expires_at
 
 
 class PersistentAgentEmailFooter(models.Model):
