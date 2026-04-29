@@ -165,8 +165,8 @@ function writeNginxRedirects() {
   ];
 
   for (const [from, to] of Object.entries(legacyApiRedirects)) {
-    lines.push(`location = /${from} { return 301 /${to}$is_args$args; }`);
-    lines.push(`location = /${from}.html { return 301 /${to}$is_args$args; }`);
+    lines.push(`location = /${from} { add_header Cache-Control "public, max-age=300" always; return 301 /${to}$is_args$args; }`);
+    lines.push(`location = /${from}.html { add_header Cache-Control "public, max-age=300" always; return 301 /${to}$is_args$args; }`);
   }
 
   writeText('legacy-redirects.conf', `${lines.join('\n')}\n`);

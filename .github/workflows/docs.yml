@@ -105,6 +105,35 @@ jobs:
           test "$(redirect_for /getting-started/introduction.html)" = "301 http://127.0.0.1:8080/getting-started/introduction"
           test "$(redirect_for /getting-started/introduction/)" = "301 http://127.0.0.1:8080/getting-started/introduction"
 
+          header_for() {
+            local path="$1"
+            local header="$2"
+            curl -sSI "http://127.0.0.1:8080${path}" \
+              | awk -v header="${header}" 'BEGIN { IGNORECASE = 1 } index($0, header ":") == 1 { sub("\r$", ""); sub("^[^:]+: *", ""); print; exit }'
+          }
+
+          asset_js="$(node - <<'NODE'
+          (async () => {
+            const html = await (await fetch('http://127.0.0.1:8080/')).text();
+            const match = html.match(/\/assets\/js\/[^"]+\.js/);
+            if (!match) process.exit(1);
+            console.log(match[0]);
+          })();
+          NODE
+          )"
+          pagefind_fragment="/$(find build/pagefind/fragment -name '*.pf_fragment' -print -quit | sed 's#^build/##')"
+
+          test "$(header_for /healthz Cache-Control)" = "no-store"
+          test "$(header_for / Cache-Control)" = "public, max-age=0, must-revalidate"
+          test "$(header_for / CDN-Cache-Control)" = "public, max-age=300, stale-while-revalidate=86400"
+          test "$(header_for / Cloudflare-CDN-Cache-Control)" = "public, max-age=300, stale-while-revalidate=86400"
+          test "$(header_for "$asset_js" Cache-Control)" = "public, max-age=31536000, immutable"
+          test "$(header_for /assets/js/not-real.js Cache-Control)" = ""
+          test "$(header_for /pagefind/pagefind-ui.js Cache-Control)" = "public, max-age=300, must-revalidate"
+          test "$(header_for "$pagefind_fragment" Cache-Control)" = "public, max-age=31536000, immutable"
+          test "$(header_for /api-reference/openapi.json Cloudflare-CDN-Cache-Control)" = "public, max-age=300, stale-while-revalidate=86400"
+          test "$(header_for /api-reference/agents-api/get-agents Cache-Control)" = "public, max-age=300"
+
   publish:
     name: Publish Docs Image
     runs-on: ubuntu-latest
