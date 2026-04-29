@@ -415,6 +415,16 @@ class NotificationPreviewTextTests(TestCase):
 
         self.assertEqual(result, "Hello there Done")
 
+    def test_strips_entity_encoded_html(self):
+        result = sanitize_notification_preview_text("&lt;b&gt;hi&lt;/b&gt;")
+
+        self.assertEqual(result, "hi")
+
+    def test_preserves_generic_backslash_escapes(self):
+        result = sanitize_notification_preview_text(r"File is at C:\new\test")
+
+        self.assertEqual(result, r"File is at C:\new\test")
+
     def test_returns_empty_for_markup_only_content(self):
         result = sanitize_notification_preview_text(
             "<script>alert('x')</script><style>body { color: red; }</style>"
