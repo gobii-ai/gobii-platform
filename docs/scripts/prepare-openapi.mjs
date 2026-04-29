@@ -46,14 +46,20 @@ const text = fs.readFileSync(specPath, 'utf8');
 const doc = YAML.parseDocument(text);
 const root = doc.toJS();
 
+root.info = {
+  ...root.info,
+  description:
+    'REST API reference for Gobii AI browser agents, browser-use automation tasks, webhooks, authentication, request parameters, and response schemas.',
+};
+
 root.tags = [
-  { name: 'Agents API' },
-  { name: 'browser-use Tasks API' },
-  { name: 'Utilities' },
+  { name: 'Agents API', description: 'Persistent Gobii agent endpoints for creating, scheduling, messaging, and managing AI browser agents.' },
+  { name: 'browser-use Tasks API', description: 'browser-use profile and task endpoints for submitting browser automation jobs, polling status, and retrieving results.' },
+  { name: 'Utilities', description: 'Utility endpoints for health checks and simple Gobii API integration verification.' },
 ];
 
-for (const pathItem of Object.values(root.paths ?? {})) {
-  for (const operation of Object.values(pathItem ?? {})) {
+for (const [operationPath, pathItem] of Object.entries(root.paths ?? {})) {
+  for (const [method, operation] of Object.entries(pathItem ?? {})) {
     if (!operation || typeof operation !== 'object' || !operation.operationId) {
       continue;
     }
@@ -61,6 +67,12 @@ for (const pathItem of Object.values(root.paths ?? {})) {
     const title = operationTitles[operation.operationId];
     if (title) {
       operation.summary = title;
+    }
+
+    const description = typeof operation.description === 'string' ? operation.description.trim() : '';
+    const genericDescription = /ViewSet|Override create/i.test(description);
+    if (!description || description.length < 70 || genericDescription) {
+      operation.description = `${title || operation.operationId} with the Gobii REST API endpoint ${method.toUpperCase()} ${operationPath}. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.`;
     }
   }
 }

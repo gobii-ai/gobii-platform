@@ -36,6 +36,9 @@ function removeDuplicateSummary(source) {
 const spec = YAML.parse(fs.readFileSync(specPath, 'utf8'));
 const groups = new Map();
 const labelsById = new Map();
+const descriptionsById = new Map();
+const tagDescriptionsBySlug = new Map((spec.tags ?? []).map((tag) => [slugify(tag.name), tag.description]));
+const apiInfoDescription = spec.info?.description;
 
 for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
   for (const [method, operation] of Object.entries(pathItem ?? {})) {
@@ -48,6 +51,7 @@ for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
     const label = sidebarTitle ?? operation.summary ?? operation.operationId;
     const id = kebabOperationId(operation.operationId);
     labelsById.set(id, label);
+    descriptionsById.set(id, operation.description);
     const item = {
       type: 'doc',
       id: `api-reference/${id}`,
@@ -100,6 +104,34 @@ for (const [id, label] of labelsById) {
 
   let doc = fs.readFileSync(docPath, 'utf8');
   doc = doc.replace(/^sidebar_label: ".*"$/m, `sidebar_label: "${label.replace(/"/g, '\\"')}"`);
+  const description = descriptionsById.get(id);
+  if (description) {
+    doc = doc.replace(/^description: ".*"$/m, `description: "${description.replace(/"/g, '\\"')}"`);
+  }
   doc = removeDuplicateSummary(doc);
+  fs.writeFileSync(docPath, doc);
+}
+
+if (apiInfoDescription) {
+  const docPath = new URL('gobii-api.info.mdx', apiDocsDir);
+  if (fs.existsSync(docPath)) {
+    let doc = fs.readFileSync(docPath, 'utf8');
+    doc = doc.replace(/^description: ".*"$/m, `description: "${apiInfoDescription.replace(/"/g, '\\"')}"`);
+    fs.writeFileSync(docPath, doc);
+  }
+}
+
+for (const [slug, description] of tagDescriptionsBySlug) {
+  const docPath = new URL(`${slug}.tag.mdx`, apiDocsDir);
+  if (!fs.existsSync(docPath) || !description) {
+    continue;
+  }
+
+  let doc = fs.readFileSync(docPath, 'utf8');
+  if (/^description: /m.test(doc)) {
+    doc = doc.replace(/^description: ".*"$/m, `description: "${description.replace(/"/g, '\\"')}"`);
+  } else {
+    doc = doc.replace(/^title: .*\n/m, (match) => `${match}description: "${description.replace(/"/g, '\\"')}"\n`);
+  }
   fs.writeFileSync(docPath, doc);
 }

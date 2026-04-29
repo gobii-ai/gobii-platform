@@ -2,7 +2,7 @@ openapi: 3.0.3
 info:
   title: Gobii API
   version: 0.1.0
-  description: API for Gobii AI browser agents platform
+  description: REST API reference for Gobii AI browser agents, browser-use automation tasks, webhooks, authentication, request parameters, and response schemas.
 paths:
   /agents/:
     get:
@@ -37,6 +37,7 @@ paths:
         metadata:
           sidebarTitle: Agents - List
       summary: Get agents
+      description: Get agents with the Gobii REST API endpoint GET /agents/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
     post:
       operationId: createPersistentAgent
       summary: Create an Agent
@@ -68,6 +69,7 @@ paths:
       x-mint:
         metadata:
           sidebarTitle: Agent - Create
+      description: Create an Agent with the Gobii REST API endpoint POST /agents/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
   /agents/{id}/:
     get:
       operationId: getPersistentAgent
@@ -96,6 +98,7 @@ paths:
         metadata:
           sidebarTitle: Agent - Get
       summary: Get Agent
+      description: Get Agent with the Gobii REST API endpoint GET /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
     put:
       operationId: updatePersistentAgent
       parameters:
@@ -135,9 +138,10 @@ paths:
         metadata:
           sidebarTitle: Agent - Update
       summary: Update Agent
+      description: Update Agent with the Gobii REST API endpoint PUT /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
     patch:
       operationId: partialUpdatePersistentAgent
-      description: Update an agent's configuration
+      description: Update Agent with the Gobii REST API endpoint PATCH /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: Update Agent
       parameters:
         - in: path
@@ -197,10 +201,11 @@ paths:
         metadata:
           sidebarTitle: Agent - Delete
       summary: Delete Agent
+      description: Delete Agent with the Gobii REST API endpoint DELETE /agents/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
   /agents/{id}/activate/:
     post:
       operationId: activatePersistentAgent
-      description: Activates an agent processing.
+      description: Activate Agent with the Gobii REST API endpoint POST /agents/{id}/activate/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -241,7 +246,7 @@ paths:
   /agents/{id}/deactivate/:
     post:
       operationId: deactivatePersistentAgent
-      description: Deactivates an agent from processing.
+      description: Deactivate Agent with the Gobii REST API endpoint POST /agents/{id}/deactivate/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -323,7 +328,7 @@ paths:
   /agents/{id}/processing-status/:
     get:
       operationId: getPersistentAgentProcessingStatus
-      description: Gets the processing status of an agent's current timeline
+      description: Get Agent Processing Status with the Gobii REST API endpoint GET /agents/{id}/processing-status/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: Get Agent Processing Status
       parameters:
         - in: path
@@ -389,10 +394,11 @@ paths:
         metadata:
           sidebarTitle: Agent Schedule - Preview
       summary: Preview Agent Schedule
+      description: Preview Agent Schedule with the Gobii REST API endpoint POST /agents/{id}/schedule/preview/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
   /agents/{id}/timeline/:
     get:
       operationId: getPersistentAgentTimeline
-      description: Gets the agent's current timeline
+      description: Get Agent Timeline with the Gobii REST API endpoint GET /agents/{id}/timeline/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: Get Agent Timeline
       parameters:
         - in: path
@@ -446,10 +452,11 @@ paths:
         metadata:
           sidebarTitle: Web Tasks - List
       summary: List Web Tasks
+      description: List Web Tasks with the Gobii REST API endpoint GET /agents/{id}/web-tasks/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
   /agents/browser-use/:
     get:
       operationId: listAgents
-      description: List all browser-use profiles for the API key.
+      description: List browser-use Profiles with the Gobii REST API endpoint GET /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: List browser-use Profiles
       parameters:
         - name: page
@@ -482,7 +489,7 @@ paths:
           sidebarTitle: Profiles - List
     post:
       operationId: createAgent
-      description: ViewSet for managing BrowserUseAgents.
+      description: Create browser-use Profile with the Gobii REST API endpoint POST /agents/browser-use/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       tags:
         - browser-use Tasks API
       requestBody:
@@ -515,9 +522,7 @@ paths:
   /agents/browser-use/{agentId}/tasks/:
     get:
       operationId: listTasks
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: List Tasks with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -556,7 +561,7 @@ paths:
       summary: List Tasks
     post:
       operationId: assignTask
-      description: Override create to handle wait parameter results.
+      description: Create Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -607,9 +612,7 @@ paths:
   /agents/browser-use/{agentId}/tasks/{id}/:
     get:
       operationId: getTask
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Get Task with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -642,9 +645,7 @@ paths:
       summary: Get Task
     put:
       operationId: updateTask
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Update Task with the Gobii REST API endpoint PUT /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -688,9 +689,7 @@ paths:
       summary: Update Task
     patch:
       operationId: updateTaskStatusPartial
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Update Task with the Gobii REST API endpoint PATCH /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -734,9 +733,7 @@ paths:
       summary: Update Task
     delete:
       operationId: deleteTask
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Delete Task with the Gobii REST API endpoint DELETE /agents/browser-use/{agentId}/tasks/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -766,9 +763,7 @@ paths:
   /agents/browser-use/{agentId}/tasks/{id}/cancel/:
     post:
       operationId: cancelTask
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Cancel Task with the Gobii REST API endpoint POST /agents/browser-use/{agentId}/tasks/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -808,9 +803,7 @@ paths:
   /agents/browser-use/{agentId}/tasks/{id}/result/:
     get:
       operationId: getTaskResult
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Get Task Result with the Gobii REST API endpoint GET /agents/browser-use/{agentId}/tasks/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: agentId
@@ -844,7 +837,7 @@ paths:
   /agents/browser-use/{id}/:
     get:
       operationId: getAgent
-      description: ViewSet for managing BrowserUseAgents.
+      description: Get browser-use Profile with the Gobii REST API endpoint GET /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: Get browser-use Profile
       parameters:
         - in: path
@@ -872,7 +865,7 @@ paths:
           sidebarTitle: Profile - Get
     put:
       operationId: updateAgent
-      description: ViewSet for managing BrowserUseAgents.
+      description: Update browser-use Profile with the Gobii REST API endpoint PUT /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -912,7 +905,7 @@ paths:
       summary: Update browser-use Profile
     patch:
       operationId: updateAgentStatusPartial
-      description: ViewSet for managing BrowserUseAgents.
+      description: Update browser-use Profile with the Gobii REST API endpoint PATCH /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -951,7 +944,7 @@ paths:
       summary: Update browser-use Profile
     delete:
       operationId: deleteAgent
-      description: ViewSet for managing BrowserUseAgents.
+      description: Delete browser-use Profile with the Gobii REST API endpoint DELETE /agents/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -976,7 +969,7 @@ paths:
   /ping/:
     get:
       operationId: ping
-      description: Test API connectivity with a simple ping endpoint
+      description: Ping API with the Gobii REST API endpoint GET /ping/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: Ping API
       tags:
         - Utilities
@@ -997,7 +990,7 @@ paths:
   /tasks/browser-use/:
     get:
       operationId: listAllTasks
-      description: List all browser-use tasks for the specified browser-use profile.
+      description: List browser-use Tasks with the Gobii REST API endpoint GET /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       summary: List browser-use Tasks
       tags:
         - browser-use Tasks API
@@ -1017,7 +1010,7 @@ paths:
           sidebarTitle: Tasks - List
     post:
       operationId: assignTask2
-      description: Override create to handle wait parameter results.
+      description: Create Task with the Gobii REST API endpoint POST /tasks/browser-use/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       tags:
         - browser-use Tasks API
       requestBody:
@@ -1061,9 +1054,7 @@ paths:
   /tasks/browser-use/{id}/:
     get:
       operationId: getTask2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Get Task with the Gobii REST API endpoint GET /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1090,9 +1081,7 @@ paths:
       summary: Get Task
     put:
       operationId: updateTask2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Update Task with the Gobii REST API endpoint PUT /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1130,9 +1119,7 @@ paths:
       summary: Update Task
     patch:
       operationId: updateTaskStatusPartial2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Update Task with the Gobii REST API endpoint PATCH /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1170,9 +1157,7 @@ paths:
       summary: Update Task
     delete:
       operationId: deleteTask2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Delete Task with the Gobii REST API endpoint DELETE /tasks/browser-use/{id}/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1196,9 +1181,7 @@ paths:
   /tasks/browser-use/{id}/cancel/:
     post:
       operationId: cancelTask2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Cancel Task with the Gobii REST API endpoint POST /tasks/browser-use/{id}/cancel/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -1232,9 +1215,7 @@ paths:
   /tasks/browser-use/{id}/result/:
     get:
       operationId: getTaskResult2
-      description: |-
-        ViewSet for managing BrowserUseAgentTasks.
-        Supports both agent-specific and user-wide task operations.
+      description: Get Task Result with the Gobii REST API endpoint GET /tasks/browser-use/{id}/result/. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.
       parameters:
         - in: path
           name: id
@@ -2051,5 +2032,8 @@ servers:
     description: Production server
 tags:
   - name: Agents API
+    description: Persistent Gobii agent endpoints for creating, scheduling, messaging, and managing AI browser agents.
   - name: browser-use Tasks API
+    description: browser-use profile and task endpoints for submitting browser automation jobs, polling status, and retrieving results.
   - name: Utilities
+    description: Utility endpoints for health checks and simple Gobii API integration verification.

@@ -1,0 +1,27 @@
+---
+title: "Async vs Sync"
+sidebarTitle: "Async vs Sync"
+description: "Choose between asynchronous webhooks, polling, and synchronous waits when running Gobii browser automation tasks."
+---
+
+Gobii tasks are asynchronous by default. For production integrations, submit the task, store the returned task ID,
+and receive results through a webhook when the browser automation finishes.
+
+Use synchronous requests only when the caller can safely wait for a bounded response. Synchronous calls are useful
+for quick demos, local tools, and short tasks, but long-running browser work should use webhooks or polling.
+
+## Recommended flow
+
+1. Submit a task without `wait`.
+2. Store the returned task ID.
+3. Receive completion through a webhook.
+4. Fetch the task result from the API if your system needs to reconcile state.
+
+If webhooks are not available, poll task status conservatively. For Gobii Cloud, avoid polling more than once every
+30 seconds.
+
+## When to use `wait`
+
+Use `wait` when you expect the task to finish quickly and the client can tolerate holding the HTTP connection open.
+The maximum wait time is 900 seconds. If the task does not complete before the timeout, continue with the asynchronous
+task ID and fetch the result later.

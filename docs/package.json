@@ -6,10 +6,11 @@
     "prestart": "npm run gen-api-docs",
     "start": "docusaurus start --host 0.0.0.0",
     "prebuild": "npm run gen-api-docs",
-    "build": "docusaurus build && node scripts/prepare-pagefind.mjs && pagefind --site build && node scripts/postbuild.mjs",
+    "build": "docusaurus build && node scripts/prepare-pagefind.mjs && pagefind --site build && node scripts/postbuild.mjs && npm run verify-seo",
     "serve": "docusaurus serve --host 0.0.0.0",
     "clear": "docusaurus clear",
-    "gen-api-docs": "node scripts/prepare-openapi.mjs && docusaurus gen-api-docs all && node scripts/polish-api-sidebar.mjs"
+    "gen-api-docs": "node scripts/prepare-openapi.mjs && docusaurus gen-api-docs all && node scripts/polish-api-sidebar.mjs",
+    "verify-seo": "node scripts/verify-seo.mjs"
   },
   "dependencies": {
     "@docusaurus/core": "3.10.0",
