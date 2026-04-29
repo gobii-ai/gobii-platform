@@ -1218,6 +1218,20 @@ class RobotsTxtTests(TestCase):
 
 
 @tag("batch_pages")
+class InstallScriptTests(TestCase):
+    @tag("batch_pages")
+    def test_install_script_is_served_from_root(self):
+        response = self.client.get("/install.sh")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain; charset=utf-8")
+        self.assertEqual(response["Content-Disposition"], 'inline; filename="install.sh"')
+        self.assertContains(response, '#!/usr/bin/env bash')
+        self.assertContains(response, 'REPO_URL="https://github.com/gobii-ai/gobii-platform.git"')
+        self.assertContains(response, 'INSTALL_DIR="${GOBII_INSTALL_DIR:-$HOME/gobii-platform}"')
+
+
+@tag("batch_pages")
 class CanonicalLinkTests(TestCase):
     @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)

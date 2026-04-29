@@ -1,4 +1,6 @@
 from datetime import timezone, datetime
+from functools import lru_cache
+from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from types import SimpleNamespace
 import uuid
@@ -134,8 +136,16 @@ from marketing_events.value_utils import (
     resolve_start_trial_conversion_rate,
 )
 import logging
+
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
+INSTALL_SCRIPT_PATH = Path(__file__).with_name("install.sh")
+
+
+@lru_cache(maxsize=1)
+def _load_install_script() -> str:
+    return INSTALL_SCRIPT_PATH.read_text(encoding="utf-8")
 
 SIGNUP_TRACKING_SESSION_KEYS = (
     'signup_event_id',
@@ -1687,6 +1697,19 @@ class WebManifestView(View):
         )
         response = JsonResponse(payload, content_type="application/manifest+json")
         response["Cache-Control"] = "no-store, max-age=0"
+        return response
+
+
+class InstallScriptView(View):
+    def get(self, request, *args, **kwargs):
+        try:
+            script = _load_install_script()
+        except OSError as exc:
+            raise Http404("Installer script unavailable.") from exc
+
+        response = HttpResponse(script, content_type="text/plain; charset=utf-8")
+        response["Cache-Control"] = "public, max-age=300"
+        response["Content-Disposition"] = 'inline; filename="install.sh"'
         return response
 
 
