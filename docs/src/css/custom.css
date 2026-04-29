@@ -9,6 +9,10 @@
   --ifm-code-font-size: 0.92rem;
   --ifm-navbar-height: 4rem;
   --ifm-border-radius: 8px;
+  --gobii-doc-panel-background: #ffffff;
+  --gobii-doc-panel-border: #dfe3ea;
+  --gobii-doc-muted-border: #e8ebf0;
+  --gobii-doc-subtle-active: rgba(47, 124, 239, 0.09);
 }
 
 [data-theme='dark'] {
@@ -16,6 +20,10 @@
   --ifm-background-surface-color: #10141d;
   --ifm-navbar-background-color: #090b0f;
   --ifm-footer-background-color: #090b0f;
+  --gobii-doc-panel-background: #11151c;
+  --gobii-doc-panel-border: #303846;
+  --gobii-doc-muted-border: #242b36;
+  --gobii-doc-subtle-active: rgba(47, 124, 239, 0.16);
 }
 
 .navbar__logo {
@@ -64,13 +72,26 @@
   border-radius: 8px;
 }
 
+.theme-api-markdown {
+  --ifm-heading-margin-top: 1.35rem;
+  color: var(--ifm-color-emphasis-800);
+}
+
+.theme-api-markdown .openapi__heading {
+  font-size: 2rem;
+  letter-spacing: 0;
+  margin-bottom: 0.7rem !important;
+}
+
 .openapi__method-endpoint {
   align-items: center;
-  border: 1px solid var(--ifm-color-emphasis-300);
+  background: var(--gobii-doc-panel-background);
+  border: 1px solid var(--gobii-doc-panel-border);
   border-radius: 8px;
-  display: flex;
+  display: inline-flex;
   gap: 0.65rem;
-  padding: 0.75rem;
+  max-width: 100%;
+  padding: 0.62rem 0.72rem;
 }
 
 .openapi__method-endpoint .badge {
@@ -82,13 +103,119 @@
 .openapi__method-endpoint-path {
   font-size: 0.95rem;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .openapi-left-panel__container > .openapi__divider:first-of-type {
   margin-top: 1.25rem;
 }
 
+.openapi-left-panel__container .openapi__divider {
+  border-color: var(--gobii-doc-muted-border);
+}
+
+.openapi-left-panel__container .openapi-tabs__heading {
+  font-size: 1.45rem;
+}
+
+.openapi-left-panel__container .openapi-tabs__response-header {
+  align-items: center;
+  display: flex;
+}
+
+.openapi-right-panel__container > * {
+  margin-bottom: 1rem;
+}
+
+.openapi-security__details,
+.openapi-tabs__code-container,
+.openapi-explorer__request-form,
+.openapi-explorer__response-container {
+  background: var(--gobii-doc-panel-background) !important;
+  border: 1px solid var(--gobii-doc-panel-border) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.openapi-security__details {
+  font-size: 0.78rem;
+}
+
+.openapi-tabs__code-container {
+  overflow: hidden;
+}
+
+.openapi-tabs__code-list-container {
+  flex-wrap: nowrap !important;
+  gap: 0.35rem;
+  padding: 0.72rem 0.72rem 0.45rem !important;
+}
+
+.openapi-tabs__code-list-container::-webkit-scrollbar {
+  height: 6px;
+}
+
+.openapi-tabs__code-item {
+  border-radius: 6px !important;
+  flex: 0 0 auto;
+  height: 2.25rem !important;
+  min-width: auto !important;
+  padding: 0 0.72rem !important;
+  width: auto !important;
+}
+
+.openapi-tabs__code-item svg,
+.openapi-tabs__code-item img {
+  display: none !important;
+}
+
+.openapi-tabs__code-item.active {
+  background: var(--gobii-doc-subtle-active) !important;
+  border-color: var(--ifm-color-primary) !important;
+}
+
+.openapi-tabs__code-item span,
+.openapi-tabs__code-item {
+  font-size: 0.68rem !important;
+  letter-spacing: 0 !important;
+}
+
+.openapi-tabs__code-container pre {
+  max-height: 22rem;
+}
+
+.openapi-explorer__request-form,
+.openapi-explorer__response-container {
+  font-size: 0.9rem;
+}
+
+.openapi-schema__container {
+  gap: 0.35rem;
+}
+
+.theme-doc-sidebar-container .menu {
+  font-size: 0.92rem;
+}
+
+.theme-doc-sidebar-container .menu__link {
+  border-radius: 6px;
+  line-height: 1.25;
+}
+
+.theme-doc-sidebar-container .menu__link--active {
+  background: var(--gobii-doc-subtle-active);
+  font-weight: 600;
+}
+
+.theme-doc-sidebar-container .menu__list .menu__list {
+  padding-left: 0.75rem;
+}
+
 @media (max-width: 996px) {
+  .theme-api-markdown .openapi__heading {
+    font-size: 2.35rem;
+  }
+
   .theme-api-markdown {
     margin-left: 0;
     margin-right: 0;
@@ -98,6 +225,10 @@
   .openapi-right-panel__container {
     padding-left: 0;
     padding-right: 0;
+  }
+
+  .openapi-left-panel__container {
+    border-right: 0 !important;
   }
 
   .openapi-right-panel__container {
