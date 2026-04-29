@@ -21,7 +21,7 @@ permissions:
   packages: write
 
 env:
-  DOCS_SITE_URL: https://docs-staging.ship.gobii.ai
+  DOCS_SITE_URL: https://docs.gobii.ai
   DOCS_IMAGE: ghcr.io/gobii-ai/gobii-docs
 
 jobs:
