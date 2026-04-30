@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch
 
 from api.models import (
     BrowserLLMPolicy,
@@ -39,6 +39,10 @@ from api.models import (
     VideoGenerationTierEndpoint,
     VideoGenerationModelEndpoint,
 )
+from console.llm_tier_usage import (
+    build_browser_endpoint_tier_usage_map,
+    build_persistent_endpoint_tier_usage_map,
+)
 
 
 def _provider_key_status(provider: LLMProvider) -> str:
@@ -60,7 +64,10 @@ def _serialize_endpoint_common(endpoint, *, label: str) -> dict[str, Any]:
     }
 
 
-def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[str, Any]:
+def _serialize_persistent_endpoint(
+    endpoint: PersistentModelEndpoint,
+    tier_usage_by_endpoint: dict[Any, list[dict[str, Any]]],
+) -> dict[str, Any]:
     label = f"{endpoint.provider.display_name} · {endpoint.litellm_model}"
     data = _serialize_endpoint_common(endpoint, label=label)
     data.update(
@@ -80,100 +87,16 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
             "max_input_tokens": endpoint.max_input_tokens,
             "provider_id": str(endpoint.provider_id),
             "type": "persistent",
-            "tier_usage": _serialize_persistent_endpoint_tier_usage(endpoint),
+            "tier_usage": tier_usage_by_endpoint.get(endpoint.id, []),
         }
     )
     return data
 
 
-def _serialize_persistent_endpoint_tier_usage(endpoint: PersistentModelEndpoint) -> list[dict[str, Any]]:
-    usage: list[dict[str, Any]] = []
-    legacy_refs = (
-        PersistentTierEndpoint.objects.filter(endpoint=endpoint)
-        .select_related("tier__token_range", "tier__intelligence_tier")
-        .order_by("tier__token_range__min_tokens", "tier__intelligence_tier__rank", "tier__order")
-    )
-    for ref in legacy_refs:
-        tier = ref.tier
-        usage.append(
-            {
-                "id": str(ref.id),
-                "source": "persistent_policy",
-                "routing_profile": "Default persistent config",
-                "routing_profile_active": True,
-                "tier": f"{tier.token_range.name} / {tier.intelligence_tier.display_name} tier {tier.order}",
-                "tier_order": tier.order,
-                "intelligence_tier": tier.intelligence_tier.display_name,
-                "description": tier.description,
-                "weight": float(ref.weight),
-                "role": "primary",
-            }
-        )
-
-    profile_refs = (
-        ProfilePersistentTierEndpoint.objects.filter(endpoint=endpoint)
-        .select_related("tier__token_range__profile", "tier__intelligence_tier")
-        .order_by(
-            "tier__token_range__profile__display_name",
-            "tier__token_range__min_tokens",
-            "tier__intelligence_tier__rank",
-            "tier__order",
-        )
-    )
-    for ref in profile_refs:
-        tier = ref.tier
-        profile = tier.token_range.profile
-        usage.append(
-            {
-                "id": str(ref.id),
-                "source": "routing_profile",
-                "routing_profile": profile.display_name or profile.name,
-                "routing_profile_active": bool(profile.is_active),
-                "tier": f"{tier.token_range.name} / {tier.intelligence_tier.display_name} tier {tier.order}",
-                "tier_order": tier.order,
-                "intelligence_tier": tier.intelligence_tier.display_name,
-                "description": tier.description,
-                "weight": float(ref.weight),
-                "role": "primary",
-            }
-        )
-
-    override_profiles = LLMRoutingProfile.objects.filter(
-        Q(eval_judge_endpoint=endpoint) | Q(summarization_endpoint=endpoint)
-    ).order_by("display_name")
-    for profile in override_profiles:
-        if profile.eval_judge_endpoint_id == endpoint.id:
-            usage.append(
-                {
-                    "id": f"{profile.id}:eval_judge",
-                    "source": "routing_profile",
-                    "routing_profile": profile.display_name or profile.name,
-                    "routing_profile_active": bool(profile.is_active),
-                    "tier": "Eval judge override",
-                    "tier_order": 0,
-                    "intelligence_tier": "",
-                    "description": "",
-                    "role": "eval_judge",
-                }
-            )
-        if profile.summarization_endpoint_id == endpoint.id:
-            usage.append(
-                {
-                    "id": f"{profile.id}:summarization",
-                    "source": "routing_profile",
-                    "routing_profile": profile.display_name or profile.name,
-                    "routing_profile_active": bool(profile.is_active),
-                    "tier": "Summarization override",
-                    "tier_order": 0,
-                    "intelligence_tier": "",
-                    "description": "",
-                    "role": "summarization",
-                }
-            )
-    return usage
-
-
-def _serialize_browser_endpoint(endpoint: BrowserModelEndpoint) -> dict[str, Any]:
+def _serialize_browser_endpoint(
+    endpoint: BrowserModelEndpoint,
+    tier_usage_by_endpoint: dict[Any, list[dict[str, Any]]],
+) -> dict[str, Any]:
     label = f"{endpoint.provider.display_name} · {endpoint.browser_model}"
     data = _serialize_endpoint_common(endpoint, label=label)
     data.update(
@@ -186,58 +109,10 @@ def _serialize_browser_endpoint(endpoint: BrowserModelEndpoint) -> dict[str, Any
             "max_output_tokens": endpoint.max_output_tokens,
             "provider_id": str(endpoint.provider_id),
             "type": "browser",
-            "tier_usage": _serialize_browser_endpoint_tier_usage(endpoint),
+            "tier_usage": tier_usage_by_endpoint.get(endpoint.id, []),
         }
     )
     return data
-
-
-def _serialize_browser_endpoint_tier_usage(endpoint: BrowserModelEndpoint) -> list[dict[str, Any]]:
-    usage: list[dict[str, Any]] = []
-    legacy_refs = (
-        BrowserTierEndpoint.objects.filter(Q(endpoint=endpoint) | Q(extraction_endpoint=endpoint))
-        .select_related("tier__policy", "tier__intelligence_tier")
-        .order_by("tier__policy__name", "tier__intelligence_tier__rank", "tier__order")
-    )
-    for ref in legacy_refs:
-        tier = ref.tier
-        usage.append(
-            {
-                "id": str(ref.id),
-                "source": "browser_policy",
-                "routing_profile": tier.policy.name,
-                "routing_profile_active": bool(tier.policy.is_active),
-                "tier": f"{tier.intelligence_tier.display_name} tier {tier.order}",
-                "tier_order": tier.order,
-                "intelligence_tier": tier.intelligence_tier.display_name,
-                "description": tier.description,
-                "weight": float(ref.weight),
-                "role": "extraction" if ref.extraction_endpoint_id == endpoint.id else "primary",
-            }
-        )
-
-    profile_refs = (
-        ProfileBrowserTierEndpoint.objects.filter(Q(endpoint=endpoint) | Q(extraction_endpoint=endpoint))
-        .select_related("tier__profile", "tier__intelligence_tier")
-        .order_by("tier__profile__display_name", "tier__intelligence_tier__rank", "tier__order")
-    )
-    for ref in profile_refs:
-        tier = ref.tier
-        usage.append(
-            {
-                "id": str(ref.id),
-                "source": "routing_profile",
-                "routing_profile": tier.profile.display_name or tier.profile.name,
-                "routing_profile_active": bool(tier.profile.is_active),
-                "tier": f"{tier.intelligence_tier.display_name} tier {tier.order}",
-                "tier_order": tier.order,
-                "intelligence_tier": tier.intelligence_tier.display_name,
-                "description": tier.description,
-                "weight": float(ref.weight),
-                "role": "extraction" if ref.extraction_endpoint_id == endpoint.id else "primary",
-            }
-        )
-    return usage
 
 
 def _serialize_embedding_endpoint(endpoint: EmbeddingsModelEndpoint) -> dict[str, Any]:
@@ -312,7 +187,7 @@ def _serialize_weighted_tier_payload(tiers) -> list[dict[str, Any]]:
 
 
 def build_llm_overview() -> dict[str, Any]:
-    providers = (
+    providers = list(
         LLMProvider.objects.all()
         .order_by("display_name")
         .prefetch_related(
@@ -323,6 +198,16 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
             Prefetch("video_generation_endpoints", queryset=VideoGenerationModelEndpoint.objects.select_related("provider")),
         )
+    )
+    persistent_tier_usage_by_endpoint = build_persistent_endpoint_tier_usage_map(
+        endpoint.id
+        for provider in providers
+        for endpoint in provider.persistent_endpoints.all()
+    )
+    browser_tier_usage_by_endpoint = build_browser_endpoint_tier_usage_map(
+        endpoint.id
+        for provider in providers
+        for endpoint in provider.browser_endpoints.all()
     )
 
     provider_payload: list[dict[str, Any]] = []
@@ -335,11 +220,11 @@ def build_llm_overview() -> dict[str, Any]:
 
     for provider in providers:
         persistent_endpoints = [
-            _serialize_persistent_endpoint(endpoint)
+            _serialize_persistent_endpoint(endpoint, persistent_tier_usage_by_endpoint)
             for endpoint in provider.persistent_endpoints.all()
         ]
         browser_endpoints = [
-            _serialize_browser_endpoint(endpoint)
+            _serialize_browser_endpoint(endpoint, browser_tier_usage_by_endpoint)
             for endpoint in provider.browser_endpoints.all()
         ]
         embedding_endpoints = [
