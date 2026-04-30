@@ -8,7 +8,9 @@ from api.agent.core.prompt_context import (
     _get_sandbox_prompt_summary,
     build_prompt_context,
 )
+from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
+from api.services.web_sessions import start_web_session
 from billing.addons import AddonUplift
 
 
@@ -115,6 +117,38 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("`os.environ`", contents)
         self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
         self.assertIn("those flows may hit system limitations", contents)
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_discourages_internal_progress_narration(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("never narrate internal reasoning", contents)
+        self.assertIn("tool sequencing", contents)
+        self.assertIn("User-facing question, blocker, config change, or finding", contents)
+        self.assertNotIn("Progress update?", contents)
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_implied_send_prompt_keeps_working_silent(self, _mock_comms, _mock_steps):
+        start_web_session(self.agent, self.user)
+
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("Your response text is a user message", contents)
+        self.assertIn("While working, respond with tool calls and no text", contents)
+        self.assertIn("never status narration", contents)
+
+    def test_web_chat_tool_description_discourages_internal_narration(self):
+        tool = get_send_chat_tool()
+        description = tool["function"]["description"]
+        will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
+
+        self.assertIn("questions, blockers, config changes, or findings", description)
+        self.assertIn("Do not narrate what you will do next", description)
+        self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_biases_toward_custom_tools_for_bulk_work(self, _mock_sandbox):

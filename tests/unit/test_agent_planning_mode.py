@@ -8,6 +8,7 @@ from waffle.testutils import override_flag
 
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
+from api.agent.tools.request_human_input import get_request_human_input_tool
 from api.agent.tools.schedule_updater import execute_update_schedule
 from api.agent.tools.static_tools import get_static_tool_definitions
 from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
@@ -119,6 +120,13 @@ class PersistentAgentPlanningModeTests(TestCase):
             function["parameters"]["properties"]["full_plan"]["description"],
         )
 
+    def test_request_human_input_tool_schema_warns_planning_questions_must_be_tracked(self):
+        tool = get_request_human_input_tool()
+        function = tool["function"]
+
+        self.assertIn("In Planning Mode, planning questions must use this tool", function["description"])
+        self.assertIn("questions sent only by chat, email, or SMS are not tracked", function["description"])
+
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -167,8 +175,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("move planning forward or call end_planning, not start the deliverable work", prompt)
         self.assertIn("Stay in planning only until planning is completed or skipped", prompt)
         self.assertIn("or otherwise start doing the task before calling end_planning", prompt)
-        self.assertIn("include a clear list of the exact planning questions in that email/SMS body", prompt)
-        self.assertIn("the recipient may not have web chat open", prompt)
+        self.assertIn("If the welcome asks planning questions by email or SMS", prompt)
+        self.assertIn("call request_human_input in the same", prompt)
+        self.assertIn("If the task is clear enough, call end_planning instead", prompt)
         self.assertIn("skip those questions and get right to work", prompt)
         self.assertIn("end_planning", prompt)
         self.assertIn("Skip Planning", prompt)
@@ -176,6 +185,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("each item contains exactly one question", prompt)
         self.assertIn("`will_continue_work=false` on request_human_input", prompt)
         self.assertIn("already visible in web chat", prompt)
+        self.assertIn("Planning questions sent only in chat, email, or SMS are", prompt)
+        self.assertIn("not tracked and do not count", prompt)
         self.assertIn("refer to the existing pending questions in a normal message", prompt)
         self.assertIn("ask only the new unanswered question", prompt)
         self.assertIn(
@@ -264,6 +275,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Keep the current schedule unchanged until planning is completed or skipped", user_message["content"])
         self.assertNotIn("To update your charter or schedule", user_message["content"])
         self.assertIn("Do not update schedule while planning mode is active", user_message["content"])
+        self.assertIn("email/SMS/chat-only questions do not count", user_message["content"])
         self.assertNotIn("You control your schedule.", system_message["content"])
         self.assertNotIn("check every hour", system_message["content"])
         self.assertNotIn("weekly on Fridays", system_message["content"])

@@ -41,6 +41,7 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         return normalized in {"1", "true", "yes"}
     return bool(raw)
 
+
 def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     if has_verified_email(recipient_user):
         if PersistentAgentCommsEndpoint.objects.filter(
@@ -69,8 +70,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a response to the user via Gobii's in-console web chat. "
-                "Use this for quick updates, follow-up questions, or sharing results in real time."
+                "Send a user-facing web chat message for questions, blockers, config changes, or findings. "
+                "Do not narrate what you will do next, tool sequencing, kanban, or internal reasoning."
             ),
             "parameters": {
                 "type": "object",
@@ -94,7 +95,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
+                        "description": "REQUIRED. true = continue after this user-facing message; false = stop. Never send a message solely to justify continuing work.",
                     },
                 },
                 "required": ["body", "will_continue_work"],
