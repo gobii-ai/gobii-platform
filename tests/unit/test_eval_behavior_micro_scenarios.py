@@ -12,13 +12,17 @@ from api.evals.scenarios.behavior_micro import (
     all_requests_have_options,
     get_forbidden_calls_before_end_planning,
     get_first_relevant_tool_call,
+    get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
 )
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
+    CommsChannel,
     EvalRun,
     PersistentAgent,
+    PersistentAgentConversation,
+    PersistentAgentHumanInputRequest,
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
@@ -82,6 +86,26 @@ class BehaviorMicroHelperTests(TestCase):
             status="complete",
         )
 
+    def _add_human_input_request(self, run, question):
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=f"web://user/{run.id}",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            eval_run=run,
+            description=f"{question} step",
+        )
+        return PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            originating_step=step,
+            question=question,
+            options_json=[{"key": "yes", "title": "Yes"}],
+            requested_via_channel=CommsChannel.WEB,
+        )
+
     def test_first_relevant_tool_call_skips_ignored_tools(self):
         self._add_tool_call("send_chat_message")
         expected = self._add_tool_call("request_human_input")
@@ -114,6 +138,20 @@ class BehaviorMicroHelperTests(TestCase):
         calls = get_planning_mutation_calls_before_end_planning(self.run.id)
 
         self.assertEqual(calls, [mutation])
+
+    def test_pending_human_input_requests_are_scoped_to_eval_run(self):
+        expected = self._add_human_input_request(self.run, "Current run question?")
+        other_run = EvalRun.objects.create(
+            scenario_slug="helper_test_other",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        self._add_human_input_request(other_run, "Other run question?")
+
+        requests = get_pending_human_input_requests(self.agent.id, self.run.id)
+
+        self.assertEqual(requests, [expected])
 
     def test_all_requests_have_options_requires_nonempty_options(self):
         with_options = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])

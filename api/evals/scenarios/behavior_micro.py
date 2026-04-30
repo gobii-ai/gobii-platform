@@ -98,7 +98,7 @@ def get_tool_calls_for_run(run_id, *, after=None, tool_names=None):
         queryset = queryset.filter(step__created_at__gte=after)
     if tool_names is not None:
         queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step_id"))
+    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
 
 
 def get_first_relevant_tool_call(run_id, *, after=None, ignored_tool_names=None):
@@ -143,9 +143,10 @@ def get_planning_mutation_calls_before_end_planning(run_id, *, after=None):
     return calls
 
 
-def get_pending_human_input_requests(agent_id, *, after=None):
+def get_pending_human_input_requests(agent_id, run_id, *, after=None):
     queryset = PersistentAgentHumanInputRequest.objects.filter(
         agent_id=agent_id,
+        originating_step__eval_run_id=run_id,
         status=PersistentAgentHumanInputRequest.Status.PENDING,
     )
     if after is not None:
@@ -254,6 +255,7 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_welcome_message")
         outbound = PersistentAgentMessage.objects.filter(
             owner_agent_id=agent_id,
+            conversation_id=inbound.conversation_id,
             is_outbound=True,
             timestamp__gt=inbound.timestamp,
         ).order_by("timestamp").first()
@@ -276,7 +278,7 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
             )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_questions")
-        requests = get_pending_human_input_requests(agent_id, after=inbound.timestamp)
+        requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
         if 1 <= len(requests) <= 3 and all_requests_have_options(requests):
             self.record_task_result(
                 run_id,
@@ -769,7 +771,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_human_input")
-        requests = get_pending_human_input_requests(agent_id, after=inbound.timestamp)
+        requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
         if requests:
             self.record_task_result(
                 run_id,
