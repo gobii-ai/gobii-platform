@@ -4230,8 +4230,55 @@ def _process_agent_events_locked(
                     if owner_user is not None:
                         span.set_attribute("credit_check.user_id", owner_user.id)
 
+                    daily_state = get_agent_daily_credit_state(agent)
+                    daily_limit = daily_state.get("hard_limit")
+                    daily_remaining = daily_state.get("hard_limit_remaining")
+                    credit_snapshot = {
+                        "available": available,
+                        "daily_state": daily_state,
+                    }
+                    try:
+                        span.set_attribute(
+                            "credit_check.daily_limit",
+                            float(daily_limit) if daily_limit is not None else -1.0,
+                        )
+                        span.set_attribute(
+                            "credit_check.daily_remaining_before_loop",
+                            float(daily_remaining) if daily_remaining is not None else -1.0,
+                        )
+                    except Exception:
+                        pass
+
+                    daily_limit_exhausted = daily_limit is not None and (
+                        daily_remaining is None or daily_remaining <= Decimal("0")
+                    )
+                    if daily_limit_exhausted:
+                        msg = (
+                            "Agent reached its enforced daily task credit limit and is entering message-only mode."
+                        )
+                        logger.warning(
+                            "Persistent agent %s reached hard daily limit before loop; continuing in message-only mode (used=%s limit=%s).",
+                            persistent_agent_id,
+                            daily_state.get("used"),
+                            daily_limit,
+                        )
+
+                        step = PersistentAgentStep.objects.create(
+                            agent=agent,
+                            description=msg,
+                        )
+                        PersistentAgentSystemStep.objects.create(
+                            step=step,
+                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+                            notes="daily_credit_limit_exhausted",
+                        )
+
+                        span.add_event("Agent processing entering daily-limit message-only mode")
+                        span.set_attribute("credit_check.daily_limit_block", True)
+
                     if (
-                        available is not None
+                        not daily_limit_exhausted
+                        and available is not None
                         and available != TASKS_UNLIMITED
                         and Decimal(available) <= Decimal("0")
                     ):
@@ -4255,48 +4302,6 @@ def _process_agent_events_locked(
                         span.add_event("Agent processing skipped - insufficient credits")
                         span.set_attribute("credit_check.sufficient", False)
                         return agent
-                    daily_state = get_agent_daily_credit_state(agent)
-                    daily_limit = daily_state.get("hard_limit")
-                    daily_remaining = daily_state.get("hard_limit_remaining")
-                    credit_snapshot = {
-                        "available": available,
-                        "daily_state": daily_state,
-                    }
-                    try:
-                        span.set_attribute(
-                            "credit_check.daily_limit",
-                            float(daily_limit) if daily_limit is not None else -1.0,
-                        )
-                        span.set_attribute(
-                            "credit_check.daily_remaining_before_loop",
-                            float(daily_remaining) if daily_remaining is not None else -1.0,
-                        )
-                    except Exception:
-                        pass
-
-                    if daily_limit is not None and (daily_remaining is None or daily_remaining <= Decimal("0")):
-                        msg = (
-                            "Agent reached its enforced daily task credit limit and is entering message-only mode."
-                        )
-                        logger.warning(
-                            "Persistent agent %s reached hard daily limit before loop; continuing in message-only mode (used=%s limit=%s).",
-                            persistent_agent_id,
-                            daily_state.get("used"),
-                            daily_limit,
-                        )
-
-                        step = PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description=msg,
-                        )
-                        PersistentAgentSystemStep.objects.create(
-                            step=step,
-                            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-                            notes="daily_credit_limit_exhausted",
-                        )
-
-                        span.add_event("Agent processing entering daily-limit message-only mode")
-                        span.set_attribute("credit_check.daily_limit_block", True)
             else:
                 # Agents without a linked user (system/automation) are not gated
                 span.add_event("Agent has no owner; skipping credit gate")

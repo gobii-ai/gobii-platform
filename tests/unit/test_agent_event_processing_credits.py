@@ -1,5 +1,6 @@
 from decimal import Decimal
 from datetime import datetime, timezone as dt_timezone
+from pathlib import Path
 
 from django.test import TestCase, tag, override_settings
 from django.utils import timezone
@@ -301,32 +302,20 @@ class PersistentAgentCreditGateTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.comms.message_service.Analytics.track_event")
-    @patch("api.agent.comms.message_service.deliver_agent_email")
-    def test_owner_hard_limit_notice_throttled_daily(self, mock_deliver_email, _mock_track_event):
-        from api.agent.comms.message_service import send_owner_daily_credit_hard_limit_notice
+    def test_daily_limit_canned_notice_removed_from_agent_code(self):
+        phrase = "I reached my daily task limit and am not able to continue today."
+        search_roots = [
+            Path("api/agent/comms"),
+            Path("api/agent/core"),
+        ]
+        matches = [
+            str(path)
+            for root in search_roots
+            for path in root.rglob("*.py")
+            if phrase in path.read_text()
+        ]
 
-        PersistentAgentCommsEndpoint.objects.create(
-            owner_agent=self.agent,
-            channel=CommsChannel.EMAIL,
-            address="agent-limit@example.com",
-            is_primary=True,
-        )
-        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
-            channel=CommsChannel.EMAIL,
-            address="owner-limit@example.com",
-        )
-        self.agent.preferred_contact_endpoint = owner_endpoint
-        self.agent.save(update_fields=["preferred_contact_endpoint"])
-
-        sent_first = send_owner_daily_credit_hard_limit_notice(self.agent)
-        self.assertTrue(sent_first)
-        self.agent.refresh_from_db()
-        self.assertIsNotNone(self.agent.daily_credit_hard_limit_notice_at)
-
-        sent_second = send_owner_daily_credit_hard_limit_notice(self.agent)
-        self.assertFalse(sent_second)
-        self.assertEqual(mock_deliver_email.call_count, 1)
+        self.assertEqual(matches, [])
 
     def test_process_agent_events_enters_message_only_mode_when_daily_limit_reached(self):
         """Processing should continue in message-only mode when the hard daily limit is reached."""
@@ -356,6 +345,10 @@ class PersistentAgentCreditGateTests(TestCase):
         with override_settings(GOBII_PROPRIETARY_MODE=True), \
              patch("config.settings.GOBII_PROPRIETARY_MODE", True), \
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=fake_state), \
+             patch(
+                 "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+                 return_value=0,
+             ), \
              patch("api.agent.core.event_processing._run_agent_loop") as loop_mock:
             _process_agent_events_locked(self.agent.id, _DummySpan())
             loop_mock.assert_called_once()

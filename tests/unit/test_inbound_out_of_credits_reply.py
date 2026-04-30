@@ -125,11 +125,9 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
     @tag("batch_email")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=10)
-    @patch("api.agent.comms.message_service.deliver_agent_email")
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
     def test_daily_limit_email_queues_processing_without_sending_notice(
         self,
-        mock_deliver_email,
         mock_calc,
         mock_delay,
     ):
@@ -155,13 +153,15 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
             msg_channel=CommsChannel.EMAIL,
         )
 
+        mail.outbox.clear()
+
         with patch.object(PersistentAgent, "get_daily_credit_remaining", return_value=Decimal("0")):
             with self.captureOnCommitCallbacks(execute=True):
                 ingest_inbound_message(CommsChannel.EMAIL, parsed)
 
-        mock_deliver_email.assert_not_called()
         mock_calc.assert_called_once()
         mock_delay.assert_called_once()
+        self.assertEqual(len(mail.outbox), 0)
         self.assertFalse(
             PersistentAgentMessage.objects.filter(
                 owner_agent=self.agent,
@@ -341,10 +341,8 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
     @tag("batch_sms")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("api.agent.comms.message_service.deliver_agent_sms")
     def test_daily_limit_sms_queues_processing_without_sending_notice(
         self,
-        mock_deliver_sms,
         mock_delay,
     ):
         self.agent.daily_credit_limit = 1
@@ -365,7 +363,6 @@ class InboundDailyCreditsSmsTests(PauseOwnerMixin, TestCase):
                 ingest_inbound_message(CommsChannel.SMS, parsed)
 
         mock_delay.assert_called_once()
-        mock_deliver_sms.assert_not_called()
         self.assertFalse(
             PersistentAgentMessage.objects.filter(
                 owner_agent=self.agent,
@@ -452,7 +449,12 @@ class InboundDailyCreditsWebChatTests(TestCase):
     @tag("batch_agent_chat")
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_daily_limit_web_queues_processing_without_sending_notice(self, mock_delay):
+    @patch("tasks.services.TaskCreditService.calculate_available_tasks_for_owner", return_value=0)
+    def test_daily_limit_web_queues_processing_without_sending_notice(
+        self,
+        mock_calc,
+        mock_delay,
+    ):
         self.agent.daily_credit_limit = 1
         self.agent.save(update_fields=["daily_credit_limit"])
 
@@ -473,6 +475,7 @@ class InboundDailyCreditsWebChatTests(TestCase):
                 ingest_inbound_message(CommsChannel.WEB, parsed)
 
         mock_delay.assert_called_once()
+        mock_calc.assert_called_once()
         self.assertFalse(
             PersistentAgentMessage.objects.filter(
                 owner_agent=self.agent,
