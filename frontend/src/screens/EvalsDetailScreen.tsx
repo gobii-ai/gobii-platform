@@ -375,7 +375,7 @@ export function EvalsDetailScreen({ suiteRunId, isStaff = false }: EvalsDetailSc
             </div>
             <div className="flex items-center gap-3">
               <a
-                href="/console/evals/"
+                href="/evals/"
                 className="inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-200 rounded-lg shadow-sm hover:bg-slate-50 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all"
               >
                 <ArrowLeft className="w-4 h-4" />

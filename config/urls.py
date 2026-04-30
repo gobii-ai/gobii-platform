@@ -64,6 +64,7 @@ from console.api_views import (
     SystemStatusAPIView,
     SystemSettingsListAPIView,
     SystemSettingDetailAPIView,
+    LLMPerformanceTestAPIView,
     LLMProviderListCreateAPIView,
     LLMProviderDetailAPIView,
     PersistentEndpointListCreateAPIView,
@@ -312,6 +313,9 @@ urlpatterns = [
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
     
     # system settings
+    path("evals/", ConsoleEvalsView.as_view(), name="evals"),
+    path("evals/<uuid:suite_run_id>/", ConsoleEvalsDetailView.as_view(), name="evals-detail"),
+    path("llm-config/", ConsoleLLMConfigView.as_view(), name="llm-config"),
     path("system-settings/", SystemSettingsView.as_view(), name="system-settings"),
 
     # console
@@ -322,9 +326,6 @@ urlpatterns = [
     path("staff/users/", StaffUsersView.as_view(), name="staff-users"),
     path("staff/users/<int:user_id>/", StaffUsersView.as_view(), name="staff-user-detail"),
     path("console/usage/", ConsoleUsageView.as_view(), name="usage"),
-    path("console/llm-config/", ConsoleLLMConfigView.as_view(), name="console-llm-config"),
-    path("console/evals/", ConsoleEvalsView.as_view(), name="console-evals"),
-    path("console/evals/<uuid:suite_run_id>/", ConsoleEvalsDetailView.as_view(), name="console-evals-detail"),
     path("console/staff/agents/<uuid:agent_id>/audit/", StaffAgentAuditView.as_view(), name="console-agent-audit"),
     path("console/secrets/", GlobalSecretsView.as_view(), name="console-secrets"),
     path(
@@ -461,6 +462,7 @@ urlpatterns = [
     path("console/api/llm/providers/", LLMProviderListCreateAPIView.as_view(), name="console_llm_providers"),
     path("console/api/llm/providers/<uuid:provider_id>/", LLMProviderDetailAPIView.as_view(), name="console_llm_provider_detail"),
     path("console/api/llm/test-endpoint/", LLMEndpointTestAPIView.as_view(), name="console_llm_test_endpoint"),
+    path("console/api/llm/performance-test/", LLMPerformanceTestAPIView.as_view(), name="console_llm_performance_test"),
     path("console/api/llm/persistent/endpoints/", PersistentEndpointListCreateAPIView.as_view(), name="console_llm_persistent_endpoints"),
     path("console/api/llm/persistent/endpoints/<uuid:endpoint_id>/", PersistentEndpointDetailAPIView.as_view(), name="console_llm_persistent_endpoint_detail"),
     path("console/api/llm/persistent/ranges/", PersistentTokenRangeListCreateAPIView.as_view(), name="console_llm_ranges"),
