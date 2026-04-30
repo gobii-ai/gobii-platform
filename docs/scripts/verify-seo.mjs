@@ -70,8 +70,8 @@ if (!fs.existsSync(buildDir)) {
   }
 
   const sitemap = readBuild('sitemap.xml');
-  if (!sitemap.includes(`<loc>${siteUrl}/getting-started/introduction</loc>`)) {
-    fail('sitemap.xml is missing the getting-started page');
+  if (!sitemap.includes(`<loc>${siteUrl}/</loc>`)) {
+    fail('sitemap.xml is missing the docs home page');
   }
   if (sitemap.includes('.html</loc>')) {
     fail('sitemap.xml contains .html URLs');
