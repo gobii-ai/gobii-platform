@@ -86,6 +86,7 @@ from api.models import (
     VideoGenerationTierEndpoint,
     IntelligenceTier,
     LLMProvider,
+    LLMRoutingProfile,
     MCPServerConfig,
     MCPServerOAuthCredential,
     MCPServerOAuthSession,
@@ -103,6 +104,8 @@ from api.models import (
     PersistentModelEndpoint,
     PersistentTierEndpoint,
     PersistentTokenRange,
+    ProfileBrowserTierEndpoint,
+    ProfilePersistentTierEndpoint,
     EvalSuiteRun,
     EvalRun,
     EvalRunTask,
@@ -128,6 +131,10 @@ from console.agent_audit.export import write_agent_audit_export_json
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
+from console.llm_tier_usage import (
+    build_browser_endpoint_tier_usage,
+    build_persistent_endpoint_tier_usage,
+)
 from api.encryption import SecretsEncryption
 from api.agent.tasks import process_agent_events_task
 from api.services.system_settings import get_max_file_size
@@ -5008,9 +5015,24 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        force = request.GET.get("force") in {"1", "true", "yes"}
+        tier_usage = build_persistent_endpoint_tier_usage(endpoint)
+        if tier_usage and not force:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "code": "endpoint_in_tiers",
+                    "message": "Endpoint is assigned to persistent routing tiers.",
+                    "tier_usage": tier_usage,
+                },
+                status=409,
+            )
+        with transaction.atomic():
+            PersistentTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            ProfilePersistentTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            LLMRoutingProfile.objects.filter(eval_judge_endpoint=endpoint).update(eval_judge_endpoint=None)
+            LLMRoutingProfile.objects.filter(summarization_endpoint=endpoint).update(summarization_endpoint=None)
+            endpoint.delete()
         invalidate_llm_bootstrap_cache()
         from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
         invalidate_min_endpoint_input_tokens_cache()
@@ -5324,9 +5346,24 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        force = request.GET.get("force") in {"1", "true", "yes"}
+        tier_usage = build_browser_endpoint_tier_usage(endpoint)
+        if tier_usage and not force:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "code": "endpoint_in_tiers",
+                    "message": "Endpoint is assigned to browser tiers.",
+                    "tier_usage": tier_usage,
+                },
+                status=409,
+            )
+        with transaction.atomic():
+            BrowserTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            ProfileBrowserTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            BrowserTierEndpoint.objects.filter(extraction_endpoint=endpoint).update(extraction_endpoint=None)
+            ProfileBrowserTierEndpoint.objects.filter(extraction_endpoint=endpoint).update(extraction_endpoint=None)
+            endpoint.delete()
         return _json_ok()
 
 

@@ -222,7 +222,6 @@ class DailyLimitProcessingTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @patch("api.agent.comms.message_service.send_owner_daily_credit_hard_limit_notice")
     @patch("api.agent.core.event_processing._run_agent_loop", return_value={"total_tokens": 0})
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch("api.agent.core.event_processing.maybe_schedule_agent_avatar")
@@ -242,7 +241,7 @@ class DailyLimitProcessingTests(TestCase):
     )
     @patch(
         "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
-        return_value=Decimal("5"),
+        return_value=Decimal("0"),
     )
     def test_process_agent_events_enters_message_only_mode_without_notice(
         self,
@@ -253,12 +252,10 @@ class DailyLimitProcessingTests(TestCase):
         _mock_agent_tags,
         _mock_agent_avatar,
         mock_run_loop,
-        mock_notice,
     ):
         _process_agent_events_locked(self.agent.id, _DummySpan())
 
         mock_run_loop.assert_called_once()
-        mock_notice.assert_not_called()
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,

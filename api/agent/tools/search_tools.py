@@ -1181,13 +1181,9 @@ def get_search_tools_tool() -> Dict[str, Any]:
                     "query": {
                         "type": "string",
                         "description": "Description of what you want to accomplish or what kind of tools and skills you're looking for",
-                    },
-                    "will_continue_work": {
-                        "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
                     }
                 },
-                "required": ["query", "will_continue_work"],
+                "required": ["query"],
             },
         },
     }
@@ -1203,20 +1199,7 @@ def execute_search_tools(agent: PersistentAgent, params: Dict[str, Any]) -> Tool
     if not query:
         return {"status": "error", "message": "Missing required parameter: query"}
 
-    will_continue_work_raw = params.get("will_continue_work", None)
-    if will_continue_work_raw is None:
-        will_continue_work = None
-    elif isinstance(will_continue_work_raw, bool):
-        will_continue_work = will_continue_work_raw
-    elif isinstance(will_continue_work_raw, str):
-        will_continue_work = will_continue_work_raw.lower() == "true"
-    else:
-        will_continue_work = None
-
     span.set_attribute("search.query", query)
     logger.info("Agent %s searching for tools: %s", agent.id, query)
 
-    result = search_tools(agent, query)
-    if isinstance(result, dict) and result.get("status") == "success" and will_continue_work is False:
-        result["auto_sleep_ok"] = True
-    return result
+    return search_tools(agent, query)

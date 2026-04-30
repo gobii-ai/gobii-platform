@@ -713,7 +713,7 @@ when:
 
 do:
   # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
-  # Otherwise → search_tools("<domain>", will_continue_work=true)
+  # Otherwise → search_tools("<domain>")
   # If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous
 
 then:
@@ -752,7 +752,7 @@ when:
 
 do:
   # First, discover the best search/extractor tools for this domain if needed
-  search_tools(query="<site/platform/domain or capability>", will_continue_work=true)
+  search_tools(query="<site/platform/domain or capability>")
   # Then use the enabled search tool
   <search_tool>(query="<topic>", will_continue_work=true)
 
@@ -944,8 +944,7 @@ will_continue_work=false → "I'm DONE, STOP NOW" — all work done AND marked d
 
 **Always set this explicitly. Examples:**
 - Intro/greeting message? → will_continue_work=true (you haven't started yet!)
-- Progress update? → will_continue_work=true (work remains)
-- Asking a question? → will_continue_work=true (you need their answer)
+- User-facing question, blocker, config change, or finding? → will_continue_work=true if work remains afterward
 - Fetching data to process? → will_continue_work=true (need to process result)
 - Final report with all work done AND marked done? → will_continue_work=false
 
@@ -2527,7 +2526,8 @@ def _render_prompt_context_once(
             f"Planning Mode is active. Do not update schedule while planning mode is active. "
             "Keep the current schedule unchanged until planning is completed or skipped. "
             f"When planning is finished, end_planning(full_plan=...) replaces your runtime charter, and only after planning ends should you write schedule changes to {AGENT_CONFIG_TABLE} via sqlite_batch. "
-            "CRITICAL: Planning is not deliverable work. Do not create kanban cards or start execution until planning is completed or skipped."
+            "CRITICAL: No deliverable work, kanban cards, or execution until planning is completed or skipped. "
+            "Planning questions must use request_human_input; email/SMS/chat-only questions do not count."
         )
     else:
         agent_config_note = (
@@ -4405,8 +4405,8 @@ def _get_planning_mode_prompt_block() -> str:
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, "
         "or implementation approach unless the user explicitly asks to configure or choose them. Keep the "
         "conversation focused on the user's need, scope, and desired outcome.\n"
-        "- Use request_human_input for planning questions. Do not ask planning questions as plain chat text, even when "
-        "the active user is in web chat, because planning answers should be tracked in the composer.\n"
+        "- Use request_human_input for planning questions. Planning questions sent only in chat, email, or SMS are "
+        "not tracked and do not count, even when the user can reply there.\n"
         "- Once request_human_input succeeds, treat those questions as already visible in web chat. "
         "Do not call request_human_input again for the same questions, even if you later decide to add another question; "
         "refer to the existing pending questions in a normal message or ask only the new unanswered question.\n"
@@ -4545,11 +4545,10 @@ def _get_planning_first_run_welcome_instruction(
         "or other prompt context already gives you a current or preferred setup. Treat that setup as outside the "
         "scope of planning unless the user explicitly wants to configure or change it. Keep planning questions "
         "focused on the user's need, scope, and desired outcome.\n\n"
-        "If your welcome is an email or SMS and you also call request_human_input in the same response, "
-        "include a clear list of the exact planning questions in that email/SMS body. Do not send a "
-        "message that only says you have questions, because the recipient may not have web chat open. "
-        "The request_human_input call tracks the answers; the email/SMS must still show the questions. "
-        "Also tell the user they can say to skip those questions and get right to work if they prefer.\n"
+        "If the welcome asks planning questions by email or SMS, call request_human_input in the same "
+        "response with the same questions and options; the email/SMS only mirrors them off web chat. "
+        "If the task is clear enough, call end_planning instead. Also tell the user they can say to skip those "
+        "questions and get right to work if they prefer.\n"
     )
 
 
@@ -4573,8 +4572,9 @@ def _get_system_instruction(
         tool_example = implied_send_context.get("tool_example") if implied_send_context else "send_chat_message(...)"
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
-            "Your text goes directly to the user—no buffer, no 'compile' step. Whatever you write is what they see.\n"
-            "Text-only replies auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
+            "Your response text is a user message. Use it only for questions, blockers, config changes, findings, or final deliverables.\n"
+            "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, kanban, or internal reasoning.\n"
+            "Text-only user messages auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "When wrapping up, send your report FIRST, then mark the last card done.\n\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
@@ -4591,12 +4591,12 @@ def _get_system_instruction(
             "  This is your normal mode while working. No announcements.\n\n"
             "Message only\n"
             "  → Message sends, then you stop\n"
-            "  Use when: delivering findings, final report—ACTUAL CONTENT, not announcements\n"
+            "  Use when: asking a question, naming a blocker, delivering findings, or sending the final report\n"
             "  To continue after: end with \"CONTINUE_WORK_SIGNAL\" on its own line\n\n"
             "Empty response\n"
             "  → auto-sleep until next trigger\n"
         )
-        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** You can combine text + tools in one response. "
+        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** Text + tools in one response is only for real user-facing content, never status narration. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -4674,7 +4674,7 @@ def _get_system_instruction(
         "- Need to send the user your answer, summary, or final report → will_continue_work=true, keep going.\n"
         "- Need to ask a follow-up question before the task is complete → will_continue_work=true, keep going.\n"
         "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
-        "- 'research competitors' → search_tools(will_continue_work=true) → keep working until all work done AND marked done.\n"
+        "- 'research competitors' → search_tools(query='competitor research tools') → keep working until all work done AND marked done.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
@@ -4886,8 +4886,7 @@ def _get_system_instruction(
         "- **Send report BEFORE marking last card done.** When wrapping up, send your findings first, then mark the final card done.\n"
         "- **Terminate on final card:** When marking your last card done, use `will_continue_work=false` on that sqlite_batch. This ends your turn immediately—no extra cycle.\n\n"
 
-        "Inform the user when you update your charter/schedule so they can provide corrections. "
-        "Do not mention other internal maintenance such as kanban bookkeeping or skill creation/update unless the user explicitly asks about it. "
+        "Message users only for input, blockers, config changes, or findings; never narrate internal reasoning, tool sequencing, kanban, or skill maintenance unless asked for live status. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
@@ -5497,7 +5496,7 @@ def _get_system_instruction(
                 "### R5: Continuation Logic\n"
                 "```\n"
                 "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
-                "WHEN actionable_task              => search_tools('{domain}'), will_continue_work=true\n"
+                "WHEN actionable_task              => search_tools('{domain}')\n"
                 "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
                 "```\n"
                 "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
@@ -5506,7 +5505,7 @@ def _get_system_instruction(
                 "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
                 "```\n"
                 "IF has_actionable_task:\n"
-                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
+                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(query='{{domain}}')\n"
                 "ELSE:\n"
                 f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                 "```\n"

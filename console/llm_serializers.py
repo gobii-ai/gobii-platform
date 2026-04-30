@@ -39,6 +39,10 @@ from api.models import (
     VideoGenerationTierEndpoint,
     VideoGenerationModelEndpoint,
 )
+from console.llm_tier_usage import (
+    build_browser_endpoint_tier_usage_map,
+    build_persistent_endpoint_tier_usage_map,
+)
 
 
 def _provider_key_status(provider: LLMProvider) -> str:
@@ -60,7 +64,10 @@ def _serialize_endpoint_common(endpoint, *, label: str) -> dict[str, Any]:
     }
 
 
-def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[str, Any]:
+def _serialize_persistent_endpoint(
+    endpoint: PersistentModelEndpoint,
+    tier_usage_by_endpoint: dict[Any, list[dict[str, Any]]],
+) -> dict[str, Any]:
     label = f"{endpoint.provider.display_name} · {endpoint.litellm_model}"
     data = _serialize_endpoint_common(endpoint, label=label)
     data.update(
@@ -80,12 +87,16 @@ def _serialize_persistent_endpoint(endpoint: PersistentModelEndpoint) -> dict[st
             "max_input_tokens": endpoint.max_input_tokens,
             "provider_id": str(endpoint.provider_id),
             "type": "persistent",
+            "tier_usage": tier_usage_by_endpoint.get(endpoint.id, []),
         }
     )
     return data
 
 
-def _serialize_browser_endpoint(endpoint: BrowserModelEndpoint) -> dict[str, Any]:
+def _serialize_browser_endpoint(
+    endpoint: BrowserModelEndpoint,
+    tier_usage_by_endpoint: dict[Any, list[dict[str, Any]]],
+) -> dict[str, Any]:
     label = f"{endpoint.provider.display_name} · {endpoint.browser_model}"
     data = _serialize_endpoint_common(endpoint, label=label)
     data.update(
@@ -98,6 +109,7 @@ def _serialize_browser_endpoint(endpoint: BrowserModelEndpoint) -> dict[str, Any
             "max_output_tokens": endpoint.max_output_tokens,
             "provider_id": str(endpoint.provider_id),
             "type": "browser",
+            "tier_usage": tier_usage_by_endpoint.get(endpoint.id, []),
         }
     )
     return data
@@ -175,7 +187,7 @@ def _serialize_weighted_tier_payload(tiers) -> list[dict[str, Any]]:
 
 
 def build_llm_overview() -> dict[str, Any]:
-    providers = (
+    providers = list(
         LLMProvider.objects.all()
         .order_by("display_name")
         .prefetch_related(
@@ -186,6 +198,16 @@ def build_llm_overview() -> dict[str, Any]:
             Prefetch("image_generation_endpoints", queryset=ImageGenerationModelEndpoint.objects.select_related("provider")),
             Prefetch("video_generation_endpoints", queryset=VideoGenerationModelEndpoint.objects.select_related("provider")),
         )
+    )
+    persistent_tier_usage_by_endpoint = build_persistent_endpoint_tier_usage_map(
+        endpoint.id
+        for provider in providers
+        for endpoint in provider.persistent_endpoints.all()
+    )
+    browser_tier_usage_by_endpoint = build_browser_endpoint_tier_usage_map(
+        endpoint.id
+        for provider in providers
+        for endpoint in provider.browser_endpoints.all()
     )
 
     provider_payload: list[dict[str, Any]] = []
@@ -198,11 +220,11 @@ def build_llm_overview() -> dict[str, Any]:
 
     for provider in providers:
         persistent_endpoints = [
-            _serialize_persistent_endpoint(endpoint)
+            _serialize_persistent_endpoint(endpoint, persistent_tier_usage_by_endpoint)
             for endpoint in provider.persistent_endpoints.all()
         ]
         browser_endpoints = [
-            _serialize_browser_endpoint(endpoint)
+            _serialize_browser_endpoint(endpoint, browser_tier_usage_by_endpoint)
             for endpoint in provider.browser_endpoints.all()
         ]
         embedding_endpoints = [

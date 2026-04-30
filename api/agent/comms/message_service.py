@@ -23,7 +23,6 @@ from django.core.mail import send_mail
 from django.db import DatabaseError, transaction
 from django.template.loader import render_to_string
 from django.urls import NoReverseMatch, reverse
-from django.templatetags.static import static
 from django.utils import timezone
 from api.agent.core.processing_flags import bump_human_inbound_generation
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
@@ -37,7 +36,6 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     CommsChannel,
-    DeliveryStatus,
     UserPhoneNumber,
     build_inbound_webhook_agent_address,
     build_inbound_webhook_sender_address,
@@ -58,12 +56,8 @@ from marketing_events.custom_events import ConfiguredCustomEvent, emit_configure
 
 from .adapters import ParsedMessage
 from .attachment_filters import is_signature_image_attachment
-from .outbound_delivery import deliver_agent_email, deliver_agent_sms
 from .rejected_attachments import build_rejected_attachment_metadata
-from .email_endpoint_routing import (
-    get_agent_primary_endpoint,
-    resolve_agent_email_sender_endpoint_for_message,
-)
+from .email_endpoint_routing import get_agent_primary_endpoint
 from .message_reads import (
     READ_SOURCE_INBOUND_REPLY,
     mark_latest_visible_outbound_message_read_before,
@@ -74,11 +68,9 @@ from opentelemetry import baggage
 from config import settings
 from util.constants.task_constants import TASKS_UNLIMITED
 from opentelemetry import trace
-from constants.plans import PlanNamesChoices
 from util.subscription_helper import get_owner_plan
 from util.urls import (
     append_context_query,
-    build_agent_daily_limit_action_links,
     build_agent_detail_url,
     build_site_url,
 )
@@ -114,6 +106,14 @@ def _is_owner_sender(agent: PersistentAgent, channel: CommsChannel | str, sender
         ).exists()
 
     return False
+
+
+def _is_daily_hard_limit_exhausted(agent: PersistentAgent) -> bool:
+    if agent.daily_credit_limit is None:
+        return False
+    remaining = agent.get_daily_credit_remaining()
+    return remaining is None or remaining <= Decimal("0")
+
 
 @tracer.start_as_current_span("_get_or_create_endpoint")
 def _get_or_create_endpoint(channel: str, address: str) -> PersistentAgentCommsEndpoint:
@@ -440,388 +440,6 @@ def _ensure_agent_inbound_webhook_endpoint(agent) -> PersistentAgentCommsEndpoin
         endpoint.save(update_fields=updates)
     return endpoint
 
-@tracer.start_as_current_span("_send_daily_credit_notice")
-def _send_daily_credit_notice(agent, channel: str, parsed: ParsedMessage, *,
-                              sender_endpoint: PersistentAgentCommsEndpoint | None,
-                              conversation: PersistentAgentConversation | None,
-                              link: str) -> bool:
-    """Send a daily credit limit notice to the inbound sender for SMS/web; email notifies owner."""
-
-    channel_value = channel.value if isinstance(channel, CommsChannel) else channel
-    if channel_value == CommsChannel.EMAIL.value:
-        return send_owner_daily_credit_hard_limit_notice(agent)
-
-    plan_label = ""
-    plan_id = ""
-    try:
-        owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
-        if owner:
-            plan = get_owner_plan(owner)
-            plan_id = str(plan.get("id") or "").strip()
-            plan_label = str(plan.get("name") or plan.get("id") or "").strip()
-    except Exception:
-        plan_label = ""
-        plan_id = ""
-
-    message_text = (
-        "I reached my daily task limit and am not able to continue today. "
-        f"Adjust the limit here: {link}"
-    )
-    analytics_source = {
-        CommsChannel.EMAIL.value: AnalyticsSource.EMAIL,
-        CommsChannel.SMS.value: AnalyticsSource.SMS,
-        CommsChannel.WEB.value: AnalyticsSource.WEB,
-    }.get(str(channel_value), AnalyticsSource.AGENT)
-
-    try:
-        if channel_value == CommsChannel.SMS.value:
-            if not parsed.sender or sender_endpoint is None:
-                return False
-            if not agent.is_sender_whitelisted(CommsChannel.SMS, parsed.sender):
-                return False
-
-            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SMS)
-            if not from_endpoint:
-                logging.info("Agent %s has no SMS endpoint for daily credit notice.", agent.id)
-                return False
-
-            outbound = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=from_endpoint,
-                to_endpoint=sender_endpoint,
-                is_outbound=True,
-                body=message_text,
-                raw_payload={"kind": "daily_credit_limit_notice"},
-            )
-            deliver_agent_sms(outbound)
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "channel": channel_value,
-                        "recipient": parsed.sender,
-                        "plan_id": plan_id,
-                        "plan_label": plan_label,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "message_type": "daily_hard_limit",
-                        "medium": "sms",
-                        "recipient_type": "inbound_contact",
-                        "upsell_shown": True,
-                        "plan": plan_id,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            return True
-
-        if channel_value == CommsChannel.WEB.value:
-            if not parsed.sender or sender_endpoint is None:
-                return False
-            if not agent.is_sender_whitelisted(CommsChannel.WEB, parsed.sender):
-                return False
-
-            agent_endpoint = _ensure_agent_web_endpoint(agent)
-            conv = conversation or _get_or_create_conversation(
-                CommsChannel.WEB,
-                parsed.sender,
-                owner_agent=agent,
-            )
-            if conv.owner_agent_id != agent.id:
-                conv.owner_agent = agent
-                conv.save(update_fields=["owner_agent"])
-
-            _ensure_participant(
-                conv,
-                agent_endpoint,
-                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-            )
-            _ensure_participant(
-                conv,
-                sender_endpoint,
-                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
-            )
-
-            outbound = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=agent_endpoint,
-                conversation=conv,
-                is_outbound=True,
-                body=message_text,
-                raw_payload={"source": "daily_credit_limit_notice"},
-            )
-
-            now = timezone.now()
-            PersistentAgentMessage.objects.filter(pk=outbound.pk).update(
-                latest_status=DeliveryStatus.DELIVERED,
-                latest_sent_at=now,
-                latest_delivered_at=now,
-                latest_error_code="",
-                latest_error_message="",
-            )
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "channel": channel_value,
-                        "recipient": parsed.sender,
-                        "plan_id": plan_id,
-                        "plan_label": plan_label,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "message_type": "daily_hard_limit",
-                        "medium": "web_chat_message",
-                        "recipient_type": "inbound_contact",
-                        "upsell_shown": True,
-                        "plan": plan_id,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            return True
-
-    except Exception:
-        logging.exception("Failed sending daily credit limit notice for agent %s", agent.id)
-
-    return False
-
-
-@tracer.start_as_current_span("send_owner_daily_credit_hard_limit_notice")
-def send_owner_daily_credit_hard_limit_notice(agent: PersistentAgent) -> bool:
-    """Notify the agent owner that the daily hard limit has been reached."""
-    try:
-        now = timezone.now()
-        last_notice = getattr(agent, "daily_credit_hard_limit_notice_at", None)
-        if last_notice and timezone.localdate(last_notice) == timezone.localdate(now):
-            return False
-
-        endpoint = getattr(agent, "preferred_contact_endpoint", None)
-        if not endpoint:
-            logging.info(
-                "Agent %s has no preferred contact endpoint; skipping hard limit notice.",
-                agent.id,
-            )
-            return False
-
-        link = append_context_query(_build_agent_detail_url(agent), agent.organization_id)
-        owner = agent.organization or agent.user
-        plan = get_owner_plan(owner) if owner is not None else None
-        plan_id = str(plan.get("id", "")).lower() if plan else ""
-        is_free_plan = plan_id == PlanNamesChoices.FREE.value
-        upgrade_url = None
-        task_pack_url = None
-        if is_free_plan and settings.GOBII_PROPRIETARY_MODE:
-            try:
-                upgrade_url = _build_site_url(reverse("proprietary:pricing"))
-            except NoReverseMatch:
-                upgrade_url = None
-        elif settings.GOBII_PROPRIETARY_MODE:
-            try:
-                billing_url = _build_site_url(reverse("billing"))
-            except NoReverseMatch:
-                billing_url = None
-            else:
-                task_pack_url = append_context_query(billing_url, agent.organization_id)
-        subject = f"{agent.name} reached today's task limit"
-        text_body = (
-            "I reached my daily task limit and am not able to continue today. "
-            f"Adjust the limit here: {link}"
-        )
-        action_links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
-        double_limit_url = action_links["double_limit_url"] or link
-        unlimited_limit_url = action_links["unlimited_limit_url"] or link
-
-        try:
-            logo_url = _build_site_url(static("images/gobii_fish_with_text_purple.png"))
-        except (Site.DoesNotExist, MultipleObjectsReturned, DatabaseError, ValueError) as exc:
-            logging.warning("Failed to build logo URL for daily credit email: %s", exc)
-            logo_url = ""
-
-        email_context = {
-            "agent": agent,
-            "settings_url": link,
-            "double_limit_url": double_limit_url,
-            "unlimited_limit_url": unlimited_limit_url,
-            "upgrade_url": upgrade_url,
-            "task_pack_url": task_pack_url,
-            "logo_url": logo_url,
-        }
-        email_body = render_to_string(
-            "emails/agent_daily_credit_owner_notice.html",
-            email_context,
-        )
-
-        channel_value = endpoint.channel
-        analytics_source = {
-            CommsChannel.EMAIL: AnalyticsSource.EMAIL,
-            CommsChannel.SMS: AnalyticsSource.SMS,
-            CommsChannel.WEB: AnalyticsSource.WEB,
-        }.get(channel_value, AnalyticsSource.AGENT)
-
-        if channel_value == CommsChannel.EMAIL:
-            from_endpoint = resolve_agent_email_sender_endpoint_for_message(
-                agent,
-                to_endpoint=endpoint,
-                cc_endpoints=None,
-                has_bcc=False,
-                log_context="owner_daily_credit_notice",
-            )
-            if not from_endpoint:
-                logging.info("Agent %s has no email endpoint for hard limit notice.", agent.id)
-                return False
-            message = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=from_endpoint,
-                to_endpoint=endpoint,
-                is_outbound=True,
-                body=email_body,
-                raw_payload={
-                    "subject": subject,
-                    "kind": "daily_credit_hard_limit_owner_notice",
-                    "hide_in_chat": True,
-                },
-            )
-            deliver_agent_email(message)
-        elif channel_value == CommsChannel.SMS:
-            from_endpoint = _find_agent_endpoint(agent, CommsChannel.SMS)
-            if not from_endpoint:
-                logging.info("Agent %s has no SMS endpoint for hard limit notice.", agent.id)
-                return False
-            message = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=from_endpoint,
-                to_endpoint=endpoint,
-                is_outbound=True,
-                body=text_body,
-                raw_payload={"kind": "daily_credit_hard_limit_owner_notice"},
-            )
-            deliver_agent_sms(message)
-        elif channel_value == CommsChannel.WEB:
-            agent_endpoint = _ensure_agent_web_endpoint(agent)
-            conv = _get_or_create_conversation(
-                CommsChannel.WEB.value,
-                endpoint.address,
-                owner_agent=agent,
-            )
-            _ensure_participant(
-                conv,
-                agent_endpoint,
-                PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-            )
-            _ensure_participant(
-                conv,
-                endpoint,
-                PersistentAgentConversationParticipant.ParticipantRole.HUMAN_USER,
-            )
-            message = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=agent_endpoint,
-                conversation=conv,
-                is_outbound=True,
-                body=text_body,
-                raw_payload={"source": "daily_credit_hard_limit_owner_notice"},
-            )
-            now = timezone.now()
-            PersistentAgentMessage.objects.filter(pk=message.pk).update(
-                latest_status=DeliveryStatus.DELIVERED,
-                latest_sent_at=now,
-                latest_delivered_at=now,
-                latest_error_code="",
-                latest_error_message="",
-            )
-        else:
-            logging.info(
-                "Agent %s preferred endpoint channel %s not supported for hard limit notice.",
-                agent.id,
-                channel_value,
-            )
-            return False
-
-        try:
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.PERSISTENT_AGENT_DAILY_CREDIT_NOTICE_SENT,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "channel": str(channel_value),
-                        "recipient": endpoint.address,
-                        "notice_type": "owner_hard_limit",
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-            # Determine medium based on channel
-            medium_map = {
-                CommsChannel.EMAIL: "email",
-                CommsChannel.SMS: "sms",
-                CommsChannel.WEB: "web_chat_message",
-            }
-            medium = medium_map.get(channel_value, "email")
-            Analytics.track_event(
-                user_id=str(getattr(agent.user, "id", "")),
-                event=AnalyticsEvent.UPSELL_MESSAGE_SHOWN,
-                source=analytics_source,
-                properties=Analytics.with_org_properties(
-                    {
-                        "agent_id": str(agent.id),
-                        "agent_name": agent.name,
-                        "message_type": "daily_hard_limit",
-                        "medium": medium,
-                        "recipient_type": "owner",
-                        "upsell_shown": bool(upgrade_url or task_pack_url),
-                        "plan": plan_id,
-                    },
-                    organization=getattr(agent, "organization", None),
-                ),
-            )
-        except Exception:
-            logging.exception(
-                "Failed to emit analytics for owner hard limit notice (agent %s)",
-                agent.id,
-            )
-
-        agent.daily_credit_hard_limit_notice_at = now
-        agent.save(update_fields=["daily_credit_hard_limit_notice_at"])
-        return True
-    except Exception:
-        logging.exception(
-            "Failed sending owner hard limit notice for agent %s",
-            getattr(agent, "id", None),
-        )
-        return False
-
-
 @transaction.atomic
 @tracer.start_as_current_span("ingest_inbound_message")
 def ingest_inbound_message(
@@ -1002,7 +620,11 @@ def ingest_inbound_message(
                         owner = getattr(agent_obj, "organization", None) or getattr(agent_obj, "user", None)
                         available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                         min_cost = get_tool_credit_cost_for_channel(channel_val)
-                        if available != TASKS_UNLIMITED and available < min_cost:
+                        if (
+                            available != TASKS_UNLIMITED
+                            and available < min_cost
+                            and not _is_daily_hard_limit_exhausted(agent_obj)
+                        ):
                             # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:
                                 try:
@@ -1122,7 +744,7 @@ def ingest_inbound_message(
             except Exception:
                 logging.exception("Error during out-of-credits pre-processing check")
 
-            # Check for out-of-credits on WEB channel (similar to EMAIL check above)
+            # Let the orchestrator decide how to respond; only notify the UI that credits are exhausted.
             try:
                 if not should_skip_processing and agent_obj and agent_obj.user_id and channel_val == CommsChannel.WEB:
                     from tasks.services import TaskCreditService
@@ -1132,23 +754,7 @@ def ingest_inbound_message(
                         available = TaskCreditService.calculate_available_tasks_for_owner(owner)
                         min_cost = get_tool_credit_cost_for_channel(channel_val)
                         if available != TASKS_UNLIMITED and available < min_cost:
-                            should_skip_processing = True
-                            try:
-                                link = _build_agent_detail_url(agent_obj)
-                            except Exception:
-                                logging.exception(
-                                    "Failed building agent detail URL for agent %s",
-                                    agent_obj.id,
-                                )
-                                link = ""
-                            _send_daily_credit_notice(
-                                agent_obj,
-                                channel_val,
-                                parsed,
-                                sender_endpoint=from_ep,
-                                conversation=conv,
-                                link=link,
-                            )
+                            should_skip_processing = not _is_daily_hard_limit_exhausted(agent_obj)
                             # Send credit_event via websocket to trigger frontend refresh
                             def _send_credit_event():
                                 try:

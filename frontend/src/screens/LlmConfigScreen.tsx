@@ -191,6 +191,7 @@ type ProviderEndpointCard = {
   openrouter_preset?: string | null
   low_latency?: boolean
   type: llmApi.ProviderEndpoint['type']
+  tierUsage: llmApi.EndpointTierUsage[]
 }
 
 type ProviderCardData = {
@@ -491,7 +492,7 @@ type MutationOptions = {
 
 type ConfirmDialogConfig = {
   title: string
-  message: string
+  message: ReactNode
   confirmLabel?: string
   cancelLabel?: string
   intent?: 'danger' | 'primary'
@@ -806,6 +807,7 @@ function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
       openrouter_preset: endpoint.openrouter_preset ?? null,
       low_latency: endpoint.low_latency,
       type: endpoint.type,
+      tierUsage: endpoint.tier_usage ?? [],
     })),
   }))
 }
@@ -1148,7 +1150,7 @@ function ConfirmActionModal({
   onCancel,
 }: {
   title: string
-  message: string
+  message: ReactNode
   confirmLabel: string
   cancelLabel: string
   intent: 'danger' | 'primary'
@@ -1161,18 +1163,18 @@ function ConfirmActionModal({
       ? { iconBg: 'bg-rose-100 text-rose-600', button: 'inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500/40 disabled:opacity-50' }
       : { iconBg: 'bg-blue-100 text-blue-600', button: button.primary }
   return (
-    <div className="fixed inset-0 z-[210] flex items-center justify-center bg-slate-900/60">
-      <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl space-y-4">
+    <div className="fixed inset-0 z-[210] flex items-center justify-center overflow-y-auto bg-slate-900/60 p-4">
+      <div className="max-h-[calc(100vh-2rem)] w-full max-w-2xl overflow-y-auto overflow-x-hidden rounded-2xl bg-white p-6 shadow-xl space-y-4">
         <div className="flex items-start gap-3">
-          <div className={`rounded-full p-2 ${accentClasses.iconBg}`}>
+          <div className={`shrink-0 rounded-full p-2 ${accentClasses.iconBg}`}>
             <AlertCircle className="size-5" />
           </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
-            <p className="text-sm text-slate-600">{message}</p>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="break-words text-lg font-semibold text-slate-900">{title}</h3>
+            <div className="min-w-0 text-sm text-slate-600">{message}</div>
           </div>
         </div>
-        <div className="flex justify-end gap-3 pt-2">
+        <div className="flex flex-wrap justify-end gap-3 pt-2">
           <button type="button" className={button.secondary} onClick={onCancel} disabled={busy}>
             {cancelLabel}
           </button>
@@ -1184,6 +1186,67 @@ function ConfirmActionModal({
       </div>
     </div>
   )
+}
+
+function EndpointDeleteMessage({
+  usage,
+}: {
+  usage: llmApi.EndpointTierUsage[]
+}) {
+  if (!usage.length) {
+    return <span>This removes the endpoint from the provider.</span>
+  }
+
+  return (
+    <div className="min-w-0 space-y-3">
+      <p>This endpoint is currently used by {usage.length} routing assignment{usage.length === 1 ? '' : 's'}.</p>
+      <div className="space-y-2">
+        {usage.map((entry) => (
+          <div key={`${entry.source}-${entry.id}`} className="min-w-0 rounded-lg border border-slate-200 p-3">
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="break-words font-medium text-slate-900">{entry.routing_profile}</p>
+                <p className="text-xs text-slate-500">
+                  {entry.source === 'browser_policy'
+                    ? 'Browser policy'
+                    : entry.source === 'persistent_policy'
+                      ? 'Persistent routing'
+                      : 'Routing profile'}
+                  {entry.routing_profile_active ? ' · active' : ''}
+                  {entry.role === 'extraction' ? ' · extraction endpoint' : ''}
+                  {entry.role === 'eval_judge' ? ' · eval judge' : ''}
+                  {entry.role === 'summarization' ? ' · summarization' : ''}
+                </p>
+              </div>
+              {typeof entry.weight === 'number' ? (
+                <span className="shrink-0 rounded-full border border-slate-200 px-2 py-0.5 text-xs font-medium text-slate-600">
+                  weight {formatNullableNumber(entry.weight)}
+                </span>
+              ) : null}
+            </div>
+            <p className="mt-2 break-words text-sm text-slate-700">{entry.tier}</p>
+            {entry.description ? <p className="mt-1 break-words text-xs text-slate-500">{entry.description}</p> : null}
+          </div>
+        ))}
+      </div>
+      <p>Confirming will remove the endpoint from these assignments, then delete it.</p>
+    </div>
+  )
+}
+
+function getEndpointDeleteConflictUsage(error: unknown): llmApi.EndpointTierUsage[] | null {
+  if (!(error instanceof HttpError) || error.status !== 409) {
+    return null
+  }
+  const body = error.body
+  if (!body || typeof body !== 'object' || !('code' in body) || !('tier_usage' in body)) {
+    return null
+  }
+  const payload = body as { code?: unknown; tier_usage?: unknown }
+  if (payload.code !== 'endpoint_in_tiers' || !Array.isArray(payload.tier_usage)) {
+    return null
+  }
+  return payload.tier_usage as llmApi.EndpointTierUsage[]
 }
 
 function ConfirmModalWrapper({
@@ -3391,18 +3454,30 @@ export function LlmConfigScreen() {
   const handleProviderDeleteEndpoint = (endpoint: ProviderEndpointCard) => {
     const kind = endpointKindFromType(endpoint.type)
     const displayName = endpoint.name || endpoint.api_base || endpoint.browser_base_url || endpoint.id
-    return confirmDestructiveAction({
+    const deleteEndpoint = (force: boolean) => runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id, { force }), {
+      successMessage: 'Endpoint removed',
+      label: 'Removing endpoint…',
+      busyKey: actionKey('endpoint', endpoint.id, 'delete'),
+      context: endpoint.name,
+      rethrow: true,
+    }).then(async () => {
+      await invalidateProfileDetail()
+      resetEndpointTestStatuses()
+    })
+
+    const confirmDeleteWithUsage = (usage: llmApi.EndpointTierUsage[]) => confirmDestructiveAction({
       title: `Delete endpoint "${displayName}"?`,
-      message: 'This removes the endpoint from the provider and detaches it from any tiers.',
-      confirmLabel: 'Delete endpoint',
-      onConfirm: () => runMutation(() => llmApi.deleteEndpoint(kind, endpoint.id), {
-        successMessage: 'Endpoint removed',
-        label: 'Removing endpoint…',
-        busyKey: actionKey('endpoint', endpoint.id, 'delete'),
-        context: endpoint.name,
-      }).then(() => {
-        resetEndpointTestStatuses()
-      }),
+      message: <EndpointDeleteMessage usage={usage} />,
+      confirmLabel: usage.length ? 'Delete and remove from tiers' : 'Delete endpoint',
+      onConfirm: () => deleteEndpoint(usage.length > 0),
+    })
+
+    return confirmDeleteWithUsage(endpoint.tierUsage).catch((error) => {
+      const usage = getEndpointDeleteConflictUsage(error)
+      if (!usage) {
+        throw error
+      }
+      return confirmDeleteWithUsage(usage)
     })
   }
 
