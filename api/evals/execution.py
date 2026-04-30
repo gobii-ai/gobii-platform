@@ -185,15 +185,11 @@ class ScenarioExecutionTools:
         agent.save(update_fields=["preferred_contact_endpoint"])
 
         if trigger_processing:
-            try:
-                from api.agent.tasks import process_agent_events_task
-                process_agent_events_task.delay(
-                    str(agent_id),
-                    eval_run_id=current_run_id,
-                    mock_config=mock_config,
-                )
-            except Exception:
-                logger.exception("Failed to trigger processing for agent %s", agent_id)
+            self._dispatch_agent_processing(
+                agent_id,
+                eval_run_id=current_run_id,
+                mock_config=mock_config,
+            )
 
         return msg
 
@@ -208,15 +204,47 @@ class ScenarioExecutionTools:
         Manually trigger the agent's event processing loop.
         """
         current_run_id = eval_run_id or get_current_eval_run_id()
+        self._dispatch_agent_processing(
+            agent_id,
+            eval_run_id=current_run_id,
+            mock_config=mock_config,
+        )
+
+    def _dispatch_agent_processing(
+        self,
+        agent_id: str,
+        *,
+        eval_run_id: str | None = None,
+        mock_config: dict | None = None,
+    ) -> None:
+        """
+        Start agent processing for scenario execution.
+
+        Eval runs execute the agent inline so a single Celery worker does not deadlock by
+        waiting on a process_agent_events task queued behind the active run_eval_task.
+        """
         try:
             from api.agent.tasks import process_agent_events_task
-            process_agent_events_task.delay(
-                str(agent_id),
-                eval_run_id=current_run_id,
-                mock_config=mock_config,
-            )
+
+            if eval_run_id:
+                process_agent_events_task.apply(
+                    args=(str(agent_id),),
+                    kwargs={
+                        "eval_run_id": eval_run_id,
+                        "mock_config": mock_config,
+                    },
+                    throw=True,
+                )
+            else:
+                process_agent_events_task.delay(
+                    str(agent_id),
+                    eval_run_id=eval_run_id,
+                    mock_config=mock_config,
+                )
         except Exception:
             logger.exception("Failed to trigger processing for agent %s", agent_id)
+            if eval_run_id:
+                raise
 
     def agent_event_listener(self, agent_id: str, *, start_time: Optional[float] = None) -> AgentEventListener:
         """
