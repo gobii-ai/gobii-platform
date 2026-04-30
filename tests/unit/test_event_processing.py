@@ -22,6 +22,7 @@ from api.agent.core.event_processing import (
     OrchestratorPromptStale,
     _completion_with_failover,
     _execute_prepared_tool_batch,
+    _finalize_tool_batch,
     _gate_send_chat_tool_for_delivery,
     build_prompt_context,
     _get_completed_process_run_count,
@@ -4010,6 +4011,38 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(executed_batch.abort_after_execution)
         self.assertEqual(mock_execute_prepared_tool_call.call_count, 1)
+
+    def test_finalize_search_tools_always_requires_followup(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="search_tools",
+            tool_params={"query": "competitor research"},
+            exec_params={"query": "competitor research"},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-search",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:search_tools",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "success", "message": "Enabled tools"},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
 
     def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION

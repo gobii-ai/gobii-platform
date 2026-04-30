@@ -1804,6 +1804,8 @@ def _prepare_tool_batch(
             call_id = getattr(call, "id", None)
             if not call_id and isinstance(call, dict):
                 call_id = call.get("id")
+            if tool_name == "search_tools":
+                tool_params.pop("will_continue_work", None)
             explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
             inferred_continue = False
             if tool_name in MESSAGE_TOOL_NAMES:
@@ -2106,7 +2108,9 @@ def _finalize_tool_batch(
         if prepared.explicit_continue is True and prepared.inferred_continue:
             inferred_message_continue_this_iteration = True
 
-        if is_error_status or tool_had_warning:
+        if tool_name == "search_tools":
+            followup_required = True
+        elif is_error_status or tool_had_warning:
             followup_required = True
         elif prepared.explicit_continue is None and not allow_auto_sleep:
             followup_required = True

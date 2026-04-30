@@ -713,7 +713,7 @@ when:
 
 do:
   # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
-  # Otherwise → search_tools("<domain>", will_continue_work=true)
+  # Otherwise → search_tools("<domain>")
   # If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous
 
 then:
@@ -752,7 +752,7 @@ when:
 
 do:
   # First, discover the best search/extractor tools for this domain if needed
-  search_tools(query="<site/platform/domain or capability>", will_continue_work=true)
+  search_tools(query="<site/platform/domain or capability>")
   # Then use the enabled search tool
   <search_tool>(query="<topic>", will_continue_work=true)
 
@@ -4674,7 +4674,7 @@ def _get_system_instruction(
         "- Need to send the user your answer, summary, or final report → will_continue_work=true, keep going.\n"
         "- Need to ask a follow-up question before the task is complete → will_continue_work=true, keep going.\n"
         "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
-        "- 'research competitors' → search_tools(will_continue_work=true) → keep working until all work done AND marked done.\n"
+        "- 'research competitors' → search_tools(query='competitor research tools') → keep working until all work done AND marked done.\n"
         f"{text_only_guidance}"
         "**Mid-conversation updates:**\n"
         f"- 'shorter next time' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
@@ -5496,7 +5496,7 @@ def _get_system_instruction(
                 "### R5: Continuation Logic\n"
                 "```\n"
                 "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
-                "WHEN actionable_task              => search_tools('{domain}'), will_continue_work=true\n"
+                "WHEN actionable_task              => search_tools('{domain}')\n"
                 "WHEN role_only OR no_task         => will_continue_work=false, stop\n"
                 "```\n"
                 "**Role vs Task:** 'You are a Talent Scout' = role (no immediate action). 'Find 10 AI startups' = task (work to do now).\n\n"
@@ -5505,7 +5505,7 @@ def _get_system_instruction(
                 "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
                 "```\n"
                 "IF has_actionable_task:\n"
-                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(will_continue_work=true)\n"
+                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule + kanban) + search_tools(query='{{domain}}')\n"
                 "ELSE:\n"
                 f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                 "```\n"

@@ -158,7 +158,8 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("You are a persistent AI agent.", prompt)
         self.assertIn("Your charter is a living document.", prompt)
-        self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertIn("search_tools(", prompt)
+        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("## Planning Mode", prompt)
         self.assertIn("REQUIRED: Your very first action must be sending a welcome message", prompt)
         self.assertIn(f"Contact channel: email at {self.user.email}", prompt)
@@ -301,7 +302,8 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertIn("## Then sqlite_batch: charter + kanban cards + everything else", prompt)
         self.assertIn("### Execution Template", prompt)
-        self.assertIn("search_tools(will_continue_work=true)", prompt)
+        self.assertIn("search_tools(", prompt)
+        self.assertNotIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("charter='<what>', schedule='<when>'", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
