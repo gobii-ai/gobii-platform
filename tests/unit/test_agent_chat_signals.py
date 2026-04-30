@@ -18,6 +18,7 @@ from api.agent.comms.message_service import ingest_inbound_message, ingest_inbou
 from api.models import (
     AgentSpawnRequest,
     AgentCollaborator,
+    AgentPeerLink,
     BrowserUseAgent,
     BrowserUseAgentTask,
     CommsChannel,
@@ -177,6 +178,32 @@ class AgentChatSignalTests(TestCase):
         notification = self._receive_with_timeout(self.owner_profile_channel_name)
         self.assertEqual(notification.get("type"), "message_notification_event")
         return notification.get("payload", {}).get("message", {}).get("body_preview")
+
+    def _create_peer_dm_conversation(self):
+        peer_browser = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Signal Peer Browser",
+        )
+        peer_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Signal Peer",
+            charter="Coordinate peer work",
+            browser_use_agent=peer_browser,
+        )
+        peer_link = AgentPeerLink.objects.create(
+            agent_a=self.agent,
+            agent_b=peer_agent,
+            created_by=self.user,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.OTHER,
+            address=f"peer://{peer_link.pair_key}",
+            display_name="Signal Tester <-> Signal Peer",
+            is_peer_dm=True,
+            peer_link=peer_link,
+        )
+        return peer_agent, conversation
 
     @tag("batch_agent_chat")
     def test_tool_call_creation_emits_timeline_event(self):
@@ -362,6 +389,38 @@ class AgentChatSignalTests(TestCase):
         )
 
     @tag("batch_agent_chat")
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_outbound_peer_dm_does_not_emit_message_notification_event(self, _mock_transition):
+        peer_agent, conversation = self._create_peer_dm_conversation()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=self.agent,
+                peer_agent=peer_agent,
+                is_outbound=True,
+                from_endpoint=self.agent_endpoint,
+                conversation=conversation,
+                body="Peer-only update",
+                raw_payload={"source": "test"},
+            )
+
+        timeline = self._receive_with_timeout()
+        self.assertEqual(timeline.get("type"), "timeline_event")
+        self.assertEqual(timeline.get("agent_id"), str(self.agent.id))
+        self.assertEqual(timeline.get("payload", {}).get("kind"), "message")
+        self.assertEqual(timeline.get("payload", {}).get("message", {}).get("id"), str(message.id))
+        self.assertTrue(timeline.get("payload", {}).get("message", {}).get("isPeer"))
+
+        owner_profile_events = self._drain_channel_events(self.owner_profile_channel_name)
+        collaborator_profile_events = self._drain_channel_events(self.collaborator_profile_channel_name)
+        self.assertFalse(
+            any(event.get("type") == "message_notification_event" for event in owner_profile_events)
+        )
+        self.assertFalse(
+            any(event.get("type") == "message_notification_event" for event in collaborator_profile_events)
+        )
+
+    @tag("batch_agent_chat")
     def test_outbound_message_notification_preview_strips_html(self):
         body_preview = self._emit_outbound_message_notification_preview(
             "<p>Hello <strong>there</strong></p><script>alert('x')</script>"
@@ -428,6 +487,38 @@ class AgentChatSignalTests(TestCase):
     @tag("batch_agent_chat")
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_roster_ignores_newer_peer_dm_for_unread_message(self, _mock_transition):
+        visible_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Visible user-facing unread",
+            raw_payload={},
+        )
+        peer_agent, conversation = self._create_peer_dm_conversation()
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            peer_agent=peer_agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            conversation=conversation,
+            body="Newer peer-only unread",
+            raw_payload={},
+        )
+
+        self.client.force_login(self.user)
+        response = self.client.get(reverse("console_agent_roster"))
+
+        self.assertEqual(response.status_code, 200)
+        agent_payload = next(item for item in response.json()["agents"] if item["id"] == str(self.agent.id))
+        self.assertTrue(agent_payload["has_unread_agent_message"])
+        self.assertEqual(agent_payload["latest_agent_message_id"], str(visible_message.id))
+        self.assertIsNone(agent_payload["latest_agent_message_read_at"])
+
+    @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
     def test_mark_latest_read_endpoint_marks_visible_outbound_message_read(self, _mock_transition):
         message = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
@@ -440,7 +531,9 @@ class AgentChatSignalTests(TestCase):
 
         self.client.force_login(self.user)
         with self.captureOnCommitCallbacks(execute=True):
-            response = self.client.post(reverse("console_agent_latest_message_read", kwargs={"agent_id": self.agent.id}))
+            response = self.client.post(
+                reverse("console_agent_latest_message_read", kwargs={"agent_id": self.agent.id})
+            )
 
         self.assertEqual(response.status_code, 200)
         owner_profile = self._receive_with_timeout(self.owner_profile_channel_name)
@@ -463,6 +556,45 @@ class AgentChatSignalTests(TestCase):
         )
         self.assertTrue(collaborator_agent["has_unread_agent_message"])
         self.assertIsNone(collaborator_agent["latest_agent_message_read_at"])
+
+    @tag("batch_agent_chat")
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)
+    def test_mark_latest_read_endpoint_ignores_newer_peer_dm(self, _mock_transition):
+        visible_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.requester_endpoint,
+            body="Please review this",
+            raw_payload={},
+        )
+        peer_agent, conversation = self._create_peer_dm_conversation()
+        peer_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            peer_agent=peer_agent,
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            conversation=conversation,
+            body="Peer-only newer update",
+            raw_payload={},
+        )
+
+        self.client.force_login(self.user)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                reverse("console_agent_latest_message_read", kwargs={"agent_id": self.agent.id})
+            )
+
+        self.assertEqual(response.status_code, 200)
+        owner_profile = self._receive_with_timeout(self.owner_profile_channel_name)
+        self.assertEqual(owner_profile.get("type"), "agent_profile_event")
+        self.assertEqual(owner_profile.get("payload", {}).get("latest_agent_message_id"), str(visible_message.id))
+        self.assertFalse(owner_profile.get("payload", {}).get("has_unread_agent_message"))
+        self.assertEqual(response.json()["latest_agent_message_id"], str(visible_message.id))
+        self.assertFalse(response.json()["has_unread_agent_message"])
+        self.assertTrue(PersistentAgentMessageRead.objects.filter(message=visible_message, user=self.user).exists())
+        self.assertFalse(PersistentAgentMessageRead.objects.filter(message=peer_message, user=self.user).exists())
 
     @tag("batch_agent_chat")
     @patch("console.agent_chat.signals.transition_agent_to_signup_preview_waiting", return_value=False)

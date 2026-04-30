@@ -38,6 +38,7 @@ from console.agent_chat.realtime import send_user_group_event, user_profile_grou
 from util.text_sanitizer import sanitize_notification_preview_text
 from api.agent.comms.message_reads import (
     build_agent_message_read_state_for_users,
+    is_peer_dm_message,
     serialize_latest_agent_message_read_state,
 )
 
@@ -351,7 +352,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             logger.exception("Failed to serialize agent message %s: %s", message_id, exc)
             return
         _send(_group_name(owner_agent_id), "timeline_event", payload, agent_id=str(owner_agent_id))
-        if msg.is_outbound:
+        if msg.is_outbound and not is_peer_dm_message(msg):
             try:
                 emit_message_notification(msg)
             except Exception:
