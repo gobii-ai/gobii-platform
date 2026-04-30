@@ -172,6 +172,7 @@ function writeNginxRedirects() {
     const target = to ? `/${to}` : '/';
     lines.push(`location = /${from} { add_header Cache-Control "public, max-age=300" always; return 301 ${target}$is_args$args; }`);
     lines.push(`location = /${from}.html { add_header Cache-Control "public, max-age=300" always; return 301 ${target}$is_args$args; }`);
+    lines.push(`location = /${from}/ { add_header Cache-Control "public, max-age=300" always; return 301 ${target}$is_args$args; }`);
   }
 
   for (const [from, to] of Object.entries(legacyApiRedirects)) {
