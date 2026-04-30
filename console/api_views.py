@@ -86,6 +86,7 @@ from api.models import (
     VideoGenerationTierEndpoint,
     IntelligenceTier,
     LLMProvider,
+    LLMRoutingProfile,
     MCPServerConfig,
     MCPServerOAuthCredential,
     MCPServerOAuthSession,
@@ -103,6 +104,8 @@ from api.models import (
     PersistentModelEndpoint,
     PersistentTierEndpoint,
     PersistentTokenRange,
+    ProfileBrowserTierEndpoint,
+    ProfilePersistentTierEndpoint,
     EvalSuiteRun,
     EvalRun,
     EvalRunTask,
@@ -5008,13 +5011,115 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(PersistentModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        force = request.GET.get("force") in {"1", "true", "yes"}
+        tier_usage = _persistent_endpoint_tier_usage(endpoint)
+        if tier_usage and not force:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "code": "endpoint_in_tiers",
+                    "message": "Endpoint is assigned to persistent routing tiers.",
+                    "tier_usage": tier_usage,
+                },
+                status=409,
+            )
+        with transaction.atomic():
+            PersistentTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            ProfilePersistentTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            LLMRoutingProfile.objects.filter(eval_judge_endpoint=endpoint).update(eval_judge_endpoint=None)
+            LLMRoutingProfile.objects.filter(summarization_endpoint=endpoint).update(summarization_endpoint=None)
+            endpoint.delete()
         invalidate_llm_bootstrap_cache()
         from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
         invalidate_min_endpoint_input_tokens_cache()
         return _json_ok()
+
+
+def _persistent_endpoint_tier_usage(endpoint: PersistentModelEndpoint) -> list[dict[str, Any]]:
+    usage: list[dict[str, Any]] = []
+    legacy_refs = (
+        PersistentTierEndpoint.objects.filter(endpoint=endpoint)
+        .select_related("tier__token_range", "tier__intelligence_tier")
+        .order_by("tier__token_range__min_tokens", "tier__intelligence_tier__rank", "tier__order")
+    )
+    for ref in legacy_refs:
+        tier = ref.tier
+        usage.append(
+            {
+                "id": str(ref.id),
+                "source": "persistent_policy",
+                "routing_profile": "Default persistent config",
+                "routing_profile_active": True,
+                "tier": f"{tier.token_range.name} / {tier.intelligence_tier.display_name} tier {tier.order}",
+                "tier_order": tier.order,
+                "intelligence_tier": tier.intelligence_tier.display_name,
+                "description": tier.description,
+                "weight": float(ref.weight),
+                "role": "primary",
+            }
+        )
+
+    profile_refs = (
+        ProfilePersistentTierEndpoint.objects.filter(endpoint=endpoint)
+        .select_related("tier__token_range__profile", "tier__intelligence_tier")
+        .order_by(
+            "tier__token_range__profile__display_name",
+            "tier__token_range__min_tokens",
+            "tier__intelligence_tier__rank",
+            "tier__order",
+        )
+    )
+    for ref in profile_refs:
+        tier = ref.tier
+        profile = tier.token_range.profile
+        usage.append(
+            {
+                "id": str(ref.id),
+                "source": "routing_profile",
+                "routing_profile": profile.display_name or profile.name,
+                "routing_profile_active": bool(profile.is_active),
+                "tier": f"{tier.token_range.name} / {tier.intelligence_tier.display_name} tier {tier.order}",
+                "tier_order": tier.order,
+                "intelligence_tier": tier.intelligence_tier.display_name,
+                "description": tier.description,
+                "weight": float(ref.weight),
+                "role": "primary",
+            }
+        )
+
+    override_profiles = LLMRoutingProfile.objects.filter(
+        Q(eval_judge_endpoint=endpoint) | Q(summarization_endpoint=endpoint)
+    ).order_by("display_name")
+    for profile in override_profiles:
+        if profile.eval_judge_endpoint_id == endpoint.id:
+            usage.append(
+                {
+                    "id": f"{profile.id}:eval_judge",
+                    "source": "routing_profile",
+                    "routing_profile": profile.display_name or profile.name,
+                    "routing_profile_active": bool(profile.is_active),
+                    "tier": "Eval judge override",
+                    "tier_order": 0,
+                    "intelligence_tier": "",
+                    "description": "",
+                    "role": "eval_judge",
+                }
+            )
+        if profile.summarization_endpoint_id == endpoint.id:
+            usage.append(
+                {
+                    "id": f"{profile.id}:summarization",
+                    "source": "routing_profile",
+                    "routing_profile": profile.display_name or profile.name,
+                    "routing_profile_active": bool(profile.is_active),
+                    "tier": "Summarization override",
+                    "tier_order": 0,
+                    "intelligence_tier": "",
+                    "description": "",
+                    "role": "summarization",
+                }
+            )
+    return usage
 
 
 class PersistentTokenRangeListCreateAPIView(SystemAdminAPIView):
@@ -5324,10 +5429,75 @@ class BrowserEndpointDetailAPIView(SystemAdminAPIView):
 
     def delete(self, request: HttpRequest, endpoint_id: str, *args: Any, **kwargs: Any):
         endpoint = get_object_or_404(BrowserModelEndpoint, pk=endpoint_id)
-        if endpoint.in_tiers.exists():
-            return HttpResponseBadRequest("Remove endpoint from tiers before deleting")
-        endpoint.delete()
+        force = request.GET.get("force") in {"1", "true", "yes"}
+        tier_usage = _browser_endpoint_tier_usage(endpoint)
+        if tier_usage and not force:
+            return JsonResponse(
+                {
+                    "ok": False,
+                    "code": "endpoint_in_tiers",
+                    "message": "Endpoint is assigned to browser tiers.",
+                    "tier_usage": tier_usage,
+                },
+                status=409,
+            )
+        with transaction.atomic():
+            BrowserTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            ProfileBrowserTierEndpoint.objects.filter(endpoint=endpoint).delete()
+            BrowserTierEndpoint.objects.filter(extraction_endpoint=endpoint).update(extraction_endpoint=None)
+            ProfileBrowserTierEndpoint.objects.filter(extraction_endpoint=endpoint).update(extraction_endpoint=None)
+            endpoint.delete()
         return _json_ok()
+
+
+def _browser_endpoint_tier_usage(endpoint: BrowserModelEndpoint) -> list[dict[str, Any]]:
+    from api.models import ProfileBrowserTierEndpoint
+
+    usage: list[dict[str, Any]] = []
+    legacy_refs = (
+        BrowserTierEndpoint.objects.filter(Q(endpoint=endpoint) | Q(extraction_endpoint=endpoint))
+        .select_related("tier__policy", "tier__intelligence_tier")
+        .order_by("tier__policy__name", "tier__intelligence_tier__rank", "tier__order")
+    )
+    for ref in legacy_refs:
+        tier = ref.tier
+        usage.append(
+            {
+                "id": str(ref.id),
+                "source": "browser_policy",
+                "routing_profile": tier.policy.name,
+                "routing_profile_active": bool(tier.policy.is_active),
+                "tier": f"{tier.intelligence_tier.display_name} tier {tier.order}",
+                "tier_order": tier.order,
+                "intelligence_tier": tier.intelligence_tier.display_name,
+                "description": tier.description,
+                "weight": float(ref.weight),
+                "role": "extraction" if ref.extraction_endpoint_id == endpoint.id else "primary",
+            }
+        )
+
+    profile_refs = (
+        ProfileBrowserTierEndpoint.objects.filter(Q(endpoint=endpoint) | Q(extraction_endpoint=endpoint))
+        .select_related("tier__profile", "tier__intelligence_tier")
+        .order_by("tier__profile__display_name", "tier__intelligence_tier__rank", "tier__order")
+    )
+    for ref in profile_refs:
+        tier = ref.tier
+        usage.append(
+            {
+                "id": str(ref.id),
+                "source": "routing_profile",
+                "routing_profile": tier.profile.display_name or tier.profile.name,
+                "routing_profile_active": bool(tier.profile.is_active),
+                "tier": f"{tier.intelligence_tier.display_name} tier {tier.order}",
+                "tier_order": tier.order,
+                "intelligence_tier": tier.intelligence_tier.display_name,
+                "description": tier.description,
+                "weight": float(ref.weight),
+                "role": "extraction" if ref.extraction_endpoint_id == endpoint.id else "primary",
+            }
+        )
+    return usage
 
 
 class EmbeddingEndpointListCreateAPIView(SystemAdminAPIView):

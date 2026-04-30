@@ -31,6 +31,20 @@ export type ProviderEndpoint = {
   low_latency?: boolean
   enabled: boolean
   provider_id: string
+  tier_usage?: EndpointTierUsage[]
+}
+
+export type EndpointTierUsage = {
+  id: string
+  source: 'browser_policy' | 'routing_profile' | string
+  routing_profile: string
+  routing_profile_active: boolean
+  tier: string
+  tier_order: number
+  intelligence_tier: string
+  description?: string
+  weight?: number
+  role?: 'primary' | 'extraction' | string
 }
 
 export type Provider = {
@@ -200,8 +214,9 @@ export function updateEndpoint(kind: EndpointKind, endpointId: string, payload: 
   return jsonRequest(`${endpointPaths[kind]}${endpointId}/`, withCsrf(payload, 'PATCH'))
 }
 
-export function deleteEndpoint(kind: EndpointKind, endpointId: string) {
-  return jsonRequest(`${endpointPaths[kind]}${endpointId}/`, withCsrf(undefined, 'DELETE'))
+export function deleteEndpoint(kind: EndpointKind, endpointId: string, options: { force?: boolean } = {}) {
+  const suffix = options.force ? '?force=1' : ''
+  return jsonRequest(`${endpointPaths[kind]}${endpointId}/${suffix}`, withCsrf(undefined, 'DELETE'))
 }
 
 export function createTokenRange(payload: { name: string; min_tokens: number; max_tokens: number | null }) {
