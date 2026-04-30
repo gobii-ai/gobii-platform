@@ -612,7 +612,7 @@ export function EvalsScreen() {
                       <td className="px-6 py-4 text-right">
                         <a
                           className="inline-flex items-center justify-center rounded-lg px-3 py-2 text-xs font-medium text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100 transition-colors"
-                          href={`/console/evals/${suite.id}/`}
+                          href={`/evals/${suite.id}/`}
                         >
                           View
                         </a>

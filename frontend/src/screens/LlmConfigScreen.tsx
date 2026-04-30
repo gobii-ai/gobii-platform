@@ -28,7 +28,7 @@ import {
   Crown,
   Star,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -361,6 +361,11 @@ type EndpointTestStatus = {
   promptTokens?: number | null
   completionTokens?: number | null
   updatedAt: number
+}
+
+type PerformanceAgentSelection = {
+  id: string
+  name: string
 }
 
 type EndpointFormValues = {
@@ -747,6 +752,25 @@ const parseNumber = (value?: string) => {
   if (!trimmed) return undefined
   const parsed = Number(trimmed)
   return Number.isNaN(parsed) ? undefined : parsed
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const formatNullableNumber = (value?: number | null, suffix = '') => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  return `${Number.isInteger(value) ? value.toString() : value.toFixed(2)}${suffix}`
+}
+
+const formatTokenCount = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  return value.toLocaleString()
+}
+
+const formatCost = (value?: number | null) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '—'
+  if (value === 0) return '$0.00'
+  if (Math.abs(value) < 0.01) return `$${value.toFixed(6)}`
+  return `$${value.toFixed(2)}`
 }
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
@@ -2600,6 +2624,346 @@ function RangeSection({
   )
 }
 
+function PerformanceTestingPanel({
+  persistentEndpoints,
+  result,
+  isRunning,
+  onRun,
+}: {
+  persistentEndpoints: llmApi.ProviderEndpoint[]
+  result: llmApi.LlmPerformanceTestResponse | null
+  isRunning: boolean
+  onRun: (payload: { agent_id: string; endpoint_ids: string[]; samples_per_endpoint: number }) => Promise<void>
+}) {
+  const [agentQuery, setAgentQuery] = useState('')
+  const [endpointQuery, setEndpointQuery] = useState('')
+  const [selectedAgent, setSelectedAgent] = useState<PerformanceAgentSelection | null>(null)
+  const [selectedEndpointIds, setSelectedEndpointIds] = useState<string[]>([])
+  const [samplesInput, setSamplesInput] = useState('3')
+  const [validationMessage, setValidationMessage] = useState<string | null>(null)
+  const [expandedEndpointIds, setExpandedEndpointIds] = useState<Set<string>>(new Set())
+  const searchTerm = agentQuery.trim()
+  const directAgentId = UUID_PATTERN.test(searchTerm) ? searchTerm : ''
+
+  const agentSearchQuery = useQuery({
+    queryKey: ['llm-performance-agent-search', searchTerm],
+    queryFn: () => llmApi.searchPerformanceAgents(searchTerm, { limit: 8 }),
+    enabled: searchTerm.length >= 2,
+    refetchOnWindowFocus: false,
+  })
+
+  const enabledEndpoints = useMemo(
+    () => persistentEndpoints.filter((endpoint) => endpoint.enabled),
+    [persistentEndpoints],
+  )
+  const endpointSearchTerm = endpointQuery.trim().toLowerCase()
+  const filteredEndpoints = useMemo(() => {
+    if (!endpointSearchTerm) return enabledEndpoints
+    return enabledEndpoints.filter((endpoint) => {
+      const searchBlob = [
+        endpoint.label,
+        endpoint.key,
+        endpoint.model,
+        endpoint.api_base,
+        endpoint.provider_id,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return searchBlob.includes(endpointSearchTerm)
+    })
+  }, [enabledEndpoints, endpointSearchTerm])
+
+  const sortedResults = useMemo(() => {
+    const endpointResults = result?.endpoints ?? []
+    return [...endpointResults].sort((a, b) => {
+      const aLatency = a.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
+      const bLatency = b.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
+      return aLatency - bLatency
+    })
+  }, [result?.endpoints])
+
+  const toggleEndpoint = (endpointId: string) => {
+    setSelectedEndpointIds((current) => (
+      current.includes(endpointId)
+        ? current.filter((id) => id !== endpointId)
+        : [...current, endpointId]
+    ))
+  }
+
+  const toggleExpanded = (endpointId: string) => {
+    setExpandedEndpointIds((current) => {
+      const next = new Set(current)
+      if (next.has(endpointId)) {
+        next.delete(endpointId)
+      } else {
+        next.add(endpointId)
+      }
+      return next
+    })
+  }
+
+  const handleAgentInputChange = (value: string) => {
+    setAgentQuery(value)
+    if (selectedAgent && value !== selectedAgent.name && value !== selectedAgent.id) {
+      setSelectedAgent(null)
+    }
+  }
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault()
+    const samples = Number(samplesInput)
+    const agentId = selectedAgent?.id || directAgentId
+    if (!agentId) {
+      setValidationMessage('Select an agent or paste a valid agent ID.')
+      return
+    }
+    if (!Number.isInteger(samples) || samples < 1 || samples > 10) {
+      setValidationMessage('Samples must be a whole number from 1 to 10.')
+      return
+    }
+    if (selectedEndpointIds.length < 1) {
+      setValidationMessage('Select at least one persistent endpoint.')
+      return
+    }
+    setValidationMessage(null)
+    await onRun({
+      agent_id: agentId,
+      endpoint_ids: selectedEndpointIds,
+      samples_per_endpoint: samples,
+    })
+  }
+
+  return (
+    <SectionCard
+      title="Performance testing"
+      description="Run the selected agent prompt against persistent endpoints and compare response metrics."
+    >
+      <form className="space-y-5" onSubmit={handleSubmit}>
+        <div className="grid gap-4 xl:grid-cols-[minmax(360px,1.25fr)_minmax(320px,1fr)_180px]">
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-slate-800" htmlFor="llm-performance-agent">
+              Agent
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 size-4 text-blue-500" />
+              <input
+                id="llm-performance-agent"
+                value={agentQuery}
+                onChange={(event) => handleAgentInputChange(event.target.value)}
+                placeholder="Search by name or paste an agent ID"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+            {selectedAgent ? (
+              <p className="text-xs font-medium text-emerald-700">Selected: {selectedAgent.name || selectedAgent.id}</p>
+            ) : directAgentId ? (
+              <p className="text-xs font-medium text-blue-700">Using pasted agent ID.</p>
+            ) : null}
+            {agentSearchQuery.data?.agents.length ? (
+              <div className="max-h-44 overflow-y-auto rounded-xl border border-blue-100 bg-white p-1 shadow-sm">
+                {agentSearchQuery.data.agents.map((agent) => (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    className="flex w-full flex-col rounded-lg px-3 py-2 text-left text-sm transition hover:bg-blue-50"
+                    onClick={() => {
+                      setSelectedAgent(agent)
+                      setAgentQuery(agent.name || agent.id)
+                    }}
+                  >
+                    <span className="font-medium text-slate-900">{agent.name || 'Unnamed agent'}</span>
+                    <span className="font-mono text-xs text-slate-500">{agent.id}</span>
+                  </button>
+                ))}
+              </div>
+            ) : searchTerm.length >= 2 && !agentSearchQuery.isFetching && !selectedAgent && !directAgentId ? (
+              <p className="text-xs text-amber-700">No matching agents found.</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-sm font-semibold text-slate-800">Persistent endpoints</label>
+              <span className="text-xs text-slate-500">{selectedEndpointIds.length}/8 selected</span>
+            </div>
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-3 size-4 text-blue-500" />
+              <input
+                value={endpointQuery}
+                onChange={(event) => setEndpointQuery(event.target.value)}
+                placeholder="Search LLMs"
+                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              />
+            </div>
+            <div className="max-h-52 overflow-y-auto rounded-xl border border-slate-200 bg-white p-2">
+              {filteredEndpoints.map((endpoint) => (
+                <label key={endpoint.id} className="flex cursor-pointer items-start gap-3 rounded-lg px-2 py-2 transition hover:bg-blue-50">
+                  <input
+                    type="checkbox"
+                    checked={selectedEndpointIds.includes(endpoint.id)}
+                    onChange={() => toggleEndpoint(endpoint.id)}
+                    disabled={!selectedEndpointIds.includes(endpoint.id) && selectedEndpointIds.length >= 8}
+                    className="mt-1 size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-medium text-slate-900">{endpoint.label}</span>
+                    <span className="block truncate font-mono text-xs text-slate-500">{endpoint.key}</span>
+                  </span>
+                </label>
+              ))}
+              {enabledEndpoints.length === 0 && (
+                <p className="px-2 py-3 text-sm text-amber-700">No enabled persistent endpoints are available.</p>
+              )}
+              {enabledEndpoints.length > 0 && filteredEndpoints.length === 0 && (
+                <p className="px-2 py-3 text-sm text-amber-700">No LLMs match that search.</p>
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-semibold text-slate-800" htmlFor="llm-performance-samples">
+              Samples
+            </label>
+            <input
+              id="llm-performance-samples"
+              type="number"
+              min={1}
+              max={10}
+              step={1}
+              value={samplesInput}
+              onChange={(event) => setSamplesInput(event.target.value)}
+              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+            <button
+              type="submit"
+              className={button.primary}
+              disabled={isRunning || enabledEndpoints.length === 0}
+            >
+              {isRunning ? <LoaderCircle className="size-4 animate-spin" /> : <Clock3 className="size-4" />}
+              Run test
+            </button>
+          </div>
+        </div>
+
+        {validationMessage && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            {validationMessage}
+          </div>
+        )}
+      </form>
+
+      {result && (
+        <div className="mt-6 space-y-4">
+          <div className="flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-blue-950">{result.agent.name || result.agent.id}</p>
+              <p className="text-xs text-blue-800">
+                {formatTokenCount(result.prompt.tokens)} prompt tokens · {result.prompt.message_count} messages · {result.prompt.tool_count} tools · {result.samples_per_endpoint} samples per endpoint
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-blue-50">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Endpoint</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Latency avg</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">p95</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Tok/sec</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Input tokens</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Output tokens</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Cost</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedResults.map((entry) => {
+                  const expanded = expandedEndpointIds.has(entry.endpoint.id)
+                  return (
+                    <Fragment key={entry.endpoint.id}>
+                      <tr className="align-top">
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            className="flex items-start gap-2 text-left"
+                            onClick={() => toggleExpanded(entry.endpoint.id)}
+                          >
+                            {expanded ? <ChevronUp className="mt-0.5 size-4 text-blue-600" /> : <ChevronDown className="mt-0.5 size-4 text-blue-600" />}
+                            <span>
+                              <span className="block font-semibold text-slate-900">{entry.endpoint.label}</span>
+                              <span className="block font-mono text-xs text-slate-500">{entry.endpoint.key}</span>
+                            </span>
+                          </button>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.latency_ms.avg, ' ms')}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.latency_ms.p95, ' ms')}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.avg_completion_tokens_per_second)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.summary.total_prompt_tokens)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.summary.total_completion_tokens)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatCost(entry.summary.total_cost)}</td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${entry.summary.error_count ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {entry.summary.success_count} ok / {entry.summary.error_count} failed
+                          </span>
+                        </td>
+                      </tr>
+                      {expanded && (
+                        <tr>
+                          <td colSpan={8} className="px-4 pb-4">
+                            <div className="overflow-x-auto rounded-xl border border-blue-100">
+                              <table className="min-w-full divide-y divide-blue-100 text-xs">
+                                <thead className="bg-white">
+                                  <tr>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Sample</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Latency</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Tok/sec</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Input</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Output</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Cost</th>
+                                    <th className="px-3 py-2 text-left font-semibold text-slate-600">Result</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-blue-50 bg-white">
+                                  {entry.samples.map((sample) => (
+                                    <tr key={`${entry.endpoint.id}:${sample.sample}`}>
+                                      <td className="px-3 py-2 font-mono text-slate-600">#{sample.sample}</td>
+                                      <td className="px-3 py-2 text-slate-700">{formatNullableNumber(sample.latency_ms, ' ms')}</td>
+                                      <td className="px-3 py-2 text-slate-700">{formatNullableNumber(sample.completion_tokens_per_second)}</td>
+                                      <td className="px-3 py-2 text-slate-700">
+                                        {formatTokenCount(sample.prompt_tokens)}
+                                        {sample.ok && !sample.usage_returned ? <span className="ml-2 text-amber-700">no usage returned</span> : null}
+                                      </td>
+                                      <td className="px-3 py-2 text-slate-700">{formatTokenCount(sample.completion_tokens)}</td>
+                                      <td className="px-3 py-2 text-slate-700">{formatCost(sample.total_cost)}</td>
+                                      <td className="max-w-xl px-3 py-2 text-slate-700">
+                                        {sample.ok ? (
+                                          <span>
+                                            <span className="font-semibold text-slate-800">{sample.response_type || 'content'}:</span>{' '}
+                                            {sample.preview || 'No preview'}
+                                          </span>
+                                        ) : (
+                                          <span className="text-rose-700">{sample.error || 'Sample failed'}</span>
+                                        )}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  )
+}
+
 export function LlmConfigScreen() {
   const queryClient = useQueryClient()
   const { runWithFeedback, isBusy, activeLabels, notices, dismissNotice } = useAsyncFeedback()
@@ -2607,6 +2971,7 @@ export function LlmConfigScreen() {
   const [pendingWeights, setPendingWeights] = useState<Record<string, number>>({})
   const [endpointTestStatuses, setEndpointTestStatuses] = useState<Record<string, EndpointTestStatus>>({})
   const resetEndpointTestStatuses = () => setEndpointTestStatuses({})
+  const [performanceResult, setPerformanceResult] = useState<llmApi.LlmPerformanceTestResponse | null>(null)
   const [savingTierIds, setSavingTierIds] = useState<Set<string>>(new Set())
   const [dirtyTierIds, setDirtyTierIds] = useState<Set<string>>(new Set())
   const stagedWeightsRef = useRef<Record<string, { scope: TierScope; updates: { id: string; weight: number }[] }>>({})
@@ -2867,6 +3232,19 @@ export function LlmConfigScreen() {
       }))
       throw error
     }
+  }
+
+  const handleRunPerformanceTest = async (payload: { agent_id: string; endpoint_ids: string[]; samples_per_endpoint: number }) => {
+    const result = await runWithFeedback(
+      () => llmApi.runPerformanceTest(payload),
+      {
+        successMessage: 'Performance test complete',
+        label: 'Running performance test…',
+        busyKey: actionKey('llm-performance-test'),
+        context: 'Performance testing',
+      },
+    )
+    setPerformanceResult(result)
   }
 
   const handleProviderToggle = (provider: ProviderCardData, enabled: boolean) => {
@@ -4137,6 +4515,13 @@ export function LlmConfigScreen() {
             </div>
           </div>
         </div>
+
+        <PerformanceTestingPanel
+          persistentEndpoints={endpointChoices.persistent_endpoints}
+          result={performanceResult}
+          isRunning={isBusy(actionKey('llm-performance-test'))}
+          onRun={handleRunPerformanceTest}
+        />
 
         <SectionCard
           title="Provider inventory"

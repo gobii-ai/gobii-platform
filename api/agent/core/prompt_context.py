@@ -227,6 +227,7 @@ __all__ = [
     "get_prompt_token_budget",
     "get_agent_daily_credit_state",
     "build_prompt_context",
+    "build_prompt_context_preview",
     "add_budget_awareness_sections",
     "get_agent_tools",
 ]
@@ -2870,6 +2871,89 @@ def build_prompt_context(
     if include_metadata:
         return (*result, final_metadata)
     return result
+
+
+def build_prompt_context_preview(
+    agent: PersistentAgent,
+    current_iteration: int = 1,
+    max_iterations: Optional[int] = None,
+    reasoning_only_streak: int = 0,
+    is_first_run: bool = False,
+    daily_credit_state: Optional[dict] = None,
+    continuation_notice: Optional[str] = None,
+    routing_profile: Any = None,
+    prefer_low_latency: Optional[bool] = None,
+) -> tuple[List[dict], int, dict[str, Any]]:
+    """
+    Render the same prompt shape used by the orchestrator without writing prompt
+    archives, compaction snapshots, or consuming queued system directives.
+    """
+    prompt_failover_configs: Sequence[Tuple[str, str, Mapping[str, Any]]] | None = (
+        _safe_get_prompt_failover_configs(
+            agent,
+            token_count=0,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+    )
+    preview_system_directive_block = _preview_system_prompt_messages(agent)
+
+    max_render_attempts = 3
+    for _attempt in range(max_render_attempts):
+        _messages, fitted_token_count, _archive_id, provisional_metadata = _render_prompt_context_once(
+            agent,
+            current_iteration=current_iteration,
+            max_iterations=max_iterations,
+            reasoning_only_streak=reasoning_only_streak,
+            is_first_run=is_first_run,
+            daily_credit_state=daily_credit_state,
+            continuation_notice=continuation_notice,
+            routing_profile=routing_profile,
+            prompt_failover_configs=prompt_failover_configs,
+            system_directive_block=preview_system_directive_block,
+            skip_compaction=True,
+            archive_prompt=False,
+            record_span=False,
+        )
+        resolved_failover_configs = _safe_get_prompt_failover_configs(
+            agent,
+            token_count=fitted_token_count,
+            is_first_run=is_first_run,
+            routing_profile=routing_profile,
+            prefer_low_latency=prefer_low_latency,
+        )
+        if (
+            _prompt_render_signature_from_failover_configs(resolved_failover_configs)
+            == provisional_metadata["prompt_render_signature"]
+        ):
+            prompt_failover_configs = resolved_failover_configs
+            break
+        prompt_failover_configs = resolved_failover_configs
+    else:
+        logger.warning(
+            "Prompt preview render config did not stabilize for agent %s after %d attempts; using latest resolved failover signature.",
+            agent.id,
+            max_render_attempts,
+        )
+
+    final_messages, final_tokens, _final_archive_id, final_metadata = _render_prompt_context_once(
+        agent,
+        current_iteration=current_iteration,
+        max_iterations=max_iterations,
+        reasoning_only_streak=reasoning_only_streak,
+        is_first_run=is_first_run,
+        daily_credit_state=daily_credit_state,
+        continuation_notice=continuation_notice,
+        routing_profile=routing_profile,
+        prompt_failover_configs=prompt_failover_configs,
+        system_directive_block=preview_system_directive_block,
+        skip_compaction=True,
+        archive_prompt=False,
+        record_span=False,
+    )
+    final_metadata["prompt_failover_configs"] = list(prompt_failover_configs or [])
+    return final_messages, final_tokens, final_metadata
 
 
 def _build_user_display_name(user: Any) -> str | None:

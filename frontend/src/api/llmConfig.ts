@@ -378,6 +378,103 @@ export function testEndpoint(payload: { endpoint_id: string; kind: ProviderEndpo
   return jsonRequest<EndpointTestResponse>(`${base}/test-endpoint/`, withCsrf(payload))
 }
 
+export type LlmPerformanceAgentSearchResult = {
+  id: string
+  name: string
+}
+
+export type LlmPerformanceAgentSearchResponse = {
+  agents: LlmPerformanceAgentSearchResult[]
+}
+
+export function searchPerformanceAgents(query: string, params: { limit?: number } = {}): Promise<LlmPerformanceAgentSearchResponse> {
+  const search = new URLSearchParams()
+  search.set('q', query)
+  if (params.limit) search.set('limit', params.limit.toString())
+  return jsonFetch<LlmPerformanceAgentSearchResponse>(`/console/api/staff/agents/search/${search.toString() ? `?${search.toString()}` : ''}`)
+}
+
+export type LlmPerformanceSample = {
+  sample: number
+  ok: boolean
+  latency_ms?: number | null
+  prompt_tokens?: number | null
+  completion_tokens?: number | null
+  total_tokens?: number | null
+  cached_tokens?: number | null
+  input_cost_total?: number | null
+  input_cost_uncached?: number | null
+  input_cost_cached?: number | null
+  output_cost?: number | null
+  total_cost?: number | null
+  completion_tokens_per_second?: number | null
+  response_type?: 'content' | 'tool_call' | 'empty' | string
+  preview?: string
+  error?: string
+  usage_returned?: boolean
+}
+
+export type LlmPerformanceEndpointSummary = {
+  success_count: number
+  error_count: number
+  latency_ms: {
+    min: number | null
+    avg: number | null
+    p50: number | null
+    p95: number | null
+    max: number | null
+  }
+  avg_completion_tokens_per_second: number | null
+  avg_prompt_tokens: number | null
+  avg_completion_tokens: number | null
+  avg_total_tokens: number | null
+  avg_input_cost_total: number | null
+  avg_output_cost: number | null
+  avg_total_cost: number | null
+  total_prompt_tokens: number
+  total_completion_tokens: number
+  total_tokens: number
+  total_input_cost: number
+  total_output_cost: number
+  total_cost: number
+}
+
+export type LlmPerformanceEndpointResult = {
+  endpoint: {
+    id: string
+    key: string
+    label: string
+    provider: string
+    model: string
+  }
+  samples: LlmPerformanceSample[]
+  summary: LlmPerformanceEndpointSummary
+}
+
+export type LlmPerformanceTestResponse = {
+  ok: boolean
+  agent: {
+    id: string
+    name: string
+  }
+  prompt: {
+    tokens: number
+    message_count: number
+    tool_count: number
+    allows_implied_send: boolean
+  }
+  samples_per_endpoint: number
+  endpoints: LlmPerformanceEndpointResult[]
+}
+
+export function runPerformanceTest(payload: {
+  agent_id: string
+  endpoint_ids: string[]
+  samples_per_endpoint: number
+}) {
+  return jsonRequest<LlmPerformanceTestResponse>(`${base}/performance-test/`, withCsrf(payload))
+}
+
 // =============================================================================
 // Routing Profiles
 // =============================================================================

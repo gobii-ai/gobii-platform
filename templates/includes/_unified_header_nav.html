@@ -183,6 +183,18 @@
                   </a>
                 </div>
                 <div class="py-1">
+                  <a href="{% url 'llm-config' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 text-slate-500"></i>
+                    LLM Config
+                  </a>
+                </div>
+                <div class="py-1">
+                  <a href="{% url 'evals' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
+                    <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 text-slate-500"></i>
+                    Evals
+                  </a>
+                </div>
+                <div class="py-1">
                   <a href="{% url 'system-settings' %}" class="w-full flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-blue-50/70 rounded-md transition-colors">
                     <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 text-slate-500"></i>
                     System Settings
@@ -374,6 +386,14 @@
             <a href="{% url 'admin:index' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="columns-3-cog" class="h-4 w-4 mr-2 text-slate-500"></i>
               Django Admin
+            </a>
+            <a href="{% url 'llm-config' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <i aria-hidden="true" data-lucide="settings-2" class="h-4 w-4 mr-2 text-slate-500"></i>
+              LLM Config
+            </a>
+            <a href="{% url 'evals' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
+              <i aria-hidden="true" data-lucide="beaker" class="h-4 w-4 mr-2 text-slate-500"></i>
+              Evals
             </a>
             <a href="{% url 'system-settings' %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">
               <i aria-hidden="true" data-lucide="sliders" class="h-4 w-4 mr-2 text-slate-500"></i>

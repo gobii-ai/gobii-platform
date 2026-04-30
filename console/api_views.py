@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import mimetypes
 import os
 import secrets
@@ -217,6 +218,11 @@ import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
+from api.agent.core.token_usage import extract_token_usage
+from api.agent.tools.sqlite_agent_config import seed_sqlite_agent_config
+from api.agent.tools.sqlite_kanban import seed_sqlite_kanban
+from api.agent.tools.sqlite_skills import seed_sqlite_skills
 from api.pipedream_app_utils import normalize_app_slugs
 from api.evals.tasks import gc_eval_runs_task
 from api.evals.registry import ScenarioRegistry
@@ -781,6 +787,272 @@ def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, ba
         "total_tokens": usage.get("total_tokens"),
         "prompt_tokens": usage.get("prompt_tokens"),
         "completion_tokens": usage.get("completion_tokens"),
+    }
+
+
+_LLM_PERFORMANCE_MAX_ENDPOINTS = 8
+_LLM_PERFORMANCE_MAX_SAMPLES = 10
+
+
+def _coerce_llm_performance_samples(value: Any) -> int:
+    try:
+        samples = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("samples_per_endpoint must be an integer") from exc
+    if samples < 1 or samples > _LLM_PERFORMANCE_MAX_SAMPLES:
+        raise ValueError(f"samples_per_endpoint must be between 1 and {_LLM_PERFORMANCE_MAX_SAMPLES}")
+    return samples
+
+
+def _coerce_llm_performance_endpoint_ids(value: Any) -> list[uuid.UUID]:
+    if not isinstance(value, list):
+        raise ValueError("endpoint_ids must be a list")
+    if not value:
+        raise ValueError("Select at least one endpoint")
+    if len(value) > _LLM_PERFORMANCE_MAX_ENDPOINTS:
+        raise ValueError(f"Select no more than {_LLM_PERFORMANCE_MAX_ENDPOINTS} endpoints")
+
+    endpoint_ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for raw_id in value:
+        try:
+            endpoint_id = uuid.UUID(str(raw_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("endpoint_ids must contain valid UUIDs") from exc
+        if endpoint_id in seen:
+            continue
+        seen.add(endpoint_id)
+        endpoint_ids.append(endpoint_id)
+    if not endpoint_ids:
+        raise ValueError("Select at least one endpoint")
+    return endpoint_ids
+
+
+def _extract_llm_performance_message(response: Any) -> tuple[str, str]:
+    choices = getattr(response, "choices", None)
+    if choices is None and isinstance(response, dict):
+        choices = response.get("choices")
+    if not choices:
+        return "empty", ""
+
+    first_choice = choices[0]
+    message = getattr(first_choice, "message", None)
+    if message is None and isinstance(first_choice, dict):
+        message = first_choice.get("message")
+    if message is None:
+        return "empty", ""
+
+    tool_calls = getattr(message, "tool_calls", None)
+    if tool_calls is None and isinstance(message, dict):
+        tool_calls = message.get("tool_calls")
+    if tool_calls:
+        first_tool = tool_calls[0]
+        function = getattr(first_tool, "function", None)
+        if function is None and isinstance(first_tool, dict):
+            function = first_tool.get("function")
+        name = getattr(function, "name", None)
+        if name is None and isinstance(function, dict):
+            name = function.get("name")
+        return "tool_call", str(name or "tool_call")[:240]
+
+    content = getattr(message, "content", None)
+    if content is None and isinstance(message, dict):
+        content = message.get("content")
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        content = "\n".join(parts)
+    preview = str(content or "").strip()
+    return ("content" if preview else "empty"), preview[:500]
+
+
+def _serialize_llm_performance_endpoint(endpoint: PersistentModelEndpoint) -> dict[str, Any]:
+    provider_name = endpoint.provider.display_name if endpoint.provider else "Unlinked"
+    return {
+        "id": str(endpoint.id),
+        "key": endpoint.key,
+        "label": f"{provider_name} · {endpoint.litellm_model}",
+        "provider": provider_name,
+        "model": endpoint.litellm_model,
+    }
+
+
+def _percentile(values: list[int], percentile: float) -> int | None:
+    if not values:
+        return None
+    sorted_values = sorted(values)
+    index = max(0, min(len(sorted_values) - 1, math.ceil((percentile / 100) * len(sorted_values)) - 1))
+    return sorted_values[index]
+
+
+def _average(values: list[float | int]) -> float | None:
+    if not values:
+        return None
+    return round(sum(values) / len(values), 2)
+
+
+def _sum_int_metric(samples: list[dict[str, Any]], key: str) -> int:
+    total = 0
+    for sample in samples:
+        value = sample.get(key)
+        if isinstance(value, int):
+            total += value
+    return total
+
+
+def _float_metric(value: Any) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sum_float_metric(samples: list[dict[str, Any]], key: str) -> float:
+    total = 0.0
+    for sample in samples:
+        value = _float_metric(sample.get(key))
+        if value is not None:
+            total += value
+    return round(total, 6)
+
+
+def _build_llm_performance_summary(samples: list[dict[str, Any]]) -> dict[str, Any]:
+    successful_samples = [sample for sample in samples if sample.get("ok")]
+    latencies = [
+        int(sample["latency_ms"])
+        for sample in successful_samples
+        if isinstance(sample.get("latency_ms"), int)
+    ]
+    tokens_per_second = [
+        float(sample["completion_tokens_per_second"])
+        for sample in successful_samples
+        if isinstance(sample.get("completion_tokens_per_second"), (int, float))
+    ]
+    prompt_tokens = [
+        int(sample["prompt_tokens"])
+        for sample in successful_samples
+        if isinstance(sample.get("prompt_tokens"), int)
+    ]
+    completion_tokens = [
+        int(sample["completion_tokens"])
+        for sample in successful_samples
+        if isinstance(sample.get("completion_tokens"), int)
+    ]
+    total_tokens = [
+        int(sample["total_tokens"])
+        for sample in successful_samples
+        if isinstance(sample.get("total_tokens"), int)
+    ]
+    input_costs = [
+        cost
+        for sample in successful_samples
+        if (cost := _float_metric(sample.get("input_cost_total"))) is not None
+    ]
+    output_costs = [
+        cost
+        for sample in successful_samples
+        if (cost := _float_metric(sample.get("output_cost"))) is not None
+    ]
+    total_costs = [
+        cost
+        for sample in successful_samples
+        if (cost := _float_metric(sample.get("total_cost"))) is not None
+    ]
+    return {
+        "success_count": len(successful_samples),
+        "error_count": len(samples) - len(successful_samples),
+        "latency_ms": {
+            "min": min(latencies) if latencies else None,
+            "avg": _average(latencies),
+            "p50": _percentile(latencies, 50),
+            "p95": _percentile(latencies, 95),
+            "max": max(latencies) if latencies else None,
+        },
+        "avg_completion_tokens_per_second": _average(tokens_per_second),
+        "avg_prompt_tokens": _average(prompt_tokens),
+        "avg_completion_tokens": _average(completion_tokens),
+        "avg_total_tokens": _average(total_tokens),
+        "avg_input_cost_total": _average(input_costs),
+        "avg_output_cost": _average(output_costs),
+        "avg_total_cost": _average(total_costs),
+        "total_prompt_tokens": _sum_int_metric(successful_samples, "prompt_tokens"),
+        "total_completion_tokens": _sum_int_metric(successful_samples, "completion_tokens"),
+        "total_tokens": _sum_int_metric(successful_samples, "total_tokens"),
+        "total_input_cost": _sum_float_metric(successful_samples, "input_cost_total"),
+        "total_output_cost": _sum_float_metric(successful_samples, "output_cost"),
+        "total_cost": _sum_float_metric(successful_samples, "total_cost"),
+    }
+
+
+def _run_llm_performance_sample(
+    *,
+    endpoint: PersistentModelEndpoint,
+    messages: list[dict[str, Any]],
+    tools: list[dict[str, Any]],
+    sample_number: int,
+) -> dict[str, Any]:
+    model, params = _build_completion_params(
+        endpoint,
+        endpoint.provider,
+        model_attr="litellm_model",
+        base_attr="api_base",
+        default_max_tokens=256,
+    )
+    started = time.monotonic()
+    try:
+        response = run_completion(
+            model=model,
+            messages=messages,
+            params=params,
+            tools=tools,
+            drop_params=True,
+        )
+    except Exception as exc:
+        latency_ms = int((time.monotonic() - started) * 1000)
+        logger.info(
+            "LLM performance sample failed for endpoint %s sample %s: %s",
+            endpoint.id,
+            sample_number,
+            exc,
+        )
+        return {
+            "sample": sample_number,
+            "ok": False,
+            "latency_ms": latency_ms,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    latency_ms = int((time.monotonic() - started) * 1000)
+    token_usage, _usage = extract_token_usage(response, model=model, provider=endpoint.provider.key)
+    completion_tokens = token_usage.get("completion_tokens") if token_usage else None
+    completion_tokens_per_second = None
+    if isinstance(completion_tokens, int) and completion_tokens > 0 and latency_ms > 0:
+        completion_tokens_per_second = round(completion_tokens / (latency_ms / 1000), 2)
+    response_type, preview = _extract_llm_performance_message(response)
+
+    return {
+        "sample": sample_number,
+        "ok": True,
+        "latency_ms": latency_ms,
+        "prompt_tokens": token_usage.get("prompt_tokens") if token_usage else None,
+        "completion_tokens": completion_tokens,
+        "total_tokens": token_usage.get("total_tokens") if token_usage else None,
+        "cached_tokens": token_usage.get("cached_tokens") if token_usage else None,
+        "input_cost_total": _float_metric(token_usage.get("input_cost_total")) if token_usage else None,
+        "input_cost_uncached": _float_metric(token_usage.get("input_cost_uncached")) if token_usage else None,
+        "input_cost_cached": _float_metric(token_usage.get("input_cost_cached")) if token_usage else None,
+        "output_cost": _float_metric(token_usage.get("output_cost")) if token_usage else None,
+        "total_cost": _float_metric(token_usage.get("total_cost")) if token_usage else None,
+        "completion_tokens_per_second": completion_tokens_per_second,
+        "response_type": response_type,
+        "preview": preview,
+        "usage_returned": bool(token_usage and any(key in token_usage for key in ("prompt_tokens", "completion_tokens", "total_tokens"))),
     }
 
 
@@ -4509,6 +4781,108 @@ class LLMEndpointTestAPIView(SystemAdminAPIView):
             return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=400)
 
         return JsonResponse({"ok": True, **result})
+
+
+class LLMPerformanceTestAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+            agent_id = uuid.UUID(str(payload.get("agent_id")))
+            endpoint_ids = _coerce_llm_performance_endpoint_ids(payload.get("endpoint_ids"))
+            samples_per_endpoint = _coerce_llm_performance_samples(payload.get("samples_per_endpoint", 3))
+        except (TypeError, ValueError) as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        agent = (
+            PersistentAgent.objects.non_eval()
+            .alive()
+            .select_related("user", "organization", "preferred_contact_endpoint")
+            .filter(pk=agent_id)
+            .first()
+        )
+        if agent is None:
+            return JsonResponse({"ok": False, "message": "Agent not found"}, status=404)
+
+        endpoints = list(
+            PersistentModelEndpoint.objects.select_related("provider")
+            .filter(id__in=endpoint_ids)
+        )
+        endpoints_by_id = {endpoint.id: endpoint for endpoint in endpoints}
+        missing_ids = [str(endpoint_id) for endpoint_id in endpoint_ids if endpoint_id not in endpoints_by_id]
+        if missing_ids:
+            return HttpResponseBadRequest(f"Unknown endpoint_id: {missing_ids[0]}")
+
+        ordered_endpoints = [endpoints_by_id[endpoint_id] for endpoint_id in endpoint_ids]
+        for endpoint in ordered_endpoints:
+            try:
+                _build_completion_params(
+                    endpoint,
+                    endpoint.provider,
+                    model_attr="litellm_model",
+                    base_attr="api_base",
+                    default_max_tokens=256,
+                )
+            except ValueError as exc:
+                return JsonResponse(
+                    {
+                        "ok": False,
+                        "message": f"{endpoint.key}: {exc}",
+                    },
+                    status=400,
+                )
+
+        try:
+            seed_sqlite_agent_config(agent)
+            seed_sqlite_kanban(agent)
+            seed_sqlite_skills(agent)
+            messages, prompt_tokens, prompt_metadata = build_prompt_context_preview(
+                agent,
+                current_iteration=1,
+                is_first_run=False,
+            )
+            tools = get_agent_tools(agent)
+        except Exception as exc:
+            logger.warning("Failed to render LLM performance prompt for agent %s", agent.id, exc_info=True)
+            return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=400)
+
+        endpoint_results: list[dict[str, Any]] = []
+        for endpoint in ordered_endpoints:
+            samples = [
+                _run_llm_performance_sample(
+                    endpoint=endpoint,
+                    messages=messages,
+                    tools=tools,
+                    sample_number=sample_number,
+                )
+                for sample_number in range(1, samples_per_endpoint + 1)
+            ]
+            endpoint_results.append(
+                {
+                    "endpoint": _serialize_llm_performance_endpoint(endpoint),
+                    "samples": samples,
+                    "summary": _build_llm_performance_summary(samples),
+                }
+            )
+
+        return JsonResponse(
+            {
+                "ok": True,
+                "agent": {
+                    "id": str(agent.id),
+                    "name": agent.name or "",
+                },
+                "prompt": {
+                    "tokens": prompt_tokens,
+                    "message_count": len(messages),
+                    "tool_count": len(tools),
+                    "allows_implied_send": bool(prompt_metadata.get("prompt_allows_implied_send", True)),
+                },
+                "samples_per_endpoint": samples_per_endpoint,
+                "endpoints": endpoint_results,
+            }
+        )
 
 
 class PersistentEndpointListCreateAPIView(SystemAdminAPIView):
