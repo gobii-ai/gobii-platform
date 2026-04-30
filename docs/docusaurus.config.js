@@ -177,7 +177,7 @@ const config = {
           {
             title: 'Docs',
             items: [
-              { label: 'Getting started', to: '/getting-started/introduction' },
+              { label: 'Getting started', to: '/' },
               { label: 'Developer basics', to: '/developers/developer-basics' },
               { label: 'API reference', to: '/api-reference/list-persistent-agents' },
               { label: 'Self-hosted', to: '/self-hosted/overview' },
