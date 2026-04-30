@@ -33,11 +33,26 @@ def visible_agent_message_filter() -> Q:
     return Q(**{hidden_key: False}) | Q(**{f"{hidden_key}__isnull": True})
 
 
+def peer_dm_message_filter() -> Q:
+    return Q(peer_agent_id__isnull=False) | Q(conversation__is_peer_dm=True)
+
+
+def is_peer_dm_message(message: PersistentAgentMessage | None) -> bool:
+    if message is None:
+        return False
+    if getattr(message, "peer_agent_id", None):
+        return True
+    conversation = getattr(message, "conversation", None)
+    return bool(conversation and getattr(conversation, "is_peer_dm", False))
+
+
 def latest_visible_outbound_message_queryset():
     return (
         PersistentAgentMessage.objects
+        .select_related("conversation")
         .filter(is_outbound=True)
         .filter(visible_agent_message_filter())
+        .exclude(peer_dm_message_filter())
         .order_by("-timestamp", "-seq")
     )
 
@@ -146,7 +161,7 @@ def build_agent_message_read_state_for_users(
 
 def mark_message_read(message: PersistentAgentMessage | None, user: object, source: str) -> bool:
     user_id = _user_id(user)
-    if message is None or not message.is_outbound or not user_id:
+    if message is None or not message.is_outbound or is_peer_dm_message(message) or not user_id:
         return False
 
     read, created = PersistentAgentMessageRead.objects.get_or_create(
