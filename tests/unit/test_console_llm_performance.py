@@ -140,6 +140,42 @@ class ConsoleLLMPerformanceTests(TestCase):
         response = self.client.get(f"/console/evals/{self.agent.id}/")
         self.assertEqual(response.status_code, 404)
 
+    def test_performance_agent_search_only_returns_eligible_agents(self):
+        deleted_agent = PersistentAgent.objects.create(
+            user=self.staff_user,
+            name="Performance Deleted Agent",
+            charter="Deleted benchmark prompt.",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.staff_user,
+                name="Performance Deleted Browser Agent",
+            ),
+            is_deleted=True,
+        )
+        eval_agent = PersistentAgent.objects.create(
+            user=self.staff_user,
+            name="Performance Eval Agent",
+            charter="Eval benchmark prompt.",
+            browser_use_agent=BrowserUseAgent.objects.create(
+                user=self.staff_user,
+                name="Performance Eval Browser Agent",
+            ),
+            execution_environment="eval",
+        )
+
+        self.client.force_login(self.staff_user)
+        url = reverse("console_agent_search")
+
+        response = self.client.get(url, {"q": "Performance", "eligible_for": "llm_performance"})
+        self.assertEqual(response.status_code, 200)
+        agent_ids = {agent["id"] for agent in response.json()["agents"]}
+        self.assertIn(str(self.agent.id), agent_ids)
+        self.assertNotIn(str(deleted_agent.id), agent_ids)
+        self.assertNotIn(str(eval_agent.id), agent_ids)
+
+        response = self.client.get(url, {"q": str(deleted_agent.id)})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(str(deleted_agent.id), {agent["id"] for agent in response.json()["agents"]})
+
     def test_rejects_invalid_agent(self):
         self.client.force_login(self.staff_user)
         response = self.client.post(

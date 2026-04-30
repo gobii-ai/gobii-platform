@@ -390,6 +390,7 @@ export type LlmPerformanceAgentSearchResponse = {
 export function searchPerformanceAgents(query: string, params: { limit?: number } = {}): Promise<LlmPerformanceAgentSearchResponse> {
   const search = new URLSearchParams()
   search.set('q', query)
+  search.set('eligible_for', 'llm_performance')
   if (params.limit) search.set('limit', params.limit.toString())
   return jsonFetch<LlmPerformanceAgentSearchResponse>(`/console/api/staff/agents/search/${search.toString() ? `?${search.toString()}` : ''}`)
 }

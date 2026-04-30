@@ -2133,7 +2133,7 @@ class StaffUserEmailTriggerAPIView(SystemAdminAPIView):
 
 
 class StaffAgentSearchAPIView(SystemAdminAPIView):
-    """Search persistent agents by name or id for the staff audit UI."""
+    """Search persistent agents by name or id for staff tools."""
 
     http_method_names = ["get"]
 
@@ -2154,8 +2154,15 @@ class StaffAgentSearchAPIView(SystemAdminAPIView):
         except (TypeError, ValueError):
             pass
 
+        queryset = PersistentAgent.objects.all()
+        eligible_for = (request.GET.get("eligible_for") or "").strip()
+        if eligible_for == "llm_performance":
+            queryset = queryset.non_eval().alive()
+        elif eligible_for:
+            return HttpResponseBadRequest("eligible_for must be llm_performance")
+
         matches = (
-            PersistentAgent.objects.filter(filters)
+            queryset.filter(filters)
             .only("id", "name")
             .order_by("name")[:limit]
         )
