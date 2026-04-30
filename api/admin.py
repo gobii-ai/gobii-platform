@@ -79,6 +79,7 @@ from .models import (
     AgentComputeSession,
     ComputeSnapshot,
     UserPreference,
+    UserEmail,
     UserFlagDefinition,
     UserFingerprintVisit,
     UserIdentitySignal,
@@ -201,6 +202,15 @@ class UserFlagDefinitionAdmin(admin.ModelAdmin):
         if obj is not None:
             readonly_fields.append("slug")
         return tuple(readonly_fields)
+
+
+@admin.register(UserEmail)
+class UserEmailAdmin(admin.ModelAdmin):
+    list_display = ("name", "event_name", "is_active", "updated_at")
+    list_filter = ("is_active",)
+    search_fields = ("name", "event_name")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("name", "event_name", "is_active", "created_at", "updated_at")
 
 
 @admin.register(StripeConfig)

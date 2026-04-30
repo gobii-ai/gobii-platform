@@ -43,6 +43,13 @@ export type StaffUserDetail = {
     adminUrl: string
     auditUrl: string
   }>
+  userEmails: {
+    triggers: Array<{
+      id: number
+      name: string
+      eventName: string
+    }>
+  }
   taskCredits: {
     available: string | null
     unlimited: boolean
@@ -60,6 +67,7 @@ export type StaffUserDetail = {
 }
 
 export type StaffUserEmailVerification = StaffUserDetail['emailVerification']
+export type StaffUserEmailTrigger = StaffUserDetail['userEmails']['triggers'][number]
 export type StaffUserTaskCreditGrant = StaffUserDetail['taskCredits']['recentGrants'][number]
 
 export async function searchStaffUsers(query: string, limit = 8, signal?: AbortSignal): Promise<{ users: StaffUserSearchResult[] }> {
@@ -89,4 +97,17 @@ export async function createStaffUserTaskCreditGrant(
     includeCsrf: true,
     json: payload,
   })
+}
+
+export async function sendStaffUserEmailTrigger(
+  userId: number,
+  userEmailId: number,
+): Promise<{ ok: boolean; userEmail: StaffUserEmailTrigger }> {
+  return jsonRequest<{ ok: boolean; userEmail: StaffUserEmailTrigger }>(
+    `/console/api/staff/users/${userId}/user-emails/${userEmailId}/send/`,
+    {
+      method: 'POST',
+      includeCsrf: true,
+    },
+  )
 }
