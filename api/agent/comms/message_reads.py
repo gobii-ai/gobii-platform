@@ -49,6 +49,7 @@ def is_peer_dm_message(message: PersistentAgentMessage | None) -> bool:
 def latest_visible_outbound_message_queryset():
     return (
         PersistentAgentMessage.objects
+        .select_related("conversation")
         .filter(is_outbound=True)
         .filter(visible_agent_message_filter())
         .exclude(peer_dm_message_filter())
