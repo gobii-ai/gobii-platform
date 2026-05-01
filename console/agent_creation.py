@@ -346,6 +346,7 @@ def create_persistent_agent_from_charter(
                         "Gobii: You've enabled SMS communication with Gobii. "
                         "Reply HELP for help, STOP to opt-out."
                     ),
+                    owner_user=request.user,
                 )
             except Exception:
                 pass
@@ -568,6 +569,7 @@ def enable_agent_sms_contact(agent: PersistentAgent, phone) -> tuple[PersistentA
                     to_number=phone.phone_number,
                     from_number=agent_sms_endpoint.address,
                     body="Gobii: You've enabled SMS communication with Gobii. Reply HELP for help, STOP to opt-out.",
+                    owner_user=agent.user,
                 )
             except Exception:
                 pass

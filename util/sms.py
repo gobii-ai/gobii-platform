@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 tracer = trace.get_tracer("gobii.utils")
 
+TWILIO_RISK_CHECK_DISABLE = "disable"
+
 # ── Vanity helpers ────────────────────────────────────────────────────────────
 _T9 = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
                     "22233344455566677778889999")  # A→2, B→2, …, Z→9
@@ -128,8 +130,48 @@ def get_user_primary_sms_number(user) -> Optional[UserPhoneNumber]:
 
     return phone_number
 
+
+def _is_us_phone_number(phone_number: str) -> bool:
+    try:
+        from phonenumbers import (
+            NumberParseException,
+            is_valid_number,
+            parse,
+            region_code_for_number,
+        )
+    except ImportError:
+        logger.warning("phonenumbers is unavailable; leaving Twilio riskCheck enabled.")
+        return False
+
+    try:
+        parsed = parse((phone_number or "").strip(), None)
+    except NumberParseException:
+        return False
+
+    return is_valid_number(parsed) and region_code_for_number(parsed) == "US"
+
+
+def should_disable_twilio_risk_check(to_number: str, owner_user=None) -> bool:
+    """
+    Disable Twilio riskCheck only for verified US phone numbers registered to
+    the agent owner's account. Our customer-care A2P campaign is exempt for
+    this first-party owner-contact path.
+    """
+    owner_user_id = getattr(owner_user, "id", None)
+    normalized_to = (to_number or "").strip()
+    if not owner_user_id or not normalized_to:
+        return False
+    if not _is_us_phone_number(normalized_to):
+        return False
+    return UserPhoneNumber.objects.filter(
+        user_id=owner_user_id,
+        phone_number__iexact=normalized_to,
+        is_verified=True,
+    ).exists()
+
+
 @tracer.start_as_current_span("SMS send_sms")
-def send_sms(to_number: str, from_number: str, body: str) -> bool|str:
+def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) -> bool|str:
     """
     Send an SMS message using Twilio.
     Returns True if sent successfully, False otherwise.
@@ -144,12 +186,15 @@ def send_sms(to_number: str, from_number: str, body: str) -> bool|str:
     try:
         with traced("SMS send_sms - Twilio"):
             logger.info(f"Sending SMS to {to_number} from {from_number}: {body}")
-            message = client.messages.create(
-                body=body,
-                from_=from_number,
-                to=to_number,
-                messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
-            )
+            message_kwargs = {
+                "body": body,
+                "from_": from_number,
+                "to": to_number,
+                "messaging_service_sid": TWILIO_MESSAGING_SERVICE_SID,
+            }
+            if should_disable_twilio_risk_check(to_number, owner_user=owner_user):
+                message_kwargs["risk_check"] = TWILIO_RISK_CHECK_DISABLE
+            message = client.messages.create(**message_kwargs)
 
         logger.info(f"SMS sent successfully to {to_number}: {message.sid}")
         return message.sid
