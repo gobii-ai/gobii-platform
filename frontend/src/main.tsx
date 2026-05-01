@@ -9,6 +9,7 @@ import { initializeSubscriptionStore } from './stores/subscriptionStore'
 import './index.css'
 import './styles/consoleShell.css'
 
+const AgentDashboardsScreen = lazy(async () => ({ default: (await import('./screens/AgentDashboardsScreen')).AgentDashboardsScreen }))
 const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
@@ -74,6 +75,12 @@ const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
 const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
 
 switch (appName) {
+  case 'agent-dashboards': {
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<import('./screens/AgentDashboardsScreen').AgentDashboardsScreenProps['initialData']>(propsId)
+    screen = <AgentDashboardsScreen initialData={initialData} />
+    break
+  }
   case 'diagnostics':
     screen = <DiagnosticsScreen />
     break

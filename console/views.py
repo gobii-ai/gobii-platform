@@ -387,6 +387,7 @@ def _resolve_dedicated_ip_pricing(plan):
 
 
 from .forms import (
+    ApiKeyForm,
     MCPServerConfigForm,
     UserProfileForm,
     PhoneVerifyForm,
@@ -429,7 +430,7 @@ from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
 from api.services import mcp_servers as mcp_server_service
-from console.agent_creation import create_persistent_agent_from_charter
+from console.agent_creation import create_persistent_agent_from_charter, enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.extra_tasks_settings import derive_extra_tasks_settings
 import logging
@@ -2829,7 +2830,7 @@ class AgentSettingsController(AgentOwnerContextOverrideMixin, ConsoleViewMixin, 
                 sms_contact_permission_attested = _posted_bool(
                     request.POST.get('sms_contact_permission_attested')
                 )
-                
+
                 if not address:
                     return JsonResponse({'success': False, 'error': 'Address is required'})
                 
@@ -4667,6 +4668,41 @@ def build_agent_detail_props_for_request(request: HttpRequest, agent: Persistent
     context = view.get_context_data(object=agent)
     return context["agent_detail_props"]
 
+class AgentDashboardsView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
+    model = PersistentAgent
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
+    template_name = "console/agent_dashboards.html"
+    allow_delinquent_personal_chat = True
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.object
+        try:
+            dashboards_url = reverse("console_agent_dashboards_api", kwargs={"agent_id": agent.id})
+        except NoReverseMatch:
+            dashboards_url = f"/console/api/agents/{agent.id}/dashboards/"
+        try:
+            chat_url = reverse("agent_chat_shell", kwargs={"pk": agent.id})
+        except NoReverseMatch:
+            chat_url = f"/console/agents/{agent.id}/chat/"
+        org_id = str(agent.organization_id) if agent.organization_id else None
+        context["agent_dashboards_props"] = {
+            "agent": {
+                "id": str(agent.id),
+                "name": agent.name,
+                "avatarUrl": agent.get_avatar_thumbnail_url(),
+                "displayColorHex": agent.get_display_color(),
+            },
+            "urls": {
+                "dashboard": append_context_query(dashboards_url, org_id),
+                "chat": append_context_query(chat_url, org_id),
+            },
+        }
+        return context
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
 
 AGENT_AVATAR_THUMBNAIL_SIZE = 128
 AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE = "image/png"

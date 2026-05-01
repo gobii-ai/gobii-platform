@@ -49,6 +49,7 @@ from console.api_views import (
     AgentTemplateCloneAPIView,
     AgentSmsEnableAPIView,
     AgentTimelineAPIView,
+    AgentDashboardsAPIView,
     AgentSpawnRequestDecisionAPIView,
     AgentRequestedSecretsFulfillAPIView,
     AgentRequestedSecretsRemoveAPIView,
@@ -225,6 +226,8 @@ from console.views import (
     SystemSkillProfilesView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
+    PersistentAgentChatShellView,
+    AgentDashboardsView,
     AgentAvatarProxyView,
     AgentAvatarThumbnailProxyView,
     PublicAgentAvatarThumbnailView,
@@ -365,6 +368,8 @@ urlpatterns = [
     path("console/profile/", LegacyConsoleRedirectView.as_view(), name="profile"),
 
     path("console/agents/", LegacyConsoleRedirectView.as_view(), name="agents"),
+    path("console/agents/<uuid:pk>/dashboards/", AgentDashboardsView.as_view(), name="agent_dashboards"),
+    path("console/agents/", LegacyConsoleRedirectView.as_view(), name="agents"),
     path("console/agents/<uuid:pk>/chat/", LegacyConsoleRedirectView.as_view(), name="agent_chat_shell"),
     path("console/agents/<uuid:pk>/chat/settings/", LegacyConsoleRedirectView.as_view(), name="agent_chat_shell_settings"),
     path("console/agents/<uuid:pk>/chat/secrets/", LegacyConsoleRedirectView.as_view(), name="agent_chat_shell_secrets"),
@@ -379,6 +384,7 @@ urlpatterns = [
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),
     path("console/api/agents/<uuid:agent_id>/collaboration/leave/", AgentCollaboratorLeaveAPIView.as_view(), name="console_agent_collaborator_leave"),
     path("console/api/agents/<uuid:agent_id>/timeline/", AgentTimelineAPIView.as_view(), name="console_agent_timeline"),
+    path("console/api/agents/<uuid:agent_id>/dashboards/", AgentDashboardsAPIView.as_view(), name="console_agent_dashboards_api"),
     path("console/api/agents/<uuid:agent_id>/planning/skip/", AgentPlanningSkipAPIView.as_view(), name="console_agent_planning_skip"),
     path("console/api/agents/<uuid:agent_id>/suggestions/", AgentSuggestionsAPIView.as_view(), name="console_agent_suggestions"),
     path(

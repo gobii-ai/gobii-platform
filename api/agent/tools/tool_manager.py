@@ -13,6 +13,8 @@ from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError
 from django.db.models import F
 
 from util.text_sanitizer import decode_unicode_escapes
@@ -49,6 +51,11 @@ from .create_video import (
     get_create_video_tool,
     execute_create_video,
     is_video_generation_available_for_agent,
+)
+from .dashboards import (
+    DASHBOARD_TOOL_NAME,
+    execute_create_or_update_dashboard,
+    get_create_or_update_dashboard_tool,
 )
 from .custom_tools import (
     execute_custom_tool,
@@ -263,6 +270,10 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_discord_channel_subscriptions,
         "search_hidden": True,
         "system_skill_key": "connected_app_channels",
+    },
+    DASHBOARD_TOOL_NAME: {
+        "definition": get_create_or_update_dashboard_tool,
+        "executor": execute_create_or_update_dashboard,
     },
     DISCORD_SEND_MESSAGE_TOOL_NAME: {
         "definition": get_discord_send_message_tool,
