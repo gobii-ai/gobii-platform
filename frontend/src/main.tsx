@@ -11,6 +11,7 @@ import './styles/consoleShell.css'
 
 const AgentChatPage = lazy(async () => ({ default: (await import('./screens/AgentChatPage')).AgentChatPage }))
 const AgentDetailScreen = lazy(async () => ({ default: (await import('./screens/AgentDetailScreen')).AgentDetailScreen }))
+const AgentDashboardsScreen = lazy(async () => ({ default: (await import('./screens/AgentDashboardsScreen')).AgentDashboardsScreen }))
 const DiagnosticsScreen = lazy(async () => ({ default: (await import('./screens/DiagnosticsScreen')).DiagnosticsScreen }))
 const McpServersScreen = lazy(async () => ({ default: (await import('./screens/McpServersScreen')).McpServersScreen }))
 const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageScreen')).UsageScreen }))
@@ -155,6 +156,12 @@ switch (appName) {
     const propsId = mountNode.dataset.propsJsonId
     const initialData = readJsonScript<import('./screens/AgentFilesScreen').AgentFilesScreenProps['initialData']>(propsId)
     screen = <AgentFilesScreen initialData={initialData} />
+    break
+  }
+  case 'agent-dashboards': {
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = readJsonScript<import('./screens/AgentDashboardsScreen').AgentDashboardsScreenProps['initialData']>(propsId)
+    screen = <AgentDashboardsScreen initialData={initialData} />
     break
   }
   case 'agent-email-settings': {
