@@ -42,6 +42,20 @@ export type AuditCompletionEvent = {
   tool_calls?: AuditToolCallEvent[]
 }
 
+export type AuditErrorEvent = {
+  kind: 'error'
+  id: string
+  timestamp: string | null
+  category: string
+  source: string
+  level: string
+  message: string
+  exception_class: string
+  traceback: string
+  context: Record<string, unknown>
+  completion_id: string | null
+}
+
 export type AuditMessageEvent = {
   kind: 'message'
   id: string
@@ -90,7 +104,7 @@ export type AuditSystemMessageEvent = {
   } | null
 }
 
-export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent
+export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent | AuditErrorEvent
 export type AuditRunStartedEvent = {
   kind: 'run_started'
   run_id: string

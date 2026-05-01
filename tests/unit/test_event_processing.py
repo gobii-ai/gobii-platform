@@ -92,6 +92,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
     PersistentAgentSystemStep,
@@ -4201,6 +4202,38 @@ class HumanInboundGenerationTests(TestCase):
 
         mock_process.assert_not_called()
 
+    def test_process_agent_events_task_logs_task_quota_error(self):
+        exc = ValidationError({"quota": "Task quota exceeded. You have no remaining task credits."})
+
+        with patch("api.agent.tasks.process_events.process_agent_events", side_effect=exc):
+            process_agent_events_task.push_request(id="quota-task", delivery_info={})
+            try:
+                with self.assertRaises(ValidationError):
+                    process_agent_events_task.run(str(self.agent.id))
+            finally:
+                process_agent_events_task.pop_request()
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertEqual(error.source, "api.agent.tasks.process_events.process_agent_events_task")
+        self.assertEqual(error.context["task_id"], "quota-task")
+
+    @patch("api.agent.tasks.process_events.switch_is_active", return_value=False)
+    def test_process_agent_cron_trigger_logs_task_quota_error(self, _mock_switch):
+        exc = ValidationError({"quota": "Task quota exceeded. You have no remaining task credits."})
+
+        with patch("api.agent.tasks.process_events.process_agent_events", side_effect=exc):
+            process_agent_cron_trigger_task.push_request(id="quota-cron", delivery_info={})
+            try:
+                process_agent_cron_trigger_task.run(str(self.agent.id), "* * * * *")
+            finally:
+                process_agent_cron_trigger_task.pop_request()
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertEqual(error.source, "api.agent.tasks.process_events.process_agent_cron_trigger_task")
+        self.assertEqual(error.context["task_id"], "quota-cron")
+
 
 @tag("batch_event_processing")
 class OrchestratorHumanInputInterruptTests(TestCase):
@@ -4302,6 +4335,10 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(usage.get("total_tokens"), 0)
         self.assertEqual(get_consumed_human_inbound_generation(self.agent.id), 0)
         self.assertEqual(get_human_inbound_generation(self.agent.id), generation)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.LLM_COMPLETION)
+        self.assertEqual(error.exception_class, "RuntimeError")
+        self.assertEqual(error.context["iteration"], 1)
 
     @patch("api.agent.core.event_processing.run_completion")
     def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):

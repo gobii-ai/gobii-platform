@@ -13,14 +13,14 @@ import {
 } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
+import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
 import { AgentAuditFiltersMenu } from '../components/agentAudit/AgentAuditFiltersMenu'
 import { CompletionCard, type PromptState } from '../components/agentAudit/CompletionCard'
-import { MessageRow, StepRow, ToolCallRow } from '../components/agentAudit/EventRows'
+import { ErrorRow, MessageRow, StepRow, ToolCallRow } from '../components/agentAudit/EventRows'
 import { renderHtmlOrText } from '../components/agentAudit/eventPrimitives'
 
 type AgentAuditScreenProps = {
@@ -54,6 +54,7 @@ const DEFAULT_FILTERS = {
   messages: true,
   toolCalls: true,
   completions: true,
+  errors: true,
   systemMessages: true,
   systemSteps: true,
   agentSteps: true,
@@ -77,6 +78,7 @@ type EventFilterKey =
   | 'messages'
   | 'toolCalls'
   | 'completions'
+  | 'errors'
   | 'systemMessages'
   | 'systemSteps'
   | 'agentSteps'
@@ -91,6 +93,7 @@ const EVENT_TYPE_FILTERS: {
   { key: 'messages', label: 'Messages', matches: (event) => event.kind === 'message' },
   { key: 'toolCalls', label: 'Tool calls', matches: (event) => event.kind === 'tool_call' },
   { key: 'completions', label: 'LLM completions', matches: (event) => event.kind === 'completion' },
+  { key: 'errors', label: 'Errors', matches: (event) => event.kind === 'error' },
   { key: 'systemMessages', label: 'System messages', matches: (event) => event.kind === 'system_message' },
   { key: 'systemSteps', label: 'System steps', matches: (event) => event.kind === 'step' && event.is_system },
   { key: 'agentSteps', label: 'Agent steps', matches: (event) => event.kind === 'step' && !event.is_system },
@@ -759,6 +762,13 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 return (
                   <div key={eventKey} {...wrapperProps} ref={messageRef}>
                     <MessageRow message={event as AuditMessageEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
+                  </div>
+                )
+              }
+              if (event.kind === 'error') {
+                return (
+                  <div key={eventKey} {...wrapperProps}>
+                    <ErrorRow error={event as AuditErrorEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
                   </div>
                 )
               }

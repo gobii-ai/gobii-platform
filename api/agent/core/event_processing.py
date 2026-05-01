@@ -162,6 +162,7 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
@@ -170,6 +171,7 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
+from api.services.agent_error_logging import log_agent_error
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_MESSAGE,
@@ -4776,7 +4778,30 @@ def _run_agent_loop(
                 except Exception as e:
                     current_span = trace.get_current_span()
                     mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
-                    logger.exception("LLM call failed for agent %s with all providers", agent.id)
+                    provider_candidates = [
+                        {"provider": provider, "model": model}
+                        for provider, model, _params in failover_configs
+                    ]
+                    log_agent_error(
+                        agent,
+                        category=PersistentAgentError.Category.LLM_COMPLETION,
+                        source="api.agent.core.event_processing._run_agent_loop",
+                        message=f"LLM call failed for agent {agent.id} with all providers",
+                        exc=e,
+                        logger=logger,
+                        context={
+                            "agent_id": str(agent.id),
+                            "provider_candidates": provider_candidates,
+                            "preferred_config": {
+                                "provider": preferred_config[0],
+                                "model": preferred_config[1],
+                            }
+                            if preferred_config
+                            else None,
+                            "run_sequence_number": run_sequence_number,
+                            "iteration": i + 1,
+                        },
+                    )
                     break
 
                 thinking_content = extract_reasoning_content(response)
