@@ -43,6 +43,11 @@ from .create_video import (
     execute_create_video,
     is_video_generation_available_for_agent,
 )
+from .dashboards import (
+    DASHBOARD_TOOL_NAME,
+    execute_create_or_update_dashboard,
+    get_create_or_update_dashboard_tool,
+)
 from .custom_tools import (
     execute_custom_tool,
     is_custom_tools_available_for_agent,
@@ -106,7 +111,7 @@ CREATE_VIDEO_TOOL_NAME = "create_video"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME, DASHBOARD_TOOL_NAME}
 
 
 def _sandbox_fallback_tools() -> Set[str]:
@@ -215,6 +220,10 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_meta_ads,
         "search_hidden": True,
         "system_skill_key": "meta_ads_platform",
+    },
+    DASHBOARD_TOOL_NAME: {
+        "definition": get_create_or_update_dashboard_tool,
+        "executor": execute_create_or_update_dashboard,
     },
 }
 

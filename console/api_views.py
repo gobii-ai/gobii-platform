@@ -94,6 +94,7 @@ from api.models import (
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
     PersistentAgent,
+    PersistentAgentDashboard,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
     PersistentAgentSecret,
@@ -157,6 +158,7 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
+from util.urls import append_context_query
 from util.personal_signup_preview import (
     build_personal_signup_starter_charter,
     resolve_personal_signup_preview,
@@ -264,6 +266,7 @@ from api.services.pipedream_apps import (
     serialize_owner_apps_state,
     set_owner_selected_app_slugs,
 )
+from api.services.agent_dashboards import render_dashboard
 from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
@@ -3366,6 +3369,41 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
+
+
+class AgentDashboardsAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        dashboard = (
+            PersistentAgentDashboard.objects
+            .filter(agent=agent)
+            .prefetch_related("widgets")
+            .first()
+        )
+        try:
+            chat_url = reverse("agent_chat_shell", kwargs={"pk": agent.id})
+        except NoReverseMatch:
+            chat_url = f"/console/agents/{agent.id}/chat/"
+        org_id = str(agent.organization_id) if agent.organization_id else None
+        payload = {
+            "agent": {
+                "id": str(agent.id),
+                "name": agent.name,
+                "avatarUrl": agent.get_avatar_thumbnail_url(),
+                "displayColorHex": agent.get_display_color(),
+                "chatUrl": append_context_query(chat_url, org_id),
+            },
+            "dashboard": render_dashboard(dashboard) if dashboard else None,
+        }
+        return JsonResponse(payload)
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentPlanningSkipAPIView(LoginRequiredMixin, View):

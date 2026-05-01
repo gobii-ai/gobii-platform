@@ -8217,6 +8217,81 @@ class PersistentAgentCustomTool(models.Model):
         return f"CustomTool<{self.tool_name}> for {getattr(self.agent, 'name', 'agent')}"
 
 
+class PersistentAgentDashboard(models.Model):
+    """Dashboard definition authored for a persistent agent."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.OneToOneField(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="dashboard",
+    )
+    title = models.CharField(max_length=160)
+    description = models.TextField(blank=True)
+    created_by_agent = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["agent", "-updated_at"], name="pa_dash_agent_updated_idx"),
+        ]
+        ordering = ["-updated_at"]
+
+    def clean(self):
+        super().clean()
+        self.title = (self.title or "").strip()
+        self.description = (self.description or "").strip()
+        if not self.title:
+            raise ValidationError({"title": "Dashboard title is required."})
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"Dashboard<{self.title}> for {getattr(self.agent, 'name', 'agent')}"
+
+
+class PersistentAgentDashboardWidget(models.Model):
+    """A validated read-only SQLite query rendered on an agent dashboard."""
+
+    class WidgetType(models.TextChoices):
+        METRIC = "metric", "Metric"
+        TABLE = "table", "Table"
+        BAR = "bar", "Bar chart"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    dashboard = models.ForeignKey(
+        "PersistentAgentDashboard",
+        on_delete=models.CASCADE,
+        related_name="widgets",
+    )
+    title = models.CharField(max_length=160)
+    widget_type = models.CharField(max_length=24, choices=WidgetType.choices)
+    sql = models.TextField()
+    display_config = models.JSONField(default=dict, blank=True)
+    position = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["dashboard", "position"], name="pa_dash_widget_order_idx"),
+        ]
+        ordering = ["position", "created_at"]
+
+    def clean(self):
+        super().clean()
+        self.title = (self.title or "").strip()
+        self.sql = (self.sql or "").strip()
+        if not self.title:
+            raise ValidationError({"title": "Widget title is required."})
+        if not self.sql:
+            raise ValidationError({"sql": "Widget SQL is required."})
+        if not isinstance(self.display_config, dict):
+            raise ValidationError({"display_config": "Widget display_config must be an object."})
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"DashboardWidget<{self.title}> ({self.widget_type})"
+
+
 def global_skill_custom_tool_upload_to(instance, filename: str) -> str:
     safe_filename = get_valid_filename(os.path.basename(filename or "")) or "tool.py"
     if not os.path.splitext(safe_filename)[1]:

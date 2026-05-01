@@ -5984,6 +5984,43 @@ class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, Det
         return HttpResponseNotAllowed(['GET'])
 
 
+class AgentDashboardsView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
+    model = PersistentAgent
+    context_object_name = "agent"
+    pk_url_kwarg = "pk"
+    template_name = "console/agent_dashboards.html"
+    allow_delinquent_personal_chat = True
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        agent = self.object
+        try:
+            dashboards_url = reverse("console_agent_dashboards_api", kwargs={"agent_id": agent.id})
+        except NoReverseMatch:
+            dashboards_url = f"/console/api/agents/{agent.id}/dashboards/"
+        try:
+            chat_url = reverse("agent_chat_shell", kwargs={"pk": agent.id})
+        except NoReverseMatch:
+            chat_url = f"/console/agents/{agent.id}/chat/"
+        org_id = str(agent.organization_id) if agent.organization_id else None
+        context["agent_dashboards_props"] = {
+            "agent": {
+                "id": str(agent.id),
+                "name": agent.name,
+                "avatarUrl": agent.get_avatar_thumbnail_url(),
+                "displayColorHex": agent.get_display_color(),
+            },
+            "urls": {
+                "dashboard": append_context_query(dashboards_url, org_id),
+                "chat": append_context_query(chat_url, org_id),
+            },
+        }
+        return context
+
+    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
+        return HttpResponseNotAllowed(['GET'])
+
+
 AGENT_AVATAR_THUMBNAIL_SIZE = 128
 AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE = "image/png"
 

@@ -1104,6 +1104,25 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
             reset_sqlite_db_path(token)
 
 
+@contextlib.contextmanager
+def agent_sqlite_db_snapshot(agent_uuid: str):
+    """Yield a restored per-agent SQLite DB path without persisting changes.
+
+    Dashboard rendering and other read-only surfaces should not use
+    agent_sqlite_db(), because that context is part of the agent processing
+    lifecycle and persists maintenance side effects on exit.
+    """
+    storage_key = sqlite_storage_key(agent_uuid)
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        db_path = os.path.join(tmp_dir, "state.db")
+
+        if default_storage.exists(storage_key):
+            _restore_sqlite_db_from_storage(storage_key, db_path, agent_uuid)
+
+        yield db_path if os.path.exists(db_path) else None
+
+
 def _drop_ephemeral_tables(conn) -> None:
     for table_name in EPHEMERAL_TABLES:
         try:
