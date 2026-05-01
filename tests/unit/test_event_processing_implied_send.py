@@ -302,7 +302,7 @@ class ImpliedSendTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_uses_natural_continuation_when_open_kanban_work(
+    def test_implied_send_uses_natural_continuation_when_open_plan_work(
         self,
         mock_completion,
         mock_build_prompt,
@@ -577,7 +577,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
-    def test_implied_send_rechecks_open_kanban_before_sleep(
+    def test_implied_send_rechecks_open_plan_before_sleep(
         self,
         mock_completion,
         mock_build_prompt,

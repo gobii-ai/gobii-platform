@@ -352,10 +352,6 @@ class TestParallelToolCallsExecution(TestCase):
         self.assertTrue(all(not call.kwargs.get("isolated_mcp", False) for call in mock_execute_enabled.call_args_list))
 
     @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=SimpleNamespace(errors=[]))
-    @patch(
-        "api.agent.core.event_processing.apply_sqlite_kanban_updates",
-        return_value=SimpleNamespace(errors=[], changes=False, snapshot=None),
-    )
     @patch("api.agent.core.event_processing.apply_sqlite_skill_updates", return_value=SimpleNamespace(errors=[], changed=False))
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
@@ -364,7 +360,6 @@ class TestParallelToolCallsExecution(TestCase):
         mock_execute_enabled,
         _mock_credit,
         _mock_skill_updates,
-        _mock_kanban_updates,
         _mock_config_updates,
     ):
         captured_paths = []

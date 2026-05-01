@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, EllipsisVertical, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { Check, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -7,7 +7,7 @@ import { useSubscriptionStore } from '../../stores/subscriptionStore'
 import { normalizeHexColor } from '../../util/color'
 import { track } from '../../util/analytics'
 import { AnalyticsEvent } from '../../constants/analyticsEvents'
-import type { KanbanBoardSnapshot } from '../../types/agentChat'
+import type { PlanSnapshot } from '../../types/agentChat'
 import type { DailyCreditsStatus } from '../../types/dailyCredits'
 import type { SignupPreviewState } from '../../types/agentRoster'
 import type { AgentChatSidebarMode } from './sidebarMode'
@@ -28,7 +28,9 @@ type AgentChatBannerProps = {
   connectionStatus?: ConnectionStatusTone
   connectionLabel?: string
   connectionDetail?: string | null
-  kanbanSnapshot?: KanbanBoardSnapshot | null
+  planSnapshot?: PlanSnapshot | null
+  planPanelMode?: 'docked' | 'floating'
+  onPlanOpen?: () => void
   processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
   onSettingsOpen?: () => void
@@ -71,7 +73,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   isCollaborator = false,
   connectionStatus = 'connecting',
   connectionLabel = 'Connecting',
-  kanbanSnapshot,
+  planSnapshot,
+  planPanelMode = 'docked',
+  onPlanOpen,
   processingActive = false,
   dailyCreditsStatus,
   onSettingsOpen,
@@ -144,20 +148,20 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
   // Animate on first appearance only (not when switching agents)
   useEffect(() => {
-    if (kanbanSnapshot && !hasAnimatedRef.current) {
+    if (planSnapshot && !hasAnimatedRef.current) {
       hasAnimatedRef.current = true
       setAnimate(false)
       const timer = setTimeout(() => setAnimate(true), 30)
       return () => clearTimeout(timer)
     }
-    // If we already have kanban data, ensure animate stays true
-    if (kanbanSnapshot && hasAnimatedRef.current && !animate) {
+    // If we already have plan data, ensure animate stays true
+    if (planSnapshot && hasAnimatedRef.current && !animate) {
       setAnimate(true)
     }
-  }, [kanbanSnapshot?.doneCount, kanbanSnapshot?.todoCount, kanbanSnapshot?.doingCount, animate])
+  }, [planSnapshot?.doneCount, planSnapshot?.todoCount, planSnapshot?.doingCount, animate])
 
-  const hasKanban = kanbanSnapshot && (kanbanSnapshot.todoCount + kanbanSnapshot.doingCount + kanbanSnapshot.doneCount) > 0
-  const currentTask = hasKanban && kanbanSnapshot.doingTitles.length > 0 ? kanbanSnapshot.doingTitles[0] : null
+  const hasPlan = planSnapshot && (planSnapshot.todoCount + planSnapshot.doingCount + planSnapshot.doneCount) > 0
+  const currentTask = hasPlan && planSnapshot.doingTitles.length > 0 ? planSnapshot.doingTitles[0] : null
   const hardLimitReached = Boolean(dailyCreditsStatus?.hardLimitReached || dailyCreditsStatus?.hardLimitBlocked)
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
@@ -171,6 +175,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const showMobileOverflow = showShareButton || showAuditButton || showSettingsButton
   const shareLabel = shareDisabledReason || 'Invite collaborators'
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
+  const planButtonLabel = planPanelMode === 'floating' ? 'Dock plan' : 'Float plan'
   const trackableShareDisabled = shareDisabled && Boolean(onBlockedShareClick)
   const trackableSettingsDisabled = settingsDisabled && Boolean(onBlockedSettingsClick)
   const previewAnalyticsEnabled = signupPreviewState !== 'none'
@@ -260,7 +265,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               ) : null}
               <ConnectionBadge status={connectionStatus} label={connectionLabel} />
             </div>
-            {hasKanban && currentTask ? (
+            {hasPlan && currentTask ? (
               <div className={`banner-task ${animate ? 'banner-task--animate' : ''}`}>
                 <span className={`banner-task-dot ${processingActive ? 'banner-task-dot--active' : ''}`} />
                 <span className="banner-task-title">{currentTask}</span>
@@ -281,6 +286,20 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <span>{upgradeButtonLabel}</span>
             </button>
           )}
+          {onPlanOpen ? (
+            <button
+              type="button"
+              className="banner-plan"
+              onClick={onPlanOpen}
+              aria-label={planButtonLabel}
+              title={planButtonLabel}
+              data-plan-mode={planPanelMode}
+            >
+              <ListTodo size={14} strokeWidth={2} />
+              <span className="banner-plan-label">Plan</span>
+              {hasPlan ? <span className="banner-plan-count">{planSnapshot.doingCount + planSnapshot.todoCount}</span> : null}
+            </button>
+          ) : null}
           {showShareButton ? (
             <button
               type="button"

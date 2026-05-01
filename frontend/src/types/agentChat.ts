@@ -87,7 +87,7 @@ export type ToolClusterEvent = {
   earliestTimestamp?: string | null
   entries: ToolCallEntry[]
   thinkingEntries?: ThinkingEvent[]
-  kanbanEntries?: KanbanEvent[]
+  planEntries?: PlanEvent[]
 }
 
 export type ProcessingWebTask = {
@@ -237,35 +237,54 @@ export type ThinkingEvent = {
   completionId?: string | null
 }
 
-export type KanbanCardChange = {
-  cardId: string
+export type PlanStepChange = {
+  stepId: string
+  cardId?: string
   title: string
   action: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
   fromStatus?: string | null
   toStatus?: string | null
 }
 
-export type KanbanBoardSnapshot = {
+export type PlanFileDeliverable = {
+  path: string
+  label?: string | null
+  downloadUrl?: string | null
+}
+
+export type PlanMessageDeliverable = {
+  messageId: string
+  label?: string | null
+}
+
+export type PlanSnapshot = {
   todoCount: number
   doingCount: number
   doneCount: number
   todoTitles: string[]
   doingTitles: string[]
   doneTitles: string[]
+  files?: PlanFileDeliverable[]
+  messages?: PlanMessageDeliverable[]
 }
 
-export type KanbanEvent = {
-  kind: 'kanban'
+export type PlanEvent = {
+  kind: 'plan'
   cursor: string
   timestamp?: string | null
   agentName: string
   displayText: string
   primaryAction: 'created' | 'started' | 'completed' | 'updated' | 'deleted' | 'archived'
-  changes: KanbanCardChange[]
-  snapshot: KanbanBoardSnapshot
+  changes: PlanStepChange[]
+  snapshot: PlanSnapshot
 }
 
-export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | KanbanEvent
+export type HistoricalPlanCompatEvent = Omit<PlanEvent, 'kind'> & {
+  kind: 'kanban'
+  changes: Array<Omit<PlanStepChange, 'stepId'> & { cardId: string; stepId?: string }>
+}
+
+export type TimelineEvent = MessageEvent | ToolClusterEvent | ThinkingEvent | PlanEvent | HistoricalPlanCompatEvent
 
 export type AgentTimelineSnapshot = {
   events: TimelineEvent[]
@@ -278,6 +297,7 @@ export type AgentTimelineSnapshot = {
   signupPreviewState?: SignupPreviewState | null
   pendingHumanInputRequests?: PendingHumanInputRequest[]
   pendingActionRequests?: PendingActionRequest[]
+  currentPlan?: PlanSnapshot | null
 }
 
 export type StreamEventPayload = {

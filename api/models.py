@@ -7493,6 +7493,44 @@ class PersistentAgentKanbanEventChange(models.Model):
         return f"KanbanEventChange<{self.action}:{self.card_id}>"
 
 
+class PersistentAgentPlanDeliverable(models.Model):
+    """Current plan deliverable referenced by an agent."""
+
+    class Kind(models.TextChoices):
+        FILE = "file", "File"
+        MESSAGE = "message", "Message"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="plan_deliverables",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    label = models.CharField(max_length=255, blank=True)
+    path = models.CharField(max_length=1024, blank=True)
+    message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="plan_deliverables",
+    )
+    position = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "created_at"]
+        indexes = [
+            models.Index(fields=["agent", "kind", "position"], name="plan_deliv_agent_kind_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        target = self.path or self.message_id or self.id
+        return f"PlanDeliverable<{self.kind}:{target}>"
+
+
 class MCPServerConfig(models.Model):
     """Configurable MCP server definition scoped to platform, org, or user."""
 

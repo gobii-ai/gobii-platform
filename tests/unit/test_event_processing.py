@@ -610,7 +610,7 @@ class PromptContextBuilderTests(TestCase):
                 self.assertIn("after they finish signup", system_content)
                 self.assertNotIn("## Planning Mode", system_content)
                 self.assertNotIn("## REQUIRED: First-Run Welcome", system_content)
-                self.assertNotIn("## Then sqlite_batch: charter + kanban cards + everything else", system_content)
+                self.assertIn("## Then charter + runtime plan + everything else", system_content)
                 self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
                     m for m in context if m["role"] == "user"
                 )["content"])
@@ -4262,7 +4262,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
     @patch("api.agent.core.event_processing._completion_with_failover")
@@ -4273,7 +4272,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         mock_completion,
         _mock_tools,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_seed_skills,
         _mock_burn_control,
         mock_pending_settings,
@@ -4304,7 +4302,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
     @patch("api.agent.core.event_processing._completion_with_failover")
@@ -4315,7 +4312,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         mock_completion,
         _mock_tools,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_seed_skills,
         _mock_burn_control,
         mock_pending_settings,
@@ -4450,7 +4446,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
     @patch("api.agent.core.event_processing.resolve_web_stream_target", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[{"type": "function", "function": {"name": "enable_tools", "parameters": {"type": "object", "properties": {}}}}])
     @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
@@ -4465,7 +4460,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         _mock_failover,
         _mock_tools,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_seed_skills,
         _mock_stream_target,
         _mock_burn_control,
@@ -4515,9 +4509,7 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_kanban_updates", return_value=MagicMock(changes=[], snapshot=None, errors=[]))
     @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
@@ -4531,9 +4523,7 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_tools,
         _mock_rate,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_apply_config,
-        _mock_apply_kanban,
         _mock_reasoning,
         mock_execute_tool,
         _mock_credit,
@@ -4584,9 +4574,7 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_kanban_updates", return_value=MagicMock(changes=[], snapshot=None, errors=[]))
     @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
@@ -4600,9 +4588,7 @@ class EventProcessingDeletedAgentAbortTests(TestCase):
         _mock_tools,
         _mock_rate,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_apply_config,
-        _mock_apply_kanban,
         _mock_reasoning,
         mock_execute_tool,
         _mock_credit,
@@ -4709,10 +4695,8 @@ class EventProcessingStopRequestTests(TestCase):
     @patch("api.agent.core.event_processing._attempt_cycle_close_for_sleep")
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")
-    @patch("api.agent.core.event_processing.apply_sqlite_kanban_updates", return_value=MagicMock(changes=[], snapshot=None, errors=[]))
     @patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=MagicMock(errors=[]))
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True)
     @patch("api.agent.core.event_processing.extract_reasoning_content", return_value=None)
@@ -4726,10 +4710,8 @@ class EventProcessingStopRequestTests(TestCase):
         _mock_tools,
         _mock_rate,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_seed_skills,
         _mock_apply_config,
-        _mock_apply_kanban,
         _mock_reasoning,
         mock_execute_tool,
         _mock_credit,

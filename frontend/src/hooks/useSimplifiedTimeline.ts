@@ -20,7 +20,7 @@ export type CollapsedEventGroup = {
     totalCount: number
     toolCallCount: number
     thinkingCount: number
-    kanbanCount: number
+    planCount: number
     label: string
   }
 }
@@ -51,6 +51,7 @@ export function isScheduleEntry(entry: ToolCallEntry): boolean {
 }
 
 function isRenderableCollapsedEvent(event: TimelineEvent): boolean {
+  if (event.kind === 'plan' || event.kind === 'kanban') return false
   if (event.kind !== 'steps') return true
   return isClusterRenderable(transformToolCluster(event))
 }
@@ -58,27 +59,27 @@ function isRenderableCollapsedEvent(event: TimelineEvent): boolean {
 function countByKind(events: TimelineEvent[]) {
   let toolCallCount = 0
   let thinkingCount = 0
-  let kanbanCount = 0
+  let planCount = 0
   for (const e of events) {
     if (e.kind === 'steps') toolCallCount += e.entryCount
     else if (e.kind === 'thinking') thinkingCount++
-    else if (e.kind === 'kanban') kanbanCount++
+    else if (e.kind === 'plan' || e.kind === 'kanban') planCount++
   }
-  return { toolCallCount, thinkingCount, kanbanCount }
+  return { toolCallCount, thinkingCount, planCount }
 }
 
 export function buildCollapsedGroupLabel(counts: {
   toolCallCount: number
   thinkingCount: number
-  kanbanCount: number
+  planCount: number
 }): string {
-  const actionCount = counts.toolCallCount + counts.thinkingCount + counts.kanbanCount
+  const actionCount = counts.toolCallCount + counts.thinkingCount + counts.planCount
   return buildActionCountLabel(actionCount || 1)
 }
 
 function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
   const counts = countByKind(buffer)
-  const totalCount = counts.toolCallCount + counts.thinkingCount + counts.kanbanCount
+  const totalCount = counts.toolCallCount + counts.thinkingCount + counts.planCount
   return {
     kind: 'collapsed-group',
     cursor: buffer[0].cursor,
@@ -92,25 +93,20 @@ function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
 }
 
 // ---------------------------------------------------------------------------
-// Pre-scan: find the latest kanban, charter, and schedule cursors
+// Pre-scan: find the latest schedule cursor
 // ---------------------------------------------------------------------------
 
 type LatestStatusCursors = {
-  kanbanCursor: string | null
   scheduleClusterCursor: string | null
   scheduleEntry: ToolCallEntry | null
 }
 
 function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
-  let kanbanCursor: string | null = null
   let scheduleClusterCursor: string | null = null
   let scheduleEntry: ToolCallEntry | null = null
 
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
-    if (event.kind === 'kanban' && !kanbanCursor) {
-      kanbanCursor = event.cursor
-    }
     if (event.kind === 'steps') {
       for (let j = event.entries.length - 1; j >= 0; j--) {
         const entry = event.entries[j]
@@ -121,10 +117,10 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
       }
     }
     // Early exit once all found
-    if (kanbanCursor && scheduleClusterCursor) break
+    if (scheduleClusterCursor) break
   }
 
-  return { kanbanCursor, scheduleClusterCursor, scheduleEntry }
+  return { scheduleClusterCursor, scheduleEntry }
 }
 
 // ---------------------------------------------------------------------------
@@ -134,10 +130,9 @@ function findLatestStatusCursors(events: TimelineEvent[]): LatestStatusCursors {
 /**
  * Collapses consecutive non-message events into summary groups.
  *
- * Messages pass through unchanged. The *latest* kanban and schedule
- * updates also appear inline at their chronological position so the user can
- * see current status at a glance. Older instances of these events collapse
- * normally.
+ * Messages pass through unchanged. The latest schedule update also appears
+ * inline at its chronological position so the user can see current status at
+ * a glance. Plan updates are rendered in the side panel, not the timeline.
  */
 export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineItem[] {
   const latest = findLatestStatusCursors(events)
@@ -161,10 +156,7 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
       continue
     }
 
-    // Latest kanban → show inline
-    if (event.kind === 'kanban' && event.cursor === latest.kanbanCursor) {
-      flush()
-      result.push(event)
+    if (event.kind === 'plan' || event.kind === 'kanban') {
       continue
     }
 
@@ -227,7 +219,7 @@ export function collapseDetailedStatusRuns(
         result.push(makeCollapsedGroup(meaningful))
       }
     } else {
-      result.push(...buffer)
+      result.push(...buffer.filter(isRenderableCollapsedEvent))
     }
     buffer = []
   }
@@ -236,6 +228,10 @@ export function collapseDetailedStatusRuns(
     if (event.kind === 'message') {
       flush()
       result.push(event)
+      continue
+    }
+
+    if (event.kind === 'plan' || event.kind === 'kanban') {
       continue
     }
 

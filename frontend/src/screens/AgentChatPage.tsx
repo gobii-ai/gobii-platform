@@ -80,7 +80,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { AgentMessageNotification, KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -147,15 +147,16 @@ function navigateToAgentChat(agentId: string): void {
   window.history.pushState({ agentId }, '', nextUrl)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
-function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
-  // Find the most recent kanban event (they're ordered oldest to newest)
+function getLatestPlanSnapshot(events: TimelineEvent[], currentPlan?: PlanSnapshot | null): PlanSnapshot | null {
+  // Find the most recent plan event (events are ordered oldest to newest). Fall back
+  // to the API snapshot so the panel survives timeline windowing.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
-    if (event.kind === 'kanban') {
+    if (event.kind === 'plan') {
       return event.snapshot
     }
   }
-  return null
+  return currentPlan ?? null
 }
 
 function adjustHexColor(hexColor: string, ratio: number): string {
@@ -2518,7 +2519,10 @@ export function AgentChatPage({
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
-  const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(timelineEvents), [timelineEvents])
+  const latestPlanSnapshot = useMemo(
+    () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
+    [timelineEvents, initialPageResponse?.current_plan],
+  )
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
   useEffect(() => {
@@ -4327,7 +4331,7 @@ export function AgentChatPage({
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
-        kanbanSnapshot={latestKanbanSnapshot}
+        planSnapshot={latestPlanSnapshot}
         agentRoster={sidebarAgents}
         favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}

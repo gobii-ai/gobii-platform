@@ -1,12 +1,10 @@
 import { memo, useMemo } from 'react'
 import { MessageEventCard } from './MessageEventCard'
 import { ToolClusterCard } from './ToolClusterCard'
-import { KanbanEventCard } from './KanbanEventCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
-import type { ToolClusterEvent } from '../../types/agentChat'
 import type { StatusExpansionTargets } from './statusExpansion'
 
 type TimelineVirtualItemProps = {
@@ -77,31 +75,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
       />
     )
   }
-  if (event.kind === 'kanban' && event.cursor === statusExpansionTargets?.latestKanbanCursor) {
-    return <KanbanEventCard event={event} />
-  }
-  if (event.kind === 'kanban') {
-    const cluster: ToolClusterEvent = {
-      kind: 'steps',
-      cursor: event.cursor,
-      entries: [],
-      entryCount: 1,
-      collapsible: false,
-      collapseThreshold: Infinity,
-      earliestTimestamp: event.timestamp ?? null,
-      latestTimestamp: event.timestamp ?? null,
-      kanbanEntries: [event],
-    }
-    return (
-      <ToolClusterCard
-        cluster={cluster}
-        isLatestEvent={isLatestEvent}
-        suppressedThinkingCursor={suppressedThinkingCursor}
-        statusExpansionTargets={statusExpansionTargets}
-        animateIncoming={animateIncoming}
-        onIncomingAnimationConsumed={onIncomingAnimationConsumed}
-      />
-    )
+  if (event.kind === 'plan' || event.kind === 'kanban') {
+    return null
   }
   return (
     <ToolClusterCard

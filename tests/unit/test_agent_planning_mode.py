@@ -205,7 +205,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("no research for the deliverable", prompt)
         self.assertIn("no implementation", prompt)
         self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
-        self.assertIn("Do not create kanban cards or begin deliverable work", prompt)
+        self.assertIn("Do not update the runtime plan or begin deliverable work", prompt)
         self.assertIn("treat that instruction as applying only after Planning Mode is completed or skipped", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertIn("Do not start doing the task while planning mode is still active", prompt)
@@ -216,7 +216,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("integrations or accounts", prompt)
         self.assertNotIn("how results should be delivered", prompt)
         self.assertNotIn("delivery expectations", prompt)
-        self.assertNotIn("Then sqlite_batch: charter + kanban cards + everything else", prompt)
+        self.assertNotIn("## Then charter + runtime plan + everything else", prompt)
         self.assertNotIn("### Execution Template", prompt)
 
         normal_prompt_index = prompt.index("You are a persistent AI agent.")
@@ -254,7 +254,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertNotIn("Ask about timezone if relevant", prompt)
         self.assertIn("Do not update schedule or __agent_config.schedule while Planning Mode is active", prompt)
         self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
-        self.assertIn("charter='<what>', schedule='<when>'", prompt)
+        self.assertIn("Do not update the runtime plan or begin deliverable work until planning is completed", prompt)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -300,11 +300,12 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         prompt = _get_system_instruction(self.agent, is_first_run=True)
 
-        self.assertIn("## Then sqlite_batch: charter + kanban cards + everything else", prompt)
+        self.assertIn("## Then charter + runtime plan + everything else", prompt)
         self.assertIn("### Execution Template", prompt)
         self.assertIn("search_tools(", prompt)
         self.assertNotIn("search_tools(will_continue_work=true)", prompt)
-        self.assertIn("charter='<what>', schedule='<when>'", prompt)
+        self.assertIn("sqlite_batch(charter + schedule)", prompt)
+        self.assertIn("update_plan", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):

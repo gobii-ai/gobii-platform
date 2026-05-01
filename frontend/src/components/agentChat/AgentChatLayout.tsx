@@ -14,6 +14,7 @@ import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
+import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
@@ -33,7 +34,7 @@ import type {
   PendingActionRequest,
   ProcessingWebTask,
   StreamState,
-  KanbanBoardSnapshot,
+  PlanSnapshot,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -132,7 +133,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   sidebarNotificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
   onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
   autoFocusComposer?: boolean
-  kanbanSnapshot?: KanbanBoardSnapshot | null
+  planSnapshot?: PlanSnapshot | null
   footer?: ReactNode
   galleryShellPage?: SelectionShellPage
   onGalleryShellPageChange?: (page: SelectionShellPage) => void
@@ -297,7 +298,7 @@ export function AgentChatLayout({
   sidebarNotificationStatus = 'off',
   onSidebarNotificationsEnabledChange,
   autoFocusComposer = false,
-  kanbanSnapshot,
+  planSnapshot,
   footer,
   galleryShellPage = 'agents',
   onGalleryShellPageChange,
@@ -438,6 +439,9 @@ export function AgentChatLayout({
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
+  const [planSheetOpen, setPlanSheetOpen] = useState(false)
+  const [planPanelMode, setPlanPanelMode] = useState<'docked' | 'floating'>('docked')
+  const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -839,6 +843,41 @@ export function AgentChatLayout({
     previewActionsDisabled,
   ])
 
+  const handleOpenPlan = useCallback(() => {
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setPlanSheetOpen(true)
+      return
+    }
+    setPlanPanelMode((mode) => (mode === 'docked' ? 'floating' : 'docked'))
+  }, [])
+
+  useEffect(() => {
+    const total = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) + (planSnapshot?.doneCount ?? 0)
+    const active = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) > 0
+    const previous = previousPlanStateRef.current
+    previousPlanStateRef.current = { total, active }
+
+    if (!previous) {
+      return
+    }
+
+    const startedFromNoPlan = previous.total === 0 && total > 0
+    const startedNewWorkBatch = previous.total > 0 && !previous.active && active
+    if (startedFromNoPlan || startedNewWorkBatch) {
+      setPlanPanelMode('docked')
+    }
+  }, [planSnapshot?.doneCount, planSnapshot?.doingCount, planSnapshot?.todoCount])
+
+  const handlePlanMessageClick = useCallback((messageId: string) => {
+    if (typeof document === 'undefined') {
+      return
+    }
+    const escaped = typeof window !== 'undefined' && window.CSS?.escape ? window.CSS.escape(messageId) : messageId.replace(/"/g, '\\"')
+    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setPlanSheetOpen(false)
+  }, [])
+
   const mainClassName = 'agent-chat-main'
   const sidebarSettings = useMemo(() => ({
     context: currentContext,
@@ -914,7 +953,9 @@ export function AgentChatLayout({
 	          connectionStatus={connectionStatus}
 	          connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
-          kanbanSnapshot={kanbanSnapshot}
+          planSnapshot={planSnapshot}
+          planPanelMode={planPanelMode}
+          onPlanOpen={handleOpenPlan}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
@@ -979,14 +1020,17 @@ export function AgentChatLayout({
       <main className={mainClassName} data-sidebar-mode={sidebarMode}>
         <div
           id="agent-workspace-root"
+          data-plan-mode={planPanelMode}
           style={composerPalette.cssVars}
         >
-          {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
-            {/* Spacer pushes content to bottom when there's extra space */}
-            <div id="timeline-spacer" aria-hidden="true" />
-            <div id="timeline-inner">
-              <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
+          <div className="agent-chat-workspace-main">
+          <div className="agent-chat-timeline-region">
+            {/* Scrollable timeline container */}
+            <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+              {/* Spacer pushes content to bottom when there's extra space */}
+              <div id="timeline-spacer" aria-hidden="true" />
+              <div id="timeline-inner">
+                <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 {loadingOlder ? (
                   <div className="timeline-load-control" data-side="older" data-state="loading">
                     <div className="timeline-load-button" role="status">
@@ -1116,9 +1160,10 @@ export function AgentChatLayout({
                     </div>
                   </div>
                 ) : null}
+                </div>
               </div>
-            </div>
 
+            </div>
           </div>
 
           {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
@@ -1219,9 +1264,23 @@ export function AgentChatLayout({
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
             />
           )}
+          </div>
+          <div className="agent-chat-plan-frame" aria-label="Plan panel hover target">
+            <PlanPanel plan={planSnapshot} onMessageClick={handlePlanMessageClick} />
+          </div>
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
+      <AgentChatMobileSheet
+        open={planSheetOpen}
+        onClose={() => setPlanSheetOpen(false)}
+        title="Plan"
+        ariaLabel="Plan"
+        bodyPadding={false}
+        tone="plan"
+      >
+        <PlanPanel plan={planSnapshot} onMessageClick={handlePlanMessageClick} compact />
+      </AgentChatMobileSheet>
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (
           <AgentChatMobileSheet

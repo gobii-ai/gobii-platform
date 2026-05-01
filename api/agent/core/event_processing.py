@@ -124,11 +124,10 @@ from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
 )
-from ..tools.sqlite_kanban import apply_sqlite_kanban_updates, seed_sqlite_kanban
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
-from console.agent_chat.signals import broadcast_kanban_changes
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.file_str_replace import execute_file_str_replace
+from ..tools.plan import execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
@@ -208,6 +207,7 @@ from .web_streaming import WebStreamBroadcaster, resolve_web_stream_target
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+
 
 MAX_AGENT_LOOP_ITERATIONS = 100
 MAX_NO_TOOL_STREAK = 5  # Allow short reasoning-only streaks before auto-sleeping
@@ -379,10 +379,10 @@ def _has_continuation_signal(text: str) -> bool:
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
 
 
-def _has_open_kanban_work(agent: PersistentAgent) -> bool:
-    """Return True when kanban still has todo/doing work for the agent."""
-    KanbanCard = apps.get_model("api", "PersistentAgentKanbanCard")
-    return KanbanCard.objects.filter(
+def _has_open_plan_work(agent: PersistentAgent) -> bool:
+    """Return True when the runtime plan still has todo/doing work for the agent."""
+    PlanCard = apps.get_model("api", "PersistentAgentKanbanCard")
+    return PlanCard.objects.filter(
         assigned_agent=agent,
         status__in=("todo", "doing"),
     ).exists()
@@ -441,7 +441,7 @@ def _should_imply_continue(
     has_canonical_continuation: bool,
     has_other_tool_calls: bool,
     has_explicit_sleep: bool,
-    has_open_kanban_work: bool = False,
+    has_open_plan_work: bool = False,
     has_natural_continuation_signal: bool = False,
 ) -> bool:
     if has_explicit_sleep:
@@ -449,9 +449,9 @@ def _should_imply_continue(
     if has_canonical_continuation or has_other_tool_calls:
         return True
     # Safety valve: if the model language clearly indicates ongoing work and
-    # kanban still has open cards, keep the loop alive even without the
+    # the plan still has open steps, keep the loop alive even without the
     # canonical continuation token.
-    return has_open_kanban_work and has_natural_continuation_signal
+    return has_open_plan_work and has_natural_continuation_signal
 
 
 class _CanonicalContinuationStreamFilter:
@@ -1656,6 +1656,8 @@ def _execute_tool_call_runtime(
         return execute_update_schedule(agent, exec_params), updated_tools
     if tool_name == "update_charter":
         return execute_update_charter(agent, exec_params), updated_tools
+    if tool_name == "update_plan":
+        return execute_update_plan(agent, exec_params), updated_tools
     if tool_name == "secure_credentials_request":
         return execute_secure_credentials_request(agent, exec_params), updated_tools
     if tool_name == "enable_database":
@@ -4761,7 +4763,6 @@ def _run_agent_loop(
 
                 prompt_human_generation = _current_human_inbound_generation()
                 config_snapshot = seed_sqlite_agent_config(agent)
-                kanban_snapshot = seed_sqlite_kanban(agent)
                 skills_snapshot = seed_sqlite_skills(agent)
                 current_notice = continuation_notice
                 continuation_notice = None
@@ -5083,41 +5084,6 @@ def _run_agent_loop(
                             )
                     return True
 
-                def _apply_kanban_updates() -> tuple[bool, Optional["KanbanBoardSnapshot"]]:
-                    """Apply kanban updates and return (had_errors, snapshot)."""
-                    from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot
-                    kanban_apply = apply_sqlite_kanban_updates(agent, kanban_snapshot)
-
-                    # Broadcast kanban changes to timeline if any
-                    if kanban_apply.changes and kanban_apply.snapshot:
-                        try:
-                            broadcast_kanban_changes(agent, kanban_apply.changes, kanban_apply.snapshot)
-                        except Exception:
-                            logger.debug(
-                                "Failed to broadcast kanban changes for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
-
-                    if not kanban_apply.errors:
-                        return False, kanban_apply.snapshot
-                    for error in kanban_apply.errors:
-                        try:
-                            step_kwargs = {
-                                "agent": agent,
-                                "description": f"Kanban update failed: {error}",
-                            }
-                            _attach_completion(step_kwargs)
-                            step = PersistentAgentStep.objects.create(**step_kwargs)
-                            _attach_prompt_archive(step)
-                        except Exception:
-                            logger.debug(
-                                "Failed to persist kanban update error step for agent %s",
-                                agent.id,
-                                exc_info=True,
-                            )
-                    return True, kanban_apply.snapshot
-
                 def _apply_skill_updates() -> tuple[bool, bool]:
                     """Apply skill updates and return (had_errors, changed)."""
                     skill_apply = apply_sqlite_skill_updates(agent, skills_snapshot)
@@ -5152,12 +5118,11 @@ def _run_agent_loop(
                         )
                         return False
                     config_errors = _apply_agent_config_updates()
-                    kanban_errors, _ = _apply_kanban_updates()
                     skill_errors, skills_changed = _apply_skill_updates()
                     if skills_changed:
                         nonlocal tools
                         tools = get_agent_tools(agent)
-                    return config_errors or kanban_errors or skill_errors
+                    return config_errors or skill_errors
 
                 msg_content = _extract_message_content(msg)
                 raw_message_text = (msg_content or "").strip()
@@ -5191,23 +5156,23 @@ def _run_agent_loop(
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
                     has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
-                    has_open_kanban_work = _has_open_kanban_work(agent)
+                    has_open_plan_work = _has_open_plan_work(agent)
                     implied_will_continue = _should_imply_continue(
                         has_canonical_continuation=has_canonical_continuation,
                         has_other_tool_calls=has_other_tool_calls,
                         has_explicit_sleep=has_explicit_sleep,
-                        has_open_kanban_work=has_open_kanban_work,
+                        has_open_plan_work=has_open_plan_work,
                         has_natural_continuation_signal=has_natural_continuation_signal,
                     )
                     if (
                         implied_will_continue
-                        and has_open_kanban_work
+                        and has_open_plan_work
                         and has_natural_continuation_signal
                         and not has_canonical_continuation
                         and not has_other_tool_calls
                     ):
                         logger.info(
-                            "Agent %s: implied send continuing due to open kanban work + continuation signal.",
+                            "Agent %s: implied send continuing due to open plan work + continuation signal.",
                             agent.id,
                         )
                     if implied_send_allowed:
@@ -5271,20 +5236,20 @@ def _run_agent_loop(
                         continue
                     if not message_text and not thinking_content:
                         # Truly empty response (no text, no thinking, no tools) = agent is done
-                        # Log kanban state to help diagnose premature termination
-                        kanban_state = "unknown"
+                        # Log plan state to help diagnose premature termination
+                        plan_state = "unknown"
                         try:
-                            from .prompt_context import get_kanban_snapshot
-                            snap = get_kanban_snapshot(agent)
+                            from api.agent.tools.plan import build_plan_snapshot
+                            snap = build_plan_snapshot(agent)
                             if snap:
-                                kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
-                        except Exception:
-                            pass
+                                plan_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                        except (DatabaseError, LookupError, RuntimeError):
+                            logger.debug("Failed to build plan snapshot for termination log", exc_info=True)
                         logger.info(
                             "Agent %s: empty response (no message, no thinking, no tools), auto-sleeping. "
-                            "Kanban at termination: %s. Raw msg_content type=%s, len=%s",
+                            "Plan at termination: %s. Raw msg_content type=%s, len=%s",
                             agent.id,
-                            kanban_state,
+                            plan_state,
                             type(msg_content).__name__,
                             len(msg_content) if msg_content else 0,
                         )
@@ -5315,28 +5280,28 @@ def _run_agent_loop(
                     effective_limit = MAX_NO_TOOL_STREAK + 1 if has_continuation else MAX_NO_TOOL_STREAK
 
                     if reasoning_only_streak >= effective_limit:
-                        # Log kanban state to help diagnose premature termination
-                        kanban_state = "unknown"
+                        # Log plan state to help diagnose premature termination
+                        plan_state = "unknown"
                         try:
-                            from .prompt_context import get_kanban_snapshot
-                            snap = get_kanban_snapshot(agent)
+                            from api.agent.tools.plan import build_plan_snapshot
+                            snap = build_plan_snapshot(agent)
                             if snap:
-                                kanban_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
+                                plan_state = f"todo={snap.todo_count}, doing={snap.doing_count}, done={snap.done_count}"
                                 if snap.todo_count > 0 or snap.doing_count > 0:
                                     logger.warning(
-                                        "Agent %s: auto-sleeping with unfinished kanban work! %s",
+                                        "Agent %s: auto-sleeping with unfinished plan work! %s",
                                         agent.id,
-                                        kanban_state,
+                                        plan_state,
                                     )
-                        except Exception:
-                            pass
+                        except (DatabaseError, LookupError, RuntimeError):
+                            logger.debug("Failed to build plan snapshot for termination log", exc_info=True)
                         logger.info(
                             "Agent %s: %d consecutive responses without tool calls (limit=%d), auto-sleeping. "
-                            "Kanban: %s. Last message preview: %.100s",
+                            "Plan: %s. Last message preview: %.100s",
                             agent.id,
                             reasoning_only_streak,
                             effective_limit,
-                            kanban_state,
+                            plan_state,
                             message_text or thinking_content or "(none)",
                         )
                         _mark_accepted_human_generation_consumed()
@@ -5485,16 +5450,16 @@ def _run_agent_loop(
                     and not followup_required
                     and last_explicit_continue is None
                 ):
-                    # Re-check against persisted kanban/message state before stopping.
+                    # Re-check against persisted plan/message state before stopping.
                     # This prevents premature sleep when initial implied-continuation inference
                     # was too conservative but the delivered text clearly signals ongoing work.
                     if (
                         implied_send_message_text
-                        and _has_open_kanban_work(agent)
+                        and _has_open_plan_work(agent)
                         and _has_continuation_signal(implied_send_message_text)
                     ):
                         logger.info(
-                            "Agent %s: implied send stop overridden due to open kanban work + continuation signal.",
+                            "Agent %s: implied send stop overridden due to open plan work + continuation signal.",
                             agent.id,
                         )
                         continue

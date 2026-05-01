@@ -35,9 +35,11 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     from .web_chat_sender import get_send_chat_tool
     from .webhook_sender import get_send_webhook_tool
     from .peer_dm import get_send_agent_message_tool
+    from .plan import get_update_plan_tool
 
     static_tools: List[dict] = [
         _get_sleep_tool(),
+        get_update_plan_tool(),
         get_send_email_tool(),
         get_send_sms_tool(),
         get_send_chat_tool(),

@@ -45,7 +45,8 @@ from api.models import (
     parse_web_user_address,
 )
 
-from .kanban_events import ensure_kanban_baseline_event
+from api.agent.tools.plan import PlanSnapshot, build_plan_snapshot
+from .plan_events import ensure_plan_baseline_event
 
 DEFAULT_PAGE_SIZE = 40
 MAX_PAGE_SIZE = 100
@@ -166,7 +167,7 @@ TimelineDirection = Literal["initial", "older", "newer"]
 @dataclass(slots=True)
 class CursorPayload:
     value: int
-    kind: Literal["message", "step", "thinking", "kanban"]
+    kind: Literal["message", "step", "thinking", "kanban", "plan"]
     identifier: str
 
     def encode(self) -> str:
@@ -207,7 +208,7 @@ class ThinkingEnvelope:
 
 
 @dataclass(slots=True)
-class KanbanEnvelope:
+class PlanEnvelope:
     sort_key: tuple[int, str, str]
     cursor: CursorPayload
     event: PersistentAgentKanbanEvent
@@ -228,6 +229,7 @@ class TimelineWindow:
     has_more_older: bool
     has_more_newer: bool
     processing_snapshot: ProcessingSnapshot
+    current_plan: dict
 
     @property
     def processing_active(self) -> bool:
@@ -542,6 +544,41 @@ def _serialize_attachment(att: PersistentAgentMessageAttachment, agent_id: uuid.
         "filespaceNodeId": filespace_node_id,
         "fileSizeLabel": size_label,
     }
+
+
+def _plan_file_download_url(agent_id: uuid.UUID | None, path: str | None) -> str | None:
+    if not agent_id or not path:
+        return None
+    query = urlencode({"path": path})
+    return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
+
+
+def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | None = None) -> dict:
+    snapshot = snapshot or build_plan_snapshot(agent)
+    return {
+        "todoCount": snapshot.todo_count,
+        "doingCount": snapshot.doing_count,
+        "doneCount": snapshot.done_count,
+        "todoTitles": list(snapshot.todo_titles),
+        "doingTitles": list(snapshot.doing_titles),
+        "doneTitles": list(snapshot.done_titles),
+        "files": [
+            {
+                "path": item.path,
+                "label": item.label,
+                "downloadUrl": _plan_file_download_url(agent.id, item.path),
+            }
+            for item in snapshot.files
+        ],
+        "messages": [
+            {
+                "messageId": item.message_id,
+                "label": item.label,
+            }
+            for item in snapshot.messages
+        ],
+    }
+
 
 def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
     message = env.message
@@ -875,7 +912,7 @@ def _thinking_queryset(
     return list(qs[:limit])
 
 
-def _kanban_queryset(
+def _plan_event_queryset(
     agent: PersistentAgent,
     direction: TimelineDirection,
     cursor: CursorPayload | None,
@@ -889,7 +926,7 @@ def _kanban_queryset(
     if direction == "older" and cursor is not None:
         qs = qs.filter(cursor_value__lte=cursor.value)
     elif direction == "newer" and cursor is not None:
-        if cursor.kind == "kanban":
+        if cursor.kind in {"kanban", "plan"}:
             try:
                 cursor_uuid = uuid.UUID(cursor.identifier)
                 qs = qs.filter(
@@ -962,18 +999,18 @@ def _envelop_thinking(completions: Iterable[PersistentAgentCompletion]) -> list[
     return envelopes
 
 
-def _envelop_kanban_events(events: Iterable[PersistentAgentKanbanEvent]) -> list[KanbanEnvelope]:
-    envelopes: list[KanbanEnvelope] = []
+def _envelop_plan_events(events: Iterable[PersistentAgentKanbanEvent]) -> list[PlanEnvelope]:
+    envelopes: list[PlanEnvelope] = []
     for event in events:
         sort_value = event.cursor_value
         cursor = CursorPayload(
             value=sort_value,
-            kind="kanban",
+            kind="plan",
             identifier=str(event.cursor_identifier),
         )
         envelopes.append(
-            KanbanEnvelope(
-                sort_key=(sort_value, "kanban", str(event.cursor_identifier)),
+            PlanEnvelope(
+                sort_key=(sort_value, "plan", str(event.cursor_identifier)),
                 cursor=cursor,
                 event=event,
             )
@@ -982,14 +1019,14 @@ def _envelop_kanban_events(events: Iterable[PersistentAgentKanbanEvent]) -> list
 
 
 def _filter_by_direction(
-    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
+    envelopes: Sequence[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
     direction: TimelineDirection,
     cursor: CursorPayload | None,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
     if not cursor or direction == "initial":
         return list(envelopes)
     pivot = (cursor.value, cursor.kind, cursor.identifier)
-    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope] = []
+    filtered: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = []
     for env in envelopes:
         key = env.sort_key
         if direction == "older" and key < pivot:
@@ -1000,10 +1037,10 @@ def _filter_by_direction(
 
 
 def _truncate_for_direction(
-    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope],
+    envelopes: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope],
     direction: TimelineDirection,
     limit: int,
-) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope]:
+) -> list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope]:
     if not envelopes:
         return []
     if direction == "older":
@@ -1067,14 +1104,14 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         except Exception:
             pass
 
-    kanban_exists = PersistentAgentKanbanEvent.objects.filter(
+    plan_event_exists = PersistentAgentKanbanEvent.objects.filter(
         agent=agent,
         cursor_value__lt=cursor.value,
     ).exists()
-    if cursor.kind == "kanban":
+    if cursor.kind in {"kanban", "plan"}:
         try:
             cursor_uuid = uuid.UUID(cursor.identifier)
-            kanban_exists = kanban_exists or PersistentAgentKanbanEvent.objects.filter(
+            plan_event_exists = plan_event_exists or PersistentAgentKanbanEvent.objects.filter(
                 agent=agent,
                 cursor_value=cursor.value,
                 cursor_identifier__lt=cursor_uuid,
@@ -1082,7 +1119,7 @@ def _has_more_before(agent: PersistentAgent, cursor: CursorPayload | None) -> bo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or kanban_exists
+    return message_exists or step_exists or completion_exists or plan_event_exists
 
 
 def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> bool:
@@ -1139,14 +1176,14 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
             )
         except Exception:
             pass
-    kanban_exists = PersistentAgentKanbanEvent.objects.filter(
+    plan_event_exists = PersistentAgentKanbanEvent.objects.filter(
         agent=agent,
         cursor_value__gt=cursor.value,
     ).exists()
-    if cursor.kind == "kanban":
+    if cursor.kind in {"kanban", "plan"}:
         try:
             cursor_uuid = uuid.UUID(cursor.identifier)
-            kanban_exists = kanban_exists or PersistentAgentKanbanEvent.objects.filter(
+            plan_event_exists = plan_event_exists or PersistentAgentKanbanEvent.objects.filter(
                 agent=agent,
                 cursor_value=cursor.value,
                 cursor_identifier__gt=cursor_uuid,
@@ -1154,7 +1191,7 @@ def _has_more_after(agent: PersistentAgent, cursor: CursorPayload | None) -> boo
         except Exception:
             pass
 
-    return message_exists or step_exists or completion_exists or kanban_exists
+    return message_exists or step_exists or completion_exists or plan_event_exists
 
 
 WEB_TASK_ACTIVE_STATUSES = (
@@ -1364,14 +1401,14 @@ def fetch_timeline_window(
     message_envelopes = _envelop_messages(_messages_queryset(agent, direction, cursor_payload))
     step_envelopes = _envelop_steps(_steps_queryset(agent, direction, cursor_payload))
     thinking_envelopes = _envelop_thinking(_thinking_queryset(agent, direction, cursor_payload))
-    kanban_envelopes = _envelop_kanban_events(_kanban_queryset(agent, direction, cursor_payload))
-    if direction == "initial" and not kanban_envelopes:
-        baseline_event = ensure_kanban_baseline_event(agent)
+    plan_envelopes = _envelop_plan_events(_plan_event_queryset(agent, direction, cursor_payload))
+    if direction == "initial" and not plan_envelopes:
+        baseline_event = ensure_plan_baseline_event(agent)
         if baseline_event:
-            kanban_envelopes = _envelop_kanban_events([baseline_event])
+            plan_envelopes = _envelop_plan_events([baseline_event])
 
-    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | KanbanEnvelope] = sorted(
-        [*message_envelopes, *step_envelopes, *thinking_envelopes, *kanban_envelopes],
+    merged: list[MessageEnvelope | StepEnvelope | ThinkingEnvelope | PlanEnvelope] = sorted(
+        [*message_envelopes, *step_envelopes, *thinking_envelopes, *plan_envelopes],
         key=lambda env: env.sort_key,
     )
 
@@ -1400,8 +1437,8 @@ def fetch_timeline_window(
             cluster_buffer = []
         if isinstance(env, ThinkingEnvelope):
             timeline_events.append(_serialize_thinking(env))
-        elif isinstance(env, KanbanEnvelope):
-            timeline_events.append(serialize_persisted_kanban_event(env, agent_name))
+        elif isinstance(env, PlanEnvelope):
+            timeline_events.append(serialize_persisted_plan_event(env, agent_name))
         else:
             timeline_events.append(_serialize_message(env, user_lookup))
     if cluster_buffer:
@@ -1424,6 +1461,7 @@ def fetch_timeline_window(
         has_more_older=has_more_older,
         has_more_newer=has_more_newer,
         processing_snapshot=processing_snapshot,
+        current_plan=serialize_plan_snapshot(agent),
     )
 
 
@@ -1464,7 +1502,7 @@ def build_tool_cluster_from_steps(steps: Sequence[PersistentAgentStep]) -> dict:
     return _build_cluster(envelopes, label_map)
 
 
-def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> dict:
+def serialize_persisted_plan_event(env: PlanEnvelope, agent_name: str) -> dict:
     event = env.event
     timestamp = _format_timestamp(_dt_from_cursor(env.cursor))
 
@@ -1475,7 +1513,7 @@ def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> di
 
     serialized_changes = [
         {
-            "cardId": str(change.card_id),
+            "stepId": str(change.card_id),
             "title": change.title,
             "action": change.action,
             "fromStatus": change.from_status,
@@ -1491,10 +1529,12 @@ def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> di
         "todoTitles": titles_by_status["todo"],
         "doingTitles": titles_by_status["doing"],
         "doneTitles": titles_by_status["done"],
+        "files": [],
+        "messages": [],
     }
 
     return {
-        "kind": "kanban",
+        "kind": "plan",
         "cursor": env.cursor.encode(),
         "timestamp": timestamp,
         "agentName": agent_name,
@@ -1505,22 +1545,19 @@ def serialize_persisted_kanban_event(env: KanbanEnvelope, agent_name: str) -> di
     }
 
 
-def serialize_kanban_event(
+def serialize_plan_event(
     agent_name: str,
-    changes: Sequence,  # Sequence[KanbanCardChange]
-    snapshot,  # KanbanBoardSnapshot
+    changes: Sequence,
+    snapshot,
+    *,
+    explanation: str = "",
+    agent_id: uuid.UUID | None = None,
 ) -> dict:
-    """Serialize a kanban timeline event for frontend display.
-
-    Args:
-        agent_name: The name of the agent (for display text)
-        changes: Sequence of KanbanCardChange objects
-        snapshot: KanbanBoardSnapshot with current board state
-    """
+    """Serialize a plan timeline event for frontend display."""
     now = timezone.now()
     timestamp = _format_timestamp(now)
     cursor_value = _microsecond_epoch(now)
-    cursor = CursorPayload(value=cursor_value, kind="kanban", identifier=str(uuid.uuid4()))
+    cursor = CursorPayload(value=cursor_value, kind="plan", identifier=str(uuid.uuid4()))
 
     # Determine primary action for display
     completed_count = sum(1 for c in changes if c.action == "completed")
@@ -1535,46 +1572,48 @@ def serialize_kanban_event(
         if completed_count == 1:
             display_text = f'{agent_name} completed "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} completed {completed_count} tasks"
+            display_text = f"{agent_name} completed {completed_count} steps"
         primary_action = "completed"
     elif started_count > 0 and started_count == len(changes):
         if started_count == 1:
             display_text = f'{agent_name} started "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} started {started_count} tasks"
+            display_text = f"{agent_name} started {started_count} steps"
         primary_action = "started"
     elif created_count > 0 and created_count == len(changes):
         if created_count == 1:
             display_text = f'{agent_name} added "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} added {created_count} tasks"
+            display_text = f"{agent_name} added {created_count} steps"
         primary_action = "created"
     elif deleted_count > 0 and deleted_count == len(changes):
         if deleted_count == 1:
             display_text = f'{agent_name} removed "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} removed {deleted_count} tasks"
+            display_text = f"{agent_name} removed {deleted_count} steps"
         primary_action = "deleted"
     elif archived_count > 0 and archived_count == len(changes):
         if archived_count == 1:
             display_text = f'{agent_name} archived "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} archived {archived_count} tasks"
+            display_text = f"{agent_name} archived {archived_count} steps"
         primary_action = "archived"
     elif updated_count > 0 and updated_count == len(changes):
         if updated_count == 1:
             display_text = f'{agent_name} updated "{changes[0].title}"'
         else:
-            display_text = f"{agent_name} updated {updated_count} tasks"
+            display_text = f"{agent_name} updated {updated_count} steps"
         primary_action = "updated"
     else:
-        display_text = f"{agent_name} updated tasks"
+        display_text = f"{agent_name} updated the plan"
         primary_action = "updated"
+    if explanation:
+        display_text = explanation[:255]
 
     # Serialize changes for animation
     serialized_changes = [
         {
-            "cardId": c.card_id,
+            "stepId": c.card_id,
             "title": c.title,
             "action": c.action,
             "fromStatus": c.from_status,
@@ -1591,10 +1630,25 @@ def serialize_kanban_event(
         "todoTitles": list(snapshot.todo_titles),
         "doingTitles": list(snapshot.doing_titles),
         "doneTitles": list(snapshot.done_titles),
+        "files": [
+            {
+                "path": item.path,
+                "label": item.label,
+                "downloadUrl": _plan_file_download_url(agent_id, item.path),
+            }
+            for item in getattr(snapshot, "files", ())
+        ],
+        "messages": [
+            {
+                "messageId": item.message_id,
+                "label": item.label,
+            }
+            for item in getattr(snapshot, "messages", ())
+        ],
     }
 
     return {
-        "kind": "kanban",
+        "kind": "plan",
         "cursor": cursor.encode(),
         "timestamp": timestamp,
         "agentName": agent_name,

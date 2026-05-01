@@ -17,7 +17,7 @@ type AgentChatMobileSheetProps = {
   ariaLabel?: string
   keepMounted?: boolean
   bodyPadding?: boolean
-  tone?: 'default' | 'sidebar'
+  tone?: 'default' | 'sidebar' | 'plan'
 }
 
 export function AgentChatMobileSheet({
@@ -82,6 +82,7 @@ export function AgentChatMobileSheet({
     'agent-mobile-sheet',
     open ? 'agent-mobile-sheet--open' : '',
     tone === 'sidebar' ? 'agent-mobile-sheet--sidebar' : '',
+    tone === 'plan' ? 'agent-mobile-sheet--plan' : '',
   ]
     .filter(Boolean)
     .join(' ')
@@ -89,6 +90,7 @@ export function AgentChatMobileSheet({
   const panelClassName = [
     'agent-mobile-sheet-panel',
     tone === 'sidebar' ? 'agent-mobile-sheet-panel--sidebar' : '',
+    tone === 'plan' ? 'agent-mobile-sheet-panel--plan' : '',
     open ? 'agent-mobile-sheet-panel--open' : '',
     isExpanded ? 'agent-mobile-sheet-panel--expanded' : '',
     isDragging ? 'agent-mobile-sheet-panel--dragging' : '',

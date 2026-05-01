@@ -223,7 +223,6 @@ class ConsoleLLMPerformanceTests(TestCase):
 
     @patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"})
     @patch("console.api_views.seed_sqlite_agent_config")
-    @patch("console.api_views.seed_sqlite_kanban")
     @patch("console.api_views.seed_sqlite_skills")
     @patch("console.api_views.get_agent_tools", return_value=[{"type": "function", "function": {"name": "noop", "parameters": {}}}])
     @patch("console.api_views.build_prompt_context_preview")
@@ -234,7 +233,6 @@ class ConsoleLLMPerformanceTests(TestCase):
         mock_prompt_preview,
         mock_get_tools,
         _mock_seed_skills,
-        _mock_seed_kanban,
         _mock_seed_config,
     ):
         self.client.force_login(self.staff_user)
@@ -276,7 +274,6 @@ class ConsoleLLMPerformanceTests(TestCase):
 
     @patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"})
     @patch("console.api_views.seed_sqlite_agent_config")
-    @patch("console.api_views.seed_sqlite_kanban")
     @patch("console.api_views.seed_sqlite_skills")
     @patch("console.api_views.get_agent_tools", return_value=[])
     @patch("console.api_views.build_prompt_context_preview")
@@ -287,7 +284,6 @@ class ConsoleLLMPerformanceTests(TestCase):
         mock_prompt_preview,
         _mock_get_tools,
         _mock_seed_skills,
-        _mock_seed_kanban,
         _mock_seed_config,
     ):
         self.client.force_login(self.staff_user)

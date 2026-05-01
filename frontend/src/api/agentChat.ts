@@ -4,6 +4,7 @@ import type {
   PendingHumanInputRequest,
   PendingHumanInputRequestInputMode,
   PendingHumanInputRequestStatus,
+  PlanSnapshot,
   ProcessingSnapshot,
   RequestedSecret,
   TimelineEvent,
@@ -39,6 +40,7 @@ export type TimelineResponse = {
   planning_state?: PlanningState | null
   pending_human_input_requests?: PendingHumanInputRequest[]
   pending_action_requests?: PendingActionRequest[]
+  current_plan?: PlanSnapshot | null
 }
 
 export type AgentMessageReadStatePayload = {

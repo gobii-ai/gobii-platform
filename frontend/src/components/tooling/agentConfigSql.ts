@@ -23,7 +23,7 @@ export type SqliteInternalTableKind =
 
 export type SqliteReservedTableKind =
   | 'agentConfig'
-  | 'kanban'
+  | 'legacyPlan'
 
 export type SqliteStatementClassification = {
   index: number
@@ -386,7 +386,7 @@ function classifyTableName(tableName: string | null): {
     return { internalTableKind: null, reservedTableKind: 'agentConfig' }
   }
   if (tableName.startsWith('__kanban')) {
-    return { internalTableKind: null, reservedTableKind: 'kanban' }
+    return { internalTableKind: null, reservedTableKind: 'legacyPlan' }
   }
   return {
     internalTableKind: SQLITE_INTERNAL_TABLE_NAME_MAP[tableName as keyof typeof SQLITE_INTERNAL_TABLE_NAME_MAP] ?? null,

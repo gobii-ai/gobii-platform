@@ -6,7 +6,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.utils import timezone
 
-from api.agent.tools.sqlite_kanban import build_kanban_board_snapshot
+from api.agent.tools.plan import build_plan_snapshot
 from api.models import (
     PersistentAgent,
     PersistentAgentKanbanCard,
@@ -71,14 +71,14 @@ def _parse_cursor(raw: str | None) -> tuple[int, str] | None:
         return None
 
 
-def ensure_kanban_baseline_event(agent: PersistentAgent) -> PersistentAgentKanbanEvent | None:
-    """Create a baseline kanban event when cards exist but no events are persisted yet."""
+def ensure_plan_baseline_event(agent: PersistentAgent) -> PersistentAgentKanbanEvent | None:
+    """Create a baseline plan event when steps exist but no events are persisted yet."""
     if not agent or not agent.id:
         return None
     if PersistentAgentKanbanEvent.objects.filter(agent=agent).exists():
         return None
 
-    snapshot = build_kanban_board_snapshot(agent)
+    snapshot = build_plan_snapshot(agent)
     total = snapshot.todo_count + snapshot.doing_count + snapshot.done_count
     if total == 0:
         return None
@@ -88,8 +88,8 @@ def ensure_kanban_baseline_event(agent: PersistentAgent) -> PersistentAgentKanba
     )
     event_time = last_updated or timezone.now()
     cursor_value = _cursor_value_from_timestamp(event_time)
-    cursor_identifier = uuid.uuid5(uuid.NAMESPACE_URL, f"kanban-baseline:{agent.id}")
-    display_text = f"{_agent_first_name(agent)} updated tasks"
+    cursor_identifier = uuid.uuid5(uuid.NAMESPACE_URL, f"plan-baseline:{agent.id}")
+    display_text = f"{_agent_first_name(agent)} updated the plan"
 
     try:
         with transaction.atomic():
@@ -134,20 +134,20 @@ def ensure_kanban_baseline_event(agent: PersistentAgent) -> PersistentAgentKanba
         return PersistentAgentKanbanEvent.objects.filter(cursor_identifier=cursor_identifier).first()
 
 
-def persist_kanban_event(agent: PersistentAgent, payload: dict) -> PersistentAgentKanbanEvent | None:
-    """Persist a serialized kanban event for timeline rehydration."""
+def persist_plan_event(agent: PersistentAgent, payload: dict) -> PersistentAgentKanbanEvent | None:
+    """Persist a serialized plan event for timeline rehydration."""
     if not agent or not agent.id or not payload:
         return None
 
     cursor_raw = payload.get("cursor")
     parsed_cursor = _parse_cursor(cursor_raw)
     if not parsed_cursor:
-        logger.debug("Missing kanban cursor; skipping persistence for agent %s", agent.id)
+        logger.debug("Missing plan cursor; skipping persistence for agent %s", agent.id)
         return None
     cursor_value, cursor_identifier_raw = parsed_cursor
     cursor_identifier = _coerce_uuid(cursor_identifier_raw)
     if not cursor_identifier:
-        logger.debug("Invalid kanban cursor identifier; skipping persistence for agent %s", agent.id)
+        logger.debug("Invalid plan cursor identifier; skipping persistence for agent %s", agent.id)
         return None
 
     existing = PersistentAgentKanbanEvent.objects.filter(cursor_identifier=cursor_identifier).first()
@@ -159,7 +159,7 @@ def persist_kanban_event(agent: PersistentAgent, payload: dict) -> PersistentAge
     if not changes or not snapshot:
         return None
 
-    display_text = (payload.get("displayText") or "Kanban updated").strip() or "Kanban updated"
+    display_text = (payload.get("displayText") or "Plan updated").strip() or "Plan updated"
     primary_action = _normalize_action(payload.get("primaryAction"))
 
     todo_count = _coerce_int(snapshot.get("todoCount"))
@@ -204,7 +204,7 @@ def persist_kanban_event(agent: PersistentAgent, payload: dict) -> PersistentAge
             for change in changes:
                 if not isinstance(change, dict):
                     continue
-                card_uuid = _coerce_uuid(change.get("cardId"))
+                card_uuid = _coerce_uuid(change.get("stepId") or change.get("cardId"))
                 if not card_uuid:
                     continue
                 title = str(change.get("title") or "").strip()
