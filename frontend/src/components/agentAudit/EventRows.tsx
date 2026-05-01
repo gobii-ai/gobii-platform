@@ -7,6 +7,21 @@ import { EventHeader } from './EventHeader'
 import { AuditJsonValue } from './AuditJsonValue'
 import { IconCircle } from './eventPrimitives'
 
+function previewValue(value: unknown, maxLength = 160): string | null {
+  if (value === null || value === undefined || value === '') return null
+  const text =
+    typeof value === 'string'
+      ? value
+      : (() => {
+          try {
+            return JSON.stringify(value)
+          } catch (_err) {
+            return String(value)
+          }
+        })()
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
+}
+
 export function ToolCallRow({
   tool,
   collapsed,
@@ -27,9 +42,7 @@ export function ToolCallRow({
     }
   }
   const resultPreview = useMemo(() => {
-    if (!tool.result) return null
-    const trimmed = tool.result.length > 160 ? `${tool.result.slice(0, 160)}…` : tool.result
-    return trimmed
+    return previewValue(tool.result)
   }, [tool.result])
   const durationLabel = useMemo(() => {
     if (tool.execution_duration_ms === null || tool.execution_duration_ms === undefined) return null

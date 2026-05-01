@@ -20,7 +20,7 @@ export type AuditToolCallEvent = {
   completion_id: string | null
   tool_name: string | null
   parameters: unknown
-  result: string | null
+  result: unknown
   execution_duration_ms?: number | null
   prompt_archive?: PromptArchiveMeta | null
 }
