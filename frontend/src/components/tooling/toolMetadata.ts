@@ -525,6 +525,18 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     },
   },
   {
+    name: 'create_or_update_dashboard',
+    label: 'Dashboard',
+    icon: BarChart3,
+    iconBgClass: 'bg-cyan-100',
+    iconColorClass: 'text-cyan-700',
+    detailKind: 'mcpTool',
+    derive(_entry, parameters) {
+      const title = coerceString(parameters?.title)
+      return { caption: truncate(title || 'Dashboard', 48) }
+    },
+  },
+  {
     name: 'create_image',
     label: 'Image',
     icon: ImageIcon,

@@ -1,0 +1,18 @@
+{% extends "console_page.html" %}
+{% load vite_tags %}
+
+{% block title %}Dashboards - {{ agent.name|default:'Agent' }} · Gobii{% endblock %}
+
+{% block console_content %}
+<div id="gobii-frontend-root"
+     class="pb-8"
+     data-app="agent-dashboards"
+     data-props-json-id="agent-dashboards-props">
+</div>
+{{ agent_dashboards_props|json_script:"agent-dashboards-props" }}
+{% endblock %}
+
+{% block extra_js %}
+  {{ block.super }}
+  {% vite_asset 'src/main.tsx' %}
+{% endblock %}

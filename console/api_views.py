@@ -96,6 +96,7 @@ from api.models import (
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
     PersistentAgent,
+    PersistentAgentDashboard,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
@@ -166,6 +167,7 @@ from util.onboarding import (
     set_trial_onboarding_intent,
     set_trial_onboarding_requires_plan_selection,
 )
+from util.urls import append_context_query
 from util.personal_signup_preview import (
     build_personal_signup_starter_charter,
     resolve_personal_signup_preview,
@@ -267,6 +269,14 @@ from api.services.persistent_agent_secrets import (
 )
 from api.services.daily_credit_limits import get_agent_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    PipedreamCatalogService,
+    get_owner_apps_state,
+    serialize_owner_apps_state,
+    set_owner_selected_app_slugs,
+)
+from api.services.agent_dashboards import render_dashboard
 from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
@@ -281,7 +291,7 @@ from api.services.system_settings import (
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from tasks.services import TaskCreditService
-from util.integrations import stripe_status
+from util.integrations import pipedream_status, stripe_status
 from util.subscription_helper import (
     get_active_subscription,
     get_stripe_customer,
@@ -2487,6 +2497,12 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
         audit_summary = write_agent_audit_export_json(agent, audit_json_file, export_range=export_range)
         audit_json_file.seek(0)
 
+        audit_js_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=2 * 1024 * 1024)
+        audit_js_file.write(b"window.__AUDIT_DATA__=")
+        shutil.copyfileobj(audit_json_file, audit_js_file, length=64 * 1024)
+        audit_js_file.write(b";")
+        audit_js_file.seek(0)
+
         html = render_to_string(
             "console/staff_agent_audit_export.html",
             {
@@ -3715,6 +3731,41 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             **_pending_action_payload(agent, request.user),
         }
         return JsonResponse(payload)
+
+
+class AgentDashboardsAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        dashboard = (
+            PersistentAgentDashboard.objects
+            .filter(agent=agent)
+            .prefetch_related("widgets")
+            .first()
+        )
+        try:
+            chat_url = reverse("agent_chat_shell", kwargs={"pk": agent.id})
+        except NoReverseMatch:
+            chat_url = f"/console/agents/{agent.id}/chat/"
+        org_id = str(agent.organization_id) if agent.organization_id else None
+        payload = {
+            "agent": {
+                "id": str(agent.id),
+                "name": agent.name,
+                "avatarUrl": agent.get_avatar_thumbnail_url(),
+                "displayColorHex": agent.get_display_color(),
+                "chatUrl": append_context_query(chat_url, org_id),
+            },
+            "dashboard": render_dashboard(dashboard) if dashboard else None,
+        }
+        return JsonResponse(payload)
+
 
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
@@ -7582,6 +7633,77 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
                 )
 
         return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+
+class PipedreamAppsAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "patch"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
+        owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
+        try:
+            payload = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(payload)
+
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        selected_app_slugs = payload.get("selected_app_slugs")
+        if not isinstance(selected_app_slugs, list):
+            return HttpResponseBadRequest("selected_app_slugs must be an array.")
+
+        owner_scope, owner_label, owner_user, owner_org = _resolve_mcp_owner(request)
+        try:
+            selected = set_owner_selected_app_slugs(
+                owner_scope,
+                selected_app_slugs,
+                owner_user=owner_user,
+                owner_org=owner_org,
+            )
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        manager = get_mcp_manager()
+        owner_id = str(owner_org.id) if owner_scope == MCPServerConfig.Scope.ORGANIZATION else str(owner_user.id)
+        manager.invalidate_pipedream_owner_cache(owner_scope, owner_id)
+        manager.prewarm_pipedream_owner_cache(owner_scope, owner_id, app_slugs=selected)
+
+        state = get_owner_apps_state(owner_scope, owner_label, owner_user=owner_user, owner_org=owner_org)
+        try:
+            response_data = serialize_owner_apps_state(state, catalog=PipedreamCatalogService())
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse(response_data)
+
+
+class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        status = pipedream_status()
+        if not status.enabled:
+            return JsonResponse({"error": status.reason}, status=503)
+        _resolve_mcp_owner(request)
+        query = str(request.GET.get("q") or "").strip()
+        if not query:
+            return JsonResponse({"results": []})
+        catalog = PipedreamCatalogService()
+        try:
+            results = [app.to_dict() for app in catalog.search_apps(query)]
+        except PipedreamCatalogError as exc:
+            return JsonResponse({"error": str(exc)}, status=502)
+        return JsonResponse({"results": results})
 
 
 class MCPServerDetailAPIView(LoginRequiredMixin, View):

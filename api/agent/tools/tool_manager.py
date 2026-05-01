@@ -52,6 +52,11 @@ from .create_video import (
     execute_create_video,
     is_video_generation_available_for_agent,
 )
+from .dashboards import (
+    DASHBOARD_TOOL_NAME,
+    execute_create_or_update_dashboard,
+    get_create_or_update_dashboard_tool,
+)
 from .custom_tools import (
     execute_custom_tool,
     is_custom_tools_available_for_agent,
@@ -296,6 +301,10 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_pipedream_trigger_subscriptions,
         "search_hidden": True,
         "system_skill_key": "connected_app_channels",
+    },
+    DASHBOARD_TOOL_NAME: {
+        "definition": get_create_or_update_dashboard_tool,
+        "executor": execute_create_or_update_dashboard,
     },
 }
 
