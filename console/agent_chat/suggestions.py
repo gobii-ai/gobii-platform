@@ -342,7 +342,7 @@ def _generate_dynamic_suggestions(
             )
             log_agent_completion(
                 agent,
-                completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+                completion_type=PersistentAgentCompletion.CompletionType.AGENT_CHAT_SUGGESTION,
                 response=response,
                 model=model,
                 provider=provider_key,

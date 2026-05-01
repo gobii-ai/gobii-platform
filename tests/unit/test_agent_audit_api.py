@@ -2,7 +2,7 @@ import json
 import io
 import zipfile
 from uuid import uuid4
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import zstandard as zstd
 from django.contrib.auth import get_user_model
@@ -16,6 +16,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
+    PersistentAgentError,
     PersistentAgentMessage,
     PersistentAgentPromptArchive,
     PersistentAgentStep,
@@ -69,6 +70,109 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(data.get("kind"), "system_message")
         self.assertEqual(data.get("body"), "Priority directive")
 
+    def test_log_agent_error_helper_persists_and_logs(self):
+        from api.services.agent_error_logging import log_agent_error
+
+        mock_logger = MagicMock()
+
+        error = log_agent_error(
+            self.agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="tests.agent_audit",
+            message="Something failed",
+            logger=mock_logger,
+            context={"agent_id": str(self.agent.id), "detail": "safe"},
+        )
+
+        self.assertIsNotNone(error)
+        mock_logger.log.assert_called_once()
+        persisted = PersistentAgentError.objects.get(id=error.id)
+        self.assertEqual(persisted.agent, self.agent)
+        self.assertEqual(persisted.category, PersistentAgentError.Category.OTHER)
+        self.assertEqual(persisted.context["detail"], "safe")
+
+    def test_log_agent_error_helper_persists_truncated_traceback(self):
+        from api.services.agent_error_logging import MAX_TRACEBACK_LENGTH, log_agent_error
+
+        mock_logger = MagicMock()
+        try:
+            raise ValueError("bad value")
+        except ValueError as exc:
+            error = log_agent_error(
+                self.agent,
+                category=PersistentAgentError.Category.LLM_COMPLETION,
+                source="tests.traceback",
+                message="LLM failed",
+                exc=exc,
+                logger=mock_logger,
+                context={"large": "x" * 5000},
+            )
+
+        self.assertIsNotNone(error)
+        persisted = PersistentAgentError.objects.get(id=error.id)
+        self.assertEqual(persisted.exception_class, "ValueError")
+        self.assertIn("ValueError: bad value", persisted.traceback)
+        self.assertLessEqual(len(persisted.traceback), MAX_TRACEBACK_LENGTH)
+        self.assertLessEqual(len(persisted.context["large"]), 2000)
+
+    def test_log_task_quota_exceeded_persists_traceback_without_server_exc_info(self):
+        from django.core.exceptions import ValidationError
+
+        from api.services.agent_error_logging import log_task_quota_exceeded
+
+        mock_logger = MagicMock()
+        try:
+            raise ValidationError({"quota": "Task quota exceeded. No credits remain."})
+        except ValidationError as exc:
+            error = log_task_quota_exceeded(
+                str(self.agent.id),
+                exc,
+                source="tests.quota_wrapper",
+                logger=mock_logger,
+                task_id="task-123",
+            )
+
+        self.assertIsNotNone(error)
+        _, kwargs = mock_logger.log.call_args
+        self.assertNotIn("exc_info", kwargs)
+        persisted = PersistentAgentError.objects.get(id=error.id)
+        self.assertEqual(persisted.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertIn("ValidationError", persisted.traceback)
+        self.assertEqual(persisted.context["task_id"], "task-123")
+
+    def test_audit_api_returns_error_events(self):
+        PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.TASK_QUOTA_EXCEEDED,
+            source="tests.quota",
+            level="INFO",
+            message="Task quota exceeded",
+            exception_class="ValidationError",
+            traceback="trace",
+            context={"validation_messages": ["Task quota exceeded"]},
+        )
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/?limit=10")
+        self.assertEqual(response.status_code, 200)
+        events = response.json()["events"]
+        error_event = next(event for event in events if event["kind"] == "error")
+        self.assertEqual(error_event["category"], PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertEqual(error_event["source"], "tests.quota")
+        self.assertEqual(error_event["context"]["validation_messages"], ["Task quota exceeded"])
+
+    def test_audit_timeline_counts_error_events(self):
+        PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="tests.timeline",
+            message="Timeline error",
+        )
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/timeline/")
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(sum(bucket["count"] for bucket in payload["buckets"]), 1)
+
     def test_system_message_requires_staff(self):
         self.client.force_login(self.nonstaff)
         response = self.client.post(
@@ -90,6 +194,8 @@ class StaffAgentAuditAPITests(TestCase):
             total_tokens=133,
             cached_tokens=11,
             response_id="resp-123",
+            llm_tool_names=["sqlite_batch", "send_email"],
+            billed=True,
         )
         prompt_step = PersistentAgentStep.objects.create(
             agent=self.agent,
@@ -151,6 +257,16 @@ class StaffAgentAuditAPITests(TestCase):
             body="Hello from the agent.",
             raw_payload={"body_html": "<p><strong>Hello</strong> from the agent.</p>"},
         )
+        PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.LLM_COMPLETION,
+            source="tests.export",
+            level="ERROR",
+            message="LLM failed",
+            exception_class="RuntimeError",
+            traceback="RuntimeError: failed",
+            context={"provider_candidates": [{"provider": "openrouter", "model": "test"}]},
+        )
 
         response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
         self.assertEqual(response.status_code, 200)
@@ -171,10 +287,14 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIn("messages", export_payload)
         self.assertEqual(export_payload["counts"]["completions"], 1)
         self.assertEqual(export_payload["counts"]["messages"], 1)
+        self.assertEqual(export_payload["counts"]["errors"], 1)
+        self.assertEqual(export_payload["errors"][0]["kind"], "error")
+        self.assertEqual(export_payload["errors"][0]["category"], PersistentAgentError.Category.LLM_COMPLETION)
 
         exported_completion = export_payload["completions"][0]
         self.assertIsNotNone(exported_completion.get("timestamp"))
         self.assertEqual(exported_completion.get("thinking"), "Reasoning trace.")
+        self.assertEqual(exported_completion.get("llm_tool_names"), ["sqlite_batch", "send_email"])
         prompt_archive = exported_completion.get("prompt_archive") or {}
         prompt_payload = prompt_archive.get("payload") or {}
         self.assertEqual(prompt_payload.get("system_prompt"), "system prompt text")

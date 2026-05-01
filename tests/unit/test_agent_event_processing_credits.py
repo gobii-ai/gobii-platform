@@ -12,6 +12,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
+    PersistentAgentError,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -663,6 +664,12 @@ class PersistentAgentToolCreditTests(TestCase):
         span.add_event.assert_any_call("Credit consumption raised exception", {"error": "db down"})
         span.add_event.assert_any_call("Tool skipped - insufficient credits during processing")
         span.set_attribute.assert_any_call("credit_check.error", "db down")
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.CREDIT_FAILURE)
+        self.assertEqual(error.exception_class, "Exception")
+        self.assertEqual(error.context["operation"], "consume_credit")
+        self.assertEqual(error.context["tool_name"], "sqlite_query")
+        self.assertEqual(error.context["cost"], "0.800")
 
     @patch("api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE", True)
     @patch(

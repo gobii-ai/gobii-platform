@@ -13,14 +13,14 @@ import {
 } from 'lucide-react'
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
-import type { AuditToolCallEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
+import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
 import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
 import { AgentAuditFiltersMenu } from '../components/agentAudit/AgentAuditFiltersMenu'
 import { CompletionCard, type PromptState } from '../components/agentAudit/CompletionCard'
-import { MessageRow, StepRow, ToolCallRow } from '../components/agentAudit/EventRows'
+import { ErrorRow, MessageRow, StepRow, ToolCallRow } from '../components/agentAudit/EventRows'
 import { renderHtmlOrText } from '../components/agentAudit/eventPrimitives'
 
 type AgentAuditScreenProps = {
@@ -33,6 +33,10 @@ type AgentAuditScreenProps = {
 function eventKeyFor(event: AuditEvent): string {
   const id = 'id' in event ? event.id : event.run_id
   return `${event.kind}:${id ?? 'unknown'}`
+}
+
+function isEventCollapsedByDefault(event: AuditEvent): boolean {
+  return event.kind !== 'message'
 }
 
 function getTargetMessageId(
@@ -54,6 +58,7 @@ const DEFAULT_FILTERS = {
   messages: true,
   toolCalls: true,
   completions: true,
+  errors: true,
   systemMessages: true,
   systemSteps: true,
   agentSteps: true,
@@ -77,6 +82,7 @@ type EventFilterKey =
   | 'messages'
   | 'toolCalls'
   | 'completions'
+  | 'errors'
   | 'systemMessages'
   | 'systemSteps'
   | 'agentSteps'
@@ -91,6 +97,7 @@ const EVENT_TYPE_FILTERS: {
   { key: 'messages', label: 'Messages', matches: (event) => event.kind === 'message' },
   { key: 'toolCalls', label: 'Tool calls', matches: (event) => event.kind === 'tool_call' },
   { key: 'completions', label: 'LLM completions', matches: (event) => event.kind === 'completion' },
+  { key: 'errors', label: 'Errors', matches: (event) => event.kind === 'error' },
   { key: 'systemMessages', label: 'System messages', matches: (event) => event.kind === 'system_message' },
   { key: 'systemSteps', label: 'System steps', matches: (event) => event.kind === 'step' && event.is_system },
   { key: 'agentSteps', label: 'Agent steps', matches: (event) => event.kind === 'step' && !event.is_system },
@@ -135,7 +142,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
-  const [collapsedEventKeys, setCollapsedEventKeys] = useState<Set<string>>(() => new Set())
+  const [eventCollapseOverrideKeys, setEventCollapseOverrideKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
@@ -373,7 +380,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleToggleEventCollapse = useCallback((event: AuditEvent) => {
     const key = eventKeyFor(event)
-    setCollapsedEventKeys((current) => {
+    setEventCollapseOverrideKeys((current) => {
       const next = new Set(current)
       if (next.has(key)) {
         next.delete(key)
@@ -386,11 +393,13 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleSetAllCollapsed = useCallback(
     (collapsed: boolean) => {
-      if (!collapsed) {
-        setCollapsedEventKeys(new Set())
-        return
-      }
-      setCollapsedEventKeys(new Set(filteredEvents.map((event) => eventKeyFor(event))))
+      setEventCollapseOverrideKeys(
+        new Set(
+          filteredEvents
+            .filter((event) => isEventCollapsedByDefault(event) !== collapsed)
+            .map((event) => eventKeyFor(event)),
+        ),
+      )
     },
     [filteredEvents],
   )
@@ -731,7 +740,9 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                   ? `${parsedTimestamp.getFullYear()}-${String(parsedTimestamp.getMonth() + 1).padStart(2, '0')}-${String(parsedTimestamp.getDate()).padStart(2, '0')}`
                   : null
               const eventKey = eventKeyFor(event)
-              const collapsed = collapsedEventKeys.has(eventKey)
+              const collapsed = eventCollapseOverrideKeys.has(eventKey)
+                ? !isEventCollapsedByDefault(event)
+                : isEventCollapsedByDefault(event)
               const messageRef = event.kind === 'message' ? registerMessageRef((event as AuditMessageEvent).id) : undefined
               const wrapperProps = { ...(day ? { 'data-day-marker': 'true', 'data-day': day } : {}) }
 
@@ -759,6 +770,13 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 return (
                   <div key={eventKey} {...wrapperProps} ref={messageRef}>
                     <MessageRow message={event as AuditMessageEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
+                  </div>
+                )
+              }
+              if (event.kind === 'error') {
+                return (
+                  <div key={eventKey} {...wrapperProps}>
+                    <ErrorRow error={event as AuditErrorEvent} collapsed={collapsed} onToggle={() => handleToggleEventCollapse(event)} />
                   </div>
                 )
               }

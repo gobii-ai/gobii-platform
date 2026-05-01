@@ -162,6 +162,7 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
@@ -170,6 +171,12 @@ from ...models import (
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
+from api.services.agent_error_logging import (
+    log_agent_error,
+    log_credit_failure,
+    log_prompt_construction_error,
+    log_tool_persistence_error,
+)
 from api.services.billing_snapshot import get_billing_snapshot_for_owner
 from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_MESSAGE,
@@ -1012,6 +1019,58 @@ def _emit_tool_call_audit(step: "PersistentAgentStep", context: str) -> None:
         )
 
 
+def _tool_context_for_error(
+    tool_name: str,
+    tool_params: Dict[str, Any] | None,
+    *,
+    result_content: str | None = None,
+    execution_duration_ms: Optional[int] = None,
+    status: str | None = None,
+    credits_consumed: Any = None,
+    consumed_credit: Any = None,
+    step: PersistentAgentStep | None = None,
+) -> dict[str, Any]:
+    context: dict[str, Any] = {
+        "tool_name": tool_name,
+        "tool_status": status,
+        "execution_duration_ms": execution_duration_ms,
+        "param_keys": sorted(str(key) for key in tool_params.keys()) if isinstance(tool_params, dict) else [],
+        "result_length": len(result_content or ""),
+        "credits_consumed": str(credits_consumed) if credits_consumed is not None else None,
+        "task_credit_id": str(getattr(consumed_credit, "id", "")) if consumed_credit is not None else None,
+    }
+    if step is not None:
+        context["step_id"] = str(getattr(step, "id", ""))
+        context["completion_id"] = str(getattr(step, "completion_id", "")) if getattr(step, "completion_id", None) else None
+    return context
+
+
+def _completion_from_step_kwargs(step_kwargs: dict[str, Any]) -> PersistentAgentCompletion | None:
+    completion = step_kwargs.get("completion")
+    return completion if isinstance(completion, PersistentAgentCompletion) else None
+
+
+def _agent_from_step(step: PersistentAgentStep) -> PersistentAgent | None:
+    try:
+        return step.agent
+    except (AttributeError, DatabaseError, PersistentAgent.DoesNotExist):
+        return None
+
+
+def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]:
+    names: list[str] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
+
+
 def _persist_tool_call_step(
     agent: "PersistentAgent",
     tool_name: str,
@@ -1088,30 +1147,59 @@ def _persist_tool_call_step(
             )
             return step
         except Exception as retry_exc:
-            logger.error(
-                "Agent %s: failed to persist tool call for %s after retry: %s",
-                agent.id,
-                safe_tool_name,
+            log_tool_persistence_error(
+                agent,
                 retry_exc,
+                source="api.agent.core.event_processing._persist_tool_call_step.retry",
+                logger=logger,
+                completion=_completion_from_step_kwargs(step_kwargs),
+                context=_tool_context_for_error(
+                    safe_tool_name,
+                    tool_params,
+                    result_content=normalized_result,
+                    execution_duration_ms=execution_duration_ms,
+                    status=status or "complete",
+                    credits_consumed=credits_consumed,
+                    consumed_credit=consumed_credit,
+                ),
             )
             return None
     except DatabaseError as db_exc:
         # Data errors, integrity errors, etc. - log and continue
-        logger.error(
-            "Agent %s: database error persisting tool call for %s: %s",
-            agent.id,
-            safe_tool_name,
+        log_tool_persistence_error(
+            agent,
             db_exc,
+            source="api.agent.core.event_processing._persist_tool_call_step",
+            logger=logger,
+            completion=_completion_from_step_kwargs(step_kwargs),
+            context=_tool_context_for_error(
+                safe_tool_name,
+                tool_params,
+                result_content=normalized_result,
+                execution_duration_ms=execution_duration_ms,
+                status=status or "complete",
+                credits_consumed=credits_consumed,
+                consumed_credit=consumed_credit,
+            ),
         )
         return None
     except Exception as exc:
         # Catch-all for unexpected errors - never crash the agent
-        logger.error(
-            "Agent %s: unexpected error persisting tool call for %s: %s",
-            agent.id,
-            safe_tool_name,
+        log_tool_persistence_error(
+            agent,
             exc,
-            exc_info=True,
+            source="api.agent.core.event_processing._persist_tool_call_step",
+            logger=logger,
+            completion=_completion_from_step_kwargs(step_kwargs),
+            context=_tool_context_for_error(
+                safe_tool_name,
+                tool_params,
+                result_content=normalized_result,
+                execution_duration_ms=execution_duration_ms,
+                status=status or "complete",
+                credits_consumed=credits_consumed,
+                consumed_credit=consumed_credit,
+            ),
         )
         return None
 
@@ -1149,12 +1237,20 @@ def _create_pending_tool_call_step(
         )
         _emit_tool_call_realtime(step, "pending")
         return step
-    except Exception:
-        logger.debug(
-            "Failed to persist pending tool call for agent %s (%s)",
-            agent.id,
-            safe_tool_name,
-            exc_info=True,
+    except Exception as exc:
+        log_tool_persistence_error(
+            agent,
+            exc,
+            source="api.agent.core.event_processing._create_pending_tool_call_step",
+            logger=logger,
+            completion=_completion_from_step_kwargs(step_kwargs),
+            context=_tool_context_for_error(
+                safe_tool_name,
+                tool_params,
+                status="pending",
+                credits_consumed=credits_consumed,
+                consumed_credit=consumed_credit,
+            ),
         )
         return None
 
@@ -1176,13 +1272,30 @@ def _finalize_pending_tool_call_step(
     try:
         step.description = description[:500]
         step.save(update_fields=["description"])
-    except Exception:
-        logger.debug(
-            "Failed to update tool step description for agent %s step %s",
-            getattr(step, "agent_id", None),
-            getattr(step, "id", None),
-            exc_info=True,
-        )
+    except Exception as exc:
+        agent = _agent_from_step(step)
+        if agent is not None:
+            log_tool_persistence_error(
+                agent,
+                exc,
+                source="api.agent.core.event_processing._finalize_pending_tool_call_step.description",
+                logger=logger,
+                context=_tool_context_for_error(
+                    safe_tool_name,
+                    tool_params,
+                    result_content=normalized_result,
+                    execution_duration_ms=execution_duration_ms,
+                    status=status,
+                    step=step,
+                ),
+            )
+        else:
+            logger.debug(
+                "Failed to update tool step description for agent %s step %s",
+                getattr(step, "agent_id", None),
+                getattr(step, "id", None),
+                exc_info=True,
+            )
 
     created_tool_call = False
     try:
@@ -1204,13 +1317,30 @@ def _finalize_pending_tool_call_step(
             tool_call.execution_duration_ms = execution_duration_ms
             tool_call.status = status
             tool_call.save(update_fields=["tool_name", "tool_params", "result", "execution_duration_ms", "status"])
-    except Exception:
-        logger.debug(
-            "Failed to finalize tool call for agent %s step %s",
-            getattr(step, "agent_id", None),
-            getattr(step, "id", None),
-            exc_info=True,
-        )
+    except Exception as exc:
+        agent = _agent_from_step(step)
+        if agent is not None:
+            log_tool_persistence_error(
+                agent,
+                exc,
+                source="api.agent.core.event_processing._finalize_pending_tool_call_step",
+                logger=logger,
+                context=_tool_context_for_error(
+                    safe_tool_name,
+                    tool_params,
+                    result_content=normalized_result,
+                    execution_duration_ms=execution_duration_ms,
+                    status=status,
+                    step=step,
+                ),
+            )
+        else:
+            logger.debug(
+                "Failed to finalize tool call for agent %s step %s",
+                getattr(step, "agent_id", None),
+                getattr(step, "id", None),
+                exc_info=True,
+            )
         return
 
     _emit_tool_call_realtime(step, "finalized")
@@ -2768,6 +2898,29 @@ def _get_completion_runtime_hints(response: Any) -> dict[str, Any]:
     return runtime_hints
 
 
+def _llm_provider_candidates_for_error_context(failover_configs: List[Tuple[str, str, dict]] | None) -> list[dict]:
+    candidates: list[dict] = []
+    for config in failover_configs or []:
+        try:
+            provider, model, _params = config
+        except (TypeError, ValueError):
+            candidates.append({"raw": str(config)})
+            continue
+        candidates.append({"provider": provider, "model": model})
+    return candidates
+
+
+def _preferred_config_for_error_context(preferred_config: Optional[Tuple[str, str]]) -> dict | None:
+    if not preferred_config:
+        return None
+    if isinstance(preferred_config, (list, tuple)) and len(preferred_config) >= 2:
+        return {
+            "provider": preferred_config[0],
+            "model": preferred_config[1],
+        }
+    return {"raw": str(preferred_config)}
+
+
 def _completion_with_failover(
     messages: List[dict],
     tools: List[dict],
@@ -3329,9 +3482,20 @@ def _ensure_credit_for_tool(
     try:
         cost = get_tool_credit_cost(tool_name)
     except Exception as e:
-        logger.warning(
-            "Failed to get credit cost for tool '%s', falling back to default. Error: %s",
-            tool_name, e, exc_info=True
+        log_credit_failure(
+            agent,
+            e,
+            source="api.agent.core.event_processing._ensure_credit_for_tool.cost",
+            logger=logger,
+            context={
+                "operation": "get_tool_credit_cost",
+                "tool_name": tool_name,
+                "owner_label": owner_label,
+                "owner_type": "organization" if owner_is_org else "user",
+                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
+                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
+                "fallback": "default_task_credit_cost",
+            },
         )
         # Fallback to default single-task cost when lookup fails
         cost = get_default_task_credit_cost()
@@ -3345,11 +3509,20 @@ def _ensure_credit_for_tool(
         try:
             available = TaskCreditService.calculate_available_tasks_for_owner(owner)
         except Exception as e:
-            logger.error(
-                "Credit availability check (in-loop) failed for agent %s (%s): %s",
-                agent.id,
-                owner_label,
-                str(e),
+            log_credit_failure(
+                agent,
+                e,
+                source="api.agent.core.event_processing._ensure_credit_for_tool.availability",
+                logger=logger,
+                context={
+                    "operation": "calculate_available_tasks",
+                    "tool_name": tool_name,
+                    "owner_label": owner_label,
+                    "owner_type": "organization" if owner_is_org else "user",
+                    "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
+                    "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
+                    "cost": str(cost) if cost is not None else None,
+                },
             )
             available = None
         if credit_snapshot is not None:
@@ -3600,11 +3773,23 @@ def _ensure_credit_for_tool(
             consumed = TaskCreditService.check_and_consume_credit_for_owner(owner, amount=cost)
             consumed_credit = consumed.get("credit") if consumed else None
     except Exception as e:
-        logger.error(
-            "Credit consumption (in-loop) failed for agent %s (%s): %s",
-            agent.id,
-            owner_label,
-            str(e),
+        log_credit_failure(
+            agent,
+            e,
+            source="api.agent.core.event_processing._ensure_credit_for_tool",
+            logger=logger,
+            context={
+                "operation": "consume_credit",
+                "tool_name": tool_name,
+                "owner_label": owner_label,
+                "owner_type": "organization" if owner_is_org else "user",
+                "owner_id": str(getattr(owner, "id", "")) if owner is not None else None,
+                "user_id": str(getattr(owner_user, "id", "")) if owner_user is not None else None,
+                "cost": str(cost) if cost is not None else None,
+                "available": str(available) if available is not None else None,
+                "daily_hard_limit": str(hard_limit) if hard_limit is not None else None,
+                "daily_hard_remaining": str(hard_remaining) if hard_remaining is not None else None,
+            },
         )
         if span is not None:
             try:
@@ -4582,18 +4767,38 @@ def _run_agent_loop(
                 continuation_notice = None
                 routing_profile = get_current_eval_routing_profile()
                 prefer_low_latency = had_deliverable_web_target_at_start
-                prompt_context_result = build_prompt_context(
-                    agent,
-                    current_iteration=i + 1,
-                    max_iterations=MAX_AGENT_LOOP_ITERATIONS,
-                    reasoning_only_streak=reasoning_only_streak,
-                    is_first_run=is_first_run,
-                    daily_credit_state=daily_state,
-                    continuation_notice=current_notice,
-                    routing_profile=routing_profile,
-                    prefer_low_latency=prefer_low_latency,
-                    include_metadata=True,
-                )
+                try:
+                    prompt_context_result = build_prompt_context(
+                        agent,
+                        current_iteration=i + 1,
+                        max_iterations=MAX_AGENT_LOOP_ITERATIONS,
+                        reasoning_only_streak=reasoning_only_streak,
+                        is_first_run=is_first_run,
+                        daily_credit_state=daily_state,
+                        continuation_notice=current_notice,
+                        routing_profile=routing_profile,
+                        prefer_low_latency=prefer_low_latency,
+                        include_metadata=True,
+                    )
+                except Exception as exc:
+                    log_prompt_construction_error(
+                        agent,
+                        exc,
+                        source="api.agent.core.event_processing._run_agent_loop",
+                        logger=logger,
+                        context={
+                            "agent_id": str(agent.id),
+                            "run_sequence_number": run_sequence_number,
+                            "iteration": i + 1,
+                            "max_iterations": MAX_AGENT_LOOP_ITERATIONS,
+                            "is_first_run": is_first_run,
+                            "reasoning_only_streak": reasoning_only_streak,
+                            "has_continuation_notice": bool(current_notice),
+                            "routing_profile": getattr(routing_profile, "name", None),
+                            "prefer_low_latency": prefer_low_latency,
+                        },
+                    )
+                    raise
                 if len(prompt_context_result) == 4:
                     history, fitted_token_count, prompt_archive_id, prompt_metadata = prompt_context_result
                 else:
@@ -4776,7 +4981,21 @@ def _run_agent_loop(
                 except Exception as e:
                     current_span = trace.get_current_span()
                     mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
-                    logger.exception("LLM call failed for agent %s with all providers", agent.id)
+                    log_agent_error(
+                        agent,
+                        category=PersistentAgentError.Category.LLM_COMPLETION,
+                        source="api.agent.core.event_processing._run_agent_loop",
+                        message=f"LLM call failed for agent {agent.id} with all providers",
+                        exc=e,
+                        logger=logger,
+                        context={
+                            "agent_id": str(agent.id),
+                            "provider_candidates": _llm_provider_candidates_for_error_context(failover_configs),
+                            "preferred_config": _preferred_config_for_error_context(preferred_config),
+                            "run_sequence_number": run_sequence_number,
+                            "iteration": i + 1,
+                        },
+                    )
                     break
 
                 thinking_content = extract_reasoning_content(response)
@@ -4790,6 +5009,7 @@ def _run_agent_loop(
                         completion = PersistentAgentCompletion.objects.create(
                             agent=agent,
                             eval_run_id=eval_run_id,
+                            llm_tool_names=_tool_definition_names_for_completion(iteration_tools),
                             thinking_content=thinking_content,
                             **billing_snapshot,
                             **token_usage_fields,

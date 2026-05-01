@@ -37,9 +37,24 @@ export type AuditCompletionEvent = {
   cached_tokens: number | null
   llm_model: string | null
   llm_provider: string | null
+  llm_tool_names?: string[]
   thinking?: string | null
   prompt_archive?: PromptArchiveMeta | null
   tool_calls?: AuditToolCallEvent[]
+}
+
+export type AuditErrorEvent = {
+  kind: 'error'
+  id: string
+  timestamp: string | null
+  category: string
+  source: string
+  level: string
+  message: string
+  exception_class: string
+  traceback: string
+  context: Record<string, unknown>
+  completion_id: string | null
 }
 
 export type AuditMessageEvent = {
@@ -90,7 +105,7 @@ export type AuditSystemMessageEvent = {
   } | null
 }
 
-export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent
+export type AuditEvent = AuditCompletionEvent | AuditToolCallEvent | AuditMessageEvent | AuditStepEvent | AuditRunStartedEvent | AuditSystemMessageEvent | AuditErrorEvent
 export type AuditRunStartedEvent = {
   kind: 'run_started'
   run_id: string

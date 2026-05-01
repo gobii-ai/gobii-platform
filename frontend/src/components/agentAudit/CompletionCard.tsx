@@ -70,6 +70,10 @@ export function CompletionCard({
   const isOpenRouter = completion.llm_model?.toLowerCase().startsWith('openrouter')
   const openRouterUrl =
     responseId && isOpenRouter ? `${OPENROUTER_GENERATION_URL}?id=${encodeURIComponent(String(responseId))}` : null
+  const llmToolNames = useMemo(
+    () => (completion.llm_tool_names || []).filter((name): name is string => typeof name === 'string' && name.length > 0),
+    [completion.llm_tool_names],
+  )
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -101,6 +105,10 @@ export function CompletionCard({
         return 'Video Generation'
       case 'tool_search':
         return 'Tool Search'
+      case 'agent_chat_suggestion':
+        return 'Agent Chat Suggestion'
+      case 'human_input_request_matching':
+        return 'Human Input Request Matching'
       default:
         return 'Other'
     }
@@ -122,7 +130,16 @@ export function CompletionCard({
             </div>
           </>
         }
-        right={<span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">LLM</span>}
+        right={
+          <div className="flex items-center gap-2">
+            {llmToolNames.length ? (
+              <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700">
+                {llmToolNames.length} tools
+              </span>
+            ) : null}
+            <span className="rounded-full bg-sky-50 px-2 py-1 text-[11px] font-medium text-sky-700">LLM</span>
+          </div>
+        }
         collapsed={collapsed}
         onToggle={onToggle}
       />
@@ -146,6 +163,19 @@ export function CompletionCard({
               </a>
             ) : null}
           </div>
+
+          {llmToolNames.length ? (
+            <div className="mt-3 rounded-lg bg-slate-50 px-3 py-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-700">Tools passed to LLM</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {llmToolNames.map((name) => (
+                  <span key={name} className="rounded-md bg-white px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           {archiveId ? (
             <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">

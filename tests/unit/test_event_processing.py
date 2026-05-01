@@ -10,6 +10,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.storage import FileSystemStorage
+from django.db import DatabaseError
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from unittest.mock import patch, MagicMock, ANY
@@ -24,6 +25,7 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
     _gate_send_chat_tool_for_delivery,
+    _persist_tool_call_step,
     build_prompt_context,
     _get_completed_process_run_count,
     _PreparedToolBatch,
@@ -92,6 +94,7 @@ from api.models import (
     PersistentAgentSecret,
     PersistentAgentPromptArchive,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentHumanInputRequest,
     PersistentAgentInboundWebhook,
     PersistentAgentSystemStep,
@@ -2368,6 +2371,8 @@ class PromptContextBuilderTests(TestCase):
             for entry in passed_tools
             if isinstance(entry, dict)
         ]
+        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
+        self.assertEqual(completion.llm_tool_names, tool_names)
         self.assertNotIn("enable_database", tool_names)
         self.assertIn("sqlite_batch", tool_names)
 
@@ -4201,6 +4206,38 @@ class HumanInboundGenerationTests(TestCase):
 
         mock_process.assert_not_called()
 
+    def test_process_agent_events_task_logs_task_quota_error(self):
+        exc = ValidationError({"quota": "Task quota exceeded. You have no remaining task credits."})
+
+        with patch("api.agent.tasks.process_events.process_agent_events", side_effect=exc):
+            process_agent_events_task.push_request(id="quota-task", delivery_info={})
+            try:
+                with self.assertRaises(ValidationError):
+                    process_agent_events_task.run(str(self.agent.id))
+            finally:
+                process_agent_events_task.pop_request()
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertEqual(error.source, "api.agent.tasks.process_events.process_agent_events_task")
+        self.assertEqual(error.context["task_id"], "quota-task")
+
+    @patch("api.agent.tasks.process_events.switch_is_active", return_value=False)
+    def test_process_agent_cron_trigger_logs_task_quota_error(self, _mock_switch):
+        exc = ValidationError({"quota": "Task quota exceeded. You have no remaining task credits."})
+
+        with patch("api.agent.tasks.process_events.process_agent_events", side_effect=exc):
+            process_agent_cron_trigger_task.push_request(id="quota-cron", delivery_info={})
+            try:
+                process_agent_cron_trigger_task.run(str(self.agent.id), "* * * * *")
+            finally:
+                process_agent_cron_trigger_task.pop_request()
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
+        self.assertEqual(error.source, "api.agent.tasks.process_events.process_agent_cron_trigger_task")
+        self.assertEqual(error.context["task_id"], "quota-cron")
+
 
 @tag("batch_event_processing")
 class OrchestratorHumanInputInterruptTests(TestCase):
@@ -4302,6 +4339,74 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(usage.get("total_tokens"), 0)
         self.assertEqual(get_consumed_human_inbound_generation(self.agent.id), 0)
         self.assertEqual(get_human_inbound_generation(self.agent.id), generation)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.LLM_COMPLETION)
+        self.assertEqual(error.exception_class, "RuntimeError")
+        self.assertEqual(error.context["iteration"], 1)
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_prompt_construction_failure_records_error(
+        self,
+        mock_build_prompt,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.side_effect = RuntimeError("template exploded")
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), self.assertRaises(RuntimeError):
+            _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=4)
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.PROMPT_CONSTRUCTION)
+        self.assertEqual(error.exception_class, "RuntimeError")
+        self.assertEqual(error.context["iteration"], 1)
+        self.assertEqual(error.context["run_sequence_number"], 4)
+
+    def test_tool_persistence_failure_records_error(self):
+        with patch(
+            "api.models.PersistentAgentToolCall.objects.create",
+            side_effect=DatabaseError("tool call insert failed"),
+        ):
+            step = _persist_tool_call_step(
+                self.agent,
+                "sqlite_query",
+                {"sql": "select 1"},
+                "ok",
+                42,
+                "complete",
+                None,
+                None,
+                lambda step_kwargs: None,
+                lambda created_step: None,
+            )
+
+        self.assertIsNone(step)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TOOL_PERSISTENCE)
+        self.assertEqual(error.exception_class, "DatabaseError")
+        self.assertEqual(error.context["tool_name"], "sqlite_query")
+        self.assertEqual(error.context["param_keys"], ["sql"])
+        self.assertEqual(error.context["execution_duration_ms"], 42)
 
     @patch("api.agent.core.event_processing.run_completion")
     def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):

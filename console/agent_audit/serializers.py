@@ -11,6 +11,7 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentPromptArchive,
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
@@ -138,9 +139,26 @@ def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: 
         "cached_tokens": completion.cached_tokens,
         "llm_model": completion.llm_model,
         "llm_provider": completion.llm_provider,
+        "llm_tool_names": completion.llm_tool_names or [],
         "thinking": completion.thinking_content,
         "prompt_archive": serialize_prompt_meta(prompt_archive),
         "tool_calls": tool_calls or [],
+    }
+
+
+def serialize_error(error: PersistentAgentError) -> dict:
+    return {
+        "kind": "error",
+        "id": str(error.id),
+        "timestamp": _dt_to_iso(error.created_at),
+        "category": error.category,
+        "source": error.source,
+        "level": error.level,
+        "message": error.message or "",
+        "exception_class": error.exception_class or "",
+        "traceback": error.traceback or "",
+        "context": error.context or {},
+        "completion_id": str(error.completion_id) if error.completion_id else None,
     }
 
 

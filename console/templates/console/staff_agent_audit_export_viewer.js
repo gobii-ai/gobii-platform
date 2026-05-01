@@ -154,6 +154,7 @@
       container.appendChild(makePill("Total: " + total));
       container.appendChild(makePill("Completions: " + (counts.completions || 0), "completion"));
       container.appendChild(makePill("Messages: " + (counts.messages || 0), "message"));
+      container.appendChild(makePill("Errors: " + (counts.errors || 0), "error"));
     }
 
     function renderCompletionCard(item) {
@@ -317,10 +318,56 @@
       return card;
     }
 
+    function renderErrorCard(item) {
+      const error = item.data;
+      const card = document.createElement("article");
+      card.className = "card error";
+
+      const head = document.createElement("div");
+      head.className = "card-head";
+
+      const title = document.createElement("h3");
+      title.className = "card-title";
+      title.textContent = "Error - " + (error.category || "OTHER");
+      head.appendChild(title);
+
+      const stamp = document.createElement("p");
+      stamp.className = "stamp";
+      stamp.textContent = formatTime(error.timestamp);
+      head.appendChild(stamp);
+
+      card.appendChild(head);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.appendChild(makePill("Error", "error"));
+      meta.appendChild(makePill("Level: " + (error.level || "ERROR"), "error"));
+      if (error.source) {
+        meta.appendChild(makePill("Source: " + error.source, "error"));
+      }
+      if (error.exception_class) {
+        meta.appendChild(makePill("Exception: " + error.exception_class, "error"));
+      }
+      card.appendChild(meta);
+
+      if (error.message) {
+        card.appendChild(makeAlwaysExpandedPre("Message", error.message));
+      }
+      if (error.context && Object.keys(error.context).length) {
+        card.appendChild(makePre("Context", error.context));
+      }
+      if (error.traceback) {
+        card.appendChild(makePre("Traceback", error.traceback));
+      }
+
+      return card;
+    }
+
     function buildTimelineItems(data) {
       const items = [];
       const completions = Array.isArray(data.completions) ? data.completions : [];
       const messages = Array.isArray(data.messages) ? data.messages : [];
+      const errors = Array.isArray(data.errors) ? data.errors : [];
 
       completions.forEach((completion) => {
         items.push({
@@ -340,6 +387,15 @@
         });
       });
 
+      errors.forEach((error) => {
+        items.push({
+          kind: "error",
+          id: error.id,
+          timestamp: error.timestamp,
+          data: error,
+        });
+      });
+
       return items;
     }
 
@@ -355,7 +411,7 @@
       if (!items.length) {
         const empty = document.createElement("p");
         empty.className = "empty";
-        empty.textContent = "No completion or message events found in this export.";
+        empty.textContent = "No completion, message, or error events found in this export.";
         list.appendChild(empty);
         return;
       }
@@ -365,6 +421,8 @@
           list.appendChild(renderCompletionCard(item));
         } else if (item.kind === "message") {
           list.appendChild(renderMessageCard(item));
+        } else if (item.kind === "error") {
+          list.appendChild(renderErrorCard(item));
         }
       });
     }
@@ -387,7 +445,8 @@
       const exportedAt = formatTime(auditData.exported_at);
       const completionCount = auditData.counts && auditData.counts.completions ? auditData.counts.completions : 0;
       const messageCount = auditData.counts && auditData.counts.messages ? auditData.counts.messages : 0;
-      summary.textContent = "Generated " + exportedAt + " - " + completionCount + " completions - " + messageCount + " messages";
+      const errorCount = auditData.counts && auditData.counts.errors ? auditData.counts.errors : 0;
+      summary.textContent = "Generated " + exportedAt + " - " + completionCount + " completions - " + messageCount + " messages - " + errorCount + " errors";
     }
 
     renderTimeline(auditData);

@@ -21,6 +21,10 @@ from django.db import transaction
 from django.core.exceptions import ValidationError
 
 from config.redis_client import get_redis_client
+from api.services.agent_error_logging import (
+    log_task_quota_exceeded,
+    validation_error_messages,
+)
 from api.services.owner_execution_pause import (
     is_owner_execution_paused,
     resolve_agent_owner,
@@ -46,23 +50,7 @@ logger = logging.getLogger(__name__)
 
 
 def _is_task_quota_error(exc: ValidationError) -> bool:
-    messages: list[str] = []
-
-    try:
-        if isinstance(getattr(exc, "message_dict", None), dict):
-            for value in exc.message_dict.values():
-                if isinstance(value, (list, tuple)):
-                    messages.extend(str(item) for item in value)
-                else:
-                    messages.append(str(value))
-    except Exception:
-        # Swallow parsing issues; we'll fall back to generic matching
-        pass
-
-    try:
-        messages.extend(str(m) for m in getattr(exc, "messages", []))
-    except Exception:
-        pass
+    messages = validation_error_messages(exc)
 
     combined = " ".join(messages).lower()
     return "task quota exceeded" in combined or "task credits" in combined
@@ -242,6 +230,16 @@ def process_agent_events_task(
             inbound_generation=inbound_generation,
             worker_pid=current_worker_pid,
         )
+    except ValidationError as exc:
+        if _is_task_quota_error(exc):
+            log_task_quota_exceeded(
+                persistent_agent_id,
+                exc,
+                source="api.agent.tasks.process_events.process_agent_events_task",
+                logger=logger,
+                task_id=getattr(self.request, "id", None),
+            )
+        raise
     finally:
         set_current_eval_routing_profile(None)
         # Ensure queued flag clears even if processing short-circuits,
@@ -467,6 +465,13 @@ def process_agent_cron_trigger_task(self, persistent_agent_id: str, cron_express
         
     except ValidationError as exc:
         if _is_task_quota_error(exc):
+            log_task_quota_exceeded(
+                persistent_agent_id,
+                exc,
+                source="api.agent.tasks.process_events.process_agent_cron_trigger_task",
+                logger=logger,
+                task_id=getattr(self.request, "id", None),
+            )
             logger.info(
                 "Skipping cron trigger for agent %s due to task quota: %s",
                 persistent_agent_id,

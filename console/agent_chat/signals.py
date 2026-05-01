@@ -18,6 +18,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentSecret,
@@ -30,6 +31,7 @@ from api.services.signup_preview import transition_agent_to_signup_preview_waiti
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
     serialize_completion,
+    serialize_error,
     serialize_message,
     serialize_step,
     serialize_tool_call,
@@ -509,6 +511,17 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
         _broadcast_audit_event(str(instance.agent_id), audit_payload)
     except Exception:
         logger.debug("Failed to broadcast audit completion %s", getattr(instance, "id", None), exc_info=True)
+
+
+@receiver(post_save, sender=PersistentAgentError)
+def broadcast_new_error(sender, instance: PersistentAgentError, created: bool, **kwargs):
+    if not created:
+        return
+    try:
+        audit_payload = serialize_error(instance)
+        _broadcast_audit_event(str(instance.agent_id), audit_payload)
+    except Exception:
+        logger.debug("Failed to broadcast audit error %s", getattr(instance, "id", None), exc_info=True)
 
 
 @receiver(post_save, sender=PersistentAgent)

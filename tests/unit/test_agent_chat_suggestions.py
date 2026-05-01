@@ -14,6 +14,7 @@ from api.models import (
     CommsChannel,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentCompletion,
     PersistentAgentConversation,
     PersistentAgentMessage,
     build_web_agent_address,
@@ -196,6 +197,10 @@ class AgentChatSuggestionsAPITests(TestCase):
         self.assertIn(f"Current user name: {self.user.username}", combined_prompt)
         self.assertIn("Do not use or mention the user's name or the agent's name", combined_prompt)
         self.assertIn("Do not mention tool calls, tools, steps, or internal agent mechanics", combined_prompt)
+        self.assertEqual(
+            _mock_log_completion.call_args.kwargs["completion_type"],
+            PersistentAgentCompletion.CompletionType.AGENT_CHAT_SUGGESTION,
+        )
 
 
 @tag("batch_agent_chat")

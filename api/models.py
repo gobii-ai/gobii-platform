@@ -11102,6 +11102,8 @@ class PersistentAgentCompletion(models.Model):
         VIDEO_GENERATION = ("video_generation", "Video Generation")
         TOOL_SEARCH = ("tool_search", "Tool Search")
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
+        AGENT_CHAT_SUGGESTION = ("agent_chat_suggestion", "Agent Chat Suggestion")
+        HUMAN_INPUT_REQUEST_MATCHING = ("human_input_request_matching", "Human Input Request Matching")
         OTHER = ("other", "Other")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -11144,6 +11146,11 @@ class PersistentAgentCompletion(models.Model):
     cached_tokens = models.IntegerField(null=True, blank=True)
     llm_model = models.CharField(max_length=256, null=True, blank=True)
     llm_provider = models.CharField(max_length=128, null=True, blank=True)
+    llm_tool_names = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Tool function names included in the LLM request for this completion.",
+    )
     thinking_content = models.TextField(
         null=True,
         blank=True,
@@ -11215,6 +11222,57 @@ class PersistentAgentCompletion(models.Model):
 
     def __str__(self):
         return f"Completion[{self.completion_type}] {self.llm_model or 'unknown'} @ {self.created_at}"
+
+
+class PersistentAgentError(models.Model):
+    """Database-backed error event tied to a persistent agent."""
+
+    class Category(models.TextChoices):
+        LLM_COMPLETION = "LLM_COMPLETION", "LLM Completion"
+        TASK_QUOTA_EXCEEDED = "TASK_QUOTA_EXCEEDED", "Task Quota Exceeded"
+        PROMPT_CONSTRUCTION = "PROMPT_CONSTRUCTION", "Prompt Construction"
+        TOOL_PERSISTENCE = "TOOL_PERSISTENCE", "Tool Persistence"
+        CREDIT_FAILURE = "CREDIT_FAILURE", "Credit Failure"
+        OTHER = "OTHER", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="errors",
+        help_text="Persistent agent this error belongs to.",
+    )
+    completion = models.ForeignKey(
+        "PersistentAgentCompletion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="errors",
+        help_text="Completion associated with this error, when available.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    category = models.CharField(
+        max_length=64,
+        choices=Category.choices,
+        default=Category.OTHER,
+        help_text="Broad error category for filtering and audit display.",
+    )
+    source = models.CharField(max_length=256, help_text="Code path that recorded this error.")
+    level = models.CharField(max_length=16, default="ERROR", help_text="Server log level used for this error.")
+    message = models.TextField(blank=True)
+    exception_class = models.CharField(max_length=256, blank=True)
+    traceback = models.TextField(blank=True)
+    context = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "-created_at"], name="pa_error_recent_idx"),
+            models.Index(fields=["category"], name="pa_error_category_idx"),
+        ]
+
+    def __str__(self):
+        return f"Error[{self.category}] {self.source} @ {self.created_at}"
 
 
 class PersistentAgentStep(models.Model):

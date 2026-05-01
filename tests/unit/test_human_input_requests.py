@@ -32,6 +32,7 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    PersistentAgentCompletion,
     PersistentAgentConversation,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
@@ -1125,12 +1126,14 @@ class HumanInputRequestTests(TestCase):
             {"type": "function", "function": {"name": "resolve_human_input_requests"}},
         )
 
+    @patch("api.agent.comms.human_input_requests.log_agent_completion")
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_llm_resolves_multiple_requests_with_mixed_option_and_text(
         self,
         mock_run_completion,
         mock_get_summarization_llm_config,
+        mock_log_completion,
     ):
         first_request = self._create_request(
             question="What's our next foodie destination?",
@@ -1183,6 +1186,10 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(
             second_request.resolution_source,
             PersistentAgentHumanInputRequest.ResolutionSource.LLM_EXTRACTION,
+        )
+        self.assertEqual(
+            mock_log_completion.call_args.kwargs["completion_type"],
+            PersistentAgentCompletion.CompletionType.HUMAN_INPUT_REQUEST_MATCHING,
         )
 
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")

@@ -11,11 +11,13 @@ from django.utils import timezone
 from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentMessage,
     PersistentAgentStep,
 )
 from console.agent_audit.serializers import (
     serialize_completion,
+    serialize_error,
     serialize_message,
     serialize_prompt_meta,
     serialize_tool_call,
@@ -156,6 +158,12 @@ def _iter_serialized_messages(agent: PersistentAgent, chunk_size: int = DEFAULT_
         yield serialize_message(message)
 
 
+def _iter_serialized_errors(agent: PersistentAgent, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterable[dict[str, Any]]:
+    queryset = PersistentAgentError.objects.filter(agent=agent).order_by("-created_at", "-id")
+    for error in queryset.iterator(chunk_size=chunk_size):
+        yield serialize_error(error)
+
+
 def _write_json_bytes(file_obj: BinaryIO, value: str) -> None:
     file_obj.write(value.encode("utf-8"))
 
@@ -175,6 +183,7 @@ def write_agent_audit_export_json(
     counts = {
         "completions": PersistentAgentCompletion.objects.filter(agent=agent).count(),
         "messages": PersistentAgentMessage.objects.filter(owner_agent=agent).count(),
+        "errors": PersistentAgentError.objects.filter(agent=agent).count(),
     }
     agent_payload = {
         "id": str(agent.id),
@@ -204,6 +213,15 @@ def write_agent_audit_export_json(
                 _write_json_bytes(file_obj, ",")
             _write_json_value(file_obj, payload)
             first_completion = False
+    _write_json_bytes(file_obj, "]")
+
+    _write_json_bytes(file_obj, ',"errors":[')
+    first_error = True
+    for error_payload in _iter_serialized_errors(agent, chunk_size=chunk_size):
+        if not first_error:
+            _write_json_bytes(file_obj, ",")
+        _write_json_value(file_obj, error_payload)
+        first_error = False
     _write_json_bytes(file_obj, "]")
 
     _write_json_bytes(file_obj, ',"messages":[')

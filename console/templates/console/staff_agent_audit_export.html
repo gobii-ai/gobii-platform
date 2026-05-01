@@ -18,6 +18,8 @@
       --completion-ink: #1d4ed8;
       --tool-soft: #fef3c7;
       --tool-ink: #a16207;
+      --error-soft: #fee2e2;
+      --error-ink: #b91c1c;
       --warn: #b91c1c;
     }
 
@@ -141,6 +143,11 @@
       background: #eff6ff;
     }
 
+    .card.error {
+      border-color: #fca5a5;
+      background: #fef2f2;
+    }
+
     .card-head {
       display: flex;
       justify-content: space-between;
@@ -192,6 +199,11 @@
     .pill.tool {
       background: var(--tool-soft);
       color: var(--tool-ink);
+    }
+
+    .pill.error {
+      background: var(--error-soft);
+      color: var(--error-ink);
     }
 
     details {
