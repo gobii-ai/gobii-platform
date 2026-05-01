@@ -2371,6 +2371,8 @@ class PromptContextBuilderTests(TestCase):
             for entry in passed_tools
             if isinstance(entry, dict)
         ]
+        completion = PersistentAgentCompletion.objects.get(agent=self.agent)
+        self.assertEqual(completion.llm_tool_names, tool_names)
         self.assertNotIn("enable_database", tool_names)
         self.assertIn("sqlite_batch", tool_names)
 

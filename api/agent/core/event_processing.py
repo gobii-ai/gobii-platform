@@ -1057,6 +1057,20 @@ def _agent_from_step(step: PersistentAgentStep) -> PersistentAgent | None:
         return None
 
 
+def _tool_definition_names_for_completion(tools: list[dict] | None) -> list[str]:
+    names: list[str] = []
+    for tool in tools or []:
+        if not isinstance(tool, dict):
+            continue
+        function = tool.get("function")
+        if not isinstance(function, dict):
+            continue
+        name = function.get("name")
+        if isinstance(name, str) and name:
+            names.append(name)
+    return names
+
+
 def _persist_tool_call_step(
     agent: "PersistentAgent",
     tool_name: str,
@@ -4995,6 +5009,7 @@ def _run_agent_loop(
                         completion = PersistentAgentCompletion.objects.create(
                             agent=agent,
                             eval_run_id=eval_run_id,
+                            llm_tool_names=_tool_definition_names_for_completion(iteration_tools),
                             thinking_content=thinking_content,
                             **billing_snapshot,
                             **token_usage_fields,

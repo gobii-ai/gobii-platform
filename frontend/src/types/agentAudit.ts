@@ -37,6 +37,7 @@ export type AuditCompletionEvent = {
   cached_tokens: number | null
   llm_model: string | null
   llm_provider: string | null
+  llm_tool_names?: string[]
   thinking?: string | null
   prompt_archive?: PromptArchiveMeta | null
   tool_calls?: AuditToolCallEvent[]

@@ -139,6 +139,7 @@ def serialize_completion(completion: PersistentAgentCompletion, prompt_archive: 
         "cached_tokens": completion.cached_tokens,
         "llm_model": completion.llm_model,
         "llm_provider": completion.llm_provider,
+        "llm_tool_names": completion.llm_tool_names or [],
         "thinking": completion.thinking_content,
         "prompt_archive": serialize_prompt_meta(prompt_archive),
         "tool_calls": tool_calls or [],

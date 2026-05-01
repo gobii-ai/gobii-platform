@@ -138,7 +138,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
-  const [collapsedEventKeys, setCollapsedEventKeys] = useState<Set<string>>(() => new Set())
+  const [expandedEventKeys, setExpandedEventKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
@@ -376,7 +376,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleToggleEventCollapse = useCallback((event: AuditEvent) => {
     const key = eventKeyFor(event)
-    setCollapsedEventKeys((current) => {
+    setExpandedEventKeys((current) => {
       const next = new Set(current)
       if (next.has(key)) {
         next.delete(key)
@@ -389,11 +389,11 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleSetAllCollapsed = useCallback(
     (collapsed: boolean) => {
-      if (!collapsed) {
-        setCollapsedEventKeys(new Set())
+      if (collapsed) {
+        setExpandedEventKeys(new Set())
         return
       }
-      setCollapsedEventKeys(new Set(filteredEvents.map((event) => eventKeyFor(event))))
+      setExpandedEventKeys(new Set(filteredEvents.map((event) => eventKeyFor(event))))
     },
     [filteredEvents],
   )
@@ -734,7 +734,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                   ? `${parsedTimestamp.getFullYear()}-${String(parsedTimestamp.getMonth() + 1).padStart(2, '0')}-${String(parsedTimestamp.getDate()).padStart(2, '0')}`
                   : null
               const eventKey = eventKeyFor(event)
-              const collapsed = collapsedEventKeys.has(eventKey)
+              const collapsed = !expandedEventKeys.has(eventKey)
               const messageRef = event.kind === 'message' ? registerMessageRef((event as AuditMessageEvent).id) : undefined
               const wrapperProps = { ...(day ? { 'data-day-marker': 'true', 'data-day': day } : {}) }
 

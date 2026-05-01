@@ -194,6 +194,7 @@ class StaffAgentAuditAPITests(TestCase):
             total_tokens=133,
             cached_tokens=11,
             response_id="resp-123",
+            llm_tool_names=["sqlite_batch", "send_email"],
             billed=True,
         )
         prompt_step = PersistentAgentStep.objects.create(
@@ -293,6 +294,7 @@ class StaffAgentAuditAPITests(TestCase):
         exported_completion = export_payload["completions"][0]
         self.assertIsNotNone(exported_completion.get("timestamp"))
         self.assertEqual(exported_completion.get("thinking"), "Reasoning trace.")
+        self.assertEqual(exported_completion.get("llm_tool_names"), ["sqlite_batch", "send_email"])
         prompt_archive = exported_completion.get("prompt_archive") or {}
         prompt_payload = prompt_archive.get("payload") or {}
         self.assertEqual(prompt_payload.get("system_prompt"), "system prompt text")

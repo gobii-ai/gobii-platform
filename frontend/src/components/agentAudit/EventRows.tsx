@@ -16,7 +16,7 @@ export function ToolCallRow({
   collapsed?: boolean
   onToggle?: () => void
 }) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const isControlled = collapsed !== undefined
   const isExpanded = isControlled ? !collapsed : expanded
   const toggle = () => {

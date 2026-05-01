@@ -11102,6 +11102,8 @@ class PersistentAgentCompletion(models.Model):
         VIDEO_GENERATION = ("video_generation", "Video Generation")
         TOOL_SEARCH = ("tool_search", "Tool Search")
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
+        AGENT_CHAT_SUGGESTION = ("agent_chat_suggestion", "Agent Chat Suggestion")
+        HUMAN_INPUT_REQUEST_MATCHING = ("human_input_request_matching", "Human Input Request Matching")
         OTHER = ("other", "Other")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -11144,6 +11146,11 @@ class PersistentAgentCompletion(models.Model):
     cached_tokens = models.IntegerField(null=True, blank=True)
     llm_model = models.CharField(max_length=256, null=True, blank=True)
     llm_provider = models.CharField(max_length=128, null=True, blank=True)
+    llm_tool_names = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Tool function names included in the LLM request for this completion.",
+    )
     thinking_content = models.TextField(
         null=True,
         blank=True,

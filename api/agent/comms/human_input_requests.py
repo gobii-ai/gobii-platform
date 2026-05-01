@@ -1350,7 +1350,7 @@ def _resolve_requests_with_llm(
         )
         log_agent_completion(
             message.owner_agent,
-            completion_type=PersistentAgentCompletion.CompletionType.OTHER,
+            completion_type=PersistentAgentCompletion.CompletionType.HUMAN_INPUT_REQUEST_MATCHING,
             response=response,
             model=model,
             provider=provider,
