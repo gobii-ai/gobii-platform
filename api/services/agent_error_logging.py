@@ -13,7 +13,7 @@ from api.models import PersistentAgent, PersistentAgentCompletion, PersistentAge
 MAX_MESSAGE_LENGTH = 4000
 MAX_TRACEBACK_LENGTH = 20000
 MAX_CONTEXT_VALUE_LENGTH = 2000
-MAX_CONTEXT_DEPTH = 4
+MAX_CONTEXT_DEPTH = 6
 MAX_CONTEXT_ITEMS = 50
 
 

@@ -2770,6 +2770,29 @@ def _get_completion_runtime_hints(response: Any) -> dict[str, Any]:
     return runtime_hints
 
 
+def _llm_provider_candidates_for_error_context(failover_configs: List[Tuple[str, str, dict]] | None) -> list[dict]:
+    candidates: list[dict] = []
+    for config in failover_configs or []:
+        try:
+            provider, model, _params = config
+        except (TypeError, ValueError):
+            candidates.append({"raw": str(config)})
+            continue
+        candidates.append({"provider": provider, "model": model})
+    return candidates
+
+
+def _preferred_config_for_error_context(preferred_config: Optional[Tuple[str, str]]) -> dict | None:
+    if not preferred_config:
+        return None
+    if isinstance(preferred_config, (list, tuple)) and len(preferred_config) >= 2:
+        return {
+            "provider": preferred_config[0],
+            "model": preferred_config[1],
+        }
+    return {"raw": str(preferred_config)}
+
+
 def _completion_with_failover(
     messages: List[dict],
     tools: List[dict],
@@ -4778,10 +4801,6 @@ def _run_agent_loop(
                 except Exception as e:
                     current_span = trace.get_current_span()
                     mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
-                    provider_candidates = [
-                        {"provider": provider, "model": model}
-                        for provider, model, _params in failover_configs
-                    ]
                     log_agent_error(
                         agent,
                         category=PersistentAgentError.Category.LLM_COMPLETION,
@@ -4791,13 +4810,8 @@ def _run_agent_loop(
                         logger=logger,
                         context={
                             "agent_id": str(agent.id),
-                            "provider_candidates": provider_candidates,
-                            "preferred_config": {
-                                "provider": preferred_config[0],
-                                "model": preferred_config[1],
-                            }
-                            if preferred_config
-                            else None,
+                            "provider_candidates": _llm_provider_candidates_for_error_context(failover_configs),
+                            "preferred_config": _preferred_config_for_error_context(preferred_config),
                             "run_sequence_number": run_sequence_number,
                             "iteration": i + 1,
                         },
