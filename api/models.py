@@ -11223,6 +11223,9 @@ class PersistentAgentError(models.Model):
     class Category(models.TextChoices):
         LLM_COMPLETION = "LLM_COMPLETION", "LLM Completion"
         TASK_QUOTA_EXCEEDED = "TASK_QUOTA_EXCEEDED", "Task Quota Exceeded"
+        PROMPT_CONSTRUCTION = "PROMPT_CONSTRUCTION", "Prompt Construction"
+        TOOL_PERSISTENCE = "TOOL_PERSISTENCE", "Tool Persistence"
+        CREDIT_FAILURE = "CREDIT_FAILURE", "Credit Failure"
         OTHER = "OTHER", "Other"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)

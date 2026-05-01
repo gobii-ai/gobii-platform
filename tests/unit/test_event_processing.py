@@ -10,6 +10,7 @@ from django.contrib import admin as django_admin
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.storage import FileSystemStorage
+from django.db import DatabaseError
 from django.test import RequestFactory, TestCase, tag, override_settings
 from django.utils import timezone
 from unittest.mock import patch, MagicMock, ANY
@@ -24,6 +25,7 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
     _gate_send_chat_tool_for_delivery,
+    _persist_tool_call_step,
     build_prompt_context,
     _get_completed_process_run_count,
     _PreparedToolBatch,
@@ -4339,6 +4341,70 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(error.category, PersistentAgentError.Category.LLM_COMPLETION)
         self.assertEqual(error.exception_class, "RuntimeError")
         self.assertEqual(error.context["iteration"], 1)
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_prompt_construction_failure_records_error(
+        self,
+        mock_build_prompt,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_kanban,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.side_effect = RuntimeError("template exploded")
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), self.assertRaises(RuntimeError):
+            _run_agent_loop(self.agent, is_first_run=False, run_sequence_number=4)
+
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.PROMPT_CONSTRUCTION)
+        self.assertEqual(error.exception_class, "RuntimeError")
+        self.assertEqual(error.context["iteration"], 1)
+        self.assertEqual(error.context["run_sequence_number"], 4)
+
+    def test_tool_persistence_failure_records_error(self):
+        with patch(
+            "api.models.PersistentAgentToolCall.objects.create",
+            side_effect=DatabaseError("tool call insert failed"),
+        ):
+            step = _persist_tool_call_step(
+                self.agent,
+                "sqlite_query",
+                {"sql": "select 1"},
+                "ok",
+                42,
+                "complete",
+                None,
+                None,
+                lambda step_kwargs: None,
+                lambda created_step: None,
+            )
+
+        self.assertIsNone(step)
+        error = PersistentAgentError.objects.get(agent=self.agent)
+        self.assertEqual(error.category, PersistentAgentError.Category.TOOL_PERSISTENCE)
+        self.assertEqual(error.exception_class, "DatabaseError")
+        self.assertEqual(error.context["tool_name"], "sqlite_query")
+        self.assertEqual(error.context["param_keys"], ["sql"])
+        self.assertEqual(error.context["execution_duration_ms"], 42)
 
     @patch("api.agent.core.event_processing.run_completion")
     def test_streaming_completion_cancels_when_generation_changes_mid_stream(self, mock_run_completion):

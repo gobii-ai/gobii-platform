@@ -178,3 +178,62 @@ def log_task_quota_exceeded(
         },
         log_exc_info=False,
     )
+
+
+def log_prompt_construction_error(
+    agent: PersistentAgent,
+    exc: BaseException,
+    *,
+    source: str,
+    logger: logging.Logger | None = None,
+    context: dict | None = None,
+) -> PersistentAgentError | None:
+    return log_agent_error(
+        agent,
+        category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
+        source=source,
+        message=f"Prompt construction failed for agent {agent.id}",
+        exc=exc,
+        logger=logger,
+        context=context,
+    )
+
+
+def log_tool_persistence_error(
+    agent: PersistentAgent,
+    exc: BaseException,
+    *,
+    source: str,
+    logger: logging.Logger | None = None,
+    completion: PersistentAgentCompletion | None = None,
+    context: dict | None = None,
+) -> PersistentAgentError | None:
+    return log_agent_error(
+        agent,
+        category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+        source=source,
+        message=f"Tool call persistence failed for agent {agent.id}",
+        exc=exc,
+        logger=logger,
+        completion=completion,
+        context=context,
+    )
+
+
+def log_credit_failure(
+    agent: PersistentAgent,
+    exc: BaseException,
+    *,
+    source: str,
+    logger: logging.Logger | None = None,
+    context: dict | None = None,
+) -> PersistentAgentError | None:
+    return log_agent_error(
+        agent,
+        category=PersistentAgentError.Category.CREDIT_FAILURE,
+        source=source,
+        message=f"Credit operation failed for agent {agent.id}",
+        exc=exc,
+        logger=logger,
+        context=context,
+    )

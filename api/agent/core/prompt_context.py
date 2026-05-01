@@ -1660,8 +1660,26 @@ def _archive_rendered_prompt(
                 tokens_saved=tokens_saved,
             )
             archive_id = archive.id
-        except Exception:
-            logger.exception("Failed to persist prompt archive metadata for agent %s", agent.id)
+        except Exception as exc:
+            from api.models import PersistentAgentError
+            from api.services.agent_error_logging import log_agent_error
+
+            log_agent_error(
+                agent,
+                category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
+                source="api.agent.core.prompt_context._archive_prompt.metadata",
+                message=f"Prompt archive metadata persistence failed for agent {agent.id}",
+                exc=exc,
+                logger=logger,
+                context={
+                    "archive_key": archive_key,
+                    "raw_bytes": len(payload_bytes),
+                    "compressed_bytes": len(compressed),
+                    "tokens_before": tokens_before,
+                    "tokens_after": tokens_after,
+                    "tokens_saved": tokens_saved,
+                },
+            )
             try:
                 default_storage.delete(archive_key)
                 logger.info("Deleted orphaned prompt archive from storage: %s", archive_key)
@@ -1675,8 +1693,23 @@ def _archive_rendered_prompt(
             len(compressed),
         )
         return archive_key, len(payload_bytes), len(compressed), archive_id
-    except Exception:
-        logger.exception("Failed to archive prompt for agent %s", agent.id)
+    except Exception as exc:
+        from api.models import PersistentAgentError
+        from api.services.agent_error_logging import log_agent_error
+
+        log_agent_error(
+            agent,
+            category=PersistentAgentError.Category.PROMPT_CONSTRUCTION,
+            source="api.agent.core.prompt_context._archive_prompt",
+            message=f"Prompt archive persistence failed for agent {agent.id}",
+            exc=exc,
+            logger=logger,
+            context={
+                "tokens_before": tokens_before,
+                "tokens_after": tokens_after,
+                "tokens_saved": tokens_saved,
+            },
+        )
         return None, None, None, None
 
 

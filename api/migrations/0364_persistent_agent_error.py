@@ -22,6 +22,9 @@ class Migration(migrations.Migration):
                         choices=[
                             ("LLM_COMPLETION", "LLM Completion"),
                             ("TASK_QUOTA_EXCEEDED", "Task Quota Exceeded"),
+                            ("PROMPT_CONSTRUCTION", "Prompt Construction"),
+                            ("TOOL_PERSISTENCE", "Tool Persistence"),
+                            ("CREDIT_FAILURE", "Credit Failure"),
                             ("OTHER", "Other"),
                         ],
                         default="OTHER",
