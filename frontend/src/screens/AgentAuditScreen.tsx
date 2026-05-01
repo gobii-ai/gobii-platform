@@ -35,6 +35,10 @@ function eventKeyFor(event: AuditEvent): string {
   return `${event.kind}:${id ?? 'unknown'}`
 }
 
+function isEventCollapsedByDefault(event: AuditEvent): boolean {
+  return event.kind !== 'message'
+}
+
 function getTargetMessageId(
   messages: AuditMessageEvent[],
   direction: 'prev' | 'next',
@@ -138,7 +142,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
-  const [expandedEventKeys, setExpandedEventKeys] = useState<Set<string>>(() => new Set())
+  const [eventCollapseOverrideKeys, setEventCollapseOverrideKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
@@ -376,7 +380,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleToggleEventCollapse = useCallback((event: AuditEvent) => {
     const key = eventKeyFor(event)
-    setExpandedEventKeys((current) => {
+    setEventCollapseOverrideKeys((current) => {
       const next = new Set(current)
       if (next.has(key)) {
         next.delete(key)
@@ -389,11 +393,13 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
 
   const handleSetAllCollapsed = useCallback(
     (collapsed: boolean) => {
-      if (collapsed) {
-        setExpandedEventKeys(new Set())
-        return
-      }
-      setExpandedEventKeys(new Set(filteredEvents.map((event) => eventKeyFor(event))))
+      setEventCollapseOverrideKeys(
+        new Set(
+          filteredEvents
+            .filter((event) => isEventCollapsedByDefault(event) !== collapsed)
+            .map((event) => eventKeyFor(event)),
+        ),
+      )
     },
     [filteredEvents],
   )
@@ -734,7 +740,9 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                   ? `${parsedTimestamp.getFullYear()}-${String(parsedTimestamp.getMonth() + 1).padStart(2, '0')}-${String(parsedTimestamp.getDate()).padStart(2, '0')}`
                   : null
               const eventKey = eventKeyFor(event)
-              const collapsed = !expandedEventKeys.has(eventKey)
+              const collapsed = eventCollapseOverrideKeys.has(eventKey)
+                ? !isEventCollapsedByDefault(event)
+                : isEventCollapsedByDefault(event)
               const messageRef = event.kind === 'message' ? registerMessageRef((event as AuditMessageEvent).id) : undefined
               const wrapperProps = { ...(day ? { 'data-day-marker': 'true', 'data-day': day } : {}) }
 
