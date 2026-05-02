@@ -71,6 +71,52 @@ def _parse_cursor(raw: str | None) -> tuple[int, str] | None:
         return None
 
 
+def _clean_file_snapshot(raw_files) -> list[dict[str, str]]:
+    if not isinstance(raw_files, list):
+        return []
+    files: list[dict[str, str]] = []
+    for item in raw_files:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get("path") or "").strip()
+        if not path:
+            continue
+        label = str(item.get("label") or "").strip()
+        files.append({"path": path[:1024], "label": label[:255]})
+    return files
+
+
+def _clean_message_snapshot(raw_messages) -> list[dict[str, str]]:
+    if not isinstance(raw_messages, list):
+        return []
+    messages: list[dict[str, str]] = []
+    for item in raw_messages:
+        if not isinstance(item, dict):
+            continue
+        message_id = str(item.get("messageId") or item.get("message_id") or "").strip()
+        if not message_id:
+            continue
+        label = str(item.get("label") or "").strip()
+        messages.append({"messageId": message_id, "label": label[:255]})
+    return messages
+
+
+def _snapshot_files_from_plan_snapshot(snapshot) -> list[dict[str, str]]:
+    return [
+        {"path": item.path[:1024], "label": (item.label or "")[:255]}
+        for item in getattr(snapshot, "files", ())
+        if getattr(item, "path", None)
+    ]
+
+
+def _snapshot_messages_from_plan_snapshot(snapshot) -> list[dict[str, str]]:
+    return [
+        {"messageId": item.message_id, "label": (item.label or "")[:255]}
+        for item in getattr(snapshot, "messages", ())
+        if getattr(item, "message_id", None)
+    ]
+
+
 def ensure_plan_baseline_event(agent: PersistentAgent) -> PersistentAgentKanbanEvent | None:
     """Create a baseline plan event when steps exist but no events are persisted yet."""
     if not agent or not agent.id:
@@ -103,6 +149,8 @@ def ensure_plan_baseline_event(agent: PersistentAgent) -> PersistentAgentKanbanE
                     "todo_count": snapshot.todo_count,
                     "doing_count": snapshot.doing_count,
                     "done_count": snapshot.done_count,
+                    "snapshot_files": _snapshot_files_from_plan_snapshot(snapshot),
+                    "snapshot_messages": _snapshot_messages_from_plan_snapshot(snapshot),
                 },
             )
             if not created:
@@ -156,7 +204,7 @@ def persist_plan_event(agent: PersistentAgent, payload: dict) -> PersistentAgent
 
     snapshot = payload.get("snapshot") or {}
     changes = payload.get("changes") or []
-    if not changes or not snapshot:
+    if not snapshot:
         return None
 
     display_text = (payload.get("displayText") or "Plan updated").strip() or "Plan updated"
@@ -165,6 +213,8 @@ def persist_plan_event(agent: PersistentAgent, payload: dict) -> PersistentAgent
     todo_count = _coerce_int(snapshot.get("todoCount"))
     doing_count = _coerce_int(snapshot.get("doingCount"))
     done_count = _coerce_int(snapshot.get("doneCount"))
+    snapshot_files = _clean_file_snapshot(snapshot.get("files"))
+    snapshot_messages = _clean_message_snapshot(snapshot.get("messages"))
 
     try:
         with transaction.atomic():
@@ -177,6 +227,8 @@ def persist_plan_event(agent: PersistentAgent, payload: dict) -> PersistentAgent
                 todo_count=todo_count,
                 doing_count=doing_count,
                 done_count=done_count,
+                snapshot_files=snapshot_files,
+                snapshot_messages=snapshot_messages,
             )
 
             title_rows: list[PersistentAgentKanbanEventTitle] = []

@@ -1529,8 +1529,23 @@ def serialize_persisted_plan_event(env: PlanEnvelope, agent_name: str) -> dict:
         "todoTitles": titles_by_status["todo"],
         "doingTitles": titles_by_status["doing"],
         "doneTitles": titles_by_status["done"],
-        "files": [],
-        "messages": [],
+        "files": [
+            {
+                "path": item.get("path"),
+                "label": item.get("label"),
+                "downloadUrl": _plan_file_download_url(event.agent_id, item.get("path")),
+            }
+            for item in (event.snapshot_files or [])
+            if isinstance(item, dict) and item.get("path")
+        ],
+        "messages": [
+            {
+                "messageId": item.get("messageId"),
+                "label": item.get("label"),
+            }
+            for item in (event.snapshot_messages or [])
+            if isinstance(item, dict) and item.get("messageId")
+        ],
     }
 
     return {

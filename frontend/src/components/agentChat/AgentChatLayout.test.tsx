@@ -535,9 +535,21 @@ describe('AgentChatLayout upgrade modal gating', () => {
       files: [],
       messages: [],
     }
-    const { rerender } = renderAgentChatLayout({ agentId: 'agent-1', planSnapshot: emptyPlan })
+    const { rerender } = renderAgentChatLayout({ agentId: 'agent-1', planSnapshot: initialPlan })
 
     fireEvent.click(screen.getByTestId('banner-plan-button'))
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-1"
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planSnapshot={emptyPlan}
+      />,
+    )
+
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
 
     rerender(
@@ -644,6 +656,6 @@ describe('AgentChatLayout upgrade modal gating', () => {
     fireEvent.click(screen.getByTestId('banner-plan-button'))
 
     expect(screen.getByTestId('mobile-sheet-Plan')).toHaveAttribute('data-tone', 'plan')
-    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
   })
 })
