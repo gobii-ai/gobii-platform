@@ -131,24 +131,28 @@ def get_user_primary_sms_number(user) -> Optional[UserPhoneNumber]:
     return phone_number
 
 
-def _is_us_phone_number(phone_number: str) -> bool:
+def _normalize_us_phone_number(phone_number: str) -> Optional[str]:
     try:
         from phonenumbers import (
             NumberParseException,
+            PhoneNumberFormat,
+            format_number,
             is_valid_number,
             parse,
             region_code_for_number,
         )
     except ImportError:
         logger.warning("phonenumbers is unavailable; leaving Twilio riskCheck enabled.")
-        return False
+        return None
 
     try:
         parsed = parse((phone_number or "").strip(), None)
     except NumberParseException:
-        return False
+        return None
 
-    return is_valid_number(parsed) and region_code_for_number(parsed) == "US"
+    if not is_valid_number(parsed) or region_code_for_number(parsed) != "US":
+        return None
+    return format_number(parsed, PhoneNumberFormat.E164)
 
 
 def should_disable_twilio_risk_check(to_number: str, owner_user=None) -> bool:
@@ -158,10 +162,10 @@ def should_disable_twilio_risk_check(to_number: str, owner_user=None) -> bool:
     this first-party owner-contact path.
     """
     owner_user_id = getattr(owner_user, "id", None)
-    normalized_to = (to_number or "").strip()
-    if not owner_user_id or not normalized_to:
+    if not owner_user_id:
         return False
-    if not _is_us_phone_number(normalized_to):
+    normalized_to = _normalize_us_phone_number(to_number)
+    if not normalized_to:
         return False
     return UserPhoneNumber.objects.filter(
         user_id=owner_user_id,

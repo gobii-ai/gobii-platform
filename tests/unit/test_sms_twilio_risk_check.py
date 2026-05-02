@@ -56,6 +56,26 @@ class TwilioRiskCheckTests(TestCase):
         self.assertEqual(kwargs["risk_check"], sms.TWILIO_RISK_CHECK_DISABLE)
 
     @patch("util.sms.Client")
+    def test_send_sms_disables_risk_check_for_formatted_verified_us_owner_number(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+        user = User.objects.create_user(username="owner", email="owner@example.com")
+        UserPhoneNumber.objects.create(
+            user=user,
+            phone_number="+14155552671",
+            is_verified=True,
+        )
+
+        sms.send_sms(
+            to_number="+1 (415) 555-2671",
+            from_number="+12025550123",
+            body="Hello",
+            owner_user=user,
+        )
+
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["risk_check"], sms.TWILIO_RISK_CHECK_DISABLE)
+
+    @patch("util.sms.Client")
     def test_send_sms_keeps_risk_check_default_for_unregistered_us_number(self, mock_client_cls):
         client = self._mock_twilio_client(mock_client_cls)
         user = User.objects.create_user(username="owner", email="owner@example.com")
