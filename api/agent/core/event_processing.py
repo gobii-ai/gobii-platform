@@ -124,7 +124,7 @@ from ..tools.sqlite_agent_config import (
     apply_sqlite_agent_config_updates,
     seed_sqlite_agent_config,
 )
-from ..tools.sqlite_skills import apply_sqlite_skill_updates, seed_sqlite_skills
+from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.file_str_replace import execute_file_str_replace
 from ..tools.plan import execute_update_plan
@@ -379,15 +379,6 @@ def _has_continuation_signal(text: str) -> bool:
     return any(phrase in lower_text for phrase in CONTINUATION_PHRASES)
 
 
-def _has_open_plan_work(agent: PersistentAgent) -> bool:
-    """Return True when the runtime plan still has todo/doing work for the agent."""
-    PlanCard = apps.get_model("api", "PersistentAgentKanbanCard")
-    return PlanCard.objects.filter(
-        assigned_agent=agent,
-        status__in=("todo", "doing"),
-    ).exists()
-
-
 def _remove_canonical_continuation_phrase(text: str) -> tuple[str, bool]:
     if not text:
         return text, False
@@ -441,17 +432,12 @@ def _should_imply_continue(
     has_canonical_continuation: bool,
     has_other_tool_calls: bool,
     has_explicit_sleep: bool,
-    has_open_plan_work: bool = False,
-    has_natural_continuation_signal: bool = False,
 ) -> bool:
     if has_explicit_sleep:
         return False
     if has_canonical_continuation or has_other_tool_calls:
         return True
-    # Safety valve: if the model language clearly indicates ongoing work and
-    # the plan still has open steps, keep the loop alive even without the
-    # canonical continuation token.
-    return has_open_plan_work and has_natural_continuation_signal
+    return False
 
 
 class _CanonicalContinuationStreamFilter:
@@ -1692,6 +1678,16 @@ def _execute_tool_call_runtime(
     ), updated_tools
 
 
+def _tool_result_is_success(result: Any) -> bool:
+    if isinstance(result, dict):
+        status = str(result.get("status", "")).strip().lower()
+        if status in {"error", "failed", "failure"}:
+            return False
+        if result.get("error") and status not in {"ok", "success"}:
+            return False
+    return True
+
+
 def _execute_prepared_tool_call(
     agent: PersistentAgent,
     prepared: _PreparedToolExecution,
@@ -1713,6 +1709,8 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
             )
+            if _tool_result_is_success(result):
+                refresh_skills_for_tool(agent, prepared.tool_name)
     except Exception as exc:
         logger.exception(
             "Agent %s: tool %s failed (call_id=%s)",
@@ -5141,7 +5139,6 @@ def _run_agent_loop(
                 implied_send = False
                 tool_calls = list(raw_tool_calls)
                 implied_stop_after_send = False  # Track if implied send should force stop
-                implied_send_message_text = ""
                 runtime_hints = _get_completion_runtime_hints(response)
                 selected_model_allows_implied_send = bool(
                     runtime_hints.get("allow_implied_send", True)
@@ -5155,26 +5152,11 @@ def _run_agent_loop(
                 if message_text and not has_explicit_send:
                     # Default: STOP. Agent must explicitly request continuation with "CONTINUE_WORK_SIGNAL".
                     # This is safer—agent won't keep running unexpectedly.
-                    has_natural_continuation_signal = _has_continuation_signal(raw_message_text)
-                    has_open_plan_work = _has_open_plan_work(agent)
                     implied_will_continue = _should_imply_continue(
                         has_canonical_continuation=has_canonical_continuation,
                         has_other_tool_calls=has_other_tool_calls,
                         has_explicit_sleep=has_explicit_sleep,
-                        has_open_plan_work=has_open_plan_work,
-                        has_natural_continuation_signal=has_natural_continuation_signal,
                     )
-                    if (
-                        implied_will_continue
-                        and has_open_plan_work
-                        and has_natural_continuation_signal
-                        and not has_canonical_continuation
-                        and not has_other_tool_calls
-                    ):
-                        logger.info(
-                            "Agent %s: implied send continuing due to open plan work + continuation signal.",
-                            agent.id,
-                        )
                     if implied_send_allowed:
                         implied_call, implied_error = _build_implied_send_tool_call(
                             agent,
@@ -5186,7 +5168,6 @@ def _run_agent_loop(
                     if implied_call:
                         implied_send = True
                         implied_stop_after_send = not implied_will_continue  # Stop unless continuation phrase
-                        implied_send_message_text = message_text
                         tool_calls = [implied_call] + tool_calls
                         logger.info(
                             "Agent %s: treating message content as implied %s send.",
@@ -5450,19 +5431,6 @@ def _run_agent_loop(
                     and not followup_required
                     and last_explicit_continue is None
                 ):
-                    # Re-check against persisted plan/message state before stopping.
-                    # This prevents premature sleep when initial implied-continuation inference
-                    # was too conservative but the delivered text clearly signals ongoing work.
-                    if (
-                        implied_send_message_text
-                        and _has_open_plan_work(agent)
-                        and _has_continuation_signal(implied_send_message_text)
-                    ):
-                        logger.info(
-                            "Agent %s: implied send stop overridden due to open plan work + continuation signal.",
-                            agent.id,
-                        )
-                        continue
                     logger.info(
                         "Agent %s: implied send without continuation phrase; auto-sleeping.",
                         agent.id,

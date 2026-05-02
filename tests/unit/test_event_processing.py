@@ -22,6 +22,7 @@ from allauth.account.models import EmailAddress
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
     _completion_with_failover,
+    _execute_prepared_tool_call,
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
     _gate_send_chat_tool_for_delivery,
@@ -100,6 +101,7 @@ from api.models import (
     PersistentAgentSystemStep,
     PersistentAgentSystemMessage,
     PersistentAgentToolCall,
+    PersistentAgentSystemSkillState,
     PromptConfig,
     TaskCredit,
     UserBilling,
@@ -295,7 +297,10 @@ class PromptContextBuilderTests(TestCase):
                 tools=["sqlite_batch"],
                 instructions=f"instructions for skill {idx}",
             )
-            PersistentAgentSkill.objects.filter(id=skill.id).update(updated_at=now + timedelta(minutes=idx))
+            PersistentAgentSkill.objects.filter(id=skill.id).update(
+                updated_at=now + timedelta(minutes=idx),
+                last_used_at=now + timedelta(hours=idx),
+            )
 
         with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
              patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
@@ -311,6 +316,61 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("Skill: prompt-skill-2 (v1)", content)
         self.assertNotIn("Skill: prompt-skill-1 (v1)", content)
         self.assertNotIn("Skill: prompt-skill-0 (v1)", content)
+        self.assertNotIn("System Skill: Runtime Planning\nKey:", content)
+        self.assertIn("Omitted skills due to prompt limit:", content)
+        self.assertIn("- prompt-skill-1", content)
+        self.assertIn("- prompt-skill-0", content)
+        self.assertIn("- System Skill: Runtime Planning (runtime_planning)", content)
+
+    def test_prompt_includes_default_runtime_planning_system_skill_when_limit_allows(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.standard_skill_prompt_limit = 1
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+
+        self.assertIn("<agent_skills>", content)
+        self.assertIn("System Skill: Runtime Planning", content)
+        self.assertIn("Use `update_plan` to track steps", content)
+
+    def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="update_plan",
+            tool_params={"plan": [{"step": "Check source", "status": "doing"}]},
+            exec_params={"plan": [{"step": "Check source", "status": "doing"}]},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-plan",
+            explicit_continue=None,
+            inferred_continue=True,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:update_plan",
+        )
+
+        outcome = _execute_prepared_tool_call(
+            self.agent,
+            prepared,
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertEqual(outcome.result["status"], "ok")
+        state = PersistentAgentSystemSkillState.objects.get(
+            agent=self.agent,
+            skill_key="runtime_planning",
+        )
+        self.assertIsNotNone(state.last_used_at)
+        self.assertEqual(state.usage_count, 1)
 
     def test_prompt_omits_skill_section_when_skill_prompt_limit_is_zero(self):
         config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
@@ -338,6 +398,8 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertNotIn("<agent_skills>", content)
         self.assertNotIn("Skill: hidden-skill (v1)", content)
+        self.assertNotIn("System Skill: Runtime Planning", content)
+        self.assertNotIn("Use `update_plan` to track steps", content)
 
     def _build_org_agent_web_interaction(self, *, org_slug: str, member_email: str, is_org_member: bool):
         org = Organization.objects.create(
@@ -610,7 +672,6 @@ class PromptContextBuilderTests(TestCase):
                 self.assertIn("after they finish signup", system_content)
                 self.assertNotIn("## Planning Mode", system_content)
                 self.assertNotIn("## REQUIRED: First-Run Welcome", system_content)
-                self.assertIn("## Then charter + runtime plan + everything else", system_content)
                 self.assertIn(f"<charter>{GENERIC_STARTER_CHARTER}</charter>", next(
                     m for m in context if m["role"] == "user"
                 )["content"])
@@ -4344,7 +4405,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
     @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
     @patch("api.agent.core.event_processing.build_prompt_context")
@@ -4353,7 +4413,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         mock_build_prompt,
         _mock_tools,
         _mock_seed_config,
-        _mock_seed_kanban,
         _mock_seed_skills,
         _mock_burn_control,
         mock_pending_settings,

@@ -12,9 +12,22 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import F, Q
+from django.utils import timezone
 
-from api.models import GlobalSecret, PersistentAgentSecret, PersistentAgentSkill
+from api.models import (
+    GlobalSecret,
+    PersistentAgentKanbanCard,
+    PersistentAgentSecret,
+    PersistentAgentSkill,
+    PersistentAgentSystemSkillState,
+)
+from api.agent.system_skills.registry import get_system_skill_definition
+from api.agent.system_skills.service import (
+    ensure_default_system_skills_enabled,
+    get_enabled_system_skill_states,
+    refresh_system_skills_for_tool,
+)
 from api.services.skill_analytics import (
     SKILL_ORIGIN_FORKED_FROM_GLOBAL,
     infer_agent_skill_origin,
@@ -65,6 +78,16 @@ class _SQLiteSkillRow:
     tools: tuple[str, ...]
     secrets: tuple[dict[str, str], ...]
     instructions: str
+
+
+@dataclass(frozen=True)
+class _PromptSkillEntry:
+    rendered: str
+    last_used_at: object
+    fallback_at: object
+    label: str
+    sort_name: str
+    omitted_name: str
 
 
 def seed_sqlite_skills(agent) -> Optional[AgentSkillsSnapshot]:
@@ -319,7 +342,11 @@ def get_latest_skill_versions(agent) -> list[PersistentAgentSkill]:
 
     return sorted(
         latest_by_name.values(),
-        key=lambda row: row.updated_at,
+        key=lambda row: (
+            row.last_used_at is not None,
+            row.last_used_at or row.updated_at,
+            row.updated_at,
+        ),
         reverse=True,
     )
 
@@ -424,62 +451,191 @@ def _classify_skill_secret_requirements(
     return required_labels, pending_labels, missing_labels
 
 
+def _render_saved_skill_for_prompt(skill: PersistentAgentSkill, secret_status_sets) -> str:
+    tools = normalize_skill_tool_ids(skill.tools)
+    tool_text = ", ".join(tools) if tools else "(none)"
+    description = (skill.description or "").strip() or "(no description)"
+    try:
+        normalized_secrets = normalize_skill_secret_requirements(skill.secrets)
+        required_secrets, pending_secrets, missing_secrets = _classify_skill_secret_requirements(
+            normalized_secrets,
+            secret_status_sets,
+        )
+        required_secret_text = ", ".join(required_secrets) if required_secrets else "(none)"
+    except ValueError as exc:
+        required_secret_text = f"(invalid: {exc})"
+        pending_secrets = []
+        missing_secrets = []
+    instructions = (skill.instructions or "").strip()
+    if not instructions:
+        instructions = "(no instructions)"
+    lines = [
+        f"Skill: {skill.name} (v{skill.version})",
+        f"Description: {description}",
+        f"Tools: {tool_text}",
+        f"Required secrets: {required_secret_text}",
+    ]
+    if pending_secrets:
+        lines.append(f"Pending secrets: {', '.join(pending_secrets)}")
+        lines.append(
+            "Pending secrets were already requested. Follow up with the user instead of requesting them again."
+        )
+    if missing_secrets:
+        lines.append(f"Missing secrets: {', '.join(missing_secrets)}")
+        lines.append(
+            "If you need these to use the skill, request them with `secure_credentials_request` using the listed type/key details."
+        )
+    lines.extend(
+        [
+            "Instructions:",
+            instructions,
+        ]
+    )
+    return "\n".join(lines)
+
+
+def _format_current_plan_state(agent) -> str:
+    cards = list(
+        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
+        .only("title", "status", "priority", "created_at")
+        .order_by("-priority", "created_at")
+    )
+    if not cards:
+        return "Current plan: none"
+
+    groups = {
+        PersistentAgentKanbanCard.Status.DOING: [],
+        PersistentAgentKanbanCard.Status.TODO: [],
+        PersistentAgentKanbanCard.Status.DONE: [],
+    }
+    for card in cards:
+        if card.status in groups:
+            groups[card.status].append(card.title)
+
+    lines = [
+        "Current plan:",
+        f"- Doing: {len(groups[PersistentAgentKanbanCard.Status.DOING])}",
+        f"- Todo: {len(groups[PersistentAgentKanbanCard.Status.TODO])}",
+        f"- Done: {len(groups[PersistentAgentKanbanCard.Status.DONE])}",
+    ]
+    for label, status in (
+        ("Doing", PersistentAgentKanbanCard.Status.DOING),
+        ("Todo", PersistentAgentKanbanCard.Status.TODO),
+        ("Done", PersistentAgentKanbanCard.Status.DONE),
+    ):
+        titles = groups[status]
+        if titles:
+            lines.append(f"{label}:")
+            lines.extend(f"- {title}" for title in titles[:20])
+    return "\n".join(lines)
+
+
+def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillState) -> str | None:
+    definition = get_system_skill_definition(state.skill_key)
+    if definition is None or not definition.prompt_instructions:
+        return None
+
+    tool_text = ", ".join(definition.tool_names) if definition.tool_names else "(none)"
+    lines = [
+        f"System Skill: {definition.name}",
+        f"Key: {definition.skill_key}",
+        f"Tools: {tool_text}",
+        "Instructions:",
+        definition.prompt_instructions.strip(),
+    ]
+    if definition.skill_key == "runtime_planning":
+        lines.extend(["", _format_current_plan_state(agent)])
+    return "\n".join(lines)
+
+
+def _prompt_skill_sort_key(entry: _PromptSkillEntry):
+    return (
+        entry.last_used_at is not None,
+        entry.last_used_at or entry.fallback_at,
+        entry.fallback_at,
+        entry.label,
+    )
+
+
 def format_recent_skills_for_prompt(agent, limit: int = 3) -> str:
-    """Format top-N recently updated skills for a high-priority prompt section."""
+    """Format the top skills by use recency for a high-priority prompt section."""
+    ensure_default_system_skills_enabled(agent)
     if limit <= 0:
         return ""
 
-    latest = get_latest_skill_versions(agent)[:limit]
-    if not latest:
-        return ""
-
     secret_status_sets = _get_skill_secret_status_sets(agent)
-    sections: list[str] = []
-    for skill in latest:
-        tools = normalize_skill_tool_ids(skill.tools)
-        tool_text = ", ".join(tools) if tools else "(none)"
-        description = (skill.description or "").strip() or "(no description)"
-        try:
-            normalized_secrets = normalize_skill_secret_requirements(skill.secrets)
-            required_secrets, pending_secrets, missing_secrets = _classify_skill_secret_requirements(
-                normalized_secrets,
-                secret_status_sets,
+    entries: list[_PromptSkillEntry] = []
+
+    for skill in get_latest_skill_versions(agent):
+        entries.append(
+            _PromptSkillEntry(
+                rendered=_render_saved_skill_for_prompt(skill, secret_status_sets),
+                last_used_at=skill.last_used_at,
+                fallback_at=skill.updated_at,
+                label=f"skill:{skill.name}",
+                sort_name=skill.name,
+                omitted_name=skill.name,
             )
-            required_secret_text = ", ".join(required_secrets) if required_secrets else "(none)"
-        except ValueError as exc:
-            required_secret_text = f"(invalid: {exc})"
-            pending_secrets = []
-            missing_secrets = []
-        instructions = (skill.instructions or "").strip()
-        if not instructions:
-            instructions = "(no instructions)"
-        lines = [
-            f"Skill: {skill.name} (v{skill.version})",
-            f"Description: {description}",
-            f"Tools: {tool_text}",
-            f"Required secrets: {required_secret_text}",
-        ]
-        if pending_secrets:
-            lines.append(f"Pending secrets: {', '.join(pending_secrets)}")
-            lines.append(
-                "Pending secrets were already requested. Follow up with the user instead of requesting them again."
-            )
-        if missing_secrets:
-            lines.append(f"Missing secrets: {', '.join(missing_secrets)}")
-            lines.append(
-                "If you need these to use the skill, request them with `secure_credentials_request` using the listed type/key details."
-            )
-        lines.extend(
-            [
-                "Instructions:",
-                instructions,
-            ]
-        )
-        sections.append(
-            "\n".join(lines)
         )
 
-    return "\n\n".join(sections)
+    for state in get_enabled_system_skill_states(agent):
+        definition = get_system_skill_definition(state.skill_key)
+        if definition is None:
+            continue
+        rendered = _render_system_skill_for_prompt(agent, state)
+        if not rendered:
+            continue
+        entries.append(
+            _PromptSkillEntry(
+                rendered=rendered,
+                last_used_at=state.last_used_at,
+                fallback_at=state.enabled_at,
+                label=f"system:{state.skill_key}",
+                sort_name=definition.name,
+                omitted_name=f"System Skill: {definition.name} ({definition.skill_key})",
+            )
+        )
+
+    entries.sort(key=_prompt_skill_sort_key, reverse=True)
+    included_entries = sorted(
+        entries[:limit],
+        key=lambda entry: (entry.sort_name.casefold(), entry.label),
+    )
+    omitted_entries = sorted(
+        entries[limit:],
+        key=lambda entry: (entry.sort_name.casefold(), entry.label),
+    )
+    rendered_blocks = [entry.rendered for entry in included_entries]
+    omitted = [entry.omitted_name for entry in omitted_entries]
+    if omitted:
+        omitted_lines = [
+            "Omitted skills due to prompt limit:",
+            *[f"- {name}" for name in omitted],
+            "Use `search_tools` with an exact omitted skill name or key if you need that skill again.",
+        ]
+        rendered_blocks.append("\n".join(omitted_lines))
+    return "\n\n".join(rendered_blocks)
+
+
+def refresh_skills_for_tool(agent, tool_name: str) -> list[str]:
+    normalized_tool = str(tool_name or "").strip()
+    if not normalized_tool:
+        return []
+
+    used_at = timezone.now()
+    refreshed: list[str] = []
+    latest = get_latest_skill_versions(agent)
+    for skill in latest:
+        if normalized_tool not in normalize_skill_tool_ids(skill.tools):
+            continue
+        PersistentAgentSkill.objects.filter(id=skill.id).update(
+            last_used_at=used_at,
+            usage_count=F("usage_count") + 1,
+        )
+        refreshed.append(skill.name)
+
+    refreshed.extend(refresh_system_skills_for_tool(agent, normalized_tool, used_at=used_at))
+    return refreshed
 
 
 def _read_sqlite_skills() -> tuple[Optional[list[_SQLiteSkillRow]], list[str], set[str], set[str]]:

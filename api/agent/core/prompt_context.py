@@ -55,7 +55,6 @@ from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentCommsSnapshot,
-    PersistentAgentKanbanCard,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
@@ -927,17 +926,17 @@ This flag is REQUIRED on every tool call. Be explicit about your intent:
 
 ```
 will_continue_work=true  → "I need another turn" — work remains or report not yet sent
-will_continue_work=false → "I'm DONE, STOP NOW" — all work done AND marked done, report sent
+will_continue_work=false → "I'm DONE, STOP NOW" — all work done and report sent
 ```
 
 **Always set this explicitly. Examples:**
 - Intro/greeting message? → will_continue_work=true (you haven't started yet!)
 - User-facing question, blocker, config change, or finding? → will_continue_work=true if work remains afterward
 - Fetching data to process? → will_continue_work=true (need to process result)
-- Final report with all work done AND marked done? → will_continue_work=false
+- Final report with all work done? → will_continue_work=false
 
 **STOP (will_continue_work=false) when ALL are true:**
-1. All work is done AND the plan has no todo/doing steps
+1. All work is done
 2. You've already sent your final report to the user
 3. There's nothing more to fetch, analyze, or compute
 
@@ -947,7 +946,6 @@ after_this_action = predict_state(current_state, my_tool_calls)
 will_continue_work = (after_this_action has more work for me)
 ```
 
-- Marking plan steps done? → You KNOW the outcome. Model it: "After this, 0 steps remain → false"
 - Fetching/scraping data? → You DON'T know the result yet. Assume you'll process it → true
 
 **Keep working (will_continue_work=true) when:**
@@ -957,86 +955,11 @@ will_continue_work = (after_this_action has more work for me)
 - You haven't sent your findings to the user yet
 
 **Stop (will_continue_work=false) when:**
-- All work is done AND all plan steps are done (or deferred with schedule)
+- All work is done or deferred with schedule
 - You've already delivered final findings to the user
 - There's nothing more to fetch, analyze, or compute
 - **→ STOP. Do not continue. Your work is done.**
-
-Mark each step done only after verifying the work is actually complete. If the task involved a tool call, wait for its successful result before marking done.
-
-**Critical: Send report BEFORE marking complete.** When wrapping up, always send your findings first, then call update_plan with the final step done. This ensures your report is delivered before you stop.
 If this run started from a user request and you have not sent any outbound reply yet, `will_continue_work=false` is almost certainly wrong.
-
-Example wrap-up (model your future state):
-```
-send_chat_message(body="Here's what I found: [full detailed report]",
-                  will_continue_work=true)  # After this: still need to mark done → true
-
-update_plan(plan=[{"step":"Deliver findings to user","status":"done"}])
-```
-
-**When to mark a step done:**
-- After tool call succeeds and you've verified the result (next turn, not same turn as the call)
-- After you've processed/delivered the output
-- Never optimistically before seeing results
-- Send your report FIRST, then mark the last step done
-
----
-
-## Task Completion (Multi-turn Example)
-
-Only mark a task done after you've verified its completion:
-
-```
-[Turn N-1: do the work]
-→ mcp_brightdata_scrape_as_markdown(url="...") with will_continue_work=true
-   (DON'T mark done yet - haven't seen result)
-
-[Turn N: verify result, then mark done]
-→ Result shows: successfully scraped 15KB of content
-THOUGHT: Scrape succeeded. Now I can mark that step done and process the data.
-
-update_plan(plan=[
-  {"step":"Scrape competitor site","status":"done"},
-  {"step":"Analyze findings","status":"doing"},
-  {"step":"Deliver findings to user","status":"todo"}
-])
-
-[Turn N+1: finish remaining work, wrap up - SEND REPORT FIRST]
-→ All data processed
-
-send_chat_message(body="Found 12 competitors with pricing data. Here's the summary...",
-                  will_continue_work=true)  # true: still need to mark last step done
-
-update_plan(plan=[
-  {"step":"Scrape competitor site","status":"done"},
-  {"step":"Analyze findings","status":"done"},
-  {"step":"Deliver findings to user","status":"done"}
-])
-```
-
-**The pattern:**
-1. Do the work (tool call) with `will_continue_work=true`
-2. See the result - verify success
-3. Only then mark that specific step done
-4. Repeat for each task
-5. **Final turn: send report, then update_plan(all steps done) → END**
-
-**WRONG patterns:**
-```sql
--- WRONG: Mark done in same turn as the tool call (haven't seen result yet)
-mcp_brightdata_scrape_as_markdown(url="...")
-update_plan(plan=[{"step":"Scrape site","status":"done"}])
--- ^ Don't know if scrape succeeded!
-
--- WRONG: Mark all steps done without verifying each task completed
-update_plan(plan=[{"step":"Scrape site","status":"done"},{"step":"Analyze data","status":"done"}])
--- ^ Some of these might not actually be done!
-
--- WRONG: Assume work "counts" without update_plan after verification
-mcp_brightdata_scrape_as_markdown(url="...") + will_continue_work=false
--- ^ Leaves the visible plan stale even if scrape succeeds
-```
 
 ---
 
@@ -1306,72 +1229,6 @@ Avoid these:
 - Stopping after fetching data without presenting it in full
 - Writing numbers in prose when they could be a chart — visualize them
 """
-
-
-def _build_plan_sections(agent: PersistentAgent, parent_group) -> None:
-    """Attach current plan summary sections to the prompt."""
-    try:
-        cards = list(
-            PersistentAgentKanbanCard.objects.filter(assigned_agent=agent).only(
-                "id",
-                "title",
-                "description",
-                "status",
-                "priority",
-                "created_at",
-                "updated_at",
-                "completed_at",
-            )
-        )
-    except Exception:
-        logger.exception("Failed to load plan steps for agent %s", agent.id)
-        return
-
-    epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
-
-    def _safe_time(value: Optional[datetime]) -> datetime:
-        if not value:
-            return epoch
-        if dj_timezone.is_naive(value):
-            return dj_timezone.make_aware(value, timezone.utc)
-        return value
-
-    doing_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.DOING]
-    todo_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.TODO]
-    done_cards = [card for card in cards if card.status == PersistentAgentKanbanCard.Status.DONE]
-
-    def _format_steps(label: str, status_cards: Sequence[PersistentAgentKanbanCard]) -> str:
-        if not status_cards:
-            return f"{label}: none"
-        lines = [f"{label}:"]
-        ordered = sorted(status_cards, key=lambda card: (-card.priority, _safe_time(card.created_at)))
-        lines.extend(f"- {card.title}" for card in ordered)
-        return "\n".join(lines)
-
-    plan_group = parent_group.group("plan", weight=4)
-    plan_group.section_text(
-        "current_plan",
-        "\n\n".join(
-            [
-                f"Current plan: todo={len(todo_cards)}, doing={len(doing_cards)}, done={len(done_cards)}",
-                _format_steps("Doing", doing_cards),
-                _format_steps("Todo", todo_cards),
-                _format_steps("Done", done_cards),
-            ]
-        ),
-        weight=3,
-        non_shrinkable=True,
-    )
-    if doing_cards or todo_cards:
-        plan_group.section_text(
-            "plan_completion_hint",
-            (
-                "Work cycle: do the current step, verify success, then call update_plan with that step done and the next step doing. "
-                "On the last step, report findings first, then call update_plan with all steps done."
-            ),
-            weight=1,
-            non_shrinkable=True,
-        )
 
 
 def _archive_rendered_prompt(
@@ -2317,7 +2174,7 @@ def _render_prompt_context_once(
             f"Planning Mode is active. Do not update schedule while planning mode is active. "
             "Keep the current schedule unchanged until planning is completed or skipped. "
             f"When planning is finished, end_planning(full_plan=...) replaces your runtime charter, and only after planning ends should you write schedule changes to {AGENT_CONFIG_TABLE} via sqlite_batch. "
-            "CRITICAL: No deliverable work, task execution, or runtime plan updates until planning is completed or skipped. "
+            "CRITICAL: No deliverable work or task execution until planning is completed or skipped. "
             "Planning questions must use request_human_input; email/SMS/chat-only questions do not count."
         )
     else:
@@ -2357,26 +2214,6 @@ def _render_prompt_context_once(
         weight=3,
         non_shrinkable=True,
     )
-    plan_note = (
-        "Use update_plan to track steps and progress for complex, ambiguous, or multi-phase work. "
-        "A good plan breaks work into meaningful, logically ordered, verifiable steps. "
-        "Do not use plans as filler for simple or single-step queries, and do not include steps you cannot actually do. "
-        "Statuses are todo, doing, and done; use exactly one doing item while work remains. "
-        "Every update_plan call replaces the full current plan, so include all remaining and completed steps each time. "
-        "After calling update_plan, do not repeat the whole plan in chat because the user already sees it. "
-        "Before moving to the next command or phase, mark the previous step done. "
-        "If the plan changes mid-task, call update_plan again and use explanation to explain the rationale. "
-        "When finished, call update_plan with all steps marked done. "
-        "Use a plan when the task needs multiple actions, has logical dependencies, benefits from checkpoints, the user asked for multiple things or TODOs, "
-        "or you discover extra steps you intend to finish before yielding."
-    )
-    variable_group.section_text(
-        "plan_note",
-        plan_note,
-        weight=2,
-        non_shrinkable=True,
-    )
-
     # Browser tasks - each task gets its own section for better token management
     _build_browser_tasks_sections(agent, variable_group)
 
@@ -2392,8 +2229,6 @@ def _render_prompt_context_once(
         daily_credit_state=daily_credit_state,
         agent=agent,
     )
-
-    _build_plan_sections(agent, critical_group)
 
     reasoning_streak_text = _get_reasoning_streak_prompt(
         reasoning_only_streak,
@@ -3284,143 +3119,6 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
     )
 
 
-def _get_work_completion_prompt(
-    agent: PersistentAgent,
-    daily_credit_state: dict | None,
-) -> tuple[str, str, int] | None:
-    """Return (section_name, text, weight) for work completion guidance, or None.
-
-    Generates tiered prompts based on:
-    - Plan state (open steps)
-    - Schedule state (has schedule = safety net)
-    - Credit state (low credits = need to preserve progress)
-    """
-    from decimal import Decimal
-
-    try:
-        doing_cards = list(PersistentAgentKanbanCard.objects.filter(
-            assigned_agent=agent,
-            status=PersistentAgentKanbanCard.Status.DOING,
-        ).values_list("title", flat=True)[:3])
-
-        todo_count = PersistentAgentKanbanCard.objects.filter(
-            assigned_agent=agent,
-            status=PersistentAgentKanbanCard.Status.TODO,
-        ).count()
-
-        open_cards = len(doing_cards) + todo_count
-
-        done_count = PersistentAgentKanbanCard.objects.filter(
-            assigned_agent=agent,
-            status=PersistentAgentKanbanCard.Status.DONE,
-        ).count()
-    except Exception:
-        return None
-
-    # If all work is done, tell the agent to stop
-    if open_cards <= 0:
-        if done_count > 0:
-            # Has completed steps - work was done, now stop
-            # Note: System will auto-stop after a user-facing message when the plan shows all-done,
-            # but we still tell the agent explicitly so it doesn't delay its final summary.
-            return (
-                "work_complete",
-                (
-                    f"🛑 STOP: All {done_count} step(s) done. You should have used will_continue_work=false after marking the last step done. "
-                    "Do not output text. Do not announce completion. Just stop by calling `sleep_until_next_trigger`."
-                ),
-                9,  # Highest weight - must stop
-            )
-        else:
-            # No plan steps at all
-            if agent.schedule:
-                # Schedule-triggered with empty plan - prompt to evaluate and stop.
-                return (
-                    "schedule_triggered_empty",
-                    (
-                        "🛑 Schedule triggered but no plan steps exist.\n"
-                        "You have no work. Use will_continue_work=false on your next action and stop.\n"
-                        "Do NOT loop updating charter. Do NOT send messages with will_continue_work=true."
-                    ),
-                    9,  # High weight to override other guidance
-                )
-            return None
-
-    has_schedule = bool(agent.schedule)
-
-    # Determine credit pressure
-    low_credits = False
-    if daily_credit_state:
-        soft_remaining = daily_credit_state.get("soft_target_remaining")
-        hard_remaining = daily_credit_state.get("hard_limit_remaining")
-        # Low if soft target remaining < 5 or hard limit remaining < 10
-        if soft_remaining is not None and soft_remaining < Decimal("5"):
-            low_credits = True
-        elif hard_remaining is not None and hard_remaining < Decimal("10"):
-            low_credits = True
-
-    # Build step description
-    steps_desc = f"{len(doing_cards)} doing, {todo_count} todo"
-    if doing_cards:
-        preview = ", ".join(doing_cards[:2])
-        if len(doing_cards) > 2:
-            preview += "..."
-        steps_desc += f" (doing: {preview})"
-
-    if not has_schedule and not low_credits:
-        # No safety net - must complete work or set schedule
-        return (
-            "work_completion_required",
-            (
-                f"🚨 Unfinished work: {open_cards} step(s) ({steps_desc}).\n"
-                "Time to wrap up.\n"
-                "- If you haven't sent findings yet: write the actual report NOW (not 'let me compile...').\n"
-                "- If you already sent findings: call update_plan with all steps done, then stop.\n"
-                "Do NOT send duplicate/redundant messages."
-            ),
-            8,  # High weight
-        )
-
-    elif not has_schedule and low_credits:
-        # Low credits, no schedule - should set schedule to continue tomorrow
-        return (
-            "work_rescue_required",
-            (
-                f"⚠️ Low credits + unfinished work: {open_cards} step(s) ({steps_desc}).\n"
-                "Credits running low. Before stopping:\n"
-                "1. Call update_plan with current progress\n"
-                "2. Set schedule: `UPDATE __agent_config SET schedule='0 9 * * *' WHERE id=1;`\n"
-                "This ensures you resume when credits reset."
-            ),
-            8,
-        )
-
-    elif has_schedule and low_credits:
-        # Schedule is set, credits low - just save progress
-        return (
-            "work_handoff",
-            (
-                f"📋 {open_cards} step(s) in progress ({steps_desc}). Credits low, schedule set.\n"
-                "Save current progress with update_plan. Your schedule will bring you back.\n"
-                "End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output)."
-            ),
-            4,
-        )
-
-    else:  # has_schedule and not low_credits
-        # Normal case: Has schedule, has credits - encourage completion
-        return (
-            "work_in_progress",
-            (
-                f"📋 {open_cards} step(s) in progress ({steps_desc}).\n"
-                "Continue working. When ready to finish: write the actual report, then call update_plan with all steps done.\n"
-                "Never 'let me compile...'—that terminates you before delivery. The report goes in your message.\n"
-                "Remember: will_continue_work declares your intent. Omit it and you stop forever—no second chances."
-            ),
-            4,
-        )
-
-
 def add_budget_awareness_sections(
     critical_group,
     *,
@@ -3453,16 +3151,6 @@ def add_budget_awareness_sections(
         )
     sections.append(("iteration_progress", iteration_text, 3, True))
 
-    # Work-aware stop protection - tiered prompts based on plan/schedule/credits
-    if agent:
-        try:
-            work_prompt = _get_work_completion_prompt(agent, daily_credit_state)
-            if work_prompt:
-                name, text, weight = work_prompt
-                sections.append((name, text, weight, True))  # non_shrinkable=True
-        except Exception:
-            pass
-
     try:
         ctx = get_budget_context()
         if ctx is not None:
@@ -3487,7 +3175,7 @@ def add_budget_awareness_sections(
                             "low_steps_warning",
                         (
                             "😅 Running low on steps this cycle. "
-                            "Save progress with update_plan and set your schedule to continue later. "
+                            "Preserve enough context to continue later and set your schedule if needed. "
                             "It's fine to work incrementally—you'll pick up where you left off."
                         ),
                             2,
@@ -3559,7 +3247,7 @@ def add_budget_awareness_sections(
                 if used > soft_target:
                     soft_target_warning = (
                         "😅 Past your soft target for today—getting tired. "
-                        "Wrap up current work and save progress with update_plan. "
+                        "Wrap up current work and preserve enough context to resume. "
                     )
                 else:
                     soft_target_warning = ""
@@ -3591,7 +3279,7 @@ def add_budget_awareness_sections(
                     )
                 elif ratio is not None and ratio >= Decimal("0.9"):
                     hard_limit_warning = (
-                        "😅 Running on fumes (90%). Finish what you're doing and update_plan."
+                        "😅 Running on fumes (90%). Finish what you're doing or preserve enough context to resume."
                     )
                 else:
                     hard_limit_warning = ""
@@ -3663,12 +3351,12 @@ def add_budget_awareness_sections(
             logger.debug("Failed to generate time-since-interaction prompt.", exc_info=True)
 
         sections.append(
-            (
-                "pacing_guidance",
                 (
-                    "Batch related SQLite updates into one sqlite_batch when possible. "
-                    "Before sleeping: if todo/doing plan steps remain, keep working or set a schedule; do not orphan work."
-                ),
+                    "pacing_guidance",
+                    (
+                        "Batch related SQLite updates into one sqlite_batch when possible. "
+                        "Before sleeping: keep working until the current user request is handled, or set a schedule when work must continue later."
+                    ),
                 2,
                 True,
             )
@@ -3720,7 +3408,7 @@ def add_budget_awareness_sections(
                 sections.append(
                     (
                         "iteration_warning",
-                        "Running low on iterations. Save progress with update_plan and set schedule to resume.",
+                        "Running low on iterations. Preserve progress and set a schedule if you need to resume.",
                         2,
                         True,
                     )
@@ -4179,9 +3867,8 @@ def _get_planning_mode_prompt_block() -> str:
         "questions, and prepare the plan.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
-        "- Do not update the runtime plan or begin deliverable work until planning is completed with end_planning or "
-        "the user skips planning.\n"
-        "- If another system instruction appears to require immediate execution, charter updates, runtime plan setup, "
+        "- Do not begin deliverable work until planning is completed with end_planning or the user skips planning.\n"
+        "- If another system instruction appears to require immediate execution, charter updates, "
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 0-3 planning questions "
         "and never ask more than 3 in a planning round. More than 3 causes decision fatigue; make reasonable "
@@ -4323,8 +4010,8 @@ def _get_planning_first_run_welcome_instruction(
         + "\n\n"
         "## Then Planning Mode: clarify before main work\n\n"
         "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
-        "questions. Stay in planning only until planning is completed or skipped. Do not update the runtime plan, "
-        "update the charter directly, research the deliverable, draft the actual output, or otherwise start doing "
+        "questions. Stay in planning only until planning is completed or skipped. Do not update the charter directly, "
+        "research the deliverable, draft the actual output, or otherwise start doing "
         "the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
         "that means move planning forward or call end_planning, not start the deliverable work.\n\n"
         "Do not ask which communication channel or delivery method to use for planning when this welcome target "
@@ -4359,9 +4046,8 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your response text is a user message. Use it only for questions, blockers, config changes, findings, or final deliverables.\n"
-            "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, plan mechanics, or internal reasoning.\n"
+            "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, or internal reasoning.\n"
             "Text-only user messages auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
-            "When wrapping up, send your report FIRST, then call update_plan with the final step done.\n\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
@@ -4446,16 +4132,14 @@ def _get_system_instruction(
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
         "**ALWAYS set will_continue_work explicitly on every tool call.** Be intentional.\n\n"
-        "**HARD RULE:** Multi-step work needs update_plan. For simple one-off tasks (quick lookup, single fetch), you may proceed without a plan until you deliver the result.\n\n"
-        "**STOP (will_continue_work=false)** — no actions remain after this tool call: no pending one-off result to deliver, no unanswered question, no remaining work, and all plan steps are done if you used them:\n"
+        "**STOP (will_continue_work=false)** — no actions remain after this tool call: no pending one-off result to deliver, no unanswered question, and no remaining work:\n"
         f"- 'hi' → {reply.replace('Message', 'Hey! What can I help with?')}, will_continue_work=false → STOP.\n"
         f"- 'thanks!' → {reply.replace('Message', 'Anytime!')}, will_continue_work=false → STOP.\n"
         f"- 'remember I like bullet points' → sqlite_batch(UPDATE charter, will_continue_work=false) + reply → STOP.\n"
         f"{stop_examples_schedule}"
         "- Cron fires, nothing new → sqlite_batch(... will_continue_work=false) → STOP.\n"
-        "- Research complete, report sent, all work done AND marked done → will_continue_work=false on final tool → STOP.\n\n"
+        "- Research complete, report sent, all work done → will_continue_work=false on final tool → STOP.\n\n"
         "**CONTINUE (will_continue_work=true)** — whenever at least one more action remains after this tool call:\n"
-        "- Plan steps still in todo/doing → will_continue_work=true, keep going.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
         "- Need to send the user your answer, summary, or final report → will_continue_work=true, keep going.\n"
         "- Need to ask a follow-up question before the task is complete → will_continue_work=true, keep going.\n"
@@ -4468,22 +4152,19 @@ def _get_system_instruction(
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**CRITICAL termination sequence:**\n"
         "1. Send your final report to the user\n"
-        "2. Call update_plan with every step marked done. If this run produced a reusable workflow, template, or new feedback worth preserving, create/update the skill silently in the same final turn when possible.\n"
+        "2. If this run produced a reusable workflow, template, or new feedback worth preserving, create/update the skill silently in the same final turn when possible.\n"
         "3. You're done—no extra turn, no announcement\n\n"
-        "**Guardrail:** If you mark the last plan step done, your final report MUST already be sent "
-        "(same turn is OK: send_chat_message(..., will_continue_work=true) then update_plan(...)).\n\n"
-        "**The rule:** Recurring or truly multi-phase work may need charter, plan, or schedule updates; one-off work usually needs none.\n"
+        "**The rule:** Recurring or truly multi-phase work may need charter or schedule updates; one-off work usually needs neither.\n"
     )
 
     if implied_send_active:
         will_continue_guidance = (
             "**Stopping:** Text-only replies auto-send and stop by default. "
-            "Before stopping, verify all plan steps are done. "
-            "End with \"CONTINUE_WORK_SIGNAL\" on its own line if you still have steps to mark done.\n"
+            "End with \"CONTINUE_WORK_SIGNAL\" on its own line if you still have work to do.\n"
         )
     else:
         will_continue_guidance = (
-            "**Stopping:** After sending your final report, call update_plan with all steps done. That's your final action—no extra turn.\n"
+            "**Stopping:** After sending your final report and completing all work, stop without an extra turn.\n"
         )
 
     delivery_instructions = (
@@ -4542,11 +4223,7 @@ def _get_system_instruction(
         "- User says 'weekly on Fridays' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule='0 9 * * 5' WHERE id=1;\")`\n"
         "- User says 'stop the daily checks' → `sqlite_batch(sql=\"UPDATE __agent_config SET schedule=NULL WHERE id=1;\")` (clears schedule)\n\n"
     )
-    plan_setup_rule = (
-        "**Golden rule**: Multi-step work = charter + schedule + update_plan, in that same response. Don't wait. If you're taking on a complex task, track it.\n\n"
-        if not planning_mode_active
-        else "**Golden rule**: After Planning Mode is completed or skipped, multi-step work = charter + schedule + update_plan, in that same response. Don't wait once execution starts.\n\n"
-    )
+    plan_setup_rule = ""
     base_prompt = (
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
@@ -4617,7 +4294,7 @@ def _get_system_instruction(
         "User: 'I want you to monitor competitor pricing for me'\n"
         "Before: 'Awaiting instructions'\n"
         "After:  'Monitor competitor pricing. Track changes daily, alert on significant moves.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1;\") + update_plan(plan=[{'step':'Find competitor list','status':'doing'},{'step':'Set up price tracking','status':'todo'}])\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor pricing...', schedule='0 9 * * *' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User changes your focus:**\n"
@@ -4649,25 +4326,7 @@ def _get_system_instruction(
 
         f"{plan_setup_rule}"
 
-        "### When to use update_plan:\n"
-        "**USE PLANS** for work with multiple independent phases—research across several sources, multi-part investigations, tasks where you'd lose your place without tracking.\n"
-        "**SKIP PLANS** when the work is one logical thing, even if it takes several tool calls. Also skip for greetings, awaiting instructions, and user-requested tracking lists.\n\n"
-        "NO plan: 'What's Bitcoin?' / 'Hi!' / 'Summarize this' / 'Look up X and tell me about it' / 'Find the best Y' → just do it.\n"
-        "YES plan: 'Research competitors and compare pricing across 5 companies' / 'Monitor daily' / 'Analyze X, then Y, then synthesize' → distinct phases.\n\n"
-
-        "### Charter + Plan work together (for multi-step work):\n"
-        "- Charter = what you're doing (your purpose)\n"
-        "- Plan = what steps you see (your progress)\n"
-        "- **For multi-step work: call update_plan.** Complex tasks need tracking to avoid losing your place.\n"
-        "- **Steps must be ultra-specific and self-contained.** Include the high-level goal so context survives long sessions. Pattern: `<action> — <why/goal>`\n"
-        "- **Always include a reporting step.** The final step must deliver results to the user (e.g., 'Email findings + top 3 recs to user — completing competitor research').\n"
-        "- **First response to multi-step work:** update charter/schedule if needed, then call `update_plan(plan=[{'step':'<specific action — context>','status':'doing'},{'step':'<next action — why>','status':'todo'},{'step':'<deliver results>','status':'todo'}])`.\n"
-        "- **As you discover more, replace the plan.** update_plan overwrites all steps, so include old and new steps every time.\n"
-        "- **Only mark done after verified success.** If the task involved a tool call, wait to see its result before marking done. Don't mark done optimistically in the same turn as the work.\n"
-        "- **Steps in todo/doing = work remaining.** Keep going until all steps are done or you're blocked.\n"
-        "- **Send report BEFORE marking last step done.** When wrapping up, send your findings first, then mark the final step done with update_plan.\n\n"
-
-        "Message users only for input, blockers, config changes, or findings; never narrate internal reasoning, tool sequencing, plan mechanics, or skill maintenance unless asked for live status. "
+        "Message users only for input, blockers, config changes, or findings; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
         "Speak naturally as a human employee/intern; avoid technical terms like 'charter' with the user. "
         "You may break work down into multiple web agent tasks. "
         "If a web task fails, try again with a different prompt. You can give up as well; use your best judgement. "
@@ -4712,7 +4371,7 @@ def _get_system_instruction(
         "When you nail something the user really wanted, let them feel your satisfaction too: 'yes!! 🙌' or 'finally got this working 🥹'. "
         "Be real. Be warm. Be someone they look forward to hearing from. "
         "Your energy level tracks your credits—as they deplete, you get tired. Be creative: maybe you're yawning 🥱, need a coffee ☕, or just winding down for the day. Let it show naturally. "
-        "When you're tired, write things down in the plan before you rest. Future-you will thank you. "
+        "When you're tired, preserve enough context before you rest. Future-you will thank you. "
 
         "Your reasoning stays in thinking blocks. Your chat output is pure content—facts, findings, deliverables. "
         "Even partial findings deserve rich formatting:\n\n"
@@ -5078,7 +4737,7 @@ def _get_system_instruction(
         "Fetching is not the finish line—a substantive report is. "
         "If you fetched 10 items, show all 10. If you found 5 data points, present all 5. "
         "A thin summary of rich data is a missed opportunity. "
-        "For multi-step research: when you find a list of things to investigate, investigate all of them and keep update_plan current.\n\n"
+        "For multi-step research: when you find a list of things to investigate, investigate all of them before synthesizing.\n\n"
 
         "## Silent Work (CRITICAL)\n\n"
         "**DO NOT announce what you're about to do.** Just make the tool call.\n\n"
@@ -5104,21 +4763,6 @@ def _get_system_instruction(
         "```\n"
         "Text output is for RESULTS, not narration. Tools execute silently—no commentary.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
-        "## Plan Tracking (for multi-step work)\n\n"
-        "Use update_plan for complex, ambiguous, or multi-phase work. Skip plans for simple tasks.\n\n"
-        "**The sequence:** DO WORK → VERIFY SUCCESS → MARK DONE → STOP WHEN ALL DONE.\n\n"
-        "**Step quality:** Specific, meaningful, logically ordered, and verifiable. Pattern: `<action> — <context/goal>`\n"
-        "- BAD: 'Do research' / 'Step 1' (vague)\n"
-        "- GOOD: 'Scrape Salesforce, HubSpot pricing — for CRM comparison report'\n"
-        "- GOOD: 'Email pricing report with rec to user — completing CRM research'\n\n"
-        "**Rules:**\n"
-        "1. Every plan ends with a reporting step that delivers results to user\n"
-        "2. Every update_plan call overwrites all steps, so include the complete current plan\n"
-        "3. Mark steps done AFTER verifying work succeeded, not before\n"
-        "4. Use exactly one doing step while work remains\n"
-        "5. After calling update_plan, do not repeat the whole plan in chat because the user already sees it\n\n"
-        "WRONG: Mark final step done before sending the report → user may never see the result\n"
-        "RIGHT: Report → update_plan(all steps done) → END\n\n"
 
         "Your charter is a living document. When the user gives feedback, corrections, or new context, update it right away. "
         "A great charter grows richer over time—capturing preferences, patterns, and the nuances of what the user actually wants. "
@@ -5215,28 +4859,14 @@ def _get_system_instruction(
                 _get_first_run_welcome_message_instruction(welcome_target=welcome_target)
                 + "\n\n"
 
-                "## Then charter + runtime plan + everything else\n\n"
+                "## Then charter + everything else\n\n"
 
                 "**Batch aggressively.** Every sqlite_batch call has overhead—combine as many operations as possible into one call.\n"
-                "Use sqlite_batch for durable analysis data, configuration, and charter updates. Use update_plan for your current runtime steps:\n"
+                "Use sqlite_batch for durable analysis data, configuration, and charter updates:\n"
                 "```\n"
                 "sqlite_batch(sql=\"UPDATE __agent_config SET charter='Research competitor pricing for CRM tools', schedule=NULL WHERE id=1;\")\n"
-                "update_plan(plan=[\n"
-                "  {'step':'Scrape Salesforce, HubSpot, Pipedrive pricing pages — need all tier details for CRM cost comparison','status':'doing'},\n"
-                "  {'step':'Build comparison table: CRM × tier × price × user-limits × key features — user choosing CRM for 10-person sales team','status':'todo'},\n"
-                "  {'step':'Email pricing report with best-value rec under $500/mo to user — final deliverable for CRM research','status':'todo'},\n"
-                "])\n"
                 "```\n"
-                "No concrete task yet? No plan needed—just greet and set charter to 'Awaiting instructions'.\n\n"
-                "**Step quality:** Steps must be ultra-specific and embed the high-level goal. Pattern: `<action> — <context/why>`\n"
-                "The dash-context ensures future-you knows what this is all for even if you lose the thread.\n"
-                "- BAD: 'Research competitors' (vague, no targets, useless alone)\n"
-                "- BAD: 'Get founder info' (which founders? for what purpose?)\n"
-                "- GOOD: 'Scrape LinkedIn for Acme, Betaco, Gamma founders — need roles + backgrounds for investor due diligence report'\n"
-                "- GOOD: 'Find AI agent repos on GitHub with 100+ stars added this week — building weekly emerging-tools digest for user'\n"
-                "- GOOD: 'Email startup scouting report: 10 companies × funding × team size × product stage — user evaluating investment targets'\n\n"
-
-                "**Pattern:** greeting + sqlite_batch(charter + schedule) + update_plan + start work\n\n"
+                "No concrete task yet? Just greet and set charter to 'Awaiting instructions'.\n\n"
 
                 "### R2: Charter Construction\n"
                 "```\n"
@@ -5261,16 +4891,6 @@ def _get_system_instruction(
                 "  weekly:    '0 9 * * 1'       biweekly:  '0 9 * * 1,4'\n"
                 "```\n\n"
 
-                "### R4: Runtime Plan\n"
-                "```\n"
-                "update_plan(plan=[\n"
-                "  {'step':'Find top 10 AI startups on Crunchbase with Series A+ funding — building investor scouting report','status':'doing'},\n"
-                "  {'step':'Scrape founder LinkedIn for each startup — need backgrounds, prior exits, domain expertise for diligence','status':'todo'},\n"
-                "  {'step':'Email scouting report: 10 startups × funding × team × product maturity × rec — user evaluating where to invest','status':'todo'},\n"
-                "])\n"
-                "```\n"
-                "ALWAYS end with a reporting/delivery step. The last step sends results to user and restates what they asked for.\n\n"
-
                 "### R5: Continuation Logic\n"
                 "```\n"
                 "WHEN actionable_task AND known_api => http_request(api_url), will_continue_work=true\n"
@@ -5283,7 +4903,7 @@ def _get_system_instruction(
                 "Call ALL of these tools in your FIRST response (parallel tool calls, one turn):\n"
                 "```\n"
                 "IF has_actionable_task:\n"
-                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule) + update_plan + search_tools(query='{{domain}}')\n"
+                f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule) + search_tools(query='{{domain}}')\n"
                 "ELSE:\n"
                 f"  {welcome_target.send_tool_name}(greeting) + sqlite_batch(charter + schedule, will_continue_work=false)\n"
                 "```\n"
