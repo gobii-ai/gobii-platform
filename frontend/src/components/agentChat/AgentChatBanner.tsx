@@ -29,7 +29,7 @@ type AgentChatBannerProps = {
   connectionLabel?: string
   connectionDetail?: string | null
   planSnapshot?: PlanSnapshot | null
-  planPanelMode?: 'docked' | 'floating'
+  planPanelMode?: 'docked' | 'hidden'
   onPlanOpen?: () => void
   processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
@@ -175,7 +175,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const showMobileOverflow = showShareButton || showAuditButton || showSettingsButton
   const shareLabel = shareDisabledReason || 'Invite collaborators'
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
-  const planButtonLabel = planPanelMode === 'floating' ? 'Dock plan' : 'Float plan'
+  const planButtonLabel = planPanelMode === 'hidden' ? 'Show plan' : 'Hide plan'
   const trackableShareDisabled = shareDisabled && Boolean(onBlockedShareClick)
   const trackableSettingsDisabled = settingsDisabled && Boolean(onBlockedSettingsClick)
   const previewAnalyticsEnabled = signupPreviewState !== 'none'

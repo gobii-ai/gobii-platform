@@ -10,7 +10,8 @@ from api.agent.core.prompt_context import _get_system_instruction, build_prompt_
 from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
 from api.agent.tools.request_human_input import get_request_human_input_tool
 from api.agent.tools.schedule_updater import execute_update_schedule
-from api.agent.tools.static_tools import get_static_tool_definitions
+from api.agent.tools.static_tools import PLANNING_MODE_DISABLED_TOOL_NAMES, get_static_tool_definitions
+from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from constants.feature_flags import PERSISTENT_AGENT_PLANNING_MODE
 from api.models import (
     BrowserUseAgent,
@@ -94,17 +95,31 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         self.assertEqual(result.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
 
-    def test_planning_static_tools_keep_normal_tools_and_add_end_planning(self):
+    def test_planning_static_tools_hide_execution_tools_and_add_end_planning(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
-        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False):
+        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True), patch(
+            "api.agent.tools.static_tools.AgentService.get_agents_available", return_value=2
+        ):
             names = _tool_names(get_static_tool_definitions(self.agent))
 
         self.assertIn("end_planning", names)
         self.assertIn("request_human_input", names)
-        self.assertIn("spawn_web_task", names)
+        self.assertIn("search_tools", names)
         self.assertIn("send_chat_message", names)
+        self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
+
+    def test_planning_runtime_rejects_disallowed_tools(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        for tool_name in PLANNING_MODE_DISABLED_TOOL_NAMES:
+            result, updated_tools = execute_runtime_tool_call(self.agent, tool_name=tool_name, exec_params={})
+
+            self.assertIsNone(updated_tools)
+            self.assertEqual(result["status"], "error")
+            self.assertIn("planning mode", result["message"])
 
     def test_end_planning_tool_description_requires_planning_to_finish_before_work(self):
         tool = get_end_planning_tool()
@@ -201,6 +216,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Keep planning questions focused on the user's need, scope, and desired outcome", prompt)
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
         self.assertIn("Stay in planning only until you call end_planning(full_plan=...)", prompt)
+        self.assertIn("Only planning-safe tools are available", prompt)
+        self.assertIn("update_plan, spawn_web_task, spawn_agent, request_contact_permission", prompt)
+        self.assertNotIn("Normal tools are available", prompt)
         self.assertIn("do not do substantive task work before planning ends", prompt)
         self.assertIn("no research for the deliverable", prompt)
         self.assertIn("no implementation", prompt)
@@ -300,7 +318,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         prompt = _get_system_instruction(self.agent, is_first_run=True)
 
-        self.assertIn("## Then charter + runtime plan + everything else", prompt)
+        self.assertIn("## Then charter + everything else", prompt)
         self.assertIn("### Execution Template", prompt)
         self.assertIn("search_tools(", prompt)
         self.assertNotIn("search_tools(will_continue_work=true)", prompt)

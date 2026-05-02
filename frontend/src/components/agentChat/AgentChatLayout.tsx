@@ -35,6 +35,8 @@ import type {
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
+  PlanFileDeliverable,
+  PlanMessageDeliverable,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -84,6 +86,56 @@ function timelineEventKey(event: SimplifiedTimelineItem): string {
     return `cluster:${event.entries[0].id}`
   }
   return event.cursor
+}
+
+function planTitlesByStatus(plan: PlanSnapshot | null | undefined): Record<'todo' | 'doing' | 'done', Set<string>> {
+  return {
+    todo: new Set(plan?.todoTitles ?? []),
+    doing: new Set(plan?.doingTitles ?? []),
+    done: new Set(plan?.doneTitles ?? []),
+  }
+}
+
+function filterChangedPlanSnapshot(previous: PlanSnapshot | null | undefined, current: PlanSnapshot | null | undefined): PlanSnapshot | null {
+  if (!current) {
+    return null
+  }
+
+  const previousTitles = planTitlesByStatus(previous)
+  const currentRows = {
+    todo: current.todoTitles ?? [],
+    doing: current.doingTitles ?? [],
+    done: current.doneTitles ?? [],
+  }
+  const changedTodoTitles = currentRows.todo.filter((title) => !previousTitles.todo.has(title))
+  const changedDoingTitles = currentRows.doing.filter((title) => !previousTitles.doing.has(title))
+  const changedDoneTitles = currentRows.done.filter((title) => !previousTitles.done.has(title))
+
+  const hasStepChange = changedTodoTitles.length > 0 || changedDoingTitles.length > 0 || changedDoneTitles.length > 0
+
+  const previousFileKeys = new Set((previous?.files ?? []).map((file) => `${file.path}:${file.downloadUrl ?? ''}`))
+  const changedFiles: PlanFileDeliverable[] = (current.files ?? []).filter((file) => (
+    !previousFileKeys.has(`${file.path}:${file.downloadUrl ?? ''}`)
+  ))
+  const previousMessageIds = new Set((previous?.messages ?? []).map((message) => message.messageId))
+  const changedMessages: PlanMessageDeliverable[] = (current.messages ?? []).filter((message) => (
+    !previousMessageIds.has(message.messageId)
+  ))
+
+  if (!hasStepChange && changedFiles.length === 0 && changedMessages.length === 0) {
+    return null
+  }
+
+  return {
+    todoCount: changedTodoTitles.length,
+    doingCount: changedDoingTitles.length,
+    doneCount: changedDoneTitles.length,
+    todoTitles: changedTodoTitles,
+    doingTitles: changedDoingTitles,
+    doneTitles: changedDoneTitles,
+    files: changedFiles,
+    messages: changedMessages,
+  }
 }
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -248,6 +300,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
     }>
   ) => Promise<void>
 }
+
+type PlanPanelMode = 'docked' | 'hidden'
 
 export function AgentChatLayout({
   agentFirstName,
@@ -441,9 +495,16 @@ export function AgentChatLayout({
   const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
   const [planSheetOpen, setPlanSheetOpen] = useState(false)
-  const [planPanelMode, setPlanPanelMode] = useState<'docked' | 'floating'>('docked')
-  const effectivePlanPanelMode = sidebarMode === 'gallery' ? 'floating' : planPanelMode
+  const [defaultPlanPanelMode, setDefaultPlanPanelMode] = useState<PlanPanelMode>('docked')
+  const [agentPlanPanelModes, setAgentPlanPanelModes] = useState<Record<string, PlanPanelMode>>({})
+  const [planPreviewSnapshot, setPlanPreviewSnapshot] = useState<PlanSnapshot | null>(null)
+  const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
+  const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'docked' : defaultPlanPanelMode
+  const showPlanInterface = sidebarMode !== 'gallery'
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
+  const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
+  const planPreviewTimeoutRef = useRef<number | null>(null)
+  const planPreviewExitTimeoutRef = useRef<number | null>(null)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -860,16 +921,68 @@ export function AgentChatLayout({
     previewActionsDisabled,
   ])
 
+  const setCurrentPlanPanelMode = useCallback((resolveMode: (mode: PlanPanelMode) => PlanPanelMode) => {
+    if (agentId) {
+      setAgentPlanPanelModes((modes) => {
+        const currentMode = modes[agentId] ?? 'docked'
+        const nextMode = resolveMode(currentMode)
+        if (nextMode === currentMode) {
+          return modes
+        }
+        return { ...modes, [agentId]: nextMode }
+      })
+      return
+    }
+    setDefaultPlanPanelMode((mode) => {
+      const nextMode = resolveMode(mode)
+      return nextMode === mode ? mode : nextMode
+    })
+  }, [agentId])
+
   const handleOpenPlan = useCallback(() => {
+    if (!showPlanInterface) {
+      return
+    }
     if (typeof window !== 'undefined' && window.innerWidth < 1024) {
       setPlanSheetOpen(true)
       return
     }
-    if (sidebarMode === 'gallery') {
-      return
+    setCurrentPlanPanelMode((mode) => (mode === 'docked' ? 'hidden' : 'docked'))
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+  }, [setCurrentPlanPanelMode, showPlanInterface])
+
+  useEffect(() => {
+    if (!showPlanInterface) {
+      setPlanSheetOpen(false)
+      setPlanPreviewSnapshot(null)
+      setPlanPreviewExiting(false)
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+        planPreviewTimeoutRef.current = null
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
     }
-    setPlanPanelMode((mode) => (mode === 'docked' ? 'floating' : 'docked'))
-  }, [sidebarMode])
+  }, [showPlanInterface])
+
+  useEffect(() => {
+    setPlanSheetOpen(false)
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    previousPlanStateRef.current = null
+    previousPlanSnapshotRef.current = null
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+  }, [agentId])
 
   useEffect(() => {
     const total = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) + (planSnapshot?.doneCount ?? 0)
@@ -877,16 +990,67 @@ export function AgentChatLayout({
     const previous = previousPlanStateRef.current
     previousPlanStateRef.current = { total, active }
 
+    const previousSnapshot = previousPlanSnapshotRef.current
+    previousPlanSnapshotRef.current = planSnapshot ?? null
+
     if (!previous) {
       return
     }
 
-    const startedFromNoPlan = previous.total === 0 && total > 0
-    const startedNewWorkBatch = previous.total > 0 && !previous.active && active
-    if (startedFromNoPlan || startedNewWorkBatch) {
-      setPlanPanelMode('docked')
+    if (previous.total === 0 && total > 0) {
+      setPlanPreviewSnapshot(null)
+      setPlanPreviewExiting(false)
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+        planPreviewTimeoutRef.current = null
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
+      setCurrentPlanPanelMode(() => 'docked')
+      return
     }
-  }, [planSnapshot?.doneCount, planSnapshot?.doingCount, planSnapshot?.todoCount])
+
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+
+    const changedSnapshot = filterChangedPlanSnapshot(previousSnapshot, planSnapshot)
+    if (!changedSnapshot) {
+      return
+    }
+
+    setPlanPreviewSnapshot(changedSnapshot)
+    setPlanPreviewExiting(false)
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    planPreviewTimeoutRef.current = window.setTimeout(() => {
+      setPlanPreviewExiting(true)
+      planPreviewTimeoutRef.current = null
+      planPreviewExitTimeoutRef.current = window.setTimeout(() => {
+        setPlanPreviewSnapshot(null)
+        setPlanPreviewExiting(false)
+        planPreviewExitTimeoutRef.current = null
+      }, 180)
+    }, 5000)
+  }, [planPanelMode, planSnapshot, setCurrentPlanPanelMode, showPlanInterface])
+
+  useEffect(() => {
+    return () => {
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+      }
+    }
+  }, [])
 
   const handlePlanMessageClick = useCallback((messageId: string) => {
     if (typeof document === 'undefined') {
@@ -929,6 +1093,17 @@ export function AgentChatLayout({
     taskQuota,
     viewerEmail,
   ])
+  const renderedPlanSnapshot = planPanelMode === 'docked' ? planSnapshot : planPreviewSnapshot
+  const workspacePlanMode = !showPlanInterface
+    ? 'hidden'
+    : planPanelMode === 'docked'
+      ? 'docked'
+      : planPreviewSnapshot
+        ? 'floating'
+        : 'hidden'
+  const showDesktopPlanPanel = showPlanInterface && workspacePlanMode !== 'hidden' && (
+    planPanelMode === 'docked' || Boolean(renderedPlanSnapshot)
+  )
 
   return (
     <>
@@ -958,24 +1133,24 @@ export function AgentChatLayout({
         embeddedSettingsTitle={embeddedSettingsTitle}
         onBackFromEmbeddedSettings={onBackFromEmbeddedSettings}
       />
-	      {showBanner && (
-	        <AgentChatBanner
-	          agentId={agentId}
-	          agentName={agentName || 'Agent'}
-	          agentAvatarUrl={agentAvatarUrl}
-	          agentColorHex={agentColorHex}
-	          agentEmail={agentEmail}
-	          agentSms={agentSms}
-	          auditUrl={auditUrl}
-	          isOrgOwned={agentIsOrgOwned}
-	          canManageAgent={canManageAgent}
-	          isCollaborator={isCollaborator}
-	          connectionStatus={connectionStatus}
-	          connectionLabel={connectionLabel}
+      {showBanner && (
+        <AgentChatBanner
+          agentId={agentId}
+          agentName={agentName || 'Agent'}
+          agentAvatarUrl={agentAvatarUrl}
+          agentColorHex={agentColorHex}
+          agentEmail={agentEmail}
+          agentSms={agentSms}
+          auditUrl={auditUrl}
+          isOrgOwned={agentIsOrgOwned}
+          canManageAgent={canManageAgent}
+          isCollaborator={isCollaborator}
+          connectionStatus={connectionStatus}
+          connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
-          planSnapshot={planSnapshot}
-          planPanelMode={effectivePlanPanelMode}
-          onPlanOpen={handleOpenPlan}
+          planSnapshot={showPlanInterface ? planSnapshot : null}
+          planPanelMode={planPanelMode}
+          onPlanOpen={showPlanInterface ? handleOpenPlan : undefined}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
@@ -988,21 +1163,21 @@ export function AgentChatLayout({
           shareDisabledReason={previewActionsDisabledReason}
           onBlockedShareClick={onBlockedCollaborate}
           signupPreviewState={signupPreviewState}
-	          sidebarMode={sidebarMode}
-	        >
-            {showHighPriorityBanner && highPriorityBanner ? (
-              <HighPriorityBanner
-                title={highPriorityBanner.title}
-                message={highPriorityBanner.message}
-                actionLabel={highPriorityBanner.actionLabel}
-                actionHref={highPriorityBanner.actionHref}
-                dismissible={highPriorityBannerDismissible}
-                tone={highPriorityBanner.tone}
-                onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
-              />
-            ) : null}
-          </AgentChatBanner>
-	      )}
+          sidebarMode={sidebarMode}
+        >
+          {showHighPriorityBanner && highPriorityBanner ? (
+            <HighPriorityBanner
+              title={highPriorityBanner.title}
+              message={highPriorityBanner.message}
+              actionLabel={highPriorityBanner.actionLabel}
+              actionHref={highPriorityBanner.actionHref}
+              dismissible={highPriorityBannerDismissible}
+              tone={highPriorityBanner.tone}
+              onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
+            />
+          ) : null}
+        </AgentChatBanner>
+      )}
       <AgentChatSettingsPanel
         open={settingsOpen}
         onClose={handleSettingsClose}
@@ -1040,7 +1215,7 @@ export function AgentChatLayout({
       <main className={mainClassName} data-sidebar-mode={sidebarMode}>
         <div
           id="agent-workspace-root"
-          data-plan-mode={effectivePlanPanelMode}
+          data-plan-mode={workspacePlanMode}
           style={composerPalette.cssVars}
         >
           <div className="agent-chat-workspace-main">
@@ -1285,14 +1460,19 @@ export function AgentChatLayout({
             />
           )}
           </div>
-          <div className="agent-chat-plan-frame" aria-label="Plan panel hover target">
-            <PlanPanel plan={planSnapshot} onMessageClick={handlePlanMessageClick} />
-          </div>
+          {showDesktopPlanPanel ? (
+            <div
+              className={`agent-chat-plan-frame${planPreviewExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
+              aria-label="Plan panel"
+            >
+              <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
+            </div>
+          ) : null}
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
       <AgentChatMobileSheet
-        open={planSheetOpen}
+        open={showPlanInterface && planSheetOpen}
         onClose={() => setPlanSheetOpen(false)}
         title="Plan"
         ariaLabel="Plan"

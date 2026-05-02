@@ -136,6 +136,7 @@ from ..tools.request_contact_permission import execute_request_contact_permissio
 from ..tools.request_human_input import execute_request_human_input
 from ..tools.spawn_agent import execute_spawn_agent
 from ..tools.search_tools import execute_search_tools
+from ..tools.static_tools import planning_mode_disallows_tool
 from ..tools.tool_manager import (
     execute_enabled_tool,
     auto_enable_heuristic_tools,
@@ -1610,6 +1611,11 @@ def _execute_tool_call_runtime(
     updated_tools: Optional[List[dict]] = None
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
     mock_result = mock_config.get(tool_name) if mock_config else None
+    if planning_mode_disallows_tool(agent, tool_name):
+        return {
+            "status": "error",
+            "message": f"{tool_name} is unavailable while planning mode is active. Complete or skip planning first.",
+        }, updated_tools
     if mock_result is not None:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",

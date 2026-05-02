@@ -1342,48 +1342,50 @@
     position: absolute;
     top: calc(var(--agent-chat-banner-height, 4rem) + 0.875rem);
     right: 0.875rem;
-    width: 4.5rem;
-    height: 4.5rem;
+    width: min(18.5rem, calc(100vw - 2rem));
+    max-height: calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem);
     overflow: visible;
     z-index: 9;
-  }
-
-  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame::before {
-    content: '';
-    position: absolute;
-    top: -0.25rem;
-    right: -0.25rem;
-    width: 4.75rem;
-    height: 4.75rem;
-    border-radius: 1rem;
-    background: rgba(42, 27, 78, 0.08);
-    opacity: 0;
-    transition: opacity 0.16s ease;
-  }
-
-  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame:hover::before,
-  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame:focus-within::before {
-    opacity: 1;
+    animation: agent-chat-plan-preview-in 180ms ease-out both;
   }
 
   #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame > .plan-panel {
-    position: absolute;
-    top: 0;
-    right: 0;
     width: min(18.5rem, calc(100vw - 2rem));
     max-height: calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem);
-    opacity: 0;
-    pointer-events: none;
-    transform: translateY(-0.25rem) scale(0.98);
-    transform-origin: top right;
-    transition: opacity 0.16s ease, transform 0.16s ease;
   }
 
-  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame:hover > .plan-panel,
-  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame:focus-within > .plan-panel {
+  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame--exiting {
+    animation: agent-chat-plan-preview-out 160ms ease-in both;
+  }
+}
+
+@keyframes agent-chat-plan-preview-in {
+  from {
+    opacity: 0;
+    transform: translateY(-0.4rem) scale(0.98);
+  }
+
+  to {
     opacity: 1;
-    pointer-events: auto;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes agent-chat-plan-preview-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateY(-0.25rem) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame {
+    animation: none;
   }
 }
 
