@@ -4,7 +4,6 @@ import { isClusterRenderable, transformToolCluster } from '../components/agentCh
 import { buildActionCountLabel } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import {
-  eventHasHistoricalStatus,
   eventHasLatestStatus,
 } from '../components/agentChat/statusExpansion'
 
@@ -213,13 +212,9 @@ export function collapseDetailedStatusRuns(
 
   const flush = () => {
     if (buffer.length === 0) return
-    if (buffer.some((event) => eventHasHistoricalStatus(event, targets))) {
-      const meaningful = buffer.filter(isRenderableCollapsedEvent)
-      if (meaningful.length > 0) {
-        result.push(makeCollapsedGroup(meaningful))
-      }
-    } else {
-      result.push(...buffer.filter(isRenderableCollapsedEvent))
+    const meaningful = buffer.filter(isRenderableCollapsedEvent)
+    if (meaningful.length > 0) {
+      result.push(makeCollapsedGroup(meaningful))
     }
     buffer = []
   }

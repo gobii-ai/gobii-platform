@@ -70,11 +70,43 @@ vi.mock('./ChatSidebar', () => ({
 }))
 
 vi.mock('./AgentChatBanner', () => ({
-  AgentChatBanner: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  AgentChatBanner: ({
+    children,
+    onPlanOpen,
+    planPanelMode,
+  }: {
+    children?: React.ReactNode
+    onPlanOpen?: () => void
+    planPanelMode?: string
+  }) => (
+    <div>
+      <button
+        type="button"
+        data-testid="banner-plan-button"
+        data-plan-mode={planPanelMode ?? ''}
+        onClick={() => onPlanOpen?.()}
+      >
+        Plan
+      </button>
+      {children}
+    </div>
+  ),
 }))
 
 vi.mock('./AgentChatMobileSheet', () => ({
-  AgentChatMobileSheet: () => null,
+  AgentChatMobileSheet: ({
+    open,
+    title,
+    tone,
+  }: {
+    open: boolean
+    title: string
+    tone?: string
+  }) => (
+    open ? (
+      <div data-testid={`mobile-sheet-${title}`} data-tone={tone ?? ''} />
+    ) : null
+  ),
 }))
 
 vi.mock('./AgentChatSettingsPanel', () => ({
@@ -183,6 +215,7 @@ function renderAgentChatLayout() {
   return render(
     <AgentChatLayout
       agentFirstName="Agent"
+      agentName="Agent"
       events={[]}
     />,
   )
@@ -334,6 +367,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     rerender(
       <AgentChatLayout
         agentFirstName="Agent"
+        agentName="Agent"
         events={[]}
         showEmbeddedSettings
         embeddedSettingsPanel={<div>Settings</div>}
@@ -342,5 +376,63 @@ describe('AgentChatLayout upgrade modal gating', () => {
 
     expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-mode', 'gallery')
     expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-embedded-settings', 'true')
+  })
+
+  it('toggles the desktop plan panel in non-gallery mode', () => {
+    renderAgentChatLayout()
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+    expect(screen.getByTestId('banner-plan-button')).toHaveAttribute('data-plan-mode', 'docked')
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'floating')
+    expect(screen.getByTestId('banner-plan-button')).toHaveAttribute('data-plan-mode', 'floating')
+  })
+
+  it('forces the desktop plan panel to float in gallery mode without changing stored mode', () => {
+    const { rerender } = renderAgentChatLayout()
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+
+    rerender(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        showEmbeddedSettings
+        embeddedSettingsPanel={<div>Settings</div>}
+      />,
+    )
+
+    expect(screen.getByTestId('chat-sidebar')).toHaveAttribute('data-mode', 'gallery')
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'floating')
+    expect(screen.getByTestId('banner-plan-button')).toHaveAttribute('data-plan-mode', 'floating')
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'floating')
+
+    rerender(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+      />,
+    )
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+  })
+
+  it('opens the plan sheet from the banner button on mobile', () => {
+    window.innerWidth = 500
+
+    renderAgentChatLayout()
+
+    expect(screen.queryByTestId('mobile-sheet-Plan')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+
+    expect(screen.getByTestId('mobile-sheet-Plan')).toHaveAttribute('data-tone', 'plan')
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
   })
 })

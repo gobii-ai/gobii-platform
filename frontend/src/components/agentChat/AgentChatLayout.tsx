@@ -401,6 +401,7 @@ export function AgentChatLayout({
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
+  const preEmbeddedSidebarModeRef = useRef<'collapsed' | 'list' | 'gallery' | null>(null)
   const {
     currentPlan: subscriptionPlan,
     isLoading: subscriptionLoading,
@@ -441,6 +442,7 @@ export function AgentChatLayout({
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
   const [planSheetOpen, setPlanSheetOpen] = useState(false)
   const [planPanelMode, setPlanPanelMode] = useState<'docked' | 'floating'>('docked')
+  const effectivePlanPanelMode = sidebarMode === 'gallery' ? 'floating' : planPanelMode
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
@@ -465,6 +467,7 @@ export function AgentChatLayout({
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
     if (showEmbeddedSettings && mode !== 'gallery') {
+      preEmbeddedSidebarModeRef.current = null
       setSidebarMode(mode)
       onBackFromEmbeddedSettings?.()
       return
@@ -506,8 +509,22 @@ export function AgentChatLayout({
 
   useEffect(() => {
     if (showEmbeddedSettings) {
-      setSidebarMode('gallery')
+      setSidebarMode((mode) => {
+        if (mode !== 'gallery' && preEmbeddedSidebarModeRef.current === null) {
+          preEmbeddedSidebarModeRef.current = mode
+        }
+        return 'gallery'
+      })
+      return
     }
+    setSidebarMode((mode) => {
+      const restoredMode = preEmbeddedSidebarModeRef.current
+      preEmbeddedSidebarModeRef.current = null
+      if (restoredMode && mode === 'gallery') {
+        return restoredMode
+      }
+      return mode
+    })
   }, [showEmbeddedSettings])
 
   useEffect(() => {
@@ -848,8 +865,11 @@ export function AgentChatLayout({
       setPlanSheetOpen(true)
       return
     }
+    if (sidebarMode === 'gallery') {
+      return
+    }
     setPlanPanelMode((mode) => (mode === 'docked' ? 'floating' : 'docked'))
-  }, [])
+  }, [sidebarMode])
 
   useEffect(() => {
     const total = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) + (planSnapshot?.doneCount ?? 0)
@@ -954,7 +974,7 @@ export function AgentChatLayout({
 	          connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
           planSnapshot={planSnapshot}
-          planPanelMode={planPanelMode}
+          planPanelMode={effectivePlanPanelMode}
           onPlanOpen={handleOpenPlan}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
@@ -1020,7 +1040,7 @@ export function AgentChatLayout({
       <main className={mainClassName} data-sidebar-mode={sidebarMode}>
         <div
           id="agent-workspace-root"
-          data-plan-mode={planPanelMode}
+          data-plan-mode={effectivePlanPanelMode}
           style={composerPalette.cssVars}
         >
           <div className="agent-chat-workspace-main">
