@@ -37,8 +37,8 @@ EMOJI_REPLACEMENTS = {
     "🙂": ":)",
     "😉": ";)",
     "😅": ":)",
-    "😂": "haha",
-    "🤣": "haha",
+    "😂": ":')",
+    "🤣": ":')",
     "😍": "<3",
     "❤️": "<3",
     "❤": "<3",
@@ -121,15 +121,16 @@ def normalize_sms_text(text: str) -> str:
     return "\n".join(" ".join(line.split()) for line in text.splitlines())
 
 
-def optimize_sms_for_cost(text: str) -> SmsOptimizationResult:
+def optimize_sms_for_cost(text: str, *, max_length: int | None = None) -> SmsOptimizationResult:
     original_encoding = sms_encoding(text)
     original_segments = estimate_sms_segments(text)
 
     normalized = normalize_sms_text(text)
     normalized_encoding = sms_encoding(normalized)
     normalized_segments = estimate_sms_segments(normalized)
+    normalized_within_limit = max_length is None or len(normalized) <= max_length
 
-    should_use_normalized = bool(normalized) and normalized != text and (
+    should_use_normalized = normalized_within_limit and bool(normalized) and normalized != text and (
         normalized_segments < original_segments
         or (
             original_encoding == "UCS-2"

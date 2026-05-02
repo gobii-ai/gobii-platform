@@ -185,7 +185,7 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
         logger.warning("Twilio client not configured; cannot send SMS.")
         return False
 
-    optimization = optimize_sms_for_cost(body)
+    optimization = optimize_sms_for_cost(body, max_length=settings.SMS_MAX_BODY_LENGTH)
     if optimization["changed"]:
         logger.info(
             "Normalized SMS body before Twilio send: encoding %s -> %s, segments %d -> %d.",
@@ -201,6 +201,12 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
     else:
         span.set_attribute("sms.normalized_for_gsm7", False)
     body = optimization["text"]
+    if len(body) > settings.SMS_MAX_BODY_LENGTH:
+        logger.warning(
+            "SMS body exceeds maximum length of %d characters after normalization.",
+            settings.SMS_MAX_BODY_LENGTH,
+        )
+        return False
 
     try:
         with traced("SMS send_sms - Twilio"):

@@ -29,6 +29,9 @@ class SmsEncodingTests(SimpleTestCase):
         self.assertEqual(normalized, 'Quick update - "done" :)')
         self.assertEqual(sms_encoding(normalized), "GSM-7")
 
+    def test_normalize_sms_text_replaces_laughing_emoji_with_short_gsm7_text(self):
+        self.assertEqual(normalize_sms_text("Funny 😂🤣"), "Funny :'):')")
+
     def test_optimize_sms_for_cost_switches_ucs2_to_gsm7_even_without_segment_savings(self):
         result = optimize_sms_for_cost("Quick update — done 😊")
 
@@ -47,3 +50,12 @@ class SmsEncodingTests(SimpleTestCase):
         self.assertEqual(result["text"], text)
         self.assertEqual(result["original_segments"], 1)
         self.assertEqual(result["normalized_segments"], 2)
+
+    def test_optimize_sms_for_cost_keeps_original_when_normalization_exceeds_max_length(self):
+        text = "😂" * 18
+
+        result = optimize_sms_for_cost(text, max_length=40)
+
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["text"], text)
+        self.assertGreater(len(normalize_sms_text(text)), 40)

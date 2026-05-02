@@ -148,6 +148,36 @@ class TwilioRiskCheckTests(TestCase):
         kwargs = client.messages.create.call_args.kwargs
         self.assertEqual(kwargs["body"], "Quick update - done :)")
 
+    @override_settings(SMS_MAX_BODY_LENGTH=40)
+    @patch("util.sms.Client")
+    def test_send_sms_keeps_original_when_normalized_body_exceeds_limit(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+        body = "😂" * 18
+
+        result = sms.send_sms(
+            to_number="+14155552671",
+            from_number="+12025550123",
+            body=body,
+        )
+
+        self.assertEqual(result, "SM123")
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["body"], body)
+
+    @override_settings(SMS_MAX_BODY_LENGTH=10)
+    @patch("util.sms.Client")
+    def test_send_sms_rejects_final_body_over_max_length(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+
+        result = sms.send_sms(
+            to_number="+14155552671",
+            from_number="+12025550123",
+            body="x" * 11,
+        )
+
+        self.assertFalse(result)
+        client.messages.create.assert_not_called()
+
     @patch("api.agent.comms.outbound_delivery.Analytics.track_event")
     @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="SM123")
     def test_deliver_agent_sms_passes_owner_user_to_twilio_send(
