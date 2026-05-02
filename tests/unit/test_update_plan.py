@@ -1,7 +1,7 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.agent.tools.plan import execute_update_plan
+from api.agent.tools.plan import execute_update_plan, get_update_plan_tool
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -74,6 +74,46 @@ class UpdatePlanToolTests(TestCase):
         self.assertEqual(deliverables[0].path, "/exports/report.csv")
         self.assertEqual(deliverables[0].label, "Report CSV")
         self.assertEqual(deliverables[1].message_id, self.message.id)
+
+    def test_update_plan_tool_schema_guides_deliverables_and_stopping(self):
+        tool = get_update_plan_tool()
+        params = tool["function"]["parameters"]
+        properties = params["properties"]
+
+        self.assertNotIn("explanation", properties)
+        self.assertIn("will_continue_work", properties)
+        self.assertIn("will_continue_work", params["required"])
+        self.assertIn("final file deliverables", properties["files"]["description"])
+        self.assertIn("scratch files", properties["files"]["description"])
+        self.assertIn("final message deliverables", properties["messages"]["description"])
+        self.assertIn("returned by the send tool", properties["messages"]["items"]["properties"]["message_id"]["description"])
+
+    def test_update_plan_returns_auto_sleep_hint_for_explicit_stop(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Deliver report", "status": "done"},
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIs(result["auto_sleep_ok"], True)
+
+    def test_update_plan_without_continue_flag_preserves_legacy_followup_behavior(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Deliver report", "status": "done"},
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("auto_sleep_ok", result)
 
     def test_update_plan_rejects_multiple_doing_without_changing_state(self):
         existing = PersistentAgentKanbanCard.objects.create(

@@ -66,17 +66,13 @@ def get_update_plan_tool() -> dict[str, Any]:
             "name": PLAN_TOOL_NAME,
             "description": (
                 "Updates the task plan.\n"
-                "Provide an optional explanation and a list of plan items, each with a step and status.\n"
+                "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
-                "Every call replaces the full current plan."
+                "Every call replaces the full current plan, including the deliverable references."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "explanation": {
-                        "type": "string",
-                        "description": "Optional reason for the plan update, especially when the plan changed.",
-                    },
                     "plan": {
                         "type": "array",
                         "description": "The list of steps",
@@ -96,12 +92,23 @@ def get_update_plan_tool() -> dict[str, Any]:
                     },
                     "files": {
                         "type": "array",
-                        "description": "Optional file deliverables associated with the work.",
+                        "description": (
+                            "Optional final file deliverables created during the work. Use this for user-visible artifacts "
+                            "such as reports, CSV exports, PDFs, charts, or generated documents that should remain attached "
+                            "to the completed plan. Include the complete current file deliverable list on every update; omit "
+                            "scratch files, temporary downloads, and intermediate analysis files."
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {
-                                "path": {"type": "string"},
-                                "label": {"type": "string"},
+                                "path": {
+                                    "type": "string",
+                                    "description": "Filespace path for the deliverable, e.g. /exports/report.csv.",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short user-facing label, e.g. Final CSV report.",
+                                },
                             },
                             "required": ["path"],
                             "additionalProperties": False,
@@ -109,23 +116,50 @@ def get_update_plan_tool() -> dict[str, Any]:
                     },
                     "messages": {
                         "type": "array",
-                        "description": "Optional message deliverables associated with the work.",
+                        "description": (
+                            "Optional final message deliverables associated with the work. Use this after sending a final "
+                            "report, answer, or important user-facing summary so the completed plan links to that delivered "
+                            "message. Include the complete current message deliverable list on every update; do not add routine "
+                            "progress updates, greetings, or internal/status messages."
+                        ),
                         "items": {
                             "type": "object",
                             "properties": {
-                                "message_id": {"type": "string"},
-                                "label": {"type": "string"},
+                                "message_id": {
+                                    "type": "string",
+                                    "description": "ID returned by the send tool for the delivered user-facing message.",
+                                },
+                                "label": {
+                                    "type": "string",
+                                    "description": "Short user-facing label, e.g. Final report message.",
+                                },
                             },
                             "required": ["message_id"],
                             "additionalProperties": False,
                         },
                     },
+                    "will_continue_work": {
+                        "type": "boolean",
+                        "description": "REQUIRED. true = continue after this plan update; false = stop because all work is done or deferred.",
+                    },
                 },
-                "required": ["plan"],
+                "required": ["plan", "will_continue_work"],
                 "additionalProperties": False,
             },
         },
     }
+
+
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes"}:
+            return True
+        if normalized in {"0", "false", "no"}:
+            return False
+    return None
 
 
 def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
@@ -140,7 +174,6 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     plan_items = validation["plan"]
     file_items = validation["files"]
     message_items = validation["messages"]
-    explanation = str(params.get("explanation") or "").strip()
 
     changes: list[PlanStepChange] = []
     with transaction.atomic():
@@ -273,8 +306,8 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
             PersistentAgentPlanDeliverable.objects.bulk_create(deliverables)
 
     snapshot = build_plan_snapshot(agent)
-    _broadcast_plan_changes(agent, changes, snapshot, explanation=explanation)
-    return {
+    _broadcast_plan_changes(agent, changes, snapshot)
+    result = {
         "status": "ok",
         "message": "Plan updated.",
         "step_count": len(plan_items),
@@ -282,6 +315,10 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
         "doing_count": snapshot.doing_count,
         "done_count": snapshot.done_count,
     }
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
+    if will_continue_work is not None:
+        result["auto_sleep_ok"] = not will_continue_work
+    return result
 
 
 def build_plan_snapshot(agent) -> PlanSnapshot:
@@ -435,10 +472,10 @@ def _default_file_label(path: str) -> str:
     return name or path or "File"
 
 
-def _broadcast_plan_changes(agent, changes: Sequence[PlanStepChange], snapshot: PlanSnapshot, *, explanation: str = "") -> None:
+def _broadcast_plan_changes(agent, changes: Sequence[PlanStepChange], snapshot: PlanSnapshot) -> None:
     try:
         from console.agent_chat.signals import broadcast_plan_changes
 
-        broadcast_plan_changes(agent, changes, snapshot, explanation=explanation)
+        broadcast_plan_changes(agent, changes, snapshot)
     except (ImportError, RuntimeError):
         logger.warning("Failed to import plan broadcast helper for agent %s", getattr(agent, "id", None), exc_info=True)

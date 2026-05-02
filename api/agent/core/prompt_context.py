@@ -4141,7 +4141,8 @@ def _get_system_instruction(
         "- Research complete, report sent, all work done → will_continue_work=false on final tool → STOP.\n\n"
         "**CONTINUE (will_continue_work=true)** — whenever at least one more action remains after this tool call:\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
-        "- Need to send the user your answer, summary, or final report → will_continue_work=true, keep going.\n"
+        "- Need to send the user your answer, summary, or final report after this tool → will_continue_work=true, keep going.\n"
+        "- This tool sends the final answer/report and no work remains after it → will_continue_work=false, STOP.\n"
         "- Need to ask a follow-up question before the task is complete → will_continue_work=true, keep going.\n"
         "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
         "- 'research competitors' → search_tools(query='competitor research tools') → keep working until all work done AND marked done.\n"
@@ -4151,9 +4152,10 @@ def _get_system_instruction(
         f"{mid_conversation_schedule_examples}"
         "- 'also watch for X' → sqlite_batch(UPDATE charter, will_continue_work=true) + continue working.\n\n"
         "**CRITICAL termination sequence:**\n"
-        "1. Send your final report to the user\n"
+        "1. Send your final report to the user with will_continue_work=false on that final send tool\n"
         "2. If this run produced a reusable workflow, template, or new feedback worth preserving, create/update the skill silently in the same final turn when possible.\n"
-        "3. You're done—no extra turn, no announcement\n\n"
+        "3. If you still need to mark the plan done after the report is already sent, call update_plan with will_continue_work=false; otherwise call only sleep_until_next_trigger.\n"
+        "4. You're done—no extra turn, no announcement or confirmation message\n\n"
         "**The rule:** Recurring or truly multi-phase work may need charter or schedule updates; one-off work usually needs neither.\n"
     )
 
