@@ -3327,7 +3327,7 @@ def _get_work_completion_prompt(
                 "work_complete",
                 (
                     f"🛑 STOP: All {done_count} step(s) done. You should have used will_continue_work=false after marking the last step done. "
-                    "Do not output text. Do not announce completion. Just stop."
+                    "Do not output text. Do not announce completion. Just stop by calling `sleep_until_next_trigger`."
                 ),
                 9,  # Highest weight - must stop
             )
