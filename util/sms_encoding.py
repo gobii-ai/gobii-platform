@@ -120,11 +120,7 @@ def normalize_sms_text(text: str) -> str:
     for original, replacement in CHAR_REPLACEMENTS.items():
         text = text.replace(original, replacement)
 
-    text = _strip_to_gsm7(text)
-
-    if "\n" not in text:
-        return " ".join(text.split())
-    return "\n".join(" ".join(line.split()) for line in text.splitlines())
+    return _strip_to_gsm7(text)
 
 
 def optimize_sms_for_cost(text: str, *, max_length: int | None = None) -> SmsOptimizationResult:
@@ -180,9 +176,7 @@ def _normalize_sms_typography(text: str) -> str:
     for original, replacement in TYPOGRAPHY_REPLACEMENTS.items():
         text = text.replace(original, replacement)
 
-    if "\n" not in text:
-        return " ".join(text.split())
-    return "\n".join(" ".join(line.split()) for line in text.splitlines())
+    return text
 
 
 def _strip_to_gsm7(text: str) -> str:
@@ -193,9 +187,13 @@ def _strip_to_gsm7(text: str) -> str:
             continue
 
         normalized = unicodedata.normalize("NFKD", char)
-        result.extend(
+        gsm7_chars = [
             normalized_char
             for normalized_char in normalized
             if normalized_char in GSM_7_BASIC or normalized_char in GSM_7_EXTENDED
-        )
+        ]
+        if gsm7_chars:
+            result.extend(gsm7_chars)
+        else:
+            result.append(char)
     return "".join(result)

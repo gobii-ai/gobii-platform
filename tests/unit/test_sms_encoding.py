@@ -32,6 +32,29 @@ class SmsEncodingTests(SimpleTestCase):
     def test_normalize_sms_text_replaces_laughing_emoji_with_short_gsm7_text(self):
         self.assertEqual(normalize_sms_text("Funny 😂🤣"), "Funny :'):')")
 
+    def test_normalize_sms_text_preserves_existing_spacing(self):
+        self.assertEqual(normalize_sms_text("A  B\n  C"), "A  B\n  C")
+
+    def test_normalize_sms_text_preserves_unmapped_non_gsm_text(self):
+        self.assertEqual(normalize_sms_text("Meet at 北京 office"), "Meet at 北京 office")
+
+    def test_normalize_sms_text_decomposes_accents_when_gsm7_safe(self):
+        self.assertEqual(normalize_sms_text("Zbyněk"), "Zbynek")
+
+    def test_optimize_sms_for_cost_preserves_spacing_while_cleaning_typography(self):
+        result = optimize_sms_for_cost("A  —  B\n  “C”")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["text"], 'A  -  B\n  "C"')
+
+    def test_optimize_sms_for_cost_does_not_delete_multilingual_text_to_save_segments(self):
+        text = ("x" * 69) + "北京"
+
+        result = optimize_sms_for_cost(text)
+
+        self.assertFalse(result["changed"])
+        self.assertEqual(result["text"], text)
+
     def test_optimize_sms_for_cost_preserves_emoji_without_segment_savings(self):
         result = optimize_sms_for_cost("Quick update — done 😊")
 
