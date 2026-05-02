@@ -135,7 +135,7 @@ class TwilioRiskCheckTests(TestCase):
         self.assertNotIn("risk_check", kwargs)
 
     @patch("util.sms.Client")
-    def test_send_sms_normalizes_body_before_twilio_send(self, mock_client_cls):
+    def test_send_sms_normalizes_typography_before_twilio_send(self, mock_client_cls):
         client = self._mock_twilio_client(mock_client_cls)
 
         result = sms.send_sms(
@@ -146,7 +146,21 @@ class TwilioRiskCheckTests(TestCase):
 
         self.assertEqual(result, "SM123")
         kwargs = client.messages.create.call_args.kwargs
-        self.assertEqual(kwargs["body"], "Quick update - done :)")
+        self.assertEqual(kwargs["body"], "Quick update - done 😊")
+
+    @patch("util.sms.Client")
+    def test_send_sms_replaces_emoji_when_it_saves_segments(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+
+        result = sms.send_sms(
+            to_number="+14155552671",
+            from_number="+12025550123",
+            body=("x" * 69) + "😊",
+        )
+
+        self.assertEqual(result, "SM123")
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["body"], ("x" * 69) + ":)")
 
     @override_settings(SMS_MAX_BODY_LENGTH=40)
     @patch("util.sms.Client")

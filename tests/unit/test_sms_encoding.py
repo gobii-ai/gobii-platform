@@ -32,14 +32,23 @@ class SmsEncodingTests(SimpleTestCase):
     def test_normalize_sms_text_replaces_laughing_emoji_with_short_gsm7_text(self):
         self.assertEqual(normalize_sms_text("Funny 😂🤣"), "Funny :'):')")
 
-    def test_optimize_sms_for_cost_switches_ucs2_to_gsm7_even_without_segment_savings(self):
+    def test_optimize_sms_for_cost_preserves_emoji_without_segment_savings(self):
         result = optimize_sms_for_cost("Quick update — done 😊")
 
         self.assertTrue(result["changed"])
-        self.assertEqual(result["text"], "Quick update - done :)")
+        self.assertEqual(result["text"], "Quick update - done 😊")
         self.assertEqual(result["original_encoding"], "UCS-2")
-        self.assertEqual(result["final_encoding"], "GSM-7")
+        self.assertEqual(result["final_encoding"], "UCS-2")
         self.assertEqual(result["segments_saved"], 0)
+
+    def test_optimize_sms_for_cost_replaces_emoji_when_it_saves_segments(self):
+        result = optimize_sms_for_cost(("x" * 69) + "😊")
+
+        self.assertTrue(result["changed"])
+        self.assertEqual(result["text"], ("x" * 69) + ":)")
+        self.assertEqual(result["original_segments"], 2)
+        self.assertEqual(result["final_segments"], 1)
+        self.assertEqual(result["final_encoding"], "GSM-7")
 
     def test_optimize_sms_for_cost_keeps_original_when_normalization_increases_segments(self):
         text = "👍" * 18
