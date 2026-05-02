@@ -297,3 +297,7 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
+
+.agent-mobile-sheet--plan .plan-panel::before {
+  display: none;
+}
