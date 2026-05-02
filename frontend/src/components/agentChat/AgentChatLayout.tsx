@@ -37,6 +37,8 @@ import type {
   PlanSnapshot,
   PlanFileDeliverable,
   PlanMessageDeliverable,
+  TimelineEvent,
+  AgentMessage,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -136,6 +138,69 @@ function filterChangedPlanSnapshot(previous: PlanSnapshot | null | undefined, cu
     files: changedFiles,
     messages: changedMessages,
   }
+}
+
+function inferPlanFilesFromMessageAttachments(
+  plan: PlanSnapshot | null | undefined,
+  events: TimelineEvent[],
+): PlanFileDeliverable[] {
+  if (!plan || (plan.files?.length ?? 0) > 0 || !plan.messages?.length) {
+    return plan?.files ?? []
+  }
+
+  const messagesById = new Map<string, AgentMessage>()
+  for (const event of events) {
+    if (event.kind === 'message') {
+      messagesById.set(event.message.id, event.message)
+    }
+  }
+
+  const inferredFiles: PlanFileDeliverable[] = []
+  const seenKeys = new Set<string>()
+  for (const messageDeliverable of plan.messages) {
+    const messageEvent = messagesById.get(messageDeliverable.messageId)
+    for (const attachment of messageEvent?.attachments ?? []) {
+      const downloadUrl = attachment.downloadUrl ?? attachment.url ?? null
+      const path = attachment.filespacePath ?? downloadUrl ?? attachment.filename
+      const key = attachment.filespaceNodeId ?? path
+      if (!path || seenKeys.has(key)) {
+        continue
+      }
+      seenKeys.add(key)
+      inferredFiles.push({
+        path,
+        label: attachment.filename,
+        downloadUrl,
+      })
+    }
+  }
+
+  return inferredFiles
+}
+
+function addInferredPlanFiles(plan: PlanSnapshot | null | undefined, events: TimelineEvent[]): PlanSnapshot | null {
+  if (!plan || (plan.files?.length ?? 0) > 0) {
+    return plan ?? null
+  }
+
+  const inferredFiles = inferPlanFilesFromMessageAttachments(plan, events)
+  if (!inferredFiles.length) {
+    return plan
+  }
+
+  return {
+    ...plan,
+    files: inferredFiles,
+  }
+}
+
+function hasCompletedPlanDeliverables(plan: PlanSnapshot | null | undefined): boolean {
+  if (!plan) {
+    return false
+  }
+  const total = plan.todoCount + plan.doingCount + plan.doneCount
+  const deliverableCount = (plan.files?.length ?? 0) + (plan.messages?.length ?? 0)
+  return total > 0 && plan.todoCount === 0 && plan.doingCount === 0 && plan.doneCount === total && deliverableCount > 0
 }
 
 type AgentChatLayoutProps = AgentTimelineProps & {
@@ -495,16 +560,23 @@ export function AgentChatLayout({
   const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
   const [planSheetOpen, setPlanSheetOpen] = useState(false)
-  const [defaultPlanPanelMode, setDefaultPlanPanelMode] = useState<PlanPanelMode>('docked')
+  const [defaultPlanPanelMode, setDefaultPlanPanelMode] = useState<PlanPanelMode>('hidden')
   const [agentPlanPanelModes, setAgentPlanPanelModes] = useState<Record<string, PlanPanelMode>>({})
   const [planPreviewSnapshot, setPlanPreviewSnapshot] = useState<PlanSnapshot | null>(null)
   const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
-  const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'docked' : defaultPlanPanelMode
+  const [planHoverPreviewVisible, setPlanHoverPreviewVisible] = useState(false)
+  const [planHoverPreviewExiting, setPlanHoverPreviewExiting] = useState(false)
+  const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'hidden' : defaultPlanPanelMode
+  const hasStoredPlanPanelMode = agentId
+    ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
+    : defaultPlanPanelMode !== 'hidden'
   const showPlanInterface = sidebarMode !== 'gallery'
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
   const planPreviewTimeoutRef = useRef<number | null>(null)
   const planPreviewExitTimeoutRef = useRef<number | null>(null)
+  const planHoverExitTimeoutRef = useRef<number | null>(null)
+  const suppressPlanHoverPreviewRef = useRef(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -924,7 +996,7 @@ export function AgentChatLayout({
   const setCurrentPlanPanelMode = useCallback((resolveMode: (mode: PlanPanelMode) => PlanPanelMode) => {
     if (agentId) {
       setAgentPlanPanelModes((modes) => {
-        const currentMode = modes[agentId] ?? 'docked'
+        const currentMode = modes[agentId] ?? 'hidden'
         const nextMode = resolveMode(currentMode)
         if (nextMode === currentMode) {
           return modes
@@ -947,16 +1019,72 @@ export function AgentChatLayout({
       setPlanSheetOpen(true)
       return
     }
+    suppressPlanHoverPreviewRef.current = planPanelMode === 'docked'
     setCurrentPlanPanelMode((mode) => (mode === 'docked' ? 'hidden' : 'docked'))
     setPlanPreviewSnapshot(null)
     setPlanPreviewExiting(false)
-  }, [setCurrentPlanPanelMode, showPlanInterface])
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+  }, [planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+
+  const displayPlanSnapshot = useMemo(
+    () => addInferredPlanFiles(planSnapshot, events),
+    [events, planSnapshot],
+  )
+
+  const handlePlanHoverChange = useCallback((hovered: boolean) => {
+    const wasSuppressed = suppressPlanHoverPreviewRef.current
+    if (!hovered) {
+      suppressPlanHoverPreviewRef.current = false
+      if (wasSuppressed || (!planHoverPreviewVisible && !planHoverPreviewExiting)) {
+        return
+      }
+    }
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      return
+    }
+    const total = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) + (displayPlanSnapshot?.doneCount ?? 0)
+    if (total === 0) {
+      return
+    }
+
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+
+    if (hovered) {
+      if (wasSuppressed) {
+        return
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
+      setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(true)
+      setPlanHoverPreviewExiting(false)
+      return
+    }
+
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(true)
+    planHoverExitTimeoutRef.current = window.setTimeout(() => {
+      setPlanHoverPreviewExiting(false)
+      planHoverExitTimeoutRef.current = null
+    }, 180)
+  }, [displayPlanSnapshot, planHoverPreviewExiting, planHoverPreviewVisible, planPanelMode, showPlanInterface])
 
   useEffect(() => {
     if (!showPlanInterface) {
       setPlanSheetOpen(false)
       setPlanPreviewSnapshot(null)
       setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(false)
+      setPlanHoverPreviewExiting(false)
       if (planPreviewTimeoutRef.current !== null) {
         window.clearTimeout(planPreviewTimeoutRef.current)
         planPreviewTimeoutRef.current = null
@@ -965,6 +1093,11 @@ export function AgentChatLayout({
         window.clearTimeout(planPreviewExitTimeoutRef.current)
         planPreviewExitTimeoutRef.current = null
       }
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+        planHoverExitTimeoutRef.current = null
+      }
+      suppressPlanHoverPreviewRef.current = false
     }
   }, [showPlanInterface])
 
@@ -972,6 +1105,8 @@ export function AgentChatLayout({
     setPlanSheetOpen(false)
     setPlanPreviewSnapshot(null)
     setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
     previousPlanStateRef.current = null
     previousPlanSnapshotRef.current = null
     if (planPreviewTimeoutRef.current !== null) {
@@ -982,24 +1117,34 @@ export function AgentChatLayout({
       window.clearTimeout(planPreviewExitTimeoutRef.current)
       planPreviewExitTimeoutRef.current = null
     }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+    suppressPlanHoverPreviewRef.current = false
   }, [agentId])
 
   useEffect(() => {
-    const total = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) + (planSnapshot?.doneCount ?? 0)
-    const active = (planSnapshot?.todoCount ?? 0) + (planSnapshot?.doingCount ?? 0) > 0
+    const total = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) + (displayPlanSnapshot?.doneCount ?? 0)
+    const active = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) > 0
     const previous = previousPlanStateRef.current
     previousPlanStateRef.current = { total, active }
 
     const previousSnapshot = previousPlanSnapshotRef.current
-    previousPlanSnapshotRef.current = planSnapshot ?? null
+    previousPlanSnapshotRef.current = displayPlanSnapshot ?? null
 
     if (!previous) {
+      if (showPlanInterface && !hasStoredPlanPanelMode && hasCompletedPlanDeliverables(displayPlanSnapshot)) {
+        setCurrentPlanPanelMode(() => 'docked')
+      }
       return
     }
 
     if (previous.total === 0 && total > 0) {
       setPlanPreviewSnapshot(null)
       setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(false)
+      setPlanHoverPreviewExiting(false)
       if (planPreviewTimeoutRef.current !== null) {
         window.clearTimeout(planPreviewTimeoutRef.current)
         planPreviewTimeoutRef.current = null
@@ -1008,7 +1153,14 @@ export function AgentChatLayout({
         window.clearTimeout(planPreviewExitTimeoutRef.current)
         planPreviewExitTimeoutRef.current = null
       }
-      setCurrentPlanPanelMode(() => 'docked')
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+        planHoverExitTimeoutRef.current = null
+      }
+      suppressPlanHoverPreviewRef.current = false
+      if (active || hasCompletedPlanDeliverables(displayPlanSnapshot)) {
+        setCurrentPlanPanelMode(() => 'docked')
+      }
       return
     }
 
@@ -1016,7 +1168,7 @@ export function AgentChatLayout({
       return
     }
 
-    const changedSnapshot = filterChangedPlanSnapshot(previousSnapshot, planSnapshot)
+    const changedSnapshot = filterChangedPlanSnapshot(previousSnapshot, displayPlanSnapshot)
     if (!changedSnapshot) {
       return
     }
@@ -1039,7 +1191,7 @@ export function AgentChatLayout({
         planPreviewExitTimeoutRef.current = null
       }, 180)
     }, 5000)
-  }, [planPanelMode, planSnapshot, setCurrentPlanPanelMode, showPlanInterface])
+  }, [displayPlanSnapshot, hasStoredPlanPanelMode, planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
 
   useEffect(() => {
     return () => {
@@ -1049,6 +1201,10 @@ export function AgentChatLayout({
       if (planPreviewExitTimeoutRef.current !== null) {
         window.clearTimeout(planPreviewExitTimeoutRef.current)
       }
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+      }
+      suppressPlanHoverPreviewRef.current = false
     }
   }, [])
 
@@ -1093,12 +1249,20 @@ export function AgentChatLayout({
     taskQuota,
     viewerEmail,
   ])
-  const renderedPlanSnapshot = planPanelMode === 'docked' ? planSnapshot : planPreviewSnapshot
+  const showHoverPlanPreview = planPanelMode === 'hidden' && (planHoverPreviewVisible || planHoverPreviewExiting)
+  const renderedPlanSnapshot = planPanelMode === 'docked'
+    ? displayPlanSnapshot
+    : showHoverPlanPreview
+      ? displayPlanSnapshot
+      : planPreviewSnapshot
+  const floatingPlanExiting = !planHoverPreviewVisible && (
+    planPreviewExiting || (planHoverPreviewExiting && !planPreviewSnapshot)
+  )
   const workspacePlanMode = !showPlanInterface
     ? 'hidden'
     : planPanelMode === 'docked'
       ? 'docked'
-      : planPreviewSnapshot
+      : renderedPlanSnapshot
         ? 'floating'
         : 'hidden'
   const showDesktopPlanPanel = showPlanInterface && workspacePlanMode !== 'hidden' && (
@@ -1148,9 +1312,10 @@ export function AgentChatLayout({
           connectionStatus={connectionStatus}
           connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
-          planSnapshot={showPlanInterface ? planSnapshot : null}
+          planSnapshot={showPlanInterface ? displayPlanSnapshot : null}
           planPanelMode={planPanelMode}
           onPlanOpen={showPlanInterface ? handleOpenPlan : undefined}
+          onPlanHoverChange={showPlanInterface ? handlePlanHoverChange : undefined}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
@@ -1462,7 +1627,7 @@ export function AgentChatLayout({
           </div>
           {showDesktopPlanPanel ? (
             <div
-              className={`agent-chat-plan-frame${planPreviewExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
+              className={`agent-chat-plan-frame${floatingPlanExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
               aria-label="Plan panel"
             >
               <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
@@ -1479,7 +1644,7 @@ export function AgentChatLayout({
         bodyPadding={false}
         tone="plan"
       >
-        <PlanPanel plan={planSnapshot} onMessageClick={handlePlanMessageClick} compact />
+        <PlanPanel plan={displayPlanSnapshot} onMessageClick={handlePlanMessageClick} compact />
       </AgentChatMobileSheet>
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (

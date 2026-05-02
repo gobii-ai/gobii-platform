@@ -147,13 +147,35 @@ function navigateToAgentChat(agentId: string): void {
   window.history.pushState({ agentId }, '', nextUrl)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
+
+function mergePlanDeliverablesFromCurrentSnapshot(snapshot: PlanSnapshot, currentPlan?: PlanSnapshot | null): PlanSnapshot {
+  if (!currentPlan) {
+    return snapshot
+  }
+
+  const hasSnapshotFiles = (snapshot.files?.length ?? 0) > 0
+  const hasSnapshotMessages = (snapshot.messages?.length ?? 0) > 0
+  const hasCurrentFiles = (currentPlan.files?.length ?? 0) > 0
+  const hasCurrentMessages = (currentPlan.messages?.length ?? 0) > 0
+
+  if (hasSnapshotFiles || hasSnapshotMessages || (!hasCurrentFiles && !hasCurrentMessages)) {
+    return snapshot
+  }
+
+  return {
+    ...snapshot,
+    files: currentPlan.files,
+    messages: currentPlan.messages,
+  }
+}
+
 function getLatestPlanSnapshot(events: TimelineEvent[], currentPlan?: PlanSnapshot | null): PlanSnapshot | null {
   // Find the most recent plan event (events are ordered oldest to newest). Fall back
   // to the API snapshot so the panel survives timeline windowing.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
     if (event.kind === 'plan') {
-      return event.snapshot
+      return mergePlanDeliverablesFromCurrentSnapshot(event.snapshot, currentPlan)
     }
   }
   return currentPlan ?? null

@@ -32,6 +32,8 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
         "The tool also accepts optional top-level `files` and `messages` deliverables. Deliverables are associated with the whole current plan, not individual steps.\n"
         "Use `files` for final user-visible artifacts created during the work, such as reports, CSV exports, PDFs, charts, or generated documents. Do not include scratch files or temporary downloads.\n"
         "Use `messages` after sending a final report, answer, or important user-facing summary. Use the message_id returned by the send tool. Do not include routine progress updates, greetings, or status messages.\n"
+        "If finishing or updating a plan after producing final files or sending final user-facing messages, include those deliverables in the same `update_plan` call using `files` and/or `messages`.\n"
+        "Because deliverables are replaced on every call, preserve any still-relevant previous `files` and `messages` when later updating the plan.\n"
         "After calling `update_plan`, do not repeat the whole plan in chat because the harness displays it.\n"
         "Before moving to the next command or phase, mark the previous step `done` after verifying the work actually succeeded.\n"
         "If the plan changes mid-task, call `update_plan` again with the full revised plan.\n"

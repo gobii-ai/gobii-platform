@@ -31,6 +31,7 @@ type AgentChatBannerProps = {
   planSnapshot?: PlanSnapshot | null
   planPanelMode?: 'docked' | 'hidden'
   onPlanOpen?: () => void
+  onPlanHoverChange?: (hovered: boolean) => void
   processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
   onSettingsOpen?: () => void
@@ -76,6 +77,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   planSnapshot,
   planPanelMode = 'docked',
   onPlanOpen,
+  onPlanHoverChange,
   processingActive = false,
   dailyCreditsStatus,
   onSettingsOpen,
@@ -291,6 +293,10 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               type="button"
               className="banner-plan"
               onClick={onPlanOpen}
+              onMouseEnter={() => onPlanHoverChange?.(true)}
+              onMouseLeave={() => onPlanHoverChange?.(false)}
+              onFocus={() => onPlanHoverChange?.(true)}
+              onBlur={() => onPlanHoverChange?.(false)}
               aria-label={planButtonLabel}
               title={planButtonLabel}
               data-plan-mode={planPanelMode}

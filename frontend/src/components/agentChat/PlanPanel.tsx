@@ -1,5 +1,5 @@
 import { memo, type MouseEvent } from 'react'
-import { CheckCircle2, Circle, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
+import { CheckCircle2, Circle, Download, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
 import type { PlanSnapshot } from '../../types/agentChat'
 
 type PlanPanelProps = {
@@ -68,29 +68,27 @@ export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact
       {hasDeliverables ? (
         <div className="plan-panel-deliverables">
           <div className="plan-panel-deliverables-title">Deliverables</div>
-          {files.map((file) => {
-            const content = (
-              <>
+          {files.map((file) => (
+            <div key={`file:${file.path}`} className="plan-panel-deliverable plan-panel-deliverable--file">
+              <span className="plan-panel-deliverable-main">
                 <FileText size={14} />
                 <span>{file.label || file.path}</span>
-              </>
-            )
-            return file.downloadUrl ? (
-              <a
-                key={`file:${file.path}`}
-                className="plan-panel-deliverable"
-                href={file.downloadUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {content}
-              </a>
-            ) : (
-              <span key={`file:${file.path}`} className="plan-panel-deliverable" aria-disabled="true">
-                {content}
               </span>
-            )
-          })}
+              {file.downloadUrl ? (
+                <a
+                  className="plan-panel-deliverable-download"
+                  aria-label={`Download ${file.label || file.path}`}
+                  title={`Download ${file.label || file.path}`}
+                  download
+                  href={file.downloadUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <Download size={13} strokeWidth={2.2} />
+                </a>
+              ) : null}
+            </div>
+          ))}
           {messages.map((message) => (
             <button
               key={`message:${message.messageId}`}
@@ -98,8 +96,10 @@ export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact
               className="plan-panel-deliverable"
               onClick={(event) => handleMessageClick(event, message.messageId)}
             >
-              <MessageSquareText size={14} />
-              <span>{message.label || 'Message'}</span>
+              <span className="plan-panel-deliverable-main">
+                <MessageSquareText size={14} />
+                <span>{message.label || 'Message'}</span>
+              </span>
             </button>
           ))}
         </div>
