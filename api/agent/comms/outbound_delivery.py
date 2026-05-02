@@ -1229,12 +1229,14 @@ def deliver_agent_sms(message: PersistentAgentMessage):
     # For true group messaging, you'd need a different approach with your SMS provider
     send_results = []
     all_successful = True
+    owner_user = getattr(getattr(message, "owner_agent", None), "user", None)
     
     for recipient in recipient_numbers:
         result = sms.send_sms(
             to_number=recipient,
             from_number=message.from_endpoint.address,
             body=plaintext_body,
+            owner_user=owner_user,
         )
         send_results.append((recipient, result))
         if not result:

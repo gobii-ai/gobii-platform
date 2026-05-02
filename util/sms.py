@@ -4,9 +4,8 @@ import logging
 import random
 from typing import Optional
 from opentelemetry import trace
+from django.conf import settings
 from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
-from config import settings
-from config.settings import TWILIO_MESSAGING_SERVICE_SID
 from util.integrations import twilio_status, twilio_verify_available
 from observability import traced
 from twilio.base.exceptions import TwilioRestException
@@ -19,6 +18,8 @@ except Exception:  # pragma: no cover - dependency optional in tests
 logger = logging.getLogger(__name__)
 
 tracer = trace.get_tracer("gobii.utils")
+
+TWILIO_RISK_CHECK_DISABLE = "disable"
 
 # ── Vanity helpers ────────────────────────────────────────────────────────────
 _T9 = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ",
@@ -128,8 +129,52 @@ def get_user_primary_sms_number(user) -> Optional[UserPhoneNumber]:
 
     return phone_number
 
+
+def _normalize_us_phone_number(phone_number: str) -> Optional[str]:
+    try:
+        from phonenumbers import (
+            NumberParseException,
+            PhoneNumberFormat,
+            format_number,
+            is_valid_number,
+            parse,
+            region_code_for_number,
+        )
+    except ImportError:
+        logger.warning("phonenumbers is unavailable; leaving Twilio riskCheck enabled.")
+        return None
+
+    try:
+        parsed = parse((phone_number or "").strip(), None)
+    except NumberParseException:
+        return None
+
+    if not is_valid_number(parsed) or region_code_for_number(parsed) != "US":
+        return None
+    return format_number(parsed, PhoneNumberFormat.E164)
+
+
+def should_disable_twilio_risk_check(to_number: str, owner_user=None) -> bool:
+    """
+    Disable Twilio riskCheck only for verified US phone numbers registered to
+    the agent owner's account. Our customer-care A2P campaign is exempt for
+    this first-party owner-contact path.
+    """
+    owner_user_id = getattr(owner_user, "id", None)
+    if not owner_user_id:
+        return False
+    normalized_to = _normalize_us_phone_number(to_number)
+    if not normalized_to:
+        return False
+    return UserPhoneNumber.objects.filter(
+        user_id=owner_user_id,
+        phone_number__iexact=normalized_to,
+        is_verified=True,
+    ).exists()
+
+
 @tracer.start_as_current_span("SMS send_sms")
-def send_sms(to_number: str, from_number: str, body: str) -> bool|str:
+def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) -> bool|str:
     """
     Send an SMS message using Twilio.
     Returns True if sent successfully, False otherwise.
@@ -144,12 +189,15 @@ def send_sms(to_number: str, from_number: str, body: str) -> bool|str:
     try:
         with traced("SMS send_sms - Twilio"):
             logger.info(f"Sending SMS to {to_number} from {from_number}: {body}")
-            message = client.messages.create(
-                body=body,
-                from_=from_number,
-                to=to_number,
-                messaging_service_sid=TWILIO_MESSAGING_SERVICE_SID,
-            )
+            message_kwargs = {
+                "body": body,
+                "from_": from_number,
+                "to": to_number,
+                "messaging_service_sid": settings.TWILIO_MESSAGING_SERVICE_SID,
+            }
+            if should_disable_twilio_risk_check(to_number, owner_user=owner_user):
+                message_kwargs["risk_check"] = TWILIO_RISK_CHECK_DISABLE
+            message = client.messages.create(**message_kwargs)
 
         logger.info(f"SMS sent successfully to {to_number}: {message.sid}")
         return message.sid
@@ -222,7 +270,7 @@ def sms_twilio_purchase_numbers(number: str) -> bool:
         incoming = client.incoming_phone_numbers.create(
             phone_number=number
         )
-        client.messaging.services(TWILIO_MESSAGING_SERVICE_SID).phone_numbers.create(
+        client.messaging.services(settings.TWILIO_MESSAGING_SERVICE_SID).phone_numbers.create(
             phone_number_sid=incoming.sid
         )
 
