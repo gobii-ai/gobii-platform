@@ -4,7 +4,7 @@ import logging
 import random
 from typing import Optional
 from opentelemetry import trace
-from config import settings
+from django.conf import settings
 from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
 from util.integrations import twilio_status, twilio_verify_available
 from observability import traced
