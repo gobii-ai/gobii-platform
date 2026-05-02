@@ -4,9 +4,8 @@ import logging
 import random
 from typing import Optional
 from opentelemetry import trace
-from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
 from config import settings
-from config.settings import TWILIO_MESSAGING_SERVICE_SID
+from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
 from util.integrations import twilio_status, twilio_verify_available
 from observability import traced
 from twilio.base.exceptions import TwilioRestException
@@ -194,7 +193,7 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
                 "body": body,
                 "from_": from_number,
                 "to": to_number,
-                "messaging_service_sid": TWILIO_MESSAGING_SERVICE_SID,
+                "messaging_service_sid": settings.TWILIO_MESSAGING_SERVICE_SID,
             }
             if should_disable_twilio_risk_check(to_number, owner_user=owner_user):
                 message_kwargs["risk_check"] = TWILIO_RISK_CHECK_DISABLE
@@ -271,7 +270,7 @@ def sms_twilio_purchase_numbers(number: str) -> bool:
         incoming = client.incoming_phone_numbers.create(
             phone_number=number
         )
-        client.messaging.services(TWILIO_MESSAGING_SERVICE_SID).phone_numbers.create(
+        client.messaging.services(settings.TWILIO_MESSAGING_SERVICE_SID).phone_numbers.create(
             phone_number_sid=incoming.sid
         )
 

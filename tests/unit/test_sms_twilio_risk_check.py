@@ -53,6 +53,30 @@ class TwilioRiskCheckTests(TestCase):
 
         self.assertEqual(result, "SM123")
         kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["messaging_service_sid"], "MG00000000000000000000000000000000")
+        self.assertEqual(kwargs["risk_check"], sms.TWILIO_RISK_CHECK_DISABLE)
+
+    @patch("config.settings.TWILIO_ACCOUNT_SID", "")
+    @patch("config.settings.TWILIO_AUTH_TOKEN", "")
+    @patch("util.sms.Client")
+    def test_send_sms_uses_django_settings_overrides_for_twilio_credentials(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+        user = User.objects.create_user(username="owner", email="owner@example.com")
+        UserPhoneNumber.objects.create(
+            user=user,
+            phone_number="+14155552671",
+            is_verified=True,
+        )
+
+        result = sms.send_sms(
+            to_number="+14155552671",
+            from_number="+12025550123",
+            body="Hello",
+            owner_user=user,
+        )
+
+        self.assertEqual(result, "SM123")
+        kwargs = client.messages.create.call_args.kwargs
         self.assertEqual(kwargs["risk_check"], sms.TWILIO_RISK_CHECK_DISABLE)
 
     @patch("util.sms.Client")
