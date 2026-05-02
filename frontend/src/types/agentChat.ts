@@ -88,6 +88,7 @@ export type ToolClusterEvent = {
   entries: ToolCallEntry[]
   thinkingEntries?: ThinkingEvent[]
   planEntries?: PlanEvent[]
+  visibleDisplayEntryIds?: string[]
 }
 
 export type ProcessingWebTask = {

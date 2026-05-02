@@ -140,6 +140,41 @@ describe('collapseDetailedStatusRuns', () => {
     }
   })
 
+  it('collapses actions before the latest schedule update even when keeping trailing activity expanded', () => {
+    const firstAction = stepCluster('2:step:first', ['search_web'])
+    const secondAction = stepCluster('3:step:second', ['sqlite_batch'])
+    const thirdAction = stepCluster('4:step:third', ['create_pdf'])
+    const scheduleUpdate = stepCluster('5:step:schedule', ['update_schedule'])
+    const events: TimelineEvent[] = [
+      messageEvent('1:message:latest', 'Latest'),
+      firstAction,
+      secondAction,
+      thirdAction,
+      scheduleUpdate,
+    ]
+
+    const result = collapseDetailedStatusRuns(
+      events,
+      {
+        latestPlanCursor: null,
+        latestScheduleEntryId: '5:step:schedule:entry:0',
+      },
+      { keepTrailingActivityExpanded: true },
+    )
+
+    expect(result.map((event) => event.kind)).toEqual(['message', 'collapsed-group', 'steps'])
+    expect(result[1].kind).toBe('collapsed-group')
+    if (result[1].kind === 'collapsed-group') {
+      expect(result[1].events.map((event) => event.cursor)).toEqual([
+        firstAction.cursor,
+        secondAction.cursor,
+        thirdAction.cursor,
+      ])
+      expect(result[1].summary.label).toBe('3 actions')
+    }
+    expect(result[2]).toBe(scheduleUpdate)
+  })
+
   it('drops runs with no visible actions', () => {
     const result = collapseDetailedStatusRuns([stepCluster('1:step:hidden', ['update_plan'])], {
       latestPlanCursor: null,

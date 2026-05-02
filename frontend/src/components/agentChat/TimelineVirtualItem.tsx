@@ -40,7 +40,7 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
     if (event.kind !== 'collapsed-group') {
       return []
     }
-    return flattenTimelineEventsToEntries(event.events)
+    return event.displayEntries ?? flattenTimelineEventsToEntries(event.events)
   }, [event])
 
   if (event.kind === 'collapsed-group') {

@@ -1,11 +1,14 @@
 import { useMemo } from 'react'
-import type { TimelineEvent, ToolCallEntry } from '../types/agentChat'
+import type { TimelineEvent, ToolCallEntry, ToolClusterEvent } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
 import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import {
   eventHasLatestStatus,
+  isStatusDisplayEntry,
+  resolveEntrySeparation,
 } from '../components/agentChat/statusExpansion'
+import type { ToolEntryDisplay } from '../components/agentChat/tooling/types'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,6 +18,7 @@ export type CollapsedEventGroup = {
   kind: 'collapsed-group'
   cursor: string
   events: TimelineEvent[]
+  displayEntries?: ToolEntryDisplay[]
   summary: {
     totalCount: number
     toolCallCount: number
@@ -80,13 +84,20 @@ export function buildCollapsedGroupLabel(counts: {
   return buildActionCountLabel(actionCount || 1)
 }
 
-function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
-  const counts = countByKind(buffer)
-  const totalCount = counts.toolCallCount + counts.thinkingCount + counts.planCount
+function makeCollapsedGroup(buffer: TimelineEvent[], displayEntries?: ToolEntryDisplay[]): CollapsedEventGroup {
+  const counts = displayEntries
+    ? {
+      toolCallCount: displayEntries.length,
+      thinkingCount: 0,
+      planCount: 0,
+    }
+    : countByKind(buffer)
+  const totalCount = displayEntries?.length ?? counts.toolCallCount + counts.thinkingCount + counts.planCount
   return {
     kind: 'collapsed-group',
-    cursor: buffer[0].cursor,
+    cursor: buffer[0]?.cursor ?? displayEntries?.[0]?.clusterCursor ?? 'collapsed-actions',
     events: [...buffer],
+    displayEntries,
     summary: {
       totalCount,
       ...counts,
@@ -107,6 +118,35 @@ function disableStepClusterCollapse(event: TimelineEvent): TimelineEvent {
     ...event,
     collapsible: false,
     collapseThreshold: Infinity,
+  }
+}
+
+function splitLatestStatusDisplayEntries(
+  event: ToolClusterEvent,
+  targets: StatusExpansionTargets,
+): { statusEntries: ToolEntryDisplay[], siblingEntries: ToolEntryDisplay[] } {
+  const transformed = transformToolCluster(event)
+  const statusEntries: ToolEntryDisplay[] = []
+  const siblingEntries: ToolEntryDisplay[] = []
+
+  for (const entry of transformed.entries) {
+    if (isStatusDisplayEntry(entry) && resolveEntrySeparation(entry, targets)) {
+      statusEntries.push(entry)
+    } else {
+      siblingEntries.push(entry)
+    }
+  }
+
+  return { statusEntries, siblingEntries }
+}
+
+function makeStatusOnlyEvent(event: ToolClusterEvent, statusEntries: ToolEntryDisplay[]): ToolClusterEvent {
+  return {
+    ...event,
+    entryCount: statusEntries.length,
+    collapsible: false,
+    collapseThreshold: Infinity,
+    visibleDisplayEntryIds: statusEntries.map((entry) => entry.id),
   }
 }
 
@@ -235,9 +275,6 @@ export function collapseDetailedStatusRuns(
 ): SimplifiedTimelineItem[] {
   const result: SimplifiedTimelineItem[] = []
   let buffer: TimelineEvent[] = []
-  const latestMessageIndex = options.keepTrailingActivityExpanded === true
-    ? events.reduce((latestIndex, event, index) => (event.kind === 'message' ? index : latestIndex), -1)
-    : -1
 
   const flush = (forceExpanded = false) => {
     if (buffer.length === 0) return
@@ -247,6 +284,18 @@ export function collapseDetailedStatusRuns(
       result.push(...expandedRenderableEvents(meaningful, forceExpanded))
     } else if (actionCount > 1) {
       result.push(makeCollapsedGroup(meaningful))
+    }
+    buffer = []
+  }
+
+  const flushWithAdditionalDisplayEntries = (additionalEntries: ToolEntryDisplay[]) => {
+    const meaningful = buffer.filter(isRenderableCollapsedEvent)
+    const displayEntries = [
+      ...flattenTimelineEventsToEntries(meaningful),
+      ...additionalEntries,
+    ]
+    if (displayEntries.length > 0) {
+      result.push(makeCollapsedGroup(meaningful, displayEntries))
     }
     buffer = []
   }
@@ -264,7 +313,16 @@ export function collapseDetailedStatusRuns(
     }
 
     if (eventHasLatestStatus(event, targets)) {
-      flush(options.keepTrailingActivityExpanded === true && index > latestMessageIndex)
+      if (event.kind === 'steps') {
+        const { statusEntries, siblingEntries } = splitLatestStatusDisplayEntries(event, targets)
+        if (siblingEntries.length > 0) {
+          flushWithAdditionalDisplayEntries(siblingEntries)
+          result.push(makeStatusOnlyEvent(event, statusEntries))
+          continue
+        }
+      }
+
+      flush()
       result.push(event)
       continue
     }
