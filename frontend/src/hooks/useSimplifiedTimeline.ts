@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { TimelineEvent, ToolCallEntry } from '../types/agentChat'
 import { isClusterRenderable, transformToolCluster } from '../components/agentChat/tooling/toolRegistry'
-import { buildActionCountLabel } from '../components/agentChat/activityEntryUtils'
+import { buildActionCountLabel, flattenTimelineEventsToEntries } from '../components/agentChat/activityEntryUtils'
 import type { StatusExpansionTargets } from '../components/agentChat/statusExpansion'
 import {
   eventHasLatestStatus,
@@ -35,6 +35,10 @@ export type SimplifiedTimelineItem =
   | CollapsedEventGroup
   | InlineScheduleUpdate
 
+export type CollapseDetailedStatusRunsOptions = {
+  keepTrailingActivityExpanded?: boolean
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -60,8 +64,8 @@ function countByKind(events: TimelineEvent[]) {
   let thinkingCount = 0
   let planCount = 0
   for (const e of events) {
-    if (e.kind === 'steps') toolCallCount += e.entryCount
-    else if (e.kind === 'thinking') thinkingCount++
+    if (e.kind === 'steps') toolCallCount += transformToolCluster(e).entries.length
+    else if (e.kind === 'thinking') thinkingCount += flattenTimelineEventsToEntries([e]).length
     else if (e.kind === 'plan' || e.kind === 'kanban') planCount++
   }
   return { toolCallCount, thinkingCount, planCount }
@@ -89,6 +93,27 @@ function makeCollapsedGroup(buffer: TimelineEvent[]): CollapsedEventGroup {
       label: buildCollapsedGroupLabel(counts),
     },
   }
+}
+
+function visibleActivityCount(events: TimelineEvent[]): number {
+  return flattenTimelineEventsToEntries(events).length
+}
+
+function disableStepClusterCollapse(event: TimelineEvent): TimelineEvent {
+  if (event.kind !== 'steps') {
+    return event
+  }
+  return {
+    ...event,
+    collapsible: false,
+    collapseThreshold: Infinity,
+  }
+}
+
+function expandedRenderableEvents(events: TimelineEvent[], disableStepCollapse: boolean): TimelineEvent[] {
+  return events
+    .filter((event) => visibleActivityCount([event]) > 0)
+    .map((event) => (disableStepCollapse ? disableStepClusterCollapse(event) : event))
 }
 
 // ---------------------------------------------------------------------------
@@ -206,20 +231,28 @@ export function collapseTimeline(events: TimelineEvent[]): SimplifiedTimelineIte
 export function collapseDetailedStatusRuns(
   events: TimelineEvent[],
   targets: StatusExpansionTargets,
+  options: CollapseDetailedStatusRunsOptions = {},
 ): SimplifiedTimelineItem[] {
   const result: SimplifiedTimelineItem[] = []
   let buffer: TimelineEvent[] = []
+  const latestMessageIndex = options.keepTrailingActivityExpanded === true
+    ? events.reduce((latestIndex, event, index) => (event.kind === 'message' ? index : latestIndex), -1)
+    : -1
 
-  const flush = () => {
+  const flush = (forceExpanded = false) => {
     if (buffer.length === 0) return
     const meaningful = buffer.filter(isRenderableCollapsedEvent)
-    if (meaningful.length > 0) {
+    const actionCount = visibleActivityCount(meaningful)
+    if (actionCount === 1 || (forceExpanded && actionCount > 0)) {
+      result.push(...expandedRenderableEvents(meaningful, forceExpanded))
+    } else if (actionCount > 1) {
       result.push(makeCollapsedGroup(meaningful))
     }
     buffer = []
   }
 
-  for (const event of events) {
+  for (let index = 0; index < events.length; index += 1) {
+    const event = events[index]
     if (event.kind === 'message') {
       flush()
       result.push(event)
@@ -231,7 +264,7 @@ export function collapseDetailedStatusRuns(
     }
 
     if (eventHasLatestStatus(event, targets)) {
-      flush()
+      flush(options.keepTrailingActivityExpanded === true && index > latestMessageIndex)
       result.push(event)
       continue
     }
@@ -239,7 +272,7 @@ export function collapseDetailedStatusRuns(
     buffer.push(event)
   }
 
-  flush()
+  flush(options.keepTrailingActivityExpanded === true)
   return result
 }
 

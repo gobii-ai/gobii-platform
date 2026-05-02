@@ -1168,9 +1168,14 @@ export function AgentChatPage({
     () => findLatestStatusExpansionTargets(timelineEvents),
     [timelineEvents],
   )
+  const keepTrailingActivityExpanded = Boolean(
+    timelineProcessingActive
+    || timelineAwaitingResponse
+    || (timelineStreaming && !timelineStreaming.done),
+  )
   const displayEvents = useMemo(
-    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets),
-    [timelineEvents, statusExpansionTargets],
+    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
+    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets],
   )
   const [timelineCanScrollForOlder, setTimelineCanScrollForOlder] = useState(false)
   const [isNearBottom, setIsNearBottom] = useState(true)

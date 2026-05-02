@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { collapseDetailedStatusRuns } from './useSimplifiedTimeline'
-import type { PlanEvent, TimelineEvent, ToolClusterEvent } from '../types/agentChat'
+import type { MessageEvent, PlanEvent, TimelineEvent, ToolClusterEvent } from '../types/agentChat'
 
 function stepCluster(cursor: string, toolNames: string[]): ToolClusterEvent {
   return {
@@ -51,7 +51,31 @@ function planEvent(cursor: string): PlanEvent {
   }
 }
 
+function messageEvent(cursor: string, bodyText = 'Message'): MessageEvent {
+  return {
+    kind: 'message',
+    cursor,
+    message: {
+      id: cursor,
+      bodyText,
+    },
+  }
+}
+
 describe('collapseDetailedStatusRuns', () => {
+  it('renders a single visible action directly instead of collapsing it', () => {
+    const action = stepCluster('1:step:first', ['update_plan', 'search_web'])
+
+    const result = collapseDetailedStatusRuns([action], {
+      latestPlanCursor: null,
+      latestScheduleEntryId: null,
+    })
+
+    expect(result).toHaveLength(1)
+    expect(result[0].kind).toBe('steps')
+    expect(result[0]).toBe(action)
+  })
+
   it('collapses adjacent action clusters into one group across hidden plan events', () => {
     const events: TimelineEvent[] = [
       {
@@ -85,5 +109,43 @@ describe('collapseDetailedStatusRuns', () => {
       ])
       expect(result[0].summary.label).toBe('5 actions')
     }
+  })
+
+  it('keeps only the trailing action run expanded while the agent is working', () => {
+    const historicalAction = stepCluster('2:step:historical', ['search_web', 'mcp_brightdata_search_engine'])
+    const trailingAction = stepCluster('4:step:trailing', ['mcp_brightdata_scrape_as_markdown', 'search_web'])
+    const events: TimelineEvent[] = [
+      messageEvent('1:message:first', 'Start'),
+      historicalAction,
+      messageEvent('3:message:latest', 'Latest'),
+      trailingAction,
+    ]
+
+    const result = collapseDetailedStatusRuns(
+      events,
+      {
+        latestPlanCursor: null,
+        latestScheduleEntryId: null,
+      },
+      { keepTrailingActivityExpanded: true },
+    )
+
+    expect(result.map((event) => event.kind)).toEqual(['message', 'collapsed-group', 'message', 'steps'])
+    expect(result[1].kind).toBe('collapsed-group')
+    expect(result[3].kind).toBe('steps')
+    if (result[3].kind === 'steps') {
+      expect(result[3].cursor).toBe(trailingAction.cursor)
+      expect(result[3].collapsible).toBe(false)
+      expect(result[3].collapseThreshold).toBe(Infinity)
+    }
+  })
+
+  it('drops runs with no visible actions', () => {
+    const result = collapseDetailedStatusRuns([stepCluster('1:step:hidden', ['update_plan'])], {
+      latestPlanCursor: null,
+      latestScheduleEntryId: null,
+    })
+
+    expect(result).toEqual([])
   })
 })
