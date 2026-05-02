@@ -1346,6 +1346,7 @@
     max-height: calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem);
     overflow: visible;
     z-index: 9;
+    cursor: pointer;
   }
 
   #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame > .plan-panel {

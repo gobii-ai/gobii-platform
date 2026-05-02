@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
@@ -966,6 +966,45 @@ export function AgentChatLayout({
     }, 180)
   }, [displayPlanSnapshot, planHoverPreviewExiting, planHoverPreviewVisible, planPanelMode, showPlanInterface])
 
+  const handleFloatingPlanOpen = useCallback(() => {
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+    setCurrentPlanPanelMode(() => 'docked')
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+    suppressPlanHoverPreviewRef.current = false
+  }, [planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+
+  const handleFloatingPlanClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handleFloatingPlanOpen()
+  }, [handleFloatingPlanOpen])
+
+  const handleFloatingPlanKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    handleFloatingPlanOpen()
+  }, [handleFloatingPlanOpen])
+
   useEffect(() => {
     if (!showPlanInterface) {
       setPlanSheetOpen(false)
@@ -1157,6 +1196,8 @@ export function AgentChatLayout({
       : renderedPlanSnapshot
         ? 'floating'
         : 'hidden'
+  const isFloatingPlanPreview = workspacePlanMode === 'floating'
+  const isHoverPlanPreview = isFloatingPlanPreview && showHoverPlanPreview
   const showDesktopPlanPanel = showPlanInterface && workspacePlanMode !== 'hidden' && (
     planPanelMode === 'docked' || Boolean(renderedPlanSnapshot)
   )
@@ -1520,7 +1561,13 @@ export function AgentChatLayout({
           {showDesktopPlanPanel ? (
             <div
               className={`agent-chat-plan-frame${floatingPlanExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
-              aria-label="Plan panel"
+              aria-label={isFloatingPlanPreview ? 'Open plan panel' : 'Plan panel'}
+              role={isFloatingPlanPreview ? 'button' : undefined}
+              tabIndex={isFloatingPlanPreview ? 0 : undefined}
+              onClickCapture={isFloatingPlanPreview ? handleFloatingPlanClick : undefined}
+              onKeyDown={isFloatingPlanPreview ? handleFloatingPlanKeyDown : undefined}
+              onMouseEnter={isHoverPlanPreview ? () => handlePlanHoverChange(true) : undefined}
+              onMouseLeave={isHoverPlanPreview ? () => handlePlanHoverChange(false) : undefined}
             >
               <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
             </div>

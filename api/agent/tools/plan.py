@@ -182,17 +182,19 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
             .filter(assigned_agent=agent)
             .order_by("-priority", "created_at")
         )
-        existing_by_key = {_normalize_step_key(card.title): card for card in existing_cards}
-        desired_keys: set[str] = set()
+        existing_by_key: dict[str, list[PersistentAgentKanbanCard]] = {}
+        for card in existing_cards:
+            existing_by_key.setdefault(_normalize_step_key(card.title), []).append(card)
+        matched_existing_card_ids: set[str] = set()
         total = len(plan_items)
 
         for index, item in enumerate(plan_items):
             step = item["step"]
             status = item["status"]
             key = _normalize_step_key(step)
-            desired_keys.add(key)
             priority = total - index
-            card = existing_by_key.get(key)
+            matching_cards = existing_by_key.get(key)
+            card = matching_cards.pop(0) if matching_cards else None
 
             if card is None:
                 completed_at = timezone.now() if status == PersistentAgentKanbanCard.Status.DONE else None
@@ -214,6 +216,7 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
                 )
                 continue
 
+            matched_existing_card_ids.add(str(card.id))
             old_status = card.status
             update_fields: list[str] = []
             non_status_changed = False
@@ -265,7 +268,7 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
                     )
 
         for card in existing_cards:
-            if _normalize_step_key(card.title) in desired_keys:
+            if str(card.id) in matched_existing_card_ids:
                 continue
             changes.append(
                 PlanStepChange(

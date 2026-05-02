@@ -74,10 +74,12 @@ vi.mock('./AgentChatBanner', () => ({
   AgentChatBanner: ({
     children,
     onPlanOpen,
+    onPlanHoverChange,
     planPanelMode,
   }: {
     children?: React.ReactNode
     onPlanOpen?: () => void
+    onPlanHoverChange?: (hovered: boolean) => void
     planPanelMode?: string
   }) => (
     <div>
@@ -87,6 +89,10 @@ vi.mock('./AgentChatBanner', () => ({
           data-testid="banner-plan-button"
           data-plan-mode={planPanelMode ?? ''}
           onClick={() => onPlanOpen()}
+          onMouseEnter={() => onPlanHoverChange?.(true)}
+          onMouseLeave={() => onPlanHoverChange?.(false)}
+          onFocus={() => onPlanHoverChange?.(true)}
+          onBlur={() => onPlanHoverChange?.(false)}
         >
           Plan
         </button>
@@ -521,6 +527,41 @@ describe('AgentChatLayout upgrade modal gating', () => {
 
     expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'hidden')
     expect(screen.queryByText('Compile findings')).not.toBeInTheDocument()
+    vi.useRealTimers()
+  })
+
+  it('docks the full plan panel when the floating preview is clicked', () => {
+    vi.useFakeTimers()
+    const { container, rerender } = renderAgentChatLayout({ planSnapshot: initialPlan })
+
+    fireEvent.click(screen.getByTestId('banner-plan-button'))
+
+    rerender(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        agentName="Agent"
+        events={[]}
+        planSnapshot={{
+          todoCount: 1,
+          doingCount: 1,
+          doneCount: 1,
+          todoTitles: ['Deliver report'],
+          doingTitles: ['Compile findings'],
+          doneTitles: ['Research sources'],
+          files: [],
+          messages: [],
+        }}
+      />,
+    )
+
+    const floatingPlan = container.querySelector('.agent-chat-plan-frame')
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'floating')
+    expect(floatingPlan).toHaveAttribute('role', 'button')
+
+    fireEvent.click(floatingPlan as Element)
+
+    expect(document.getElementById('agent-workspace-root')).toHaveAttribute('data-plan-mode', 'docked')
+    expect(screen.getByText('Deliver report')).toBeInTheDocument()
     vi.useRealTimers()
   })
 

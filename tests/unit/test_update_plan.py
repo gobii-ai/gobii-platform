@@ -170,3 +170,35 @@ class UpdatePlanToolTests(TestCase):
         self.assertIsNotNone(keep.completed_at)
         self.assertFalse(PersistentAgentKanbanCard.objects.filter(id=remove.id).exists())
         self.assertTrue(PersistentAgentKanbanCard.objects.filter(assigned_agent=self.agent, title="Send report").exists())
+
+    def test_update_plan_deletes_surplus_existing_duplicate_steps(self):
+        keep = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research sources",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=2,
+        )
+        duplicate = PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title=" research   sources ",
+            status=PersistentAgentKanbanCard.Status.DONE,
+            priority=1,
+        )
+
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        keep.refresh_from_db()
+        self.assertEqual(keep.status, PersistentAgentKanbanCard.Status.DOING)
+        self.assertFalse(PersistentAgentKanbanCard.objects.filter(id=duplicate.id).exists())
+        self.assertEqual(
+            list(PersistentAgentKanbanCard.objects.filter(assigned_agent=self.agent).values_list("title", flat=True)),
+            ["Research sources"],
+        )
