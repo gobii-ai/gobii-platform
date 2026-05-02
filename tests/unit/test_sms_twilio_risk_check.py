@@ -134,6 +134,20 @@ class TwilioRiskCheckTests(TestCase):
         kwargs = client.messages.create.call_args.kwargs
         self.assertNotIn("risk_check", kwargs)
 
+    @patch("util.sms.Client")
+    def test_send_sms_normalizes_body_before_twilio_send(self, mock_client_cls):
+        client = self._mock_twilio_client(mock_client_cls)
+
+        result = sms.send_sms(
+            to_number="+14155552671",
+            from_number="+12025550123",
+            body="Quick update — done 😊",
+        )
+
+        self.assertEqual(result, "SM123")
+        kwargs = client.messages.create.call_args.kwargs
+        self.assertEqual(kwargs["body"], "Quick update - done :)")
+
     @patch("api.agent.comms.outbound_delivery.Analytics.track_event")
     @patch("api.agent.comms.outbound_delivery.sms.send_sms", return_value="SM123")
     def test_deliver_agent_sms_passes_owner_user_to_twilio_send(
