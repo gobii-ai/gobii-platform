@@ -38,6 +38,11 @@ class SmsEncodingTests(SimpleTestCase):
     def test_normalize_sms_text_preserves_unmapped_non_gsm_text(self):
         self.assertEqual(normalize_sms_text("Meet at 北京 office"), "Meet at 北京 office")
 
+    def test_normalize_sms_text_preserves_zero_width_marks(self):
+        text = "A\u200bB A\u200cB A\u200dB"
+
+        self.assertEqual(normalize_sms_text(text), text)
+
     def test_normalize_sms_text_decomposes_accents_when_gsm7_safe(self):
         self.assertEqual(normalize_sms_text("Zbyněk"), "Zbynek")
 

@@ -76,16 +76,9 @@ CHAR_REPLACEMENTS = {
     "®": "",
     "©": "",
     "\u00a0": " ",
-    "\u200b": "",
-    "\u200c": "",
-    "\u200d": "",
 }
 
-TYPOGRAPHY_REPLACEMENTS = {
-    original: replacement
-    for original, replacement in CHAR_REPLACEMENTS.items()
-    if original != "\u200d"
-}
+TYPOGRAPHY_REPLACEMENTS = dict(CHAR_REPLACEMENTS)
 
 
 def sms_encoding(text: str) -> SmsEncoding:

@@ -194,11 +194,13 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
             optimization["original_segments"],
             optimization["final_segments"],
         )
-        span.set_attribute("sms.normalized_for_gsm7", True)
+        span.set_attribute("sms.body_normalized", True)
+        span.set_attribute("sms.normalized_for_gsm7", optimization["final_encoding"] == "GSM-7")
         span.set_attribute("sms.original_encoding", optimization["original_encoding"])
         span.set_attribute("sms.final_encoding", optimization["final_encoding"])
         span.set_attribute("sms.segments_saved", optimization["segments_saved"])
     else:
+        span.set_attribute("sms.body_normalized", False)
         span.set_attribute("sms.normalized_for_gsm7", False)
     body = optimization["text"]
     if len(body) > settings.SMS_MAX_BODY_LENGTH:
