@@ -56,6 +56,7 @@ from .dashboards import (
     DASHBOARD_TOOL_NAME,
     execute_create_or_update_dashboard,
     get_create_or_update_dashboard_tool,
+    is_dashboard_tool_available_for_agent,
 )
 from .custom_tools import (
     execute_custom_tool,
@@ -274,6 +275,7 @@ BUILTIN_TOOL_REGISTRY = {
     DASHBOARD_TOOL_NAME: {
         "definition": get_create_or_update_dashboard_tool,
         "executor": execute_create_or_update_dashboard,
+        "is_available": is_dashboard_tool_available_for_agent,
     },
     DISCORD_SEND_MESSAGE_TOOL_NAME: {
         "definition": get_discord_send_message_tool,
@@ -1010,6 +1012,9 @@ def ensure_default_tools_enabled(
             continue
         if tool_name not in BUILTIN_TOOL_REGISTRY:
             logger.warning("Default builtin tool '%s' not registered, skipping", tool_name)
+            continue
+        if not _is_builtin_tool_available(tool_name, agent, include_hidden=True):
+            logger.info("Default builtin tool '%s' is unavailable for agent %s", tool_name, agent.id)
             continue
         result = mark_tool_enabled_without_discovery(agent, tool_name)
         if result.get("status") == "success":
