@@ -321,6 +321,54 @@ class DynamicUserFlagAdminTests(TestCase):
         self.assertTrue(has_user_flag(voluntary_option.flag, self.target_user))
         self.assertFalse(has_user_flag(involuntary_flag, self.target_user))
 
+    def test_bulk_set_blocks_enabling_inactive_choice_option_flag(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        inactive_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_retired",
+            description="Retired churn segment.",
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Retired Segment",
+            flag=inactive_flag,
+            is_active=False,
+        )
+
+        response = self.client.post(
+            self._bulk_url(),
+            data={
+                "user_ids": str(self.target_user.id),
+                "flag": str(inactive_flag.pk),
+                "value": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            None,
+            "Inactive user flag choice options cannot be enabled in bulk. "
+            "Mark the option active first or choose a different flag.",
+        )
+        self.assertFalse(has_user_flag(inactive_flag, self.target_user))
+
+        UserFlagAssignment.objects.create(user=self.target_user, flag=inactive_flag)
+        response = self.client.post(
+            self._bulk_url(),
+            data={
+                "user_ids": str(self.target_user.id),
+                "flag": str(inactive_flag.pk),
+                "value": "false",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(has_user_flag(inactive_flag, self.target_user))
+
     def test_user_changelist_search_supports_flag_true_and_false(self):
         set_user_flag(self.flag, self.target_user, True)
 

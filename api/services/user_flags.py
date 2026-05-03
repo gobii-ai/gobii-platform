@@ -1,5 +1,6 @@
 import logging
 
+from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef
 
@@ -100,6 +101,17 @@ def get_selected_user_flag_choice_option(group: UserFlagChoiceGroup, user) -> Us
     )
 
 
+def _ensure_user_flag_assignment(user, flag_id: int) -> bool:
+    try:
+        with transaction.atomic():
+            _, created = UserFlagAssignment.objects.get_or_create(user=user, flag_id=flag_id)
+    except IntegrityError:
+        if not UserFlagAssignment.objects.filter(user=user, flag_id=flag_id).exists():
+            raise
+        return False
+    return created
+
+
 def set_user_flag_choice(
     group: UserFlagChoiceGroup,
     user,
@@ -122,6 +134,7 @@ def set_user_flag_choice(
     desired_flag_ids = {selected_flag_id} if selected_flag_id else set()
 
     with transaction.atomic():
+        get_user_model().objects.select_for_update().only("pk").get(pk=user.pk)
         existing_flag_ids = set(
             UserFlagAssignment.objects.filter(
                 user=user,
@@ -137,7 +150,7 @@ def set_user_flag_choice(
         ).delete()
 
         if selected_flag_id and selected_flag_id not in existing_flag_ids:
-            UserFlagAssignment.objects.create(user=user, flag_id=selected_flag_id)
+            _ensure_user_flag_assignment(user, selected_flag_id)
 
     _sync_user_flags_to_analytics(user)
     return option
