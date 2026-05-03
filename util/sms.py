@@ -1,18 +1,17 @@
-from __future__ import annotations
-
 import logging
 import random
 from typing import Optional
 from opentelemetry import trace
 from django.conf import settings
 from api.models import SmsNumber, PersistentAgentCommsEndpoint, CommsChannel, UserPhoneNumber
+from util.sms_encoding import optimize_sms_for_cost
 from util.integrations import twilio_status, twilio_verify_available
 from observability import traced
 from twilio.base.exceptions import TwilioRestException
 
 try:
     from twilio.rest import Client
-except Exception:  # pragma: no cover - dependency optional in tests
+except ImportError:  # pragma: no cover - dependency optional in tests
     Client = None  # type: ignore
 
 logger = logging.getLogger(__name__)
@@ -184,6 +183,31 @@ def send_sms(to_number: str, from_number: str, body: str, *, owner_user=None) ->
 
     if not client:
         logger.warning("Twilio client not configured; cannot send SMS.")
+        return False
+
+    optimization = optimize_sms_for_cost(body, max_length=settings.SMS_MAX_BODY_LENGTH)
+    if optimization["changed"]:
+        logger.info(
+            "Normalized SMS body before Twilio send: encoding %s -> %s, segments %d -> %d.",
+            optimization["original_encoding"],
+            optimization["final_encoding"],
+            optimization["original_segments"],
+            optimization["final_segments"],
+        )
+        span.set_attribute("sms.body_normalized", True)
+        span.set_attribute("sms.normalized_for_gsm7", optimization["final_encoding"] == "GSM-7")
+        span.set_attribute("sms.original_encoding", optimization["original_encoding"])
+        span.set_attribute("sms.final_encoding", optimization["final_encoding"])
+        span.set_attribute("sms.segments_saved", optimization["segments_saved"])
+    else:
+        span.set_attribute("sms.body_normalized", False)
+        span.set_attribute("sms.normalized_for_gsm7", False)
+    body = optimization["text"]
+    if len(body) > settings.SMS_MAX_BODY_LENGTH:
+        logger.warning(
+            "SMS body exceeds maximum length of %d characters after normalization.",
+            settings.SMS_MAX_BODY_LENGTH,
+        )
         return False
 
     try:
