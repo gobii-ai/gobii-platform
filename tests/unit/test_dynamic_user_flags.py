@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from django.contrib import admin
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, RequestFactory, TestCase, override_settings, tag
 from django.urls import reverse
 
@@ -9,12 +10,16 @@ from api.admin import CustomUserAdmin, CustomUserAdminForm
 from api.models import (
     ImmutableUserFlagSlugError,
     UserFlagAssignment,
+    UserFlagChoiceGroup,
+    UserFlagChoiceOption,
     UserFlagDefinition,
 )
 from api.services.user_flags import (
     UnknownUserFlagError,
     filter_users_by_flag,
+    get_selected_user_flag_choice_option,
     has_user_flag,
+    set_user_flag_choice,
     set_user_flag,
 )
 from util.analytics import Analytics
@@ -112,6 +117,69 @@ class DynamicUserFlagServiceTests(TestCase):
 
         set_user_flag(self.flag, self.user, False)
         mock_identify.assert_called_once_with(self.user.id, {})
+
+    def test_set_user_flag_choice_replaces_group_option_assignments(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        voluntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_voluntary",
+            description="Voluntary churn segment.",
+        )
+        involuntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_involuntary",
+            description="Involuntary churn segment.",
+        )
+        voluntary_option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Voluntary - Dissatisfied",
+            flag=voluntary_flag,
+        )
+        involuntary_option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Involuntary - Payment",
+            flag=involuntary_flag,
+        )
+        UserFlagAssignment.objects.create(user=self.user, flag=voluntary_flag)
+        UserFlagAssignment.objects.create(user=self.user, flag=involuntary_flag)
+
+        selected_option = get_selected_user_flag_choice_option(group, self.user)
+        self.assertEqual(selected_option, involuntary_option)
+
+        set_user_flag_choice(group, self.user, voluntary_option)
+
+        self.assertTrue(has_user_flag(voluntary_flag, self.user))
+        self.assertFalse(has_user_flag(involuntary_flag, self.user))
+
+        set_user_flag_choice(group, self.user, None)
+
+        self.assertFalse(has_user_flag(voluntary_flag, self.user))
+
+    def test_user_flag_choice_option_value_is_immutable_and_cannot_be_deleted(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        other_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_other",
+            description="Other churn segment.",
+        )
+        option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Other",
+            flag=self.flag,
+        )
+
+        option.flag = other_flag
+        with self.assertRaises(ValueError):
+            option.save()
+
+        option.refresh_from_db()
+        with self.assertRaises(ValidationError):
+            option.delete()
+        with self.assertRaises(ValidationError):
+            UserFlagChoiceOption.objects.filter(pk=option.pk).delete()
 
 
 @tag("batch_user_flags")
@@ -214,6 +282,93 @@ class DynamicUserFlagAdminTests(TestCase):
         self.assertIn("Skipped invalid user ID tokens: not-an-id.", messages)
         self.assertIn("Skipped missing user IDs: 999999.", messages)
 
+    def test_bulk_set_option_flag_respects_choice_group_exclusivity(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        voluntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_voluntary",
+            description="Voluntary churn segment.",
+        )
+        involuntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_involuntary",
+            description="Involuntary churn segment.",
+        )
+        voluntary_option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Voluntary - Dissatisfied",
+            flag=voluntary_flag,
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Involuntary - Payment",
+            flag=involuntary_flag,
+        )
+        UserFlagAssignment.objects.create(user=self.target_user, flag=involuntary_flag)
+
+        response = self.client.post(
+            self._bulk_url(),
+            data={
+                "user_ids": str(self.target_user.id),
+                "flag": str(voluntary_flag.pk),
+                "value": "true",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(has_user_flag(voluntary_option.flag, self.target_user))
+        self.assertFalse(has_user_flag(involuntary_flag, self.target_user))
+
+    def test_bulk_set_blocks_enabling_inactive_choice_option_flag(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        inactive_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_retired",
+            description="Retired churn segment.",
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Retired Segment",
+            flag=inactive_flag,
+            is_active=False,
+        )
+
+        response = self.client.post(
+            self._bulk_url(),
+            data={
+                "user_ids": str(self.target_user.id),
+                "flag": str(inactive_flag.pk),
+                "value": "true",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFormError(
+            response.context["form"],
+            None,
+            "Inactive user flag choice options cannot be enabled in bulk. "
+            "Mark the option active first or choose a different flag.",
+        )
+        self.assertFalse(has_user_flag(inactive_flag, self.target_user))
+
+        UserFlagAssignment.objects.create(user=self.target_user, flag=inactive_flag)
+        response = self.client.post(
+            self._bulk_url(),
+            data={
+                "user_ids": str(self.target_user.id),
+                "flag": str(inactive_flag.pk),
+                "value": "false",
+            },
+            follow=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(has_user_flag(inactive_flag, self.target_user))
+
     def test_user_changelist_search_supports_flag_true_and_false(self):
         set_user_flag(self.flag, self.target_user, True)
 
@@ -252,3 +407,141 @@ class DynamicUserFlagAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Bulk Set User Flags")
         self.assertContains(response, self._bulk_url())
+
+    def test_user_change_form_renders_choice_group_select_and_hides_option_flags(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+            description="Why the user churned.",
+        )
+        voluntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_voluntary",
+            description="Voluntary churn segment.",
+        )
+        involuntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_involuntary",
+            description="Involuntary churn segment.",
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Voluntary - Dissatisfied",
+            flag=voluntary_flag,
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Involuntary - Payment",
+            flag=involuntary_flag,
+        )
+
+        response = self.client.get(self._change_url())
+
+        self.assertEqual(response.status_code, 200)
+        choice_field_name = CustomUserAdminForm.user_flag_choice_field_name(group)
+        self.assertContains(response, "Churn Type")
+        self.assertContains(response, 'name="user_flag_choice_group_')
+        self.assertNotContains(
+            response,
+            f'name="{CustomUserAdminForm.user_flag_field_name(voluntary_flag)}"',
+        )
+        self.assertNotContains(
+            response,
+            f'name="{CustomUserAdminForm.user_flag_field_name(involuntary_flag)}"',
+        )
+
+        form = response.context["adminform"].form
+        choice_labels = [
+            label
+            for value, label in form.fields[choice_field_name].choices
+            if value
+        ]
+        self.assertEqual(
+            choice_labels,
+            ["Involuntary - Payment", "Voluntary - Dissatisfied"],
+        )
+
+    def test_save_model_persists_and_clears_choice_group_selection(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        involuntary_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_involuntary",
+            description="Involuntary churn segment.",
+        )
+        involuntary_option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Involuntary - Payment",
+            flag=involuntary_flag,
+        )
+        request = self.factory.post(self._change_url())
+        request.user = self.admin_user
+        choice_field_name = CustomUserAdminForm.user_flag_choice_field_name(group)
+
+        form = CustomUserAdminForm(instance=self.target_user)
+        form.cleaned_data = {
+            "execution_paused_admin": False,
+            "execution_pause_reason_admin": "",
+            choice_field_name: str(involuntary_option.pk),
+        }
+
+        self.user_admin.save_model(request, self.target_user, form, change=True)
+        self.assertTrue(has_user_flag(involuntary_flag, self.target_user))
+
+        form = CustomUserAdminForm(instance=self.target_user)
+        form.cleaned_data = {
+            "execution_paused_admin": False,
+            "execution_pause_reason_admin": "",
+            choice_field_name: "",
+        }
+
+        self.user_admin.save_model(request, self.target_user, form, change=True)
+        self.assertFalse(has_user_flag(involuntary_flag, self.target_user))
+
+    def test_user_change_form_keeps_inactive_current_choice_visible(self):
+        group = UserFlagChoiceGroup.objects.create(
+            slug="churn_type",
+            label="Churn Type",
+        )
+        active_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_active",
+            description="Active churn segment.",
+        )
+        inactive_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_inactive",
+            description="Inactive churn segment.",
+        )
+        hidden_flag = UserFlagDefinition.objects.create(
+            slug="segment_churn_segment_hidden",
+            description="Inactive unselected churn segment.",
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Active",
+            flag=active_flag,
+        )
+        inactive_option = UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Inactive Current",
+            flag=inactive_flag,
+            is_active=False,
+        )
+        UserFlagChoiceOption.objects.create(
+            group=group,
+            label="Inactive Hidden",
+            flag=hidden_flag,
+            is_active=False,
+        )
+        UserFlagAssignment.objects.create(user=self.target_user, flag=inactive_flag)
+
+        response = self.client.get(self._change_url())
+
+        self.assertEqual(response.status_code, 200)
+        choice_field_name = CustomUserAdminForm.user_flag_choice_field_name(group)
+        form = response.context["adminform"].form
+        choice_labels = [
+            label
+            for value, label in form.fields[choice_field_name].choices
+            if value
+        ]
+        self.assertEqual(choice_labels, ["Active", "Inactive Current (inactive)"])
+        self.assertEqual(form.initial[choice_field_name], str(inactive_option.pk))

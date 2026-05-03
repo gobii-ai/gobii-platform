@@ -622,6 +622,10 @@ class ImmutableUserFlagSlugError(ValueError):
     """Raised when attempting to change an existing configured user flag slug."""
 
 
+class ImmutableUserFlagChoiceError(ValueError):
+    """Raised when attempting to change immutable configured user flag choice fields."""
+
+
 class UserFlagDefinition(models.Model):
     """Admin-managed configuration for dynamic per-user flags."""
 
@@ -650,6 +654,98 @@ class UserFlagDefinition(models.Model):
             if existing_slug and existing_slug != self.slug:
                 raise ImmutableUserFlagSlugError("User flag slugs are immutable once created.")
         super().save(*args, **kwargs)
+
+
+class UserFlagChoiceGroup(models.Model):
+    """Admin-facing single-select group backed by concrete user flag assignments."""
+
+    slug = models.SlugField(
+        max_length=64,
+        unique=True,
+        help_text="Stable identifier for this admin select group, for example 'churn_type'.",
+    )
+    label = models.CharField(
+        max_length=120,
+        help_text="Label shown on the user admin form, for example 'Churn Type'.",
+    )
+    description = models.TextField(
+        blank=True,
+        help_text="Optional explanation shown as help text on the user admin form.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("label", "slug")
+        verbose_name = "User flag choice group"
+        verbose_name_plural = "User flag choice groups"
+
+    def __str__(self):
+        return self.label
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            existing_slug = type(self).objects.filter(pk=self.pk).values_list("slug", flat=True).first()
+            if existing_slug and existing_slug != self.slug:
+                raise ImmutableUserFlagChoiceError("User flag choice group slugs are immutable once created.")
+        super().save(*args, **kwargs)
+
+
+class UserFlagChoiceOption(models.Model):
+    """One admin-select option that maps to a concrete user flag definition."""
+
+    group = models.ForeignKey(
+        UserFlagChoiceGroup,
+        on_delete=models.PROTECT,
+        related_name="options",
+    )
+    label = models.CharField(
+        max_length=160,
+        help_text="Label shown in the user admin select list.",
+    )
+    flag = models.ForeignKey(
+        UserFlagDefinition,
+        on_delete=models.PROTECT,
+        related_name="choice_options",
+        help_text="Concrete flag enabled when this option is selected.",
+    )
+    is_active = models.BooleanField(
+        default=True,
+        db_index=True,
+        help_text="Inactive options remain assigned where already used but are hidden for new selections.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("label", "id")
+        constraints = [
+            UniqueConstraint(fields=["group", "label"], name="unique_user_flag_choice_group_label"),
+            UniqueConstraint(fields=["group", "flag"], name="unique_user_flag_choice_group_flag"),
+            UniqueConstraint(fields=["flag"], name="unique_user_flag_choice_option_flag"),
+        ]
+        verbose_name = "User flag choice option"
+        verbose_name_plural = "User flag choice options"
+
+    def __str__(self):
+        return f"{self.group.label}: {self.label}"
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            existing = type(self).objects.filter(pk=self.pk).values("group_id", "flag_id").first()
+            if existing and existing["group_id"] != self.group_id:
+                raise ImmutableUserFlagChoiceError("User flag choice option groups are immutable once created.")
+            if existing and existing["flag_id"] != self.flag_id:
+                raise ImmutableUserFlagChoiceError("User flag choice option values are immutable once created.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValidationError("User flag choice options cannot be deleted. Mark them inactive instead.")
+
+
+@receiver(pre_delete, sender=UserFlagChoiceOption)
+def prevent_user_flag_choice_option_delete(sender, instance, **kwargs):
+    raise ValidationError("User flag choice options cannot be deleted. Mark them inactive instead.")
 
 
 class UserFlagAssignment(models.Model):

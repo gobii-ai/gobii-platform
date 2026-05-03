@@ -8,7 +8,7 @@ from django.contrib import admin, messages
 from django.contrib.admin import SimpleListFilter
 from django.contrib.sites.models import Site
 from django.db import transaction
-from django.db.models import Count  # For annotated counts
+from django.db.models import Count, Prefetch  # For annotated counts
 from django.db.models.expressions import OuterRef, Exists
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -80,6 +80,8 @@ from .models import (
     ComputeSnapshot,
     UserPreference,
     UserEmail,
+    UserFlagChoiceGroup,
+    UserFlagChoiceOption,
     UserFlagDefinition,
     UserFingerprintVisit,
     UserIdentitySignal,
@@ -116,7 +118,9 @@ from .services.global_skill_json import (
 )
 from .services.user_flags import (
     filter_users_by_flag,
+    get_selected_user_flag_choice_option,
     get_enabled_user_flag_slugs,
+    set_user_flag_choice,
     set_user_flag,
 )
 from config import settings
@@ -202,6 +206,63 @@ class UserFlagDefinitionAdmin(admin.ModelAdmin):
         if obj is not None:
             readonly_fields.append("slug")
         return tuple(readonly_fields)
+
+
+class UserFlagChoiceOptionAdminForm(forms.ModelForm):
+    class Meta:
+        model = UserFlagChoiceOption
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.pk:
+            for field_name in ("group", "flag"):
+                if field_name in self.fields:
+                    self.fields[field_name].disabled = True
+
+
+class UserFlagChoiceOptionInline(admin.TabularInline):
+    model = UserFlagChoiceOption
+    form = UserFlagChoiceOptionAdminForm
+    extra = 1
+    fields = ("label", "flag", "is_active", "created_at", "updated_at")
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("flag",)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(UserFlagChoiceGroup)
+class UserFlagChoiceGroupAdmin(admin.ModelAdmin):
+    list_display = ("label", "slug", "option_count", "created_at", "updated_at")
+    search_fields = ("label", "slug", "description")
+    readonly_fields = ("created_at", "updated_at")
+    fields = ("label", "slug", "description", "created_at", "updated_at")
+    inlines = (UserFlagChoiceOptionInline,)
+
+    @admin.display(description="Options")
+    def option_count(self, obj):
+        return obj.options.count()
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly_fields = list(super().get_readonly_fields(request, obj))
+        if obj is not None:
+            readonly_fields.append("slug")
+        return tuple(readonly_fields)
+
+
+@admin.register(UserFlagChoiceOption)
+class UserFlagChoiceOptionAdmin(admin.ModelAdmin):
+    form = UserFlagChoiceOptionAdminForm
+    list_display = ("label", "group", "flag", "is_active", "created_at", "updated_at")
+    list_filter = ("group", "is_active")
+    search_fields = ("label", "group__label", "group__slug", "flag__slug")
+    readonly_fields = ("created_at", "updated_at")
+    autocomplete_fields = ("group", "flag")
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(UserEmail)
@@ -2275,6 +2336,7 @@ ADMIN_MANUAL_EXECUTION_PAUSE_REASON = ExecutionPauseReasonChoices.ADMIN_MANUAL_P
 
 class CustomUserAdminForm(forms.ModelForm):
     user_flag_definitions: tuple[UserFlagDefinition, ...] = ()
+    user_flag_choice_groups: tuple[UserFlagChoiceGroup, ...] = ()
     execution_paused_admin = forms.BooleanField(
         required=False,
         label="Execution Paused",
@@ -2295,6 +2357,16 @@ class CustomUserAdminForm(forms.ModelForm):
     def user_flag_field_name(definition: UserFlagDefinition) -> str:
         return f"user_flag_definition_{definition.pk}"
 
+    @staticmethod
+    def user_flag_choice_field_name(group: UserFlagChoiceGroup) -> str:
+        return f"user_flag_choice_group_{group.pk}"
+
+    @staticmethod
+    def user_flag_choice_option_label(option: UserFlagChoiceOption) -> str:
+        if option.is_active:
+            return option.label
+        return f"{option.label} (inactive)"
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and getattr(self.instance, "pk", None):
@@ -2303,8 +2375,13 @@ class CustomUserAdminForm(forms.ModelForm):
             self.fields["execution_pause_reason_admin"].initial = pause_state["reason"]
 
         self._user_flag_definitions = list(
-            self.user_flag_definitions or tuple(UserFlagDefinition.objects.order_by("slug"))
+            self.user_flag_definitions
+            or tuple(UserFlagDefinition.objects.filter(choice_options__isnull=True).order_by("slug"))
         )
+        self._user_flag_choice_groups = list(
+            self.user_flag_choice_groups or tuple(UserFlagChoiceGroup.objects.order_by("label", "slug"))
+        )
+        self._user_flag_choice_options_by_group_id: dict[int, dict[str, UserFlagChoiceOption]] = {}
         enabled_flag_slugs = get_enabled_user_flag_slugs(self.instance)
 
         for definition in self._user_flag_definitions:
@@ -2315,8 +2392,36 @@ class CustomUserAdminForm(forms.ModelForm):
             self.fields[field_name].help_text = definition.description
             self.initial[field_name] = definition.slug in enabled_flag_slugs
 
+        for group in self._user_flag_choice_groups:
+            selected_option = get_selected_user_flag_choice_option(group, self.instance)
+            options = [
+                option
+                for option in group.options.select_related("flag").order_by("label", "pk")
+                if option.is_active or (selected_option is not None and option.pk == selected_option.pk)
+            ]
+            options.sort(key=lambda option: (option.label.casefold(), option.flag.slug.casefold()))
+            options_by_id = {str(option.pk): option for option in options}
+            self._user_flag_choice_options_by_group_id[group.pk] = options_by_id
+
+            field_name = self.user_flag_choice_field_name(group)
+            if field_name not in self.fields:
+                self.fields[field_name] = forms.ChoiceField(required=False)
+            self.fields[field_name].label = group.label
+            self.fields[field_name].help_text = group.description
+            self.fields[field_name].choices = [
+                ("", "---------"),
+                *[
+                    (str(option.pk), self.user_flag_choice_option_label(option))
+                    for option in options
+                ],
+            ]
+            self.initial[field_name] = str(selected_option.pk) if selected_option else ""
+
     def get_user_flag_field_names(self) -> tuple[str, ...]:
-        return tuple(self.user_flag_field_name(definition) for definition in self._user_flag_definitions)
+        return (
+            tuple(self.user_flag_field_name(definition) for definition in self._user_flag_definitions)
+            + tuple(self.user_flag_choice_field_name(group) for group in self._user_flag_choice_groups)
+        )
 
     def save_user_flags(self, user) -> None:
         for definition in self._user_flag_definitions:
@@ -2326,6 +2431,11 @@ class CustomUserAdminForm(forms.ModelForm):
                 user,
                 bool(self.cleaned_data.get(field_name, False)),
             )
+        for group in self._user_flag_choice_groups:
+            field_name = self.user_flag_choice_field_name(group)
+            option_id = str(self.cleaned_data.get(field_name) or "")
+            option = self._user_flag_choice_options_by_group_id.get(group.pk, {}).get(option_id)
+            set_user_flag_choice(group, user, option)
 
 # ------------------------------------------------------------------
 # CUSTOM USER ADMIN (Optimized)  ------------------------------------
@@ -2342,12 +2452,29 @@ class CustomUserAdmin(UserAdmin):
     actions = ['queue_rollup_for_selected_users']
 
     def _configured_user_flag_definitions(self) -> list[UserFlagDefinition]:
+        return list(UserFlagDefinition.objects.filter(choice_options__isnull=True).order_by("slug"))
+
+    def _all_user_flag_definitions(self) -> list[UserFlagDefinition]:
         return list(UserFlagDefinition.objects.order_by("slug"))
 
+    def _configured_user_flag_choice_groups(self) -> list[UserFlagChoiceGroup]:
+        option_queryset = UserFlagChoiceOption.objects.select_related("flag").order_by("label", "pk")
+        return list(
+            UserFlagChoiceGroup.objects.prefetch_related(
+                Prefetch("options", queryset=option_queryset),
+            ).order_by("label", "slug")
+        )
+
     def _user_flag_field_names(self) -> tuple[str, ...]:
-        return tuple(
-            CustomUserAdminForm.user_flag_field_name(definition)
-            for definition in self._configured_user_flag_definitions()
+        return (
+            tuple(
+                CustomUserAdminForm.user_flag_field_name(definition)
+                for definition in self._configured_user_flag_definitions()
+            )
+            + tuple(
+                CustomUserAdminForm.user_flag_choice_field_name(group)
+                for group in self._configured_user_flag_choice_groups()
+            )
         )
 
     def _bulk_set_flags_url_name(self) -> str:
@@ -2382,7 +2509,8 @@ class CustomUserAdmin(UserAdmin):
     def get_form(self, request, obj=None, change=False, **kwargs):
         base_form = kwargs.get("form") or (self.add_form if obj is None else self.form)
         definitions = tuple(self._configured_user_flag_definitions()) if obj is not None else ()
-        if not definitions:
+        choice_groups = tuple(self._configured_user_flag_choice_groups()) if obj is not None else ()
+        if not definitions and not choice_groups:
             kwargs["form"] = base_form
             return super().get_form(request, obj, change=change, **kwargs)
         dynamic_fields = {
@@ -2393,12 +2521,24 @@ class CustomUserAdmin(UserAdmin):
             )
             for definition in definitions
         }
+        dynamic_fields.update(
+            {
+                CustomUserAdminForm.user_flag_choice_field_name(group): forms.ChoiceField(
+                    required=False,
+                    choices=(),
+                    label=group.label,
+                    help_text=group.description,
+                )
+                for group in choice_groups
+            }
+        )
         dynamic_form = type(
             "DynamicCustomUserAdminForm",
             (base_form,),
             dynamic_fields,
         )
         dynamic_form.user_flag_definitions = definitions
+        dynamic_form.user_flag_choice_groups = choice_groups
         kwargs["form"] = dynamic_form
         return super().get_form(request, obj, change=change, **kwargs)
 
@@ -2425,7 +2565,7 @@ class CustomUserAdmin(UserAdmin):
     ) -> tuple[str, list[tuple[UserFlagDefinition, bool]]]:
         definitions_by_slug = {
             definition.slug: definition
-            for definition in self._configured_user_flag_definitions()
+            for definition in self._all_user_flag_definitions()
         }
         remaining_terms: list[str] = []
         flag_filters: list[tuple[UserFlagDefinition, bool]] = []
@@ -2476,6 +2616,7 @@ class CustomUserAdmin(UserAdmin):
             user_ids = form.cleaned_data["user_ids"]
             flag = form.cleaned_data["flag"]
             enabled = form.cleaned_data["value"]
+            choice_option = flag.choice_options.select_related("group").first()
             users_by_id = {
                 user.id: user
                 for user in self.model.objects.filter(id__in=user_ids)
@@ -2489,7 +2630,10 @@ class CustomUserAdmin(UserAdmin):
                     missing_user_ids.append(user_id)
                     continue
 
-                set_user_flag(flag, user, enabled)
+                if enabled and choice_option is not None:
+                    set_user_flag_choice(choice_option.group, user, choice_option)
+                else:
+                    set_user_flag(flag, user, enabled)
                 updated_count += 1
 
             state_label = "enabled" if enabled else "disabled"

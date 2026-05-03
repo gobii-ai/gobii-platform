@@ -487,6 +487,17 @@ class BulkSetUserFlagsForm(forms.Form):
         super().__init__(*args, **kwargs)
         self.invalid_user_id_tokens: list[str] = []
 
+    def clean(self):
+        cleaned = super().clean()
+        flag = cleaned.get("flag")
+        enabled = cleaned.get("value")
+        if enabled and flag and flag.choice_options.filter(is_active=False).exists():
+            raise forms.ValidationError(
+                "Inactive user flag choice options cannot be enabled in bulk. "
+                "Mark the option active first or choose a different flag."
+            )
+        return cleaned
+
     def clean_user_ids(self):
         raw = self.cleaned_data["user_ids"]
         tokens = [token for token in re.split(r"[\s,]+", raw.strip()) if token]
