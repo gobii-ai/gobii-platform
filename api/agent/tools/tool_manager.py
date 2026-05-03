@@ -47,6 +47,7 @@ from .dashboards import (
     DASHBOARD_TOOL_NAME,
     execute_create_or_update_dashboard,
     get_create_or_update_dashboard_tool,
+    is_dashboard_tool_available_for_agent,
 )
 from .custom_tools import (
     execute_custom_tool,
@@ -224,6 +225,7 @@ BUILTIN_TOOL_REGISTRY = {
     DASHBOARD_TOOL_NAME: {
         "definition": get_create_or_update_dashboard_tool,
         "executor": execute_create_or_update_dashboard,
+        "is_available": is_dashboard_tool_available_for_agent,
     },
 }
 
@@ -898,6 +900,9 @@ def ensure_default_tools_enabled(
     for tool_name in missing_builtin:
         if tool_name not in BUILTIN_TOOL_REGISTRY:
             logger.warning("Default builtin tool '%s' not registered, skipping", tool_name)
+            continue
+        if not _is_builtin_tool_available(tool_name, agent, include_hidden=True):
+            logger.info("Default builtin tool '%s' is unavailable for agent %s", tool_name, agent.id)
             continue
         mark_tool_enabled_without_discovery(agent, tool_name)
         logger.info("Enabled default builtin tool '%s' for agent %s", tool_name, agent.id)

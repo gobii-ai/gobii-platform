@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 from typing import Any, Dict
 
 from django.core.exceptions import ValidationError
@@ -11,11 +12,27 @@ from api.services.agent_dashboards import (
     DashboardValidationError,
     create_or_update_dashboard,
 )
+from constants.feature_flags import AGENT_DASHBOARDS
 from util.urls import append_context_query
+from util.waffle_flags import is_waffle_flag_active
 
 logger = logging.getLogger(__name__)
 
 DASHBOARD_TOOL_NAME = "create_or_update_dashboard"
+
+
+def is_dashboard_tool_available_for_agent(agent: PersistentAgent | None) -> bool:
+    """Evaluate the rollout flag against the agent owner when no request exists."""
+    if agent is None:
+        return False
+
+    request = SimpleNamespace(
+        user=getattr(agent, "user", None),
+        GET={},
+        headers={},
+        COOKIES={},
+    )
+    return is_waffle_flag_active(AGENT_DASHBOARDS, request, default=False)
 
 
 def _dashboard_url(agent: PersistentAgent) -> str:

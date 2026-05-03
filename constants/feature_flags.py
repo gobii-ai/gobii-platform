@@ -3,6 +3,9 @@ PERSISTENT_AGENTS = "persistent_agents"
 ORGANIZATIONS = "organizations"
 MULTIPLAYER_AGENTS = "multiplayer_agents"
 
+# Controls agent-authored dashboard creation and console dashboard rendering.
+AGENT_DASHBOARDS = "agent_dashboards"
+
 # Soft-expiration for free-plan agents that go inactive
 AGENT_SOFT_EXPIRATION = "agent_soft_expiration"
 

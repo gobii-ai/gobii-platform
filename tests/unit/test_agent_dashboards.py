@@ -1,11 +1,14 @@
 import sqlite3
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.files.storage import default_storage
 from django.test import TestCase, tag
 from django.urls import reverse
+from waffle.testutils import override_flag
 
-from api.agent.tools.dashboards import execute_create_or_update_dashboard
+from api.agent.tools.dashboards import DASHBOARD_TOOL_NAME, execute_create_or_update_dashboard
+from api.agent.tools.tool_manager import get_available_builtin_tool_entries
 from api.agent.tools.sqlite_state import agent_sqlite_db, sqlite_storage_key
 from api.models import (
     BrowserUseAgent,
@@ -14,6 +17,7 @@ from api.models import (
     PersistentAgentDashboardWidget,
 )
 from api.services.agent_dashboards import create_or_update_dashboard
+from constants.feature_flags import AGENT_DASHBOARDS
 
 
 @tag("batch_sqlite")
@@ -178,7 +182,8 @@ class AgentDashboardTests(TestCase):
             )
 
         self.client.force_login(self.user)
-        response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
+        with override_flag(AGENT_DASHBOARDS, active=True):
+            response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -191,6 +196,33 @@ class AgentDashboardTests(TestCase):
     def test_dashboard_api_uses_agent_access_rules(self):
         self.client.force_login(self.other_user)
 
-        response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
+        with override_flag(AGENT_DASHBOARDS, active=True):
+            response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
 
         self.assertEqual(response.status_code, 403)
+
+    def test_dashboard_api_requires_feature_flag(self):
+        self.client.force_login(self.user)
+
+        with override_flag(AGENT_DASHBOARDS, active=False):
+            response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_dashboard_page_requires_feature_flag(self):
+        self.client.force_login(self.user)
+
+        with override_flag(AGENT_DASHBOARDS, active=False):
+            response = self.client.get(reverse("agent_dashboards", kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_dashboard_builtin_tool_requires_feature_flag(self):
+        with patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False):
+            with override_flag(AGENT_DASHBOARDS, active=False):
+                disabled_entries = get_available_builtin_tool_entries(self.agent)
+            with override_flag(AGENT_DASHBOARDS, active=True):
+                enabled_entries = get_available_builtin_tool_entries(self.agent)
+
+        self.assertNotIn(DASHBOARD_TOOL_NAME, disabled_entries)
+        self.assertIn(DASHBOARD_TOOL_NAME, enabled_entries)
