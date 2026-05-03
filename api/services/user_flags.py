@@ -3,6 +3,7 @@ import logging
 from django.contrib.auth import get_user_model
 from django.db import IntegrityError, transaction
 from django.db.models import Exists, OuterRef
+from django.db.models.functions import Lower
 
 from api.models import UserFlagAssignment, UserFlagChoiceGroup, UserFlagChoiceOption, UserFlagDefinition
 
@@ -96,7 +97,7 @@ def get_selected_user_flag_choice_option(group: UserFlagChoiceGroup, user) -> Us
             flag__user_assignments__user=user,
         )
         .select_related("flag", "group")
-        .order_by("label", "pk")
+        .order_by(Lower("label"), "pk")
         .first()
     )
 
