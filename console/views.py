@@ -394,6 +394,7 @@ from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSo
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import (
+    AGENT_DASHBOARDS,
     CTA_CONTINUE_AGENT_BTN,
     CTA_NO_CHARGE_DURING_TRIAL,
     CTA_PICK_A_PLAN,
@@ -613,6 +614,11 @@ def _is_cta_continue_agent_btn_enabled(request: HttpRequest | None) -> bool:
 def _is_cta_no_charge_during_trial_enabled(request: HttpRequest | None) -> bool:
     """Default to disabled until the rollout is explicitly enabled."""
     return is_waffle_flag_active(CTA_NO_CHARGE_DURING_TRIAL, request, default=False)
+
+
+def _is_agent_dashboards_enabled(request: HttpRequest | None) -> bool:
+    """Default to disabled until the rollout is explicitly enabled."""
+    return is_waffle_flag_active(AGENT_DASHBOARDS, request, default=False)
 
 
 def _get_personal_signup_preview_config(
@@ -5990,6 +5996,11 @@ class AgentDashboardsView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     pk_url_kwarg = "pk"
     template_name = "console/agent_dashboards.html"
     allow_delinquent_personal_chat = True
+
+    def dispatch(self, request, *args, **kwargs):
+        if not _is_agent_dashboards_enabled(request):
+            raise Http404("Inactive waffle")
+        return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
