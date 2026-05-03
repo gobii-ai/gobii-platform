@@ -48,7 +48,7 @@ const COMMUNICATION_TOOL_NAMES = [
   'send_agent_message',
 ] as const
 
-const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', '', null] as const
+const BASE_SKIP_TOOL_NAMES = ['sleep', 'sleep_until_next_trigger', 'action', 'update_plan', '', null] as const
 
 export const CHAT_SKIP_TOOL_NAMES = new Set<string | null>([
   ...COMMUNICATION_TOOL_NAMES,

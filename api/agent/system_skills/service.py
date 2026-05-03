@@ -2,10 +2,82 @@
 
 from typing import Iterable, Optional
 
-from api.models import PersistentAgent, PersistentAgentEnabledTool
-from api.agent.tools.tool_manager import enable_tools
+from django.db.models import F
+from django.utils import timezone
+
+from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 
 from .registry import SystemSkillDefinition, get_system_skill_definition
+from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
+
+
+def default_enabled_system_skill_keys() -> tuple[str, ...]:
+    return tuple(
+        skill_key
+        for skill_key, definition in DEFAULT_SYSTEM_SKILL_DEFINITIONS.items()
+        if definition.default_enabled
+    )
+
+
+def ensure_default_system_skills_enabled(agent: PersistentAgent) -> None:
+    default_keys = default_enabled_system_skill_keys()
+    if not default_keys:
+        return
+
+    existing_keys = set(
+        PersistentAgentSystemSkillState.objects.filter(
+            agent=agent,
+            skill_key__in=default_keys,
+        ).values_list("skill_key", flat=True)
+    )
+    missing_keys = [skill_key for skill_key in default_keys if skill_key not in existing_keys]
+    if missing_keys:
+        PersistentAgentSystemSkillState.objects.bulk_create(
+            [
+                PersistentAgentSystemSkillState(agent=agent, skill_key=skill_key, is_enabled=True)
+                for skill_key in missing_keys
+            ],
+            ignore_conflicts=True,
+        )
+
+    PersistentAgentSystemSkillState.objects.filter(
+        agent=agent,
+        skill_key__in=default_keys,
+        is_enabled=False,
+    ).update(is_enabled=True)
+
+
+def get_enabled_system_skill_states(agent: PersistentAgent):
+    ensure_default_system_skills_enabled(agent)
+    return PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
+
+
+def refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, used_at=None) -> list[str]:
+    normalized_tool = str(tool_name or "").strip()
+    if not normalized_tool:
+        return []
+
+    used_at = used_at or timezone.now()
+    ensure_default_system_skills_enabled(agent)
+    matching_keys = [
+        definition.skill_key
+        for definition in DEFAULT_SYSTEM_SKILL_DEFINITIONS.values()
+        if normalized_tool in definition.tool_names
+    ]
+    if not matching_keys:
+        return []
+
+    updated = PersistentAgentSystemSkillState.objects.filter(
+        agent=agent,
+        skill_key__in=matching_keys,
+        is_enabled=True,
+    ).update(
+        last_used_at=used_at,
+        usage_count=F("usage_count") + 1,
+    )
+    if not updated:
+        return []
+    return matching_keys
 
 
 def enable_system_skills(
@@ -50,8 +122,17 @@ def enable_system_skills(
             continue
 
         tool_names = list(definition.tool_names)
+        state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
+            agent=agent,
+            skill_key=skill_key,
+            defaults={"is_enabled": True},
+        )
+        if not state.is_enabled:
+            state.is_enabled = True
+            state.save(update_fields=["is_enabled"])
+
         if not tool_names:
-            invalid.append(skill_key)
+            enabled.append(skill_key)
             continue
 
         enabled_qs = PersistentAgentEnabledTool.objects.filter(
@@ -62,6 +143,8 @@ def enable_system_skills(
         if enabled_tool_names.issuperset(tool_names):
             already_enabled.append(skill_key)
             continue
+
+        from api.agent.tools.tool_manager import enable_tools
 
         result = enable_tools(agent, tool_names, include_hidden_builtin=True)
         if result.get("status") != "success":

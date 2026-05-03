@@ -37,6 +37,8 @@ class SystemSkillDefinition:
     enables: tuple[str, ...] = ()
     use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
+    prompt_instructions: str = ""
+    default_enabled: bool = False
     required_profile_fields: tuple[SystemSkillField, ...] = ()
     optional_profile_fields: tuple[SystemSkillField, ...] = ()
     default_values: Mapping[str, str] = field(default_factory=dict)

@@ -38,6 +38,12 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-backdrop--open {
+  background: rgba(7, 10, 24, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .agent-mobile-sheet-panel {
   position: relative;
   width: min(100%, 720px);
@@ -64,7 +70,17 @@
   box-shadow: 0 -18px 38px rgba(7, 10, 24, 0.48);
 }
 
-.agent-mobile-sheet-panel--sidebar::before {
+.agent-mobile-sheet-panel--plan {
+  background:
+    radial-gradient(ellipse at 25% 0%, rgba(64, 27, 104, 0.2) 0%, transparent 55%),
+    radial-gradient(ellipse at 80% 100%, rgba(64, 27, 104, 0.12) 0%, transparent 50%),
+    linear-gradient(175deg, #401b68 0%, #1c0f42 55%, #170d38 100%);
+  border: 1px solid rgba(196, 181, 253, 0.16);
+  box-shadow: 0 -18px 38px rgba(7, 10, 24, 0.48);
+}
+
+.agent-mobile-sheet-panel--sidebar::before,
+.agent-mobile-sheet-panel--plan::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -109,6 +125,10 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-grabber-bar {
+  background: rgba(221, 214, 254, 0.34);
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-grabber-bar {
   background: rgba(221, 214, 254, 0.34);
 }
 
@@ -170,6 +190,11 @@
   color: #ddd6fe;
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-icon {
+  background: rgba(167, 139, 250, 0.16);
+  color: #ddd6fe;
+}
+
 .agent-mobile-sheet-title {
   font-size: 1.05rem;
   font-weight: 600;
@@ -180,6 +205,10 @@
   color: rgba(255, 255, 255, 0.96);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-title {
+  color: rgba(255, 255, 255, 0.96);
+}
+
 .agent-mobile-sheet-subtitle {
   font-size: 0.8rem;
   color: #475569;
@@ -187,6 +216,10 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-subtitle {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-subtitle {
   color: rgba(226, 232, 240, 0.72);
 }
 
@@ -213,12 +246,22 @@
   color: rgba(255, 255, 255, 0.86);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-close {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+}
+
 .agent-mobile-sheet-close:hover {
   background: rgba(59, 130, 246, 0.2);
   color: #1d4ed8;
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-close:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
@@ -243,4 +286,18 @@
 
 .agent-mobile-sheet-body--padded {
   padding: 0 1rem 1.5rem;
+}
+
+.agent-mobile-sheet--plan .plan-panel {
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.agent-mobile-sheet--plan .plan-panel::before {
+  display: none;
 }

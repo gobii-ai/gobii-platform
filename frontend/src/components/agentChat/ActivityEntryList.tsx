@@ -79,7 +79,7 @@ export function ActivityEntryList({
           const relativeTime = formatRelativeTimestamp(entry.timestamp)
           const caption = deriveEntryCaption(entry)
           const thinkingPreview = deriveThinkingPreview(entry)
-          const kind = entry.toolName === 'thinking' ? 'thinking' : entry.toolName === 'kanban' ? 'kanban' : 'tool'
+          const kind = entry.toolName === 'thinking' ? 'thinking' : 'tool'
           const DetailComponent = entry.detailComponent
 
           return (

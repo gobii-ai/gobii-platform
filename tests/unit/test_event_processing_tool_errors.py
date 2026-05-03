@@ -80,9 +80,7 @@ class ToolErrorHandlingTests(TestCase):
              patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None}), \
              patch("api.agent.core.event_processing._enforce_tool_rate_limit", return_value=True), \
              patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None), \
-             patch("api.agent.core.event_processing.seed_sqlite_kanban", return_value=None), \
              patch("api.agent.core.event_processing.apply_sqlite_agent_config_updates", return_value=SimpleNamespace(errors=[])), \
-             patch("api.agent.core.event_processing.apply_sqlite_kanban_updates", return_value=SimpleNamespace(changes=[], snapshot=None, errors=[])), \
              execute_patch:
             with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
                 ep._run_agent_loop(self.agent, is_first_run=False)

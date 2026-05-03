@@ -12,6 +12,7 @@ from django.utils import timezone
 from api.agent.tools.sqlite_skills import (
     apply_sqlite_skill_updates,
     format_recent_skills_for_prompt,
+    refresh_skills_for_tool,
     seed_sqlite_skills,
 )
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
@@ -28,6 +29,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentSkill,
+    PersistentAgentSystemSkillState,
     UserQuota,
 )
 from util.analytics import AnalyticsEvent
@@ -375,7 +377,7 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertEqual(kwargs["properties"]["global_skill_name"], "daily-brief-template")
         self.assertEqual(kwargs["properties"]["tool_ids"], ["sqlite_batch", "read_file"])
 
-    def test_prompt_block_uses_top_three_latest_skills(self):
+    def test_prompt_block_uses_top_three_recently_used_skills(self):
         now = timezone.now()
         for idx in range(4):
             skill = PersistentAgentSkill.objects.create(
@@ -386,7 +388,10 @@ class AgentSkillsPersistenceTests(TestCase):
                 tools=["sqlite_batch"],
                 instructions=f"instructions for skill {idx}",
             )
-            PersistentAgentSkill.objects.filter(id=skill.id).update(updated_at=now + timedelta(minutes=idx))
+            PersistentAgentSkill.objects.filter(id=skill.id).update(
+                updated_at=now + timedelta(minutes=idx),
+                last_used_at=now + timedelta(hours=idx),
+            )
 
         block = format_recent_skills_for_prompt(self.agent, limit=3)
 
@@ -394,7 +399,57 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Skill: skill-2 (v1)", block)
         self.assertIn("Skill: skill-1 (v1)", block)
         self.assertNotIn("Skill: skill-0 (v1)", block)
+        self.assertNotIn("System Skill: Runtime Planning\nKey:", block)
+        self.assertLess(block.index("Skill: skill-1 (v1)"), block.index("Skill: skill-2 (v1)"))
+        self.assertLess(block.index("Skill: skill-2 (v1)"), block.index("Skill: skill-3 (v1)"))
+        self.assertIn("Omitted skills due to prompt limit:", block)
+        self.assertIn("- skill-0", block)
+        self.assertIn("- System Skill: Runtime Planning (runtime_planning)", block)
+        self.assertIn("Use `search_tools` with an exact omitted skill name or key", block)
         self.assertIn("instructions for skill 3", block)
+
+    def test_prompt_block_includes_default_runtime_planning_system_skill(self):
+        block = format_recent_skills_for_prompt(self.agent, limit=1)
+
+        self.assertIn("System Skill: Runtime Planning", block)
+        self.assertIn("Tools: update_plan", block)
+        self.assertIn("Use `update_plan` to track steps", block)
+        self.assertIn("Current plan: none", block)
+
+    def test_prompt_block_limit_zero_omits_system_skills(self):
+        block = format_recent_skills_for_prompt(self.agent, limit=0)
+
+        self.assertEqual(block, "")
+
+    def test_refresh_skills_for_tool_updates_saved_and_system_skills(self):
+        saved = PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="sqlite-playbook",
+            description="SQLite workflow",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Use sqlite.",
+        )
+        format_recent_skills_for_prompt(self.agent, limit=1)
+        system_state = PersistentAgentSystemSkillState.objects.get(
+            agent=self.agent,
+            skill_key="runtime_planning",
+        )
+
+        refresh_skills_for_tool(self.agent, "sqlite_batch")
+        saved.refresh_from_db()
+        system_state.refresh_from_db()
+
+        self.assertIsNotNone(saved.last_used_at)
+        self.assertEqual(saved.usage_count, 1)
+        self.assertIsNone(system_state.last_used_at)
+        self.assertEqual(system_state.usage_count, 0)
+
+        refresh_skills_for_tool(self.agent, "update_plan")
+        system_state.refresh_from_db()
+
+        self.assertIsNotNone(system_state.last_used_at)
+        self.assertEqual(system_state.usage_count, 1)
 
     def test_prompt_block_reports_required_pending_and_missing_secrets(self):
         global_secret = GlobalSecret(
@@ -417,7 +472,7 @@ class AgentSkillsPersistenceTests(TestCase):
             encrypted_value=b"",
         )
 
-        PersistentAgentSkill.objects.create(
+        secret_skill = PersistentAgentSkill.objects.create(
             agent=self.agent,
             name="skill-with-secrets",
             description="Secret-heavy workflow",
@@ -446,6 +501,7 @@ class AgentSkillsPersistenceTests(TestCase):
             ],
             instructions="Use the secrets when available.",
         )
+        PersistentAgentSkill.objects.filter(id=secret_skill.id).update(last_used_at=timezone.now())
 
         block = format_recent_skills_for_prompt(self.agent, limit=1)
 

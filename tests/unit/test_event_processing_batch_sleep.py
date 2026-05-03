@@ -377,7 +377,7 @@ class TestBatchToolCallsWithSleep(TestCase):
     @patch('api.agent.core.event_processing.execute_send_email', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.build_prompt_context')
     @patch('api.agent.core.event_processing._completion_with_failover')
-    def test_auto_sleep_not_overridden_with_open_kanban_work(
+    def test_auto_sleep_not_overridden_with_open_plan_work(
         self,
         mock_completion,
         mock_build_prompt,
@@ -477,6 +477,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_send_chat.assert_called_once()
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
+    @patch('api.agent.core.event_processing.execute_update_plan', return_value={"status": "ok"})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": False})
     @patch('api.agent.core.event_processing.build_prompt_context')
@@ -487,6 +488,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_build_prompt,
         mock_send_chat,
         mock_execute_enabled,
+        mock_update_plan,
         _mock_credit,
     ):
         """Stop when the final tool call explicitly sets will_continue_work=false."""
@@ -504,13 +506,13 @@ class TestBatchToolCallsWithSleep(TestCase):
             return tc
 
         tc_message = mk_tc('send_chat_message', '{"body": "Report done.", "will_continue_work": true}')
-        tc_sqlite = mk_tc(
-            'sqlite_batch',
-            '{"sql": "UPDATE __kanban_cards SET status=\'done\' WHERE friendly_id=\'final\';", "will_continue_work": false}'
+        tc_plan = mk_tc(
+            'update_plan',
+            '{"plan": [{"step": "Deliver final report", "status": "done"}], "will_continue_work": false}'
         )
 
         msg = MagicMock()
-        msg.tool_calls = [tc_message, tc_sqlite]
+        msg.tool_calls = [tc_message, tc_plan]
         msg.content = None
         choice = MagicMock(); choice.message = msg
         resp = MagicMock(); resp.choices = [choice]
@@ -535,4 +537,5 @@ class TestBatchToolCallsWithSleep(TestCase):
 
         self.assertEqual(mock_completion.call_count, 1)
         mock_send_chat.assert_called_once()
-        mock_execute_enabled.assert_called_once()
+        mock_update_plan.assert_called_once()
+        mock_execute_enabled.assert_not_called()

@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from 'react'
+import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
@@ -14,6 +14,7 @@ import { AgentChatBanner, type ConnectionStatusTone } from './AgentChatBanner'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { AgentChatSettingsPanel } from './AgentChatSettingsPanel'
 import { AgentChatAddonsPanel } from './AgentChatAddonsPanel'
+import { PlanPanel } from './PlanPanel'
 import { HighPriorityBanner, type HighPriorityBannerConfig } from './HighPriorityBanner'
 import { HardLimitCalloutCard } from './HardLimitCalloutCard'
 import { ContactCapCalloutCard } from './ContactCapCalloutCard'
@@ -33,7 +34,7 @@ import type {
   PendingActionRequest,
   ProcessingWebTask,
   StreamState,
-  KanbanBoardSnapshot,
+  PlanSnapshot,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -50,6 +51,11 @@ import type { AddonPackOption, ContactCapInfo, ContactCapStatus, TrialInfo } fro
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
 import type { StatusExpansionTargets } from './statusExpansion'
+import {
+  addInferredPlanFiles,
+  filterChangedPlanSnapshot,
+  hasCompletedPlanDeliverables,
+} from './planSnapshotUtils'
 
 type TaskQuotaInfo = {
   available: number
@@ -132,7 +138,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   sidebarNotificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
   onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
   autoFocusComposer?: boolean
-  kanbanSnapshot?: KanbanBoardSnapshot | null
+  planSnapshot?: PlanSnapshot | null
   footer?: ReactNode
   galleryShellPage?: SelectionShellPage
   onGalleryShellPageChange?: (page: SelectionShellPage) => void
@@ -248,6 +254,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   ) => Promise<void>
 }
 
+type PlanPanelMode = 'docked' | 'hidden'
+
 export function AgentChatLayout({
   agentFirstName,
   events,
@@ -297,7 +305,7 @@ export function AgentChatLayout({
   sidebarNotificationStatus = 'off',
   onSidebarNotificationsEnabledChange,
   autoFocusComposer = false,
-  kanbanSnapshot,
+  planSnapshot,
   footer,
   galleryShellPage = 'agents',
   onGalleryShellPageChange,
@@ -400,6 +408,7 @@ export function AgentChatLayout({
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
   const [sidebarMode, setSidebarMode] = useState(getInitialAgentChatSidebarMode)
+  const preEmbeddedSidebarModeRef = useRef<'collapsed' | 'list' | 'gallery' | null>(null)
   const {
     currentPlan: subscriptionPlan,
     isLoading: subscriptionLoading,
@@ -438,6 +447,24 @@ export function AgentChatLayout({
   const [taskCreditsDismissed, setTaskCreditsDismissed] = useState(false)
   const [highPriorityDismissed, setHighPriorityDismissed] = useState(false)
   const [quickIncreaseBusy, setQuickIncreaseBusy] = useState(false)
+  const [planSheetOpen, setPlanSheetOpen] = useState(false)
+  const [defaultPlanPanelMode, setDefaultPlanPanelMode] = useState<PlanPanelMode>('hidden')
+  const [agentPlanPanelModes, setAgentPlanPanelModes] = useState<Record<string, PlanPanelMode>>({})
+  const [planPreviewSnapshot, setPlanPreviewSnapshot] = useState<PlanSnapshot | null>(null)
+  const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
+  const [planHoverPreviewVisible, setPlanHoverPreviewVisible] = useState(false)
+  const [planHoverPreviewExiting, setPlanHoverPreviewExiting] = useState(false)
+  const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'hidden' : defaultPlanPanelMode
+  const hasStoredPlanPanelMode = agentId
+    ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
+    : defaultPlanPanelMode !== 'hidden'
+  const showPlanInterface = sidebarMode !== 'gallery'
+  const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
+  const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
+  const planPreviewTimeoutRef = useRef<number | null>(null)
+  const planPreviewExitTimeoutRef = useRef<number | null>(null)
+  const planHoverExitTimeoutRef = useRef<number | null>(null)
+  const suppressPlanHoverPreviewRef = useRef(false)
   const contactCapLimitReachedRef = useRef<boolean | null>(null)
   const taskCreditsStorageKeyRef = useRef<string | null>(null)
   const addonsOpen = addonsMode !== null
@@ -461,6 +488,7 @@ export function AgentChatLayout({
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
     if (showEmbeddedSettings && mode !== 'gallery') {
+      preEmbeddedSidebarModeRef.current = null
       setSidebarMode(mode)
       onBackFromEmbeddedSettings?.()
       return
@@ -502,8 +530,22 @@ export function AgentChatLayout({
 
   useEffect(() => {
     if (showEmbeddedSettings) {
-      setSidebarMode('gallery')
+      setSidebarMode((mode) => {
+        if (mode !== 'gallery' && preEmbeddedSidebarModeRef.current === null) {
+          preEmbeddedSidebarModeRef.current = mode
+        }
+        return 'gallery'
+      })
+      return
     }
+    setSidebarMode((mode) => {
+      const restoredMode = preEmbeddedSidebarModeRef.current
+      preEmbeddedSidebarModeRef.current = null
+      if (restoredMode && mode === 'gallery') {
+        return restoredMode
+      }
+      return mode
+    })
   }, [showEmbeddedSettings])
 
   useEffect(() => {
@@ -839,6 +881,274 @@ export function AgentChatLayout({
     previewActionsDisabled,
   ])
 
+  const setCurrentPlanPanelMode = useCallback((resolveMode: (mode: PlanPanelMode) => PlanPanelMode) => {
+    if (agentId) {
+      setAgentPlanPanelModes((modes) => {
+        const currentMode = modes[agentId] ?? 'hidden'
+        const nextMode = resolveMode(currentMode)
+        if (nextMode === currentMode) {
+          return modes
+        }
+        return { ...modes, [agentId]: nextMode }
+      })
+      return
+    }
+    setDefaultPlanPanelMode((mode) => {
+      const nextMode = resolveMode(mode)
+      return nextMode === mode ? mode : nextMode
+    })
+  }, [agentId])
+
+  const handleOpenPlan = useCallback(() => {
+    if (!showPlanInterface) {
+      return
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      setPlanSheetOpen(true)
+      return
+    }
+    suppressPlanHoverPreviewRef.current = planPanelMode === 'docked'
+    setCurrentPlanPanelMode((mode) => (mode === 'docked' ? 'hidden' : 'docked'))
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+  }, [planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+
+  const displayPlanSnapshot = useMemo(
+    () => addInferredPlanFiles(planSnapshot, events),
+    [events, planSnapshot],
+  )
+
+  const handlePlanHoverChange = useCallback((hovered: boolean) => {
+    const wasSuppressed = suppressPlanHoverPreviewRef.current
+    if (!hovered) {
+      suppressPlanHoverPreviewRef.current = false
+      if (wasSuppressed || (!planHoverPreviewVisible && !planHoverPreviewExiting)) {
+        return
+      }
+    }
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+    if (typeof window !== 'undefined' && window.innerWidth < 1024) {
+      return
+    }
+    const total = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) + (displayPlanSnapshot?.doneCount ?? 0)
+    if (total === 0) {
+      return
+    }
+
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+
+    if (hovered) {
+      if (wasSuppressed) {
+        return
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
+      setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(true)
+      setPlanHoverPreviewExiting(false)
+      return
+    }
+
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(true)
+    planHoverExitTimeoutRef.current = window.setTimeout(() => {
+      setPlanHoverPreviewExiting(false)
+      planHoverExitTimeoutRef.current = null
+    }, 180)
+  }, [displayPlanSnapshot, planHoverPreviewExiting, planHoverPreviewVisible, planPanelMode, showPlanInterface])
+
+  const handleFloatingPlanOpen = useCallback(() => {
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+    setCurrentPlanPanelMode(() => 'docked')
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+    suppressPlanHoverPreviewRef.current = false
+  }, [planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+
+  const handleFloatingPlanClick = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handleFloatingPlanOpen()
+  }, [handleFloatingPlanOpen])
+
+  const handleFloatingPlanKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    handleFloatingPlanOpen()
+  }, [handleFloatingPlanOpen])
+
+  useEffect(() => {
+    if (!showPlanInterface) {
+      setPlanSheetOpen(false)
+      setPlanPreviewSnapshot(null)
+      setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(false)
+      setPlanHoverPreviewExiting(false)
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+        planPreviewTimeoutRef.current = null
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+        planHoverExitTimeoutRef.current = null
+      }
+      suppressPlanHoverPreviewRef.current = false
+    }
+  }, [showPlanInterface])
+
+  useEffect(() => {
+    setPlanSheetOpen(false)
+    setPlanPreviewSnapshot(null)
+    setPlanPreviewExiting(false)
+    setPlanHoverPreviewVisible(false)
+    setPlanHoverPreviewExiting(false)
+    previousPlanStateRef.current = null
+    previousPlanSnapshotRef.current = null
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+      planPreviewTimeoutRef.current = null
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    if (planHoverExitTimeoutRef.current !== null) {
+      window.clearTimeout(planHoverExitTimeoutRef.current)
+      planHoverExitTimeoutRef.current = null
+    }
+    suppressPlanHoverPreviewRef.current = false
+  }, [agentId])
+
+  useEffect(() => {
+    const total = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) + (displayPlanSnapshot?.doneCount ?? 0)
+    const active = (displayPlanSnapshot?.todoCount ?? 0) + (displayPlanSnapshot?.doingCount ?? 0) > 0
+    const previous = previousPlanStateRef.current
+    previousPlanStateRef.current = { total, active }
+
+    const previousSnapshot = previousPlanSnapshotRef.current
+    previousPlanSnapshotRef.current = displayPlanSnapshot ?? null
+
+    if (!previous) {
+      if (
+        showPlanInterface
+        && !hasStoredPlanPanelMode
+        && (active || hasCompletedPlanDeliverables(displayPlanSnapshot))
+      ) {
+        setCurrentPlanPanelMode(() => 'docked')
+      }
+      return
+    }
+
+    if (previous.total === 0 && total > 0) {
+      setPlanPreviewSnapshot(null)
+      setPlanPreviewExiting(false)
+      setPlanHoverPreviewVisible(false)
+      setPlanHoverPreviewExiting(false)
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+        planPreviewTimeoutRef.current = null
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+        planPreviewExitTimeoutRef.current = null
+      }
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+        planHoverExitTimeoutRef.current = null
+      }
+      suppressPlanHoverPreviewRef.current = false
+      if (active || hasCompletedPlanDeliverables(displayPlanSnapshot)) {
+        setCurrentPlanPanelMode(() => 'docked')
+      }
+      return
+    }
+
+    if (!showPlanInterface || planPanelMode !== 'hidden') {
+      return
+    }
+
+    const changedSnapshot = filterChangedPlanSnapshot(previousSnapshot, displayPlanSnapshot)
+    if (!changedSnapshot) {
+      return
+    }
+
+    setPlanPreviewSnapshot(changedSnapshot)
+    setPlanPreviewExiting(false)
+    if (planPreviewTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewTimeoutRef.current)
+    }
+    if (planPreviewExitTimeoutRef.current !== null) {
+      window.clearTimeout(planPreviewExitTimeoutRef.current)
+      planPreviewExitTimeoutRef.current = null
+    }
+    planPreviewTimeoutRef.current = window.setTimeout(() => {
+      setPlanPreviewExiting(true)
+      planPreviewTimeoutRef.current = null
+      planPreviewExitTimeoutRef.current = window.setTimeout(() => {
+        setPlanPreviewSnapshot(null)
+        setPlanPreviewExiting(false)
+        planPreviewExitTimeoutRef.current = null
+      }, 180)
+    }, 5000)
+  }, [displayPlanSnapshot, hasStoredPlanPanelMode, planPanelMode, setCurrentPlanPanelMode, showPlanInterface])
+
+  useEffect(() => {
+    return () => {
+      if (planPreviewTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewTimeoutRef.current)
+      }
+      if (planPreviewExitTimeoutRef.current !== null) {
+        window.clearTimeout(planPreviewExitTimeoutRef.current)
+      }
+      if (planHoverExitTimeoutRef.current !== null) {
+        window.clearTimeout(planHoverExitTimeoutRef.current)
+      }
+      suppressPlanHoverPreviewRef.current = false
+    }
+  }, [])
+
+  const handlePlanMessageClick = useCallback((messageId: string) => {
+    if (typeof document === 'undefined') {
+      return
+    }
+    const escaped = typeof window !== 'undefined' && window.CSS?.escape ? window.CSS.escape(messageId) : messageId.replace(/"/g, '\\"')
+    const target = document.querySelector<HTMLElement>(`[data-message-id="${escaped}"]`)
+    target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    setPlanSheetOpen(false)
+  }, [])
+
   const mainClassName = 'agent-chat-main'
   const sidebarSettings = useMemo(() => ({
     context: currentContext,
@@ -870,6 +1180,27 @@ export function AgentChatLayout({
     taskQuota,
     viewerEmail,
   ])
+  const showHoverPlanPreview = planPanelMode === 'hidden' && (planHoverPreviewVisible || planHoverPreviewExiting)
+  const renderedPlanSnapshot = planPanelMode === 'docked'
+    ? displayPlanSnapshot
+    : showHoverPlanPreview
+      ? displayPlanSnapshot
+      : planPreviewSnapshot
+  const floatingPlanExiting = !planHoverPreviewVisible && (
+    planPreviewExiting || (planHoverPreviewExiting && !planPreviewSnapshot)
+  )
+  const workspacePlanMode = !showPlanInterface
+    ? 'hidden'
+    : planPanelMode === 'docked'
+      ? 'docked'
+      : renderedPlanSnapshot
+        ? 'floating'
+        : 'hidden'
+  const isFloatingPlanPreview = workspacePlanMode === 'floating'
+  const isHoverPlanPreview = isFloatingPlanPreview && showHoverPlanPreview
+  const showDesktopPlanPanel = showPlanInterface && workspacePlanMode !== 'hidden' && (
+    planPanelMode === 'docked' || Boolean(renderedPlanSnapshot)
+  )
 
   return (
     <>
@@ -899,22 +1230,25 @@ export function AgentChatLayout({
         embeddedSettingsTitle={embeddedSettingsTitle}
         onBackFromEmbeddedSettings={onBackFromEmbeddedSettings}
       />
-	      {showBanner && (
-	        <AgentChatBanner
-	          agentId={agentId}
-	          agentName={agentName || 'Agent'}
-	          agentAvatarUrl={agentAvatarUrl}
-	          agentColorHex={agentColorHex}
-	          agentEmail={agentEmail}
-	          agentSms={agentSms}
-	          auditUrl={auditUrl}
-	          isOrgOwned={agentIsOrgOwned}
-	          canManageAgent={canManageAgent}
-	          isCollaborator={isCollaborator}
-	          connectionStatus={connectionStatus}
-	          connectionLabel={connectionLabel}
+      {showBanner && (
+        <AgentChatBanner
+          agentId={agentId}
+          agentName={agentName || 'Agent'}
+          agentAvatarUrl={agentAvatarUrl}
+          agentColorHex={agentColorHex}
+          agentEmail={agentEmail}
+          agentSms={agentSms}
+          auditUrl={auditUrl}
+          isOrgOwned={agentIsOrgOwned}
+          canManageAgent={canManageAgent}
+          isCollaborator={isCollaborator}
+          connectionStatus={connectionStatus}
+          connectionLabel={connectionLabel}
           connectionDetail={connectionDetail}
-          kanbanSnapshot={kanbanSnapshot}
+          planSnapshot={showPlanInterface ? displayPlanSnapshot : null}
+          planPanelMode={planPanelMode}
+          onPlanOpen={showPlanInterface ? handleOpenPlan : undefined}
+          onPlanHoverChange={showPlanInterface ? handlePlanHoverChange : undefined}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
@@ -927,21 +1261,21 @@ export function AgentChatLayout({
           shareDisabledReason={previewActionsDisabledReason}
           onBlockedShareClick={onBlockedCollaborate}
           signupPreviewState={signupPreviewState}
-	          sidebarMode={sidebarMode}
-	        >
-            {showHighPriorityBanner && highPriorityBanner ? (
-              <HighPriorityBanner
-                title={highPriorityBanner.title}
-                message={highPriorityBanner.message}
-                actionLabel={highPriorityBanner.actionLabel}
-                actionHref={highPriorityBanner.actionHref}
-                dismissible={highPriorityBannerDismissible}
-                tone={highPriorityBanner.tone}
-                onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
-              />
-            ) : null}
-          </AgentChatBanner>
-	      )}
+          sidebarMode={sidebarMode}
+        >
+          {showHighPriorityBanner && highPriorityBanner ? (
+            <HighPriorityBanner
+              title={highPriorityBanner.title}
+              message={highPriorityBanner.message}
+              actionLabel={highPriorityBanner.actionLabel}
+              actionHref={highPriorityBanner.actionHref}
+              dismissible={highPriorityBannerDismissible}
+              tone={highPriorityBanner.tone}
+              onDismiss={highPriorityBannerDismissible ? handleHighPriorityDismiss : undefined}
+            />
+          ) : null}
+        </AgentChatBanner>
+      )}
       <AgentChatSettingsPanel
         open={settingsOpen}
         onClose={handleSettingsClose}
@@ -979,14 +1313,17 @@ export function AgentChatLayout({
       <main className={mainClassName} data-sidebar-mode={sidebarMode}>
         <div
           id="agent-workspace-root"
+          data-plan-mode={workspacePlanMode}
           style={composerPalette.cssVars}
         >
-          {/* Scrollable timeline container */}
-          <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
-            {/* Spacer pushes content to bottom when there's extra space */}
-            <div id="timeline-spacer" aria-hidden="true" />
-            <div id="timeline-inner">
-              <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
+          <div className="agent-chat-workspace-main">
+          <div className="agent-chat-timeline-region">
+            {/* Scrollable timeline container */}
+            <div ref={timelineRef} id="timeline-shell" data-scroll-pinned={autoScrollPinned ? 'true' : 'false'}>
+              {/* Spacer pushes content to bottom when there's extra space */}
+              <div id="timeline-spacer" aria-hidden="true" />
+              <div id="timeline-inner">
+                <div id="timeline-events" className="flex flex-col" data-has-jump-button={showJumpButton ? 'true' : 'false'} data-has-working-panel={showProcessingIndicator ? 'true' : 'false'}>
                 {loadingOlder ? (
                   <div className="timeline-load-control" data-side="older" data-state="loading">
                     <div className="timeline-load-button" role="status">
@@ -1116,9 +1453,10 @@ export function AgentChatLayout({
                     </div>
                   </div>
                 ) : null}
+                </div>
               </div>
-            </div>
 
+            </div>
           </div>
 
           {/* Jump button outside scroll container so position:fixed works on iOS Safari */}
@@ -1219,9 +1557,34 @@ export function AgentChatLayout({
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
             />
           )}
+          </div>
+          {showDesktopPlanPanel ? (
+            <div
+              className={`agent-chat-plan-frame${floatingPlanExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
+              aria-label={isFloatingPlanPreview ? 'Open plan panel' : 'Plan panel'}
+              role={isFloatingPlanPreview ? 'button' : undefined}
+              tabIndex={isFloatingPlanPreview ? 0 : undefined}
+              onClickCapture={isFloatingPlanPreview ? handleFloatingPlanClick : undefined}
+              onKeyDown={isFloatingPlanPreview ? handleFloatingPlanKeyDown : undefined}
+              onMouseEnter={isHoverPlanPreview ? () => handlePlanHoverChange(true) : undefined}
+              onMouseLeave={isHoverPlanPreview ? () => handlePlanHoverChange(false) : undefined}
+            >
+              <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
+            </div>
+          ) : null}
         </div>
         {footer ? <div className="mt-6 px-4 sm:px-6 lg:px-10">{footer}</div> : null}
       </main>
+      <AgentChatMobileSheet
+        open={showPlanInterface && planSheetOpen}
+        onClose={() => setPlanSheetOpen(false)}
+        title="Plan"
+        ariaLabel="Plan"
+        bodyPadding={false}
+        tone="plan"
+      >
+        <PlanPanel plan={displayPlanSnapshot} onMessageClick={handlePlanMessageClick} compact />
+      </AgentChatMobileSheet>
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (
           <AgentChatMobileSheet

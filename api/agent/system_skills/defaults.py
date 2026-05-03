@@ -3,6 +3,54 @@
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
+RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key="runtime_planning",
+    name="Runtime Planning",
+    search_summary="Track multi-step runtime work with visible plan steps and deliverables.",
+    tool_names=("update_plan",),
+    enables=(
+        "visible task plans",
+        "runtime step tracking",
+        "file and message deliverable references",
+    ),
+    use_when=(
+        "work is non-trivial and requires multiple actions",
+        "work has logical phases or dependencies",
+        "work has ambiguity that benefits from outlining goals",
+        "intermediate checkpoints would help",
+        "the user asked for multiple things",
+        "the user explicitly asked for TODOs or a plan",
+        "extra steps are discovered before yielding",
+    ),
+    query_aliases=("plan", "planning", "todo", "todos", "update plan", "task steps"),
+    prompt_instructions=(
+        "Use `update_plan` to track steps and progress and render them to the user.\n"
+        "Plans are for complex, ambiguous, or multi-phase work. Do not use plans as filler for simple or single-step queries.\n"
+        "A good plan breaks work into meaningful, logically ordered, verifiable steps. Do not include steps you cannot actually do.\n"
+        "Use public statuses exactly as `todo`, `doing`, and `done`. Use exactly one `doing` item while work remains.\n"
+        "Every `update_plan` call overwrites all current steps, so include the complete current plan each time.\n"
+        "The tool also accepts optional top-level `files` and `messages` deliverables. Deliverables are associated with the whole current plan, not individual steps.\n"
+        "Use `files` for final user-visible artifacts created during the work, such as reports, CSV exports, PDFs, charts, or generated documents. Do not include scratch files or temporary downloads.\n"
+        "Use `messages` after sending a final report, answer, or important user-facing summary. Use the message_id returned by the send tool. Do not include routine progress updates, greetings, or status messages.\n"
+        "If finishing or updating a plan after producing final files or sending final user-facing messages, include those deliverables in the same `update_plan` call using `files` and/or `messages`.\n"
+        "Because deliverables are replaced on every call, preserve any still-relevant previous `files` and `messages` when later updating the plan.\n"
+        "After calling `update_plan`, do not repeat the whole plan in chat because the harness displays it.\n"
+        "Before moving to the next command or phase, mark the previous step `done` after verifying the work actually succeeded.\n"
+        "If the plan changes mid-task, call `update_plan` again with the full revised plan.\n"
+        "Send the final user-facing report before marking the final step done. When finished, call `update_plan` with all steps marked `done`.\n\n"
+        "Use a plan when:\n"
+        "- The task is non-trivial and requires multiple actions.\n"
+        "- There are logical phases or dependencies.\n"
+        "- The work has ambiguity that benefits from outlining goals.\n"
+        "- Intermediate checkpoints would help.\n"
+        "- The user asked for multiple things.\n"
+        "- The user explicitly asked for TODOs or the plan tool.\n"
+        "- You discover extra steps you intend to finish before yielding."
+    ),
+    default_enabled=True,
+)
+
+
 META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key="meta_ads_platform",
     name="Meta Ads Platform",
@@ -203,5 +251,6 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
 
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
+    RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
 }

@@ -8,6 +8,41 @@ from agents.services import AgentService
 from api.models import AgentPeerLink, PersistentAgent
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 
+PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
+    "create_custom_tool",
+    "file_str_replace",
+    "request_contact_permission",
+    "spawn_agent",
+    "spawn_web_task",
+    "update_plan",
+})
+
+
+def planning_mode_disallows_tool(agent: Optional[PersistentAgent], tool_name: str) -> bool:
+    return (
+        bool(agent)
+        and agent.planning_state == PersistentAgent.PlanningState.PLANNING
+        and tool_name in PLANNING_MODE_DISABLED_TOOL_NAMES
+    )
+
+
+def _get_tool_name(tool: dict) -> Optional[str]:
+    function_block = tool.get("function")
+    if not isinstance(function_block, dict):
+        return None
+    tool_name = function_block.get("name")
+    return tool_name if isinstance(tool_name, str) and tool_name else None
+
+
+def _filter_planning_mode_tools(agent: PersistentAgent, tools: List[dict]) -> List[dict]:
+    if agent.planning_state != PersistentAgent.PlanningState.PLANNING:
+        return tools
+    return [
+        tool for tool in tools
+        if (_get_tool_name(tool) not in PLANNING_MODE_DISABLED_TOOL_NAMES)
+    ]
+
+
 def _get_sleep_tool() -> Dict[str, object]:
     return {
         "type": "function",
@@ -35,9 +70,11 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     from .web_chat_sender import get_send_chat_tool
     from .webhook_sender import get_send_webhook_tool
     from .peer_dm import get_send_agent_message_tool
+    from .plan import get_update_plan_tool
 
     static_tools: List[dict] = [
         _get_sleep_tool(),
+        get_update_plan_tool(),
         get_send_email_tool(),
         get_send_sms_tool(),
         get_send_chat_tool(),
@@ -75,19 +112,14 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     if has_peer_links:
         static_tools.append(get_send_agent_message_tool())
 
-    return static_tools
+    return _filter_planning_mode_tools(agent, static_tools)
 
 
 def get_static_tool_names(agent: Optional[PersistentAgent]) -> Set[str]:
     """Return function names for static tools currently available to an agent."""
     names: Set[str] = set()
     for tool in get_static_tool_definitions(agent):
-        if not isinstance(tool, dict):
-            continue
-        function_block = tool.get("function")
-        if not isinstance(function_block, dict):
-            continue
-        tool_name = function_block.get("name")
-        if isinstance(tool_name, str) and tool_name:
+        tool_name = _get_tool_name(tool)
+        if tool_name:
             names.add(tool_name)
     return names

@@ -131,6 +131,30 @@ class AgentCapabilitiesPromptTests(TestCase):
 
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_says_final_send_stops(self, _mock_comms, _mock_steps):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn(
+            "This tool sends the final answer/report and no work remains after it → will_continue_work=false",
+            contents,
+        )
+        self.assertIn(
+            "Send your final report to the user with will_continue_work=false on that final send tool",
+            contents,
+        )
+        self.assertIn(
+            "If you still need to mark the plan done after the report is already sent, call update_plan with will_continue_work=false",
+            contents,
+        )
+        self.assertIn("no extra turn, no announcement or confirmation message", contents)
+        self.assertNotIn(
+            "Need to send the user your answer, summary, or final report → will_continue_work=true",
+            contents,
+        )
+
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
     def test_implied_send_prompt_keeps_working_silent(self, _mock_comms, _mock_steps):
         start_web_session(self.agent, self.user)
 

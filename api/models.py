@@ -7412,6 +7412,8 @@ class PersistentAgentKanbanEvent(models.Model):
     todo_count = models.PositiveIntegerField(default=0)
     doing_count = models.PositiveIntegerField(default=0)
     done_count = models.PositiveIntegerField(default=0)
+    snapshot_files = models.JSONField(default=list, blank=True)
+    snapshot_messages = models.JSONField(default=list, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -7491,6 +7493,44 @@ class PersistentAgentKanbanEventChange(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - simple display helper
         return f"KanbanEventChange<{self.action}:{self.card_id}>"
+
+
+class PersistentAgentPlanDeliverable(models.Model):
+    """Current plan deliverable referenced by an agent."""
+
+    class Kind(models.TextChoices):
+        FILE = "file", "File"
+        MESSAGE = "message", "Message"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="plan_deliverables",
+    )
+    kind = models.CharField(max_length=16, choices=Kind.choices)
+    label = models.CharField(max_length=255, blank=True)
+    path = models.CharField(max_length=1024, blank=True)
+    message = models.ForeignKey(
+        "PersistentAgentMessage",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="plan_deliverables",
+    )
+    position = models.PositiveSmallIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "created_at"]
+        indexes = [
+            models.Index(fields=["agent", "kind", "position"], name="plan_deliv_agent_kind_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        target = self.path or self.message_id or self.id
+        return f"PlanDeliverable<{self.kind}:{target}>"
 
 
 class MCPServerConfig(models.Model):
@@ -8318,6 +8358,8 @@ class PersistentAgentSkill(models.Model):
     instructions = models.TextField()
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    usage_count = models.PositiveIntegerField(default=0)
 
     class Meta:
         constraints = [
@@ -8329,6 +8371,7 @@ class PersistentAgentSkill(models.Model):
         indexes = [
             models.Index(fields=["agent", "name", "-version"], name="pa_skill_agent_name_ver_idx"),
             models.Index(fields=["agent", "-updated_at"], name="pa_skill_agent_updated_idx"),
+            models.Index(fields=["agent", "last_used_at"], name="pa_skill_agent_lu_idx"),
         ]
         ordering = ["name", "-version", "-updated_at"]
 
@@ -8350,6 +8393,43 @@ class PersistentAgentSkill(models.Model):
 
     def __str__(self) -> str:  # pragma: no cover - trivial
         return f"Skill<{self.name}@v{self.version}> for {getattr(self.agent, 'name', 'agent')}"
+
+
+class PersistentAgentSystemSkillState(models.Model):
+    """Per-agent enablement and recency state for code-defined system skills."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="system_skill_states",
+    )
+    skill_key = models.CharField(max_length=128)
+    is_enabled = models.BooleanField(default=True)
+    enabled_at = models.DateTimeField(auto_now_add=True)
+    last_used_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    usage_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "skill_key"],
+                name="unique_agent_system_skill_state",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "is_enabled", "last_used_at"], name="pa_sys_skill_agent_lu_idx"),
+            models.Index(fields=["skill_key"], name="pa_sys_skill_key_idx"),
+        ]
+        ordering = ["-last_used_at", "-enabled_at"]
+
+    def clean(self):
+        super().clean()
+        if self.skill_key:
+            self.skill_key = self.skill_key.strip()
+
+    def __str__(self) -> str:  # pragma: no cover - trivial
+        return f"SystemSkillState<{self.skill_key}> for {getattr(self.agent, 'name', 'agent')}"
 
 
 class SecretModelMixin:

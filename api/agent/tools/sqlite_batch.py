@@ -1347,7 +1347,7 @@ def _execute_with_autocorrections(
                     zero_rows_warning = True
                     msg += (
                         " (No match—verify WHERE values against ground truth: "
-                        "schema, kanban snapshot, tool results, or prior query output.)"
+                        "schema, current plan, tool results, or prior query output.)"
                     )
                 result_entry = {"message": msg}
                 if zero_rows_warning:
