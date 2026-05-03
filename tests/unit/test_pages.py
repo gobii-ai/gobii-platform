@@ -14,7 +14,7 @@ from django.template.loader import render_to_string
 from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
-from waffle.testutils import override_flag
+from waffle.testutils import override_flag, override_switch
 from api.models import (
     BrowserUseAgent,
     MCPServerConfig,
@@ -2702,6 +2702,179 @@ class CheckoutRedirectTests(TestCase):
                 }
             },
         )
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.record_checkout_context")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_scale_checkout_applies_collection_fields_when_switches_enabled_for_trial(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        _mock_customer_modify,
+        _mock_record_checkout_context,
+        mock_existing_subs,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale_trial_switches@test.com",
+            password="pw",
+            username="scale_trial_switches_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+            scale_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale_trial_switches")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_existing_subs.return_value = []
+        mock_ensure.return_value = (None, "absent")
+
+        with (
+            override_switch("stripe_scale_trial_checkout_billing_address_required", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_enabled", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_optional", active=True),
+        ):
+            resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(kwargs["billing_address_collection"], "required")
+        self.assertEqual(
+            kwargs["name_collection"],
+            {
+                "individual": {
+                    "enabled": True,
+                    "optional": True,
+                }
+            },
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=False)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.get_existing_individual_subscriptions")
+    @patch("pages.views.record_checkout_context")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_scale_checkout_skips_collection_fields_when_switches_enabled_without_trial(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        _mock_customer_modify,
+        _mock_record_checkout_context,
+        mock_existing_subs,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="scale_purchase_switches@test.com",
+            password="pw",
+            username="scale_purchase_switches_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            scale_price_id="price_scale",
+            scale_additional_task_price_id="price_scale_meter",
+            scale_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_scale_purchase_switches")
+        mock_price_get.return_value = MagicMock(unit_amount=25000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-scale")
+        mock_existing_subs.return_value = []
+        mock_ensure.return_value = (None, "absent")
+
+        with (
+            override_switch("stripe_scale_trial_checkout_billing_address_required", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_enabled", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_optional", active=True),
+        ):
+            resp = self.client.get("/subscribe/scale/")
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertNotIn("billing_address_collection", kwargs)
+        self.assertNotIn("name_collection", kwargs)
+
+    @tag("batch_pages")
+    @patch("pages.views._prepare_stripe_or_404")
+    @patch("pages.views._is_individual_trial_eligible", return_value=True)
+    @patch("pages.views.ensure_single_individual_subscription")
+    @patch("pages.views.record_checkout_context")
+    @patch("pages.views.stripe.Customer.modify")
+    @patch("pages.views.stripe.checkout.Session.create")
+    @patch("pages.views.Price.objects.get")
+    @patch("pages.views.get_or_create_stripe_customer")
+    @patch("pages.views.get_stripe_settings")
+    def test_startup_checkout_skips_scale_collection_fields_when_switches_enabled(
+        self,
+        mock_stripe_settings,
+        mock_customer,
+        mock_price_get,
+        mock_session_create,
+        _mock_customer_modify,
+        _mock_record_checkout_context,
+        mock_ensure,
+        _mock_trial_eligible,
+        _,
+    ):
+        user = get_user_model().objects.create_user(
+            email="startup_trial_switches@test.com",
+            password="pw",
+            username="startup_trial_switches_user",
+        )
+        self.client.force_login(user)
+
+        mock_stripe_settings.return_value = SimpleNamespace(
+            startup_price_id="price_startup",
+            startup_additional_task_price_id="price_startup_meter",
+            startup_trial_days=7,
+        )
+        mock_customer.return_value = SimpleNamespace(id="cus_startup_trial_switches")
+        mock_price_get.return_value = MagicMock(unit_amount=12000, currency="usd")
+        mock_session_create.return_value = MagicMock(url="https://stripe.test/checkout-startup")
+        mock_ensure.return_value = (None, "absent")
+
+        with (
+            override_switch("stripe_scale_trial_checkout_billing_address_required", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_enabled", active=True),
+            override_switch("stripe_scale_trial_checkout_individual_name_optional", active=True),
+        ):
+            resp = self.client.get(reverse("proprietary:pro_checkout"))
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "https://stripe.test/checkout-startup")
+
+        kwargs = mock_session_create.call_args.kwargs
+        self.assertNotIn("billing_address_collection", kwargs)
+        self.assertNotIn("name_collection", kwargs)
 
     @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
