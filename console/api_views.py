@@ -231,6 +231,8 @@ from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KE
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
+from constants.feature_flags import AGENT_DASHBOARDS
+from util.waffle_flags import is_waffle_flag_active
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
@@ -3735,6 +3737,11 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
 
 class AgentDashboardsAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
+
+    def dispatch(self, request, *args, **kwargs):
+        if not is_waffle_flag_active(AGENT_DASHBOARDS, request, default=False):
+            raise Http404("Inactive waffle")
+        return super().dispatch(request, *args, **kwargs)
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(
