@@ -5,6 +5,7 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Any, Optional, Sequence
+from uuid import UUID
 
 from django.db import transaction
 from django.utils import timezone
@@ -437,6 +438,33 @@ def _validate_message_deliverables(agent, raw_messages: Any, errors: list[str]) 
     if not isinstance(raw_messages, list):
         errors.append("messages must be a list.")
         return []
+
+    parsed_message_ids: dict[int, str] = {}
+    valid_message_ids: set[str] = set()
+    for index, item in enumerate(raw_messages):
+        if not isinstance(item, dict):
+            continue
+        raw_message_id = str(item.get("message_id") or "").strip()
+        if not raw_message_id:
+            continue
+        try:
+            message_id = str(UUID(raw_message_id))
+        except (TypeError, ValueError, AttributeError):
+            errors.append(f"messages[{index}].message_id must be a valid UUID.")
+            continue
+        parsed_message_ids[index] = message_id
+        valid_message_ids.add(message_id)
+
+    existing_message_ids = set()
+    if valid_message_ids:
+        existing_message_ids = {
+            str(message_id)
+            for message_id in PersistentAgentMessage.objects.filter(
+                id__in=valid_message_ids,
+                owner_agent=agent,
+            ).values_list("id", flat=True)
+        }
+
     message_items: list[dict[str, str]] = []
     for index, item in enumerate(raw_messages):
         if not isinstance(item, dict):
@@ -446,15 +474,14 @@ def _validate_message_deliverables(agent, raw_messages: Any, errors: list[str]) 
         if not raw_message_id:
             errors.append(f"messages[{index}].message_id is required.")
             continue
-        message = PersistentAgentMessage.objects.filter(
-            id=raw_message_id,
-            owner_agent=agent,
-        ).only("id").first()
-        if not message:
+        message_id = parsed_message_ids.get(index)
+        if message_id is None:
+            continue
+        if message_id not in existing_message_ids:
             errors.append(f"messages[{index}].message_id does not reference a message for this agent.")
             continue
         label = str(item.get("label") or "").strip() or "Message"
-        message_items.append({"message_id": str(message.id), "label": label[:255]})
+        message_items.append({"message_id": message_id, "label": label[:255]})
     return message_items
 
 

@@ -623,16 +623,18 @@ def refresh_skills_for_tool(agent, tool_name: str) -> list[str]:
         return []
 
     used_at = timezone.now()
-    refreshed: list[str] = []
     latest = get_latest_skill_versions(agent)
-    for skill in latest:
-        if normalized_tool not in normalize_skill_tool_ids(skill.tools):
-            continue
-        PersistentAgentSkill.objects.filter(id=skill.id).update(
+    matching_skills = [
+        skill
+        for skill in latest
+        if normalized_tool in normalize_skill_tool_ids(skill.tools)
+    ]
+    refreshed = [skill.name for skill in matching_skills]
+    if matching_skills:
+        PersistentAgentSkill.objects.filter(id__in=[skill.id for skill in matching_skills]).update(
             last_used_at=used_at,
             usage_count=F("usage_count") + 1,
         )
-        refreshed.append(skill.name)
 
     refreshed.extend(refresh_system_skills_for_tool(agent, normalized_tool, used_at=used_at))
     return refreshed

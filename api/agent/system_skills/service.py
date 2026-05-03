@@ -20,15 +20,31 @@ def default_enabled_system_skill_keys() -> tuple[str, ...]:
 
 
 def ensure_default_system_skills_enabled(agent: PersistentAgent) -> None:
-    for skill_key in default_enabled_system_skill_keys():
-        state, created = PersistentAgentSystemSkillState.objects.get_or_create(
+    default_keys = default_enabled_system_skill_keys()
+    if not default_keys:
+        return
+
+    existing_keys = set(
+        PersistentAgentSystemSkillState.objects.filter(
             agent=agent,
-            skill_key=skill_key,
-            defaults={"is_enabled": True},
+            skill_key__in=default_keys,
+        ).values_list("skill_key", flat=True)
+    )
+    missing_keys = [skill_key for skill_key in default_keys if skill_key not in existing_keys]
+    if missing_keys:
+        PersistentAgentSystemSkillState.objects.bulk_create(
+            [
+                PersistentAgentSystemSkillState(agent=agent, skill_key=skill_key, is_enabled=True)
+                for skill_key in missing_keys
+            ],
+            ignore_conflicts=True,
         )
-        if not created and not state.is_enabled:
-            state.is_enabled = True
-            state.save(update_fields=["is_enabled"])
+
+    PersistentAgentSystemSkillState.objects.filter(
+        agent=agent,
+        skill_key__in=default_keys,
+        is_enabled=False,
+    ).update(is_enabled=True)
 
 
 def get_enabled_system_skill_states(agent: PersistentAgent):

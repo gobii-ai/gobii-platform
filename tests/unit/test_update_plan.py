@@ -139,6 +139,21 @@ class UpdatePlanToolTests(TestCase):
             [existing.id],
         )
 
+    def test_update_plan_rejects_malformed_message_deliverable_id(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Deliver report", "status": "done"},
+                ],
+                "messages": [{"message_id": "not-a-uuid", "label": "Report message"}],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("messages[0].message_id must be a valid UUID.", result["errors"])
+        self.assertFalse(PersistentAgentPlanDeliverable.objects.filter(agent=self.agent).exists())
+
     def test_update_plan_matches_by_normalized_step_text_and_deletes_missing(self):
         keep = PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
