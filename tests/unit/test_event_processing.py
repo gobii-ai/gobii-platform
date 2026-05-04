@@ -36,10 +36,12 @@ from api.agent.core.event_processing import (
 )
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
+    _human_inbound_generation_key,
     bump_human_inbound_generation,
     clear_processing_stop_requested,
     get_consumed_human_inbound_generation,
     get_human_inbound_generation,
+    is_human_inbound_generation_consumed,
     is_processing_stop_requested,
     mark_human_inbound_generation_consumed,
     set_processing_stop_requested,
@@ -49,6 +51,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import submit_human_input_responses_batch
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.peer_comm import PeerMessagingService
+from config.redis_client import get_redis_client
 from api.agent.core.internal_reasoning import (
     INTERNAL_REASONING_PREFIX,
     build_internal_reasoning_description,
@@ -4205,6 +4208,16 @@ class HumanInboundGenerationTests(TestCase):
                 process_agent_events_task.pop_request()
 
         mock_process.assert_not_called()
+
+    def test_new_human_generation_advances_when_current_key_expired_before_consumed(self):
+        generation = bump_human_inbound_generation(self.agent.id)
+        mark_human_inbound_generation_consumed(self.agent.id, generation)
+        get_redis_client().delete(_human_inbound_generation_key(self.agent.id))
+
+        next_generation = bump_human_inbound_generation(self.agent.id)
+
+        self.assertEqual(next_generation, generation + 1)
+        self.assertFalse(is_human_inbound_generation_consumed(self.agent.id, next_generation))
 
     def test_process_agent_events_task_logs_task_quota_error(self):
         exc = ValidationError({"quota": "Task quota exceeded. You have no remaining task credits."})
