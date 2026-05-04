@@ -53,7 +53,7 @@ export function Modal({
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] overflow-y-auto">
       <div
         className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm"
         onClick={onClose}
