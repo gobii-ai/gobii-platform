@@ -29,6 +29,7 @@ from api.models import (
     PersistentAgentEmailEndpoint,
 )
 from api.services.agent_email_aliases import get_default_agent_email_endpoint
+from api.services.agent_planning import schedule_planning_timeout_processing
 from api.services.daily_credit_limits import (
     calculate_default_daily_credit_limit,
     calculate_daily_credit_slider_bounds,
@@ -141,6 +142,7 @@ class PersistentAgentProvisioningService:
             except ValueError:
                 raise PersistentAgentProvisioningError("Unsupported intelligence tier selection.")
 
+            resolved_planning_state = planning_state or cls._default_planning_state(user)
             persistent_agent = PersistentAgent(
                 user=user,
                 organization=organization,
@@ -151,7 +153,7 @@ class PersistentAgentProvisioningService:
                 is_active=is_active,
                 preferred_contact_endpoint=preferred_contact_endpoint,
                 preferred_llm_tier=computed_tier,
-                planning_state=planning_state or cls._default_planning_state(user),
+                planning_state=resolved_planning_state,
             )
 
             if life_state:
@@ -170,6 +172,7 @@ class PersistentAgentProvisioningService:
                 ) from exc
 
             persistent_agent.save()
+            schedule_planning_timeout_processing(persistent_agent)
 
             # Apply plan-specific default daily credit limits
             if settings.GOBII_PROPRIETARY_MODE:
