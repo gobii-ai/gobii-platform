@@ -62,16 +62,21 @@ def schedule_planning_timeout_processing(agent: PersistentAgent) -> None:
     timeout_seconds = int(settings.PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS)
     if timeout_seconds <= 0:
         return
+    if settings.CELERY_TASK_ALWAYS_EAGER and timeout_seconds > 0:
+        logger.info(
+            "Skipping delayed planning-timeout scheduling in eager mode for agent %s.",
+            agent.id,
+        )
+        return
 
-    def _enqueue() -> None:
-        from api.agent.tasks import process_planning_timeout_task
+    from api.agent.tasks import process_planning_timeout_task
 
-        process_planning_timeout_task.apply_async(
+    transaction.on_commit(
+        lambda: process_planning_timeout_task.apply_async(
             args=[str(agent.id)],
             countdown=timeout_seconds,
         )
-
-    transaction.on_commit(_enqueue)
+    )
     logger.info(
         "Scheduled planning-timeout processing for agent %s in %s seconds.",
         agent.id,

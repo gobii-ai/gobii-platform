@@ -95,6 +95,14 @@ class PlanningTimeoutDirectiveTests(TestCase):
             countdown=3600,
         )
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True, PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS=3600)
+    @patch("api.agent.tasks.process_planning_timeout_task.apply_async")
+    def test_schedule_planning_timeout_processing_skips_delayed_task_in_eager_mode(self, apply_async_mock):
+        with self.captureOnCommitCallbacks(execute=True):
+            schedule_planning_timeout_processing(self.agent)
+
+        apply_async_mock.assert_not_called()
+
     @override_settings(PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS=3600)
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
     def test_planning_timeout_task_creates_system_directive_and_queues_processing(self, delay_mock):

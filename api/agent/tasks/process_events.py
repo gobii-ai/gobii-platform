@@ -64,13 +64,12 @@ def schedule_unseen_web_chat_followup(message) -> None:
         )
         return
 
-    def _enqueue() -> None:
-        process_unseen_web_chat_followup_task.apply_async(
+    transaction.on_commit(
+        lambda: process_unseen_web_chat_followup_task.apply_async(
             args=[str(message.id)],
             countdown=delay_seconds,
         )
-
-    transaction.on_commit(_enqueue)
+    )
 
 
 def _is_task_quota_error(exc: ValidationError) -> bool:
