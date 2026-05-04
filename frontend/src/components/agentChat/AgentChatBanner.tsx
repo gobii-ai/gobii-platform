@@ -295,7 +295,11 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               onClick={onPlanOpen}
               onMouseEnter={() => onPlanHoverChange?.(true)}
               onMouseLeave={() => onPlanHoverChange?.(false)}
-              onFocus={() => onPlanHoverChange?.(true)}
+              onFocus={(event) => {
+                if (event.currentTarget.matches(':focus-visible')) {
+                  onPlanHoverChange?.(true)
+                }
+              }}
               onBlur={() => onPlanHoverChange?.(false)}
               aria-label={planButtonLabel}
               title={planButtonLabel}
