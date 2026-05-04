@@ -1,3 +1,7 @@
+import logging
+from datetime import timedelta
+
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -10,6 +14,9 @@ from api.agent.tags import maybe_schedule_agent_tags
 from api.evals.execution import get_current_eval_routing_profile
 from api.models import PersistentAgent, PersistentAgentHumanInputRequest
 
+logger = logging.getLogger(__name__)
+PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER = "Planning Timeout Auto-Complete"
+
 
 def _schedule_charter_metadata(agent: PersistentAgent) -> None:
     routing_profile = get_current_eval_routing_profile()
@@ -18,6 +25,63 @@ def _schedule_charter_metadata(agent: PersistentAgent) -> None:
     maybe_schedule_mini_description(agent, routing_profile_id=routing_profile_id)
     maybe_schedule_agent_tags(agent, routing_profile_id=routing_profile_id)
     maybe_schedule_agent_avatar(agent, routing_profile_id=routing_profile_id)
+
+
+def is_planning_timeout_expired(agent: PersistentAgent, *, now=None) -> bool:
+    if agent.planning_state != PersistentAgent.PlanningState.PLANNING:
+        return False
+
+    timeout_seconds = int(settings.PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS)
+    if timeout_seconds <= 0:
+        return False
+
+    started_at = agent.created_at
+    if started_at is None:
+        return False
+
+    stamp = now or timezone.now()
+    return stamp >= started_at + timedelta(seconds=timeout_seconds)
+
+
+def build_planning_timeout_directive(agent: PersistentAgent) -> str | None:
+    if not is_planning_timeout_expired(agent):
+        return None
+    return (
+        f"{PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER}: "
+        "This agent has been in Planning Mode for more than 1 hour. "
+        "Do not ask another planning question unless the task is impossible to scope from existing context. "
+        "Call end_planning(full_plan=...) now with the best decision-complete plan you can infer from the "
+        "conversation, explicitly noting reasonable assumptions, then continue with the work after planning ends."
+    )
+
+
+def schedule_planning_timeout_processing(agent: PersistentAgent) -> None:
+    if agent.planning_state != PersistentAgent.PlanningState.PLANNING:
+        return
+
+    timeout_seconds = int(settings.PERSISTENT_AGENT_PLANNING_TIMEOUT_SECONDS)
+    if timeout_seconds <= 0:
+        return
+    if settings.CELERY_TASK_ALWAYS_EAGER and timeout_seconds > 0:
+        logger.info(
+            "Skipping delayed planning-timeout scheduling in eager mode for agent %s.",
+            agent.id,
+        )
+        return
+
+    from api.agent.tasks import process_planning_timeout_task
+
+    transaction.on_commit(
+        lambda: process_planning_timeout_task.apply_async(
+            args=[str(agent.id)],
+            countdown=timeout_seconds,
+        )
+    )
+    logger.info(
+        "Scheduled planning-timeout processing for agent %s in %s seconds.",
+        agent.id,
+        timeout_seconds,
+    )
 
 
 def complete_agent_planning(agent: PersistentAgent, full_plan: str) -> PersistentAgent:

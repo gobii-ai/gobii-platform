@@ -49,6 +49,29 @@ tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
 
 
+def schedule_unseen_web_chat_followup(message) -> None:
+    delay_seconds = int(settings.WEB_CHAT_UNSEEN_FOLLOWUP_DELAY_SECONDS)
+    if delay_seconds < 0:
+        return
+    from api.services.web_chat_followups import has_unseen_web_chat_followup_contact
+
+    if not has_unseen_web_chat_followup_contact(message):
+        return
+    if settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
+        logger.info(
+            "Skipping delayed unseen web-chat follow-up scheduling in eager mode for message %s.",
+            message.id,
+        )
+        return
+
+    transaction.on_commit(
+        lambda: process_unseen_web_chat_followup_task.apply_async(
+            args=[str(message.id)],
+            countdown=delay_seconds,
+        )
+    )
+
+
 def _is_task_quota_error(exc: ValidationError) -> bool:
     messages = validation_error_messages(exc)
 
@@ -259,6 +282,79 @@ def process_agent_events_task(
                 "Failed to check/grant deferred referral credits for agent %s",
                 persistent_agent_id,
             )
+
+
+@shared_task(bind=True, name="api.agent.tasks.process_unseen_web_chat_followup")
+def process_unseen_web_chat_followup_task(self, message_id: str) -> None:  # noqa: D401, ANN001
+    """Queue agent processing when an outbound web chat message remains unread."""
+    from api.models import PersistentAgentSystemMessage
+    from api.services.web_chat_followups import prepare_unseen_web_chat_followup
+
+    followup = prepare_unseen_web_chat_followup(message_id)
+    if followup is None:
+        return
+
+    created = False
+    with transaction.atomic():
+        already_exists = PersistentAgentSystemMessage.objects.filter(
+            agent=followup.agent,
+            body__contains=str(followup.message.id),
+        ).exists()
+        if not already_exists:
+            PersistentAgentSystemMessage.objects.create(
+                agent=followup.agent,
+                body=followup.directive,
+            )
+            created = True
+
+    if not created:
+        return
+
+    logger.info(
+        "Queued unseen web-chat follow-up processing for agent %s message %s.",
+        followup.agent.id,
+        followup.message.id,
+    )
+    process_agent_events_task.delay(str(followup.agent.id))
+
+
+@shared_task(bind=True, name="api.agent.tasks.process_planning_timeout")
+def process_planning_timeout_task(self, persistent_agent_id: str) -> None:  # noqa: D401, ANN001
+    """Create a one-time planning timeout directive and queue agent processing."""
+    from api.models import PersistentAgent, PersistentAgentSystemMessage
+    from api.services.agent_planning import (
+        PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER,
+        build_planning_timeout_directive,
+    )
+
+    queued_agent_id = None
+    with transaction.atomic():
+        agent = PersistentAgent.objects.select_for_update().filter(id=persistent_agent_id).first()
+        if agent is None:
+            return
+
+        directive = build_planning_timeout_directive(agent)
+        if directive is None:
+            return
+
+        already_exists = PersistentAgentSystemMessage.objects.filter(
+            agent=agent,
+            body__contains=PLANNING_TIMEOUT_SYSTEM_MESSAGE_MARKER,
+        ).exists()
+        if already_exists:
+            return
+
+        PersistentAgentSystemMessage.objects.create(
+            agent=agent,
+            body=directive,
+        )
+        queued_agent_id = str(agent.id)
+
+    logger.info(
+        "Queued planning-timeout processing for agent %s.",
+        queued_agent_id,
+    )
+    process_agent_events_task.delay(queued_agent_id)
 
 
 @shared_task(bind=True, name="api.agent.tasks.process_pending_agent_events")

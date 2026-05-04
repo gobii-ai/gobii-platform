@@ -241,6 +241,9 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         latest_error_code="",
         latest_error_message="",
     )
+    from api.agent.tasks.process_events import schedule_unseen_web_chat_followup
+
+    schedule_unseen_web_chat_followup(message)
 
     return {
         "status": "ok",
