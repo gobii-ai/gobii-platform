@@ -83,7 +83,7 @@ export function SubscriptionUpgradeModal({
     : 'relative z-50 w-full max-w-4xl transform overflow-hidden rounded-2xl bg-white shadow-2xl transition-all'
 
   return createPortal(
-    <div className="fixed inset-0 z-50 overflow-y-auto">
+    <div className="fixed inset-0 z-[100] overflow-y-auto">
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm"

@@ -1198,7 +1198,8 @@ export function AgentChatLayout({
         : 'hidden'
   const isFloatingPlanPreview = workspacePlanMode === 'floating'
   const isHoverPlanPreview = isFloatingPlanPreview && showHoverPlanPreview
-  const showDesktopPlanPanel = showPlanInterface && workspacePlanMode !== 'hidden' && (
+  const showDesktopPlanFrame = showPlanInterface
+  const showDesktopPlanPanel = workspacePlanMode !== 'hidden' && (
     planPanelMode === 'docked' || Boolean(renderedPlanSnapshot)
   )
 
@@ -1558,10 +1559,11 @@ export function AgentChatLayout({
             />
           )}
           </div>
-          {showDesktopPlanPanel ? (
+          {showDesktopPlanFrame ? (
             <div
               className={`agent-chat-plan-frame${floatingPlanExiting ? ' agent-chat-plan-frame--exiting' : ''}`}
-              aria-label={isFloatingPlanPreview ? 'Open plan panel' : 'Plan panel'}
+              aria-label={showDesktopPlanPanel ? (isFloatingPlanPreview ? 'Open plan panel' : 'Plan panel') : undefined}
+              aria-hidden={showDesktopPlanPanel ? undefined : true}
               role={isFloatingPlanPreview ? 'button' : undefined}
               tabIndex={isFloatingPlanPreview ? 0 : undefined}
               onClickCapture={isFloatingPlanPreview ? handleFloatingPlanClick : undefined}
@@ -1569,7 +1571,9 @@ export function AgentChatLayout({
               onMouseEnter={isHoverPlanPreview ? () => handlePlanHoverChange(true) : undefined}
               onMouseLeave={isHoverPlanPreview ? () => handlePlanHoverChange(false) : undefined}
             >
-              <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
+              {showDesktopPlanPanel ? (
+                <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
+              ) : null}
             </div>
           ) : null}
         </div>
