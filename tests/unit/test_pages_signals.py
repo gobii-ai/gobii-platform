@@ -1358,7 +1358,7 @@ class SubscriptionSignalTests(TestCase):
     @tag("batch_pages_signals")
     def test_subscription_update_plan_change_survives_identify_failure(self):
         self.mock_capi.reset_mock()
-        payload = _build_event_payload(billing_reason=None, invoice_id="in_upgrade_500")
+        payload = _build_event_payload(status="trialing", billing_reason=None, invoice_id="in_upgrade_500")
         event = _build_djstripe_event(payload, event_type="customer.subscription.updated")
 
         self.billing.subscription = PlanNamesChoices.STARTUP.value
@@ -1391,6 +1391,7 @@ class SubscriptionSignalTests(TestCase):
                 return_value={"id": PlanNamesChoices.SCALE.value, "monthly_task_credits": 10000},
             ), \
             patch("pages.signals.timezone.now", return_value=as_of), \
+            patch("pages.signals.stripe.Subscription.retrieve") as mock_subscription_retrieve, \
             patch("pages.signals.stripe.Invoice.retrieve", return_value=invoice_payload), \
             patch("pages.signals.Invoice.sync_from_stripe_data", return_value=invoice_obj), \
             patch("pages.signals.TaskCreditService.grant_subscription_credits") as mock_grant, \
@@ -1402,6 +1403,7 @@ class SubscriptionSignalTests(TestCase):
 
         self.user.refresh_from_db()
         self.assertEqual(self.user.billing.subscription, PlanNamesChoices.SCALE.value)
+        mock_subscription_retrieve.assert_not_called()
         mock_grant.assert_called_once()
         mock_track_event.assert_not_called()
         self.assertTrue(any("Failed to identify subscription analytics state" in str(call.args[0]) for call in mock_logger_exception.call_args_list))
@@ -1861,7 +1863,7 @@ class SubscriptionSignalTests(TestCase):
     @tag("batch_pages_signals")
     def test_dedicated_ip_release_on_cancellation(self):
         self.mock_capi.reset_mock()
-        payload = _build_event_payload()
+        payload = _build_event_payload(status="canceled")
         event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
 
         sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
@@ -1871,6 +1873,7 @@ class SubscriptionSignalTests(TestCase):
         with patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
             patch("pages.signals.PaymentsHelper.get_stripe_key"), \
             patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.stripe.Subscription.retrieve") as mock_subscription_retrieve, \
             patch("pages.signals.TaskCreditService.grant_subscription_credits"), \
             patch("pages.signals.Analytics.identify"), \
             patch("pages.signals.Analytics.track_event"), \
@@ -1879,6 +1882,7 @@ class SubscriptionSignalTests(TestCase):
             handle_subscription_event(event)
 
         mock_release.assert_called_once_with(self.user)
+        mock_subscription_retrieve.assert_not_called()
         self.mock_capi.assert_called_once()
 
 

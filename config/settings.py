@@ -952,6 +952,9 @@ BROWSER_AGENT_MAX_ACTIVE_TASKS = env.int("BROWSER_AGENT_MAX_ACTIVE_TASKS", defau
 BROWSER_AGENT_DAILY_MAX_TASKS = env.int("BROWSER_AGENT_DAILY_MAX_TASKS", default=60)
 # Preferred vision detail level to request from browser_use when vision is enabled.
 BROWSER_AGENT_VISION_DETAIL_LEVEL = env("BROWSER_AGENT_VISION_DETAIL_LEVEL", default="auto")
+# Disable only the Celery browser task wrapper when tests need task creation
+# behavior without launching browser-use.
+BROWSER_USE_TASK_EXECUTION_DISABLED = env.bool("BROWSER_USE_TASK_EXECUTION_DISABLED", default=False)
 
 SOCIALACCOUNT_LOGIN_ON_GET = True
 

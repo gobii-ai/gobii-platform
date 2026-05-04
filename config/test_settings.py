@@ -18,10 +18,19 @@ os.environ.setdefault("SEGMENT_WRITE_KEY", "")
 os.environ.setdefault("GOBII_ENABLE_COMMUNITY_UNLIMITED", "0")
 os.environ.setdefault("ANTHROPIC_API_KEY", "test-anthropic-key")
 os.environ.setdefault("GOBII_ENABLE_TRACING", "0")
+os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 os.environ["STRIPE_ENABLED"] = "1"
 os.environ["STRIPE_TEST_SECRET_KEY"] = os.environ.get("STRIPE_TEST_SECRET_KEY") or "sk_test_dummy"
 
 from .settings import *
+
+# -----------------------------------------------------------------------------
+#  Network and LLM isolation
+# -----------------------------------------------------------------------------
+
+from tests.utils.runtime_isolation import install_test_runtime_isolation
+
+install_test_runtime_isolation()
 
 # Ensure Stripe integration appears enabled during tests when patched/mocked.
 STRIPE_TEST_SECRET_KEY = os.environ.get("STRIPE_TEST_SECRET_KEY", "sk_test_dummy")
@@ -85,6 +94,10 @@ FIRST_RUN_SETUP_ENABLED = False
 
 # Skip LLM bootstrap gating in tests; specific test cases can override as needed.
 LLM_BOOTSTRAP_OPTIONAL = True
+
+# API tests should verify task creation/enqueueing without launching browser-use
+# and its provider clients in Celery eager mode.
+BROWSER_USE_TASK_EXECUTION_DISABLED = True
 
 # -----------------------------------------------------------------------------
 #  Silence Django's noisy "Adding permission ..." output at high verbosity

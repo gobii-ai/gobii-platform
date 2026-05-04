@@ -17,7 +17,7 @@ from api.agent.comms.smtp_transport import SmtpTransport
 User = get_user_model()
 
 
-@tag("smtp", "batch_outbound_email")
+@tag("smtp")
 class TestSmtpTransport(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="smtpuser", email="smtpuser@example.com", password="pw")
