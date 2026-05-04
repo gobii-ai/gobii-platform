@@ -159,14 +159,14 @@ def collect_tests_and_tags(pyfile: str) -> tuple[int, int, list[str], set[str]]:
 def load_ci_tags(ci_yml_path: str = ".github/workflows/ci.yml") -> set[str]:
     # Only accept YAML mapping lines that begin with optional spaces then 'tag:'
     # to avoid matching shell strings like: echo "... tag: $TAG".
-    tag_line = re.compile(r"^\s*tag:\s*([A-Za-z0-9_.-]+)\s*$")
+    tag_line = re.compile(r"^\s*tag:\s*['\"]?([A-Za-z0-9_.\-\s]+)['\"]?\s*$")
     tags: set[str] = set()
     try:
         with open(ci_yml_path, "r", encoding="utf-8") as f:
             for line in f:
                 m = tag_line.match(line)
                 if m:
-                    tags.add(m.group(1))
+                    tags.update(m.group(1).split())
     except FileNotFoundError:
         pass
     return tags

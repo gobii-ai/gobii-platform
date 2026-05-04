@@ -112,16 +112,12 @@ jobs:
         include:
           - batch: email
             tag: batch_email
-          - batch: smtp
-            tag: smtp
           - batch: sms
             tag: batch_sms
           - batch: email_body
             tag: batch_email_body
-          - batch: email_allowlist
-            tag: batch_email_allowlist
-          - batch: email_footer
-            tag: batch_email_footer
+          - batch: email_small
+            tag: smtp batch_outbound_email batch_email_allowlist batch_email_footer batch_outbound_dedupe
           - batch: pages
             tag: batch_pages
           - batch: pages_signals
@@ -136,10 +132,8 @@ jobs:
             tag: batch_console_agents
           - batch: console_agents_management
             tag: batch_console_agents_management
-          - batch: console_allowlist
-            tag: batch_console_allowlist
-          - batch: outbound_email
-            tag: batch_outbound_email
+          - batch: api_console_small
+            tag: batch_api_serializer batch_api_org_keys batch_console_allowlist batch_console_api_keys batch_mcp_admin mcp_org_assignment_batch
           - batch: secrets
             tag: batch_secrets
           - batch: secrets_profiles
@@ -150,8 +144,6 @@ jobs:
             tag: batch_global_skill_evals
           - batch: proxy_selection
             tag: batch_proxy_selection
-          - batch: compaction
-            tag: batch_compaction
           - batch: step_compaction
             tag: batch_step_compaction
           - batch: subscription
@@ -164,32 +156,22 @@ jobs:
             tag: batch_link_shortener
           - batch: organizations
             tag: batch_organizations
-          - batch: browser_profile
-            tag: batch_browser_profile
-          - batch: browser_config
-            tag: batch_browser_config
+          - batch: browser_proxy_small
+            tag: batch_browser_agent_max_tokens batch_browser_config batch_browser_profile batch_dedicated_proxy_models
           - batch: forward_detection
             tag: batch_forward_detection
-          - batch: fbp_middleware
-            tag: batch_fbp_middleware
           - batch: agent_limits
             tag: batch_agent_limits
           - batch: agent_credit_soft_target
             tag: agent_credit_soft_target_batch
-          - batch: soft_expiration
-            tag: batch_soft_expiration
           - batch: api_agents
             tag: batch_api_agents
-          - batch: api_serializer
-            tag: batch_api_serializer
           - batch: api_tasks
             tag: batch_api_tasks
           - batch: api_tasks_reads
             tag: batch_api_tasks_reads
           - batch: api_tasks_mutations
             tag: batch_api_tasks_mutations
-          - batch: periodic
-            tag: batch_periodic
           - batch: celery_redbeat
             tag: batch_celery_redbeat
           - batch: email_verification
@@ -200,14 +182,8 @@ jobs:
             tag: batch_attachment_guidance
           - batch: outbound_delivery
             tag: batch_outbound_delivery
-          - batch: outbound_dedupe
-            tag: batch_outbound_dedupe
           - batch: browser_task_db
             tag: batch_browser_task_db
-          - batch: browser_task_followup
-            tag: batch_web_task_followup
-          - batch: redis_budget_cleanup
-            tag: batch_redis_budget_cleanup
           - batch: agent_invite
             tag: batch_agent_invite
           - batch: agent_collaborators
@@ -224,8 +200,8 @@ jobs:
             tag: batch_api_persistent_agents
           - batch: billing
             tag: batch_billing
-          - batch: plan_versioning
-            tag: batch_plan_versioning
+          - batch: billing_small
+            tag: batch_org_billing batch_plan_versioning batch_soft_expiration batch_stripe_config
           - batch: event_llm
             tag: batch_event_llm
           - batch: event_processing
@@ -236,22 +212,12 @@ jobs:
             tag: batch_event_parallel
           - batch: mcp_tools
             tag: batch_mcp_tools
-          - batch: mcp_admin
-            tag: batch_mcp_admin
-          - batch: mcp_org_assignment
-            tag: mcp_org_assignment_batch
           - batch: pipedream_connect
             tag: pipedream_connect
           - batch: promptree
             tag: batch_promptree
-          - batch: redis_leaks
-            tag: batch_redis_leaks
-          - batch: spawn_depth
-            tag: batch_spawn_depth
           - batch: xvfb
             tag: batch_xvfb
-          - batch: websocket
-            tag: batch_websocket
           - batch: agent_webhooks
             tag: batch_agent_webhooks
           - batch: agent_chat
@@ -260,8 +226,6 @@ jobs:
             tag: batch_human_input
           - batch: peer_dm
             tag: batch_peer_dm
-          - batch: peer_intro
-            tag: batch_peer_intro
           - batch: allowlist_direction
             tag: batch_allowlist_direction
           - batch: console_context
@@ -270,10 +234,8 @@ jobs:
             tag: batch_token_usage
           - batch: batch_sqlite
             tag: batch_sqlite
-          - batch: enable_database
-            tag: enable_database
-          - batch: pa_step_credits
-            tag: batch_pa_step_credits
+          - batch: infra_small
+            tag: batch_charter_tools batch_compaction batch_fbp_middleware batch_web_task_followup batch_periodic batch_redis_leaks batch_redis_budget_cleanup enable_database eval_sim oss_readiness_batch batch_setup_cookies batch_websocket
           - batch: tool_costs
             tag: batch_tool_costs
           - batch: tool_results
@@ -290,18 +252,14 @@ jobs:
             tag: http_request_batch
           - batch: billing_rollup
             tag: batch_billing_rollup
-          - batch: pa_shutdown_triggers
-            tag: batch_pa_shutdown_triggers
           - batch: agent_lifecycle
             tag: batch_agent_lifecycle
           - batch: agent_short_description
             tag: batch_agent_short_description
           - batch: video_generation
             tag: batch_video_generation
-          - batch: agent_colors
-            tag: batch_agent_colors
-          - batch: agent_tags
-            tag: batch_agent_tags
+          - batch: agent_small
+            tag: batch_agent_colors batch_agent_tags batch_agent_transfer batch_peer_intro batch_pa_shutdown_triggers batch_pa_step_credits batch_spawn_depth
           - batch: agent_tools
             tag: batch_agent_tools
           - batch: user_flags
@@ -318,14 +276,6 @@ jobs:
             tag: batch_email_blocklist
           - batch: system_settings
             tag: batch_system_settings
-          - batch: stripe_config
-            tag: batch_stripe_config
-          - batch: org_billing
-            tag: batch_org_billing
-          - batch: api_org_keys
-            tag: batch_api_org_keys
-          - batch: console_api_keys
-            tag: batch_console_api_keys
           - batch: console_api
             tag: batch_console_api
           - batch: console_mcp_oauth
@@ -334,30 +284,16 @@ jobs:
             tag: batch_console_email_oauth
           - batch: console_mcp_servers
             tag: batch_console_mcp_servers
-          - batch: charter_tools
-            tag: batch_charter_tools
           - batch: text_sanitization
             tag: batch_text_sanitization
-          - batch: oss_readiness
-            tag: oss_readiness_batch
-          - batch: agent_transfer
-            tag: batch_agent_transfer
           - batch: usage_api
             tag: batch_usage_api
-          - batch: dedicated_proxy_models
-            tag: batch_dedicated_proxy_models
-          - batch: setup_cookies
-            tag: batch_setup_cookies
           - batch: dedicated_proxy_service
             tag: batch_dedicated_proxy_service
-          - batch: browser_agent_max_tokens
-            tag: batch_browser_agent_max_tokens
           - batch: support_turnstile
             tag: batch_support_turnstile
           - batch: eval_fingerprint
             tag: batch_eval_fingerprint
-          - batch: eval_sim
-            tag: eval_sim
           - batch: batch_pipedream_jit_connect
             tag: pipedream_jit_connect
           - batch: referral
@@ -436,9 +372,13 @@ jobs:
           set -euo pipefail
           BATCH_OUTPUT_DIR="$TEST_OUTPUT_DIR/${{ matrix.batch }}"
           mkdir -p "$BATCH_OUTPUT_DIR"
-          TAG="${{ matrix.tag }}"
-          echo "Running tests with tag: $TAG"
-          uv run python manage.py test --tag "$TAG" \
+          TAGS="${{ matrix.tag }}"
+          TAG_ARGS=()
+          for TAG in $TAGS; do
+            TAG_ARGS+=(--tag "$TAG")
+          done
+          echo "Running tests with tags: $TAGS"
+          uv run python manage.py test "${TAG_ARGS[@]}" \
             --settings=config.test_settings \
             --parallel 1 \
             --testrunner=xmlrunner.extra.djangotestrunner.XMLTestRunner

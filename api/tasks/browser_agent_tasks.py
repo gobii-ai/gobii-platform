@@ -2193,6 +2193,14 @@ def process_browser_use_task(
     span.update_name("PROCESS Browser Use Task")
     span.set_attribute("task.id", str(browser_use_agent_task_id))
 
+    if settings.BROWSER_USE_TASK_EXECUTION_DISABLED:
+        logger.info(
+            "Skipping browser-use task execution because BROWSER_USE_TASK_EXECUTION_DISABLED is enabled "
+            "for task %s",
+            browser_use_agent_task_id,
+        )
+        return None
+
     return _process_browser_use_task_core(
         browser_use_agent_task_id,
         override_proxy_id,

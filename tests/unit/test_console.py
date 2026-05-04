@@ -2760,7 +2760,6 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNone(billing.get("paymentIntentStatus"))
         self.assertEqual(billing.get("manageBillingUrl"), "https://billing.example.test/portal")
 
-    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     @patch('util.analytics.Analytics.track_event')
     def test_agent_detail_rejects_decimal_soft_target(self, mock_track_event):
@@ -2793,7 +2792,6 @@ class ConsoleViewsTest(TestCase):
             "Expected error message about whole number requirement",
         )
 
-    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_blank_soft_target_sets_unlimited(self):
         from api.models import PersistentAgent, BrowserUseAgent
@@ -2825,7 +2823,6 @@ class ConsoleViewsTest(TestCase):
         slider_bounds = get_daily_credit_slider_bounds(credit_settings)
         self.assertEqual(response.context['daily_credit_slider_value'], slider_bounds["slider_unlimited_value"])
 
-    @tag("batch_console_agents_management")
     @tag("agent_credit_soft_target_batch")
     def test_agent_detail_soft_target_clamps_to_bounds(self):
         from api.models import PersistentAgent, BrowserUseAgent
