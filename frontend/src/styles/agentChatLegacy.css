@@ -1318,23 +1318,48 @@
 }
 
 @media (min-width: 1024px) {
-  #agent-workspace-root[data-plan-mode='docked'] {
+  #agent-workspace-root {
     flex-direction: row;
   }
 
   .agent-chat-plan-frame {
+    --agent-chat-plan-panel-width: min(18.5rem, calc(100vw - 2rem));
     display: flex;
-  }
-
-  #agent-workspace-root[data-plan-mode='docked'] > .agent-chat-plan-frame {
-    flex: 0 0 min(18.5rem, calc(100vw - 2rem));
-    width: min(18.5rem, calc(100vw - 2rem));
+    flex: 0 0 0;
+    width: 0;
+    max-width: 0;
     max-height: min(
       calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem),
       calc(100% - var(--agent-chat-banner-height, 4rem) - 1.75rem)
     );
     align-self: flex-start;
+    margin: calc(var(--agent-chat-banner-height, 4rem) + 0.875rem) 0 0.875rem 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateX(0.5rem);
+    transition:
+      flex-basis 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      max-width 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      margin-right 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 180ms ease,
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .agent-chat-plan-frame > .plan-panel {
+    flex: 0 0 var(--agent-chat-plan-panel-width);
+    width: var(--agent-chat-plan-panel-width);
+  }
+
+  #agent-workspace-root[data-plan-mode='docked'] > .agent-chat-plan-frame {
+    flex-basis: var(--agent-chat-plan-panel-width);
+    width: var(--agent-chat-plan-panel-width);
+    max-width: var(--agent-chat-plan-panel-width);
     margin: calc(var(--agent-chat-banner-height, 4rem) + 0.875rem) 0.875rem 0.875rem 0;
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateX(0);
     z-index: 2;
   }
 
@@ -1342,15 +1367,21 @@
     position: absolute;
     top: calc(var(--agent-chat-banner-height, 4rem) + 0.875rem);
     right: 0.875rem;
-    width: min(18.5rem, calc(100vw - 2rem));
+    flex-basis: auto;
+    width: var(--agent-chat-plan-panel-width);
+    max-width: var(--agent-chat-plan-panel-width);
     max-height: calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem);
+    margin: 0;
+    opacity: 1;
     overflow: visible;
+    pointer-events: auto;
+    transform: none;
     z-index: 9;
     cursor: pointer;
   }
 
   #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame > .plan-panel {
-    width: min(18.5rem, calc(100vw - 2rem));
+    width: var(--agent-chat-plan-panel-width);
     max-height: calc(100vh - var(--agent-chat-banner-height, 4rem) - 1.75rem);
     animation: agent-chat-plan-preview-in 180ms ease-out both;
   }
@@ -1385,6 +1416,10 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .agent-chat-plan-frame {
+    transition: none;
+  }
+
   #agent-workspace-root[data-plan-mode='floating'] > .agent-chat-plan-frame > .plan-panel {
     animation: none;
   }
