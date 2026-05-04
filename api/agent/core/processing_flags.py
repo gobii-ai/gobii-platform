@@ -171,12 +171,13 @@ def bump_human_inbound_generation(
         redis_client = client or get_redis_client()
         key = _human_inbound_generation_key(agent_id)
         consumed_key = _human_inbound_consumed_generation_key(agent_id)
-        current = _coerce_generation(redis_client.get(key))
-        consumed = _coerce_generation(redis_client.get(consumed_key))
-        generation = max(current, consumed) + 1
-        redis_client.set(key, str(generation))
+        generation = int(redis_client.incr(key))
+        consumed = get_consumed_human_inbound_generation(agent_id, client=redis_client)
+        if generation <= consumed:
+            generation = int(redis_client.incr(key, amount=consumed - generation + 1))
         if ttl > 0:
             redis_client.expire(key, ttl)
+            redis_client.expire(consumed_key, ttl)
         return generation
     except Exception:
         logger.exception("Failed to bump human inbound generation for agent %s", agent_id)
@@ -220,10 +221,8 @@ def mark_human_inbound_generation_consumed(
         key = _human_inbound_consumed_generation_key(agent_id)
         current_key = _human_inbound_generation_key(agent_id)
         previous = _coerce_generation(redis_client.get(key))
-        current = _coerce_generation(redis_client.get(current_key))
         next_generation = max(previous, parsed_generation)
         redis_client.set(key, str(next_generation))
-        redis_client.set(current_key, str(max(current, next_generation)))
         if ttl > 0:
             redis_client.expire(key, ttl)
             redis_client.expire(current_key, ttl)
