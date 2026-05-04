@@ -150,6 +150,7 @@ export const MessageEventCard = memo(function MessageEventCard({
     <article
       className={`timeline-event chat-event ${alignmentClass} ${isPeer ? 'is-peer' : ''}`}
       data-cursor={eventCursor}
+      data-message-id={message.id}
       data-status={status || undefined}
     >
       <div className={`chat-bubble ${bubbleTheme}`} style={bubbleStyle}>

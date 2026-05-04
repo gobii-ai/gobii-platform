@@ -246,7 +246,7 @@ class AgentChatSuggestionsContextTests(TestCase):
                 ],
             }
         )
-        events.append({"kind": "kanban", "displayText": "Plan changed"})
+        events.append({"kind": "plan", "displayText": "Plan changed"})
 
         context = _context_from_timeline_events(events)
         self.assertNotIn("Message 0", context)

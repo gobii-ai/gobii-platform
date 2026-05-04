@@ -17,6 +17,7 @@ from .secure_credentials_request import execute_secure_credentials_request
 from .sms_sender import execute_send_sms
 from .spawn_agent import execute_spawn_agent
 from .spawn_web_task import execute_spawn_web_task
+from .static_tools import planning_mode_disallows_tool
 from .tool_manager import execute_enabled_tool
 from .web_chat_sender import execute_send_chat_message
 from .webhook_sender import execute_send_webhook_event
@@ -36,6 +37,12 @@ def execute_runtime_tool_call(
     isolated_mcp: bool = False,
 ) -> tuple[Any, Optional[list[dict]]]:
     updated_tools: Optional[list[dict]] = None
+
+    if planning_mode_disallows_tool(agent, tool_name):
+        return {
+            "status": "error",
+            "message": f"{tool_name} is unavailable while planning mode is active. Complete or skip planning first.",
+        }, updated_tools
 
     if isolated_mcp:
         return execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True), updated_tools

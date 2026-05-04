@@ -4,7 +4,7 @@ import { transformToolCluster } from './tooling/toolRegistry'
 import type { ToolEntryDisplay } from './tooling/types'
 
 export type StatusExpansionTargets = {
-  latestKanbanCursor: string | null
+  latestPlanCursor: string | null
   latestScheduleEntryId: string | null
 }
 
@@ -22,17 +22,13 @@ export function isScheduleDisplayEntry(entry: ToolEntryDisplay): boolean {
 }
 
 export function isStatusDisplayEntry(entry: ToolEntryDisplay): boolean {
-  return entry.toolName === 'kanban' || isScheduleDisplayEntry(entry)
+  return isScheduleDisplayEntry(entry)
 }
 
 export function resolveEntrySeparation(
   entry: ToolEntryDisplay,
   targets: StatusExpansionTargets,
 ): boolean {
-  if (entry.toolName === 'kanban') {
-    return entry.cursor === targets.latestKanbanCursor
-  }
-
   if (isScheduleDisplayEntry(entry)) {
     return entry.id === targets.latestScheduleEntryId
   }
@@ -41,15 +37,10 @@ export function resolveEntrySeparation(
 }
 
 export function findLatestStatusExpansionTargets(events: TimelineEvent[]): StatusExpansionTargets {
-  let latestKanbanCursor: string | null = null
   let latestScheduleEntryId: string | null = null
 
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index]
-
-    if (!latestKanbanCursor && event.kind === 'kanban') {
-      latestKanbanCursor = event.cursor
-    }
 
     if (!latestScheduleEntryId && event.kind === 'steps') {
       const transformed = transformToolCluster(event)
@@ -62,20 +53,20 @@ export function findLatestStatusExpansionTargets(events: TimelineEvent[]): Statu
       }
     }
 
-    if (latestKanbanCursor && latestScheduleEntryId) {
+    if (latestScheduleEntryId) {
       break
     }
   }
 
   return {
-    latestKanbanCursor,
+    latestPlanCursor: null,
     latestScheduleEntryId,
   }
 }
 
 export function eventHasLatestStatus(event: TimelineEvent, targets: StatusExpansionTargets): boolean {
-  if (event.kind === 'kanban') {
-    return event.cursor === targets.latestKanbanCursor
+  if (event.kind === 'plan' || event.kind === 'kanban') {
+    return false
   }
   if (event.kind !== 'steps') {
     return false
@@ -86,8 +77,8 @@ export function eventHasLatestStatus(event: TimelineEvent, targets: StatusExpans
 }
 
 export function eventHasHistoricalStatus(event: TimelineEvent, targets: StatusExpansionTargets): boolean {
-  if (event.kind === 'kanban') {
-    return event.cursor !== targets.latestKanbanCursor
+  if (event.kind === 'plan' || event.kind === 'kanban') {
+    return false
   }
   if (event.kind !== 'steps') {
     return false

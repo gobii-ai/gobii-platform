@@ -38,6 +38,12 @@
   -webkit-backdrop-filter: blur(8px);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-backdrop--open {
+  background: rgba(7, 10, 24, 0.58);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
 .agent-mobile-sheet-panel {
   position: relative;
   width: min(100%, 720px);
@@ -64,7 +70,19 @@
   box-shadow: 0 -18px 38px rgba(7, 10, 24, 0.48);
 }
 
-.agent-mobile-sheet-panel--sidebar::before {
+.agent-mobile-sheet-panel--plan {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
+    rgba(42, 27, 78, 0.5);
+  border: 1px solid rgba(196, 181, 253, 0.16);
+  box-shadow: 0 -18px 38px rgba(7, 10, 24, 0.48);
+  -webkit-backdrop-filter: blur(30px) saturate(1.55);
+  backdrop-filter: blur(30px) saturate(1.55);
+  isolation: isolate;
+}
+
+.agent-mobile-sheet-panel--sidebar::before,
+.agent-mobile-sheet-panel--plan::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -72,6 +90,12 @@
   background:
     radial-gradient(circle at top left, rgba(221, 214, 254, 0.08), transparent 32%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 24%);
+}
+
+.agent-mobile-sheet-panel--plan::before {
+  background:
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.13), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
 }
 
 .agent-mobile-sheet-panel--open {
@@ -109,6 +133,10 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-grabber-bar {
+  background: rgba(221, 214, 254, 0.34);
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-grabber-bar {
   background: rgba(221, 214, 254, 0.34);
 }
 
@@ -170,6 +198,11 @@
   color: #ddd6fe;
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-icon {
+  background: rgba(167, 139, 250, 0.16);
+  color: #ddd6fe;
+}
+
 .agent-mobile-sheet-title {
   font-size: 1.05rem;
   font-weight: 600;
@@ -180,6 +213,10 @@
   color: rgba(255, 255, 255, 0.96);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-title {
+  color: rgba(255, 255, 255, 0.96);
+}
+
 .agent-mobile-sheet-subtitle {
   font-size: 0.8rem;
   color: #475569;
@@ -187,6 +224,10 @@
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-subtitle {
+  color: rgba(226, 232, 240, 0.72);
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-subtitle {
   color: rgba(226, 232, 240, 0.72);
 }
 
@@ -213,12 +254,22 @@
   color: rgba(255, 255, 255, 0.86);
 }
 
+.agent-mobile-sheet--plan .agent-mobile-sheet-close {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.86);
+}
+
 .agent-mobile-sheet-close:hover {
   background: rgba(59, 130, 246, 0.2);
   color: #1d4ed8;
 }
 
 .agent-mobile-sheet--sidebar .agent-mobile-sheet-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.agent-mobile-sheet--plan .agent-mobile-sheet-close:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #ffffff;
 }
@@ -243,4 +294,18 @@
 
 .agent-mobile-sheet-body--padded {
   padding: 0 1rem 1.5rem;
+}
+
+.agent-mobile-sheet--plan .plan-panel {
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.agent-mobile-sheet--plan .plan-panel::before {
+  display: none;
 }

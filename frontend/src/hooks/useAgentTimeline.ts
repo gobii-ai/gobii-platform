@@ -1,7 +1,7 @@
 import { useInfiniteQuery, type InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
-import type { TimelineEvent } from '../types/agentChat'
+import type { PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import { mergeTimelineEvents, prepareTimelineEvents } from '../stores/agentChatTimeline'
 
 export const TIMELINE_PAGE_SIZE = 100
@@ -14,6 +14,7 @@ export type TimelinePage = {
   hasMoreOlder: boolean
   hasMoreNewer: boolean
   raw: TimelineResponse
+  currentPlan: PlanSnapshot | null
 }
 
 export function timelineResponseToPage(response: TimelineResponse): TimelinePage {
@@ -25,6 +26,7 @@ export function timelineResponseToPage(response: TimelineResponse): TimelinePage
     hasMoreOlder: response.has_more_older,
     hasMoreNewer: response.has_more_newer,
     raw: response,
+    currentPlan: response.current_plan ?? null,
   }
 }
 

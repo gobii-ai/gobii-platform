@@ -71,7 +71,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for questions, blockers, config changes, or findings. "
-                "Do not narrate what you will do next, tool sequencing, kanban, or internal reasoning."
+                "Do not narrate what you will do next, tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {
                 "type": "object",

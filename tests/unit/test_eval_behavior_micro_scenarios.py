@@ -132,12 +132,13 @@ class BehaviorMicroHelperTests(TestCase):
     def test_planning_mutation_detection_ignores_reads_and_after_end_planning(self):
         self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
         mutation = self._add_tool_call("sqlite_batch", {"sql": "UPDATE __agent_config SET schedule='0 9 * * *'"})
+        plan_mutation = self._add_tool_call("update_plan", {"plan": [{"step": "x", "status": "todo"}]})
         self._add_tool_call("end_planning")
-        self._add_tool_call("sqlite_batch", {"sql": "INSERT INTO __kanban_cards (title, status) VALUES ('x', 'todo')"})
+        self._add_tool_call("update_plan", {"plan": [{"step": "after", "status": "todo"}]})
 
         calls = get_planning_mutation_calls_before_end_planning(self.run.id)
 
-        self.assertEqual(calls, [mutation])
+        self.assertEqual(calls, [mutation, plan_mutation])
 
     def test_pending_human_input_requests_are_scoped_to_eval_run(self):
         expected = self._add_human_input_request(self.run, "Current run question?")

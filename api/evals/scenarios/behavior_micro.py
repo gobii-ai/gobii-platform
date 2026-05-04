@@ -72,6 +72,7 @@ SUBSTANTIVE_WORK_TOOL_NAMES = BROWSER_OR_SEARCH_TOOL_NAMES | {
 PLANNING_MUTATION_TOOL_NAMES = {
     "update_schedule",
     "update_charter",
+    "update_plan",
 }
 
 IGNORED_FIRST_ACTION_TOOL_NAMES = {
@@ -86,7 +87,6 @@ PLANNING_ALLOWED_FIRST_ACTION_TOOL_NAMES = {
 
 PLANNING_STATE_TABLE_NAMES = {
     "__agent_config",
-    "__kanban_cards",
 }
 
 SQL_MUTATION_RE = re.compile(r"\b(insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
@@ -459,7 +459,7 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
 @register_scenario
 class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
     slug = PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES
-    description = "Planning mode should not update schedule, charter, or kanban state before end_planning."
+    description = "Planning mode should not update schedule, charter, or runtime plan before end_planning."
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_no_planning_state_mutations", assertion_type="manual"),
@@ -511,7 +511,7 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_no_planning_state_mutations",
-                observed_summary="No schedule/config/kanban mutation was attempted before end_planning.",
+                observed_summary="No schedule/config/plan mutation was attempted before end_planning.",
             )
 
 

@@ -118,7 +118,7 @@
   transform: translateY(-1px);
 }
 
-/* ---- Inline Status Cards (charter, schedule, compact kanban) ---- */
+/* ---- Inline Status Cards (charter, schedule, compact plan) ---- */
 
 .inline-status-card {
   display: flex;
@@ -155,7 +155,7 @@
   color: var(--color-sky-600, #0284c7);
 }
 
-.inline-status-card__icon--kanban {
+.inline-status-card__icon--plan {
   background: var(--color-amber-50, #fffbeb);
   color: var(--color-amber-600, #d97706);
 }

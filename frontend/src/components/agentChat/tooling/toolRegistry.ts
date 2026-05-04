@@ -1,8 +1,8 @@
-import { Brain, LayoutGrid, Waypoints } from 'lucide-react'
+import { Brain, Waypoints } from 'lucide-react'
 import { resolveDetailComponent } from '../toolDetails'
 import { isPlainObject, parseResultObject } from '../../../util/objectUtils'
 import { compareTimelineCursors } from '../../../util/timelineCursor'
-import type { KanbanEvent, ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
+import type { ThinkingEvent, ToolCallEntry, ToolClusterEvent } from '../../../types/agentChat'
 import type {
   ToolClusterTransform,
   ToolDescriptor,
@@ -23,7 +23,6 @@ import {
   getSqliteInternalTableDisplay,
 } from '../../tooling/sqliteDisplay'
 import { ThinkingDetail } from '../toolDetails/details/common'
-import { KanbanUpdateDetail } from '../toolDetails/details/kanban'
 import { buildAgentConfigEntry, buildSqliteSyntheticId } from './sqliteEntries'
 
 const TOOL_DESCRIPTORS = buildToolDescriptorMap(resolveDetailComponent)
@@ -177,7 +176,7 @@ function buildToolEntryDisplay(
       : null
   const mergedTransform = customToolTransform ? { ...transform, ...customToolTransform } : transform
 
-  // Check if the derive function requested this entry be skipped (e.g., kanban-only SQL)
+  // Check if the derive function requested this entry be skipped.
   if (mergedTransform.skip) {
     return null
   }
@@ -244,14 +243,14 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   const configStatementIndexes = classifications
     .filter((classification) => classification.reservedTableKind === 'agentConfig')
     .map((classification) => classification.index)
-  const kanbanStatementIndexes = new Set(
+  const legacyPlanStatementIndexes = new Set(
     classifications
-      .filter((classification) => classification.reservedTableKind === 'kanban')
+      .filter((classification) => classification.reservedTableKind === 'legacyPlan')
       .map((classification) => classification.index),
   )
-  const nonKanbanCount = classifications.filter((classification) => !kanbanStatementIndexes.has(classification.index)).length
+  const visibleStatementCount = classifications.filter((classification) => !legacyPlanStatementIndexes.has(classification.index)).length
 
-  if (nonKanbanCount === 0) {
+  if (visibleStatementCount === 0) {
     return []
   }
 
@@ -270,7 +269,7 @@ function buildSqliteEntries(clusterCursor: string, entry: ToolCallEntry): ToolEn
   const leftoverIndexes: number[] = []
 
   for (const classification of classifications) {
-    if (kanbanStatementIndexes.has(classification.index) || handledAgentConfigIndexes.has(classification.index)) {
+    if (legacyPlanStatementIndexes.has(classification.index) || handledAgentConfigIndexes.has(classification.index)) {
       continue
     }
 
@@ -401,34 +400,6 @@ function buildThinkingEntry(
   }
 }
 
-function buildKanbanEntry(clusterCursor: string, entry: KanbanEvent): ToolEntryDisplay | null {
-  if (!entry?.cursor) {
-    return null
-  }
-  return {
-    id: `kanban:${entry.cursor}`,
-    clusterCursor,
-    cursor: entry.cursor,
-    toolName: 'kanban',
-    label: 'Kanban update',
-    caption: entry.displayText || 'Kanban update',
-    timestamp: entry.timestamp ?? null,
-    icon: LayoutGrid,
-    iconBgClass: 'bg-amber-100',
-    iconColorClass: 'text-amber-700',
-    parameters: null,
-    rawParameters: entry,
-    result: entry,
-    summary: null,
-    charterText: null,
-    sqlStatements: undefined,
-    detailComponent: KanbanUpdateDetail,
-    meta: undefined,
-    sourceEntry: undefined,
-    separateFromPreview: true,
-  }
-}
-
 export function transformToolCluster(
   cluster: ToolClusterEvent,
   options?: { suppressedThinkingCursor?: string | null },
@@ -436,7 +407,6 @@ export function transformToolCluster(
   const entries: ToolEntryDisplay[] = []
   let skippedCount = 0
   const thinkingEntries = cluster.thinkingEntries ?? []
-  const kanbanEntries = cluster.kanbanEntries ?? []
   const suppressedThinkingCursor = options?.suppressedThinkingCursor ?? null
 
   for (const entry of cluster.entries) {
@@ -450,13 +420,6 @@ export function transformToolCluster(
 
   for (const entry of thinkingEntries) {
     const transformed = buildThinkingEntry(cluster.cursor, entry, suppressedThinkingCursor)
-    if (transformed) {
-      entries.push(transformed)
-    }
-  }
-
-  for (const entry of kanbanEntries) {
-    const transformed = buildKanbanEntry(cluster.cursor, entry)
     if (transformed) {
       entries.push(transformed)
     }

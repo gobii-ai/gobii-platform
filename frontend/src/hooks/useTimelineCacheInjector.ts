@@ -269,6 +269,7 @@ function injectEventsIntoCache(
     const lastPage = pages[lastIndex]
 
     const merged = mergeTimelineEvents(lastPage.events, incoming)
+    const latestPlan = [...incoming].reverse().find((event) => event.kind === 'plan' || event.kind === 'kanban')
     const newestCursor = merged.length ? merged[merged.length - 1].cursor : lastPage.newestCursor
     const oldestCursor = merged.length ? merged[0].cursor : lastPage.oldestCursor
 
@@ -277,6 +278,13 @@ function injectEventsIntoCache(
       events: merged,
       newestCursor,
       oldestCursor,
+      currentPlan: latestPlan?.snapshot ?? lastPage.currentPlan,
+      raw: latestPlan
+        ? {
+          ...lastPage.raw,
+          current_plan: latestPlan.snapshot,
+        }
+        : lastPage.raw,
     }
 
     return {

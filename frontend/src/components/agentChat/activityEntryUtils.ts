@@ -1,4 +1,4 @@
-import type { KanbanEvent, ThinkingEvent, TimelineEvent, ToolClusterEvent } from '../../types/agentChat'
+import type { ThinkingEvent, TimelineEvent, ToolClusterEvent } from '../../types/agentChat'
 import type { ToolEntryDisplay } from './tooling/types'
 import { transformToolCluster } from './tooling/toolRegistry'
 
@@ -22,20 +22,6 @@ export function buildThinkingCluster(event: ThinkingEvent): ToolClusterEvent {
   }
 }
 
-function buildKanbanCluster(event: KanbanEvent): ToolClusterEvent {
-  return {
-    kind: 'steps',
-    cursor: event.cursor,
-    entries: [],
-    entryCount: 1,
-    collapsible: false,
-    collapseThreshold: Infinity,
-    earliestTimestamp: event.timestamp ?? null,
-    latestTimestamp: event.timestamp ?? null,
-    kanbanEntries: [event],
-  }
-}
-
 export function flattenTimelineEventsToEntries(
   events: TimelineEvent[],
   options?: { suppressedThinkingCursor?: string | null },
@@ -49,8 +35,6 @@ export function flattenTimelineEventsToEntries(
       cluster = event
     } else if (event.kind === 'thinking') {
       cluster = buildThinkingCluster(event)
-    } else if (event.kind === 'kanban') {
-      cluster = buildKanbanCluster(event)
     }
 
     if (!cluster) {

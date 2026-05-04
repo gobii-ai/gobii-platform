@@ -27,7 +27,7 @@ type PreviewEntry = {
   relativeTime: string | null
 }
 
-type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'kanban' | 'chart' | 'image' | 'video' | 'tool'
+type ActivityKind = 'linkedin' | 'search' | 'snapshot' | 'thinking' | 'chart' | 'image' | 'video' | 'tool'
 type PreviewState = 'active' | 'complete'
 
 type ActivityDescriptor = {
@@ -897,7 +897,6 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   const toolName = (entry.toolName || '').toLowerCase()
   const label = entry.label.toLowerCase()
   if (toolName === 'thinking') return 'thinking'
-  if (toolName === 'kanban') return 'kanban'
   if (toolName.includes('linkedin') || label.includes('linkedin')) return 'linkedin'
   if (toolName.includes('search') || label.includes('search')) return 'search'
   if (toolName === 'create_chart' || label === 'chart') return 'chart'
@@ -982,15 +981,6 @@ function deriveActivityDescriptor(entry: ToolEntryDisplay): ActivityDescriptor {
       kind,
       label: 'Planning next step',
       detail: thought,
-    }
-  }
-
-  if (kind === 'kanban') {
-    const detail = clampText(semantic ?? entry.caption ?? 'Kanban board updated')
-    return {
-      kind,
-      label: 'Updating kanban',
-      detail,
     }
   }
 

@@ -31,7 +31,22 @@ export const ToolClusterCard = memo(function ToolClusterCard({
   onIncomingAnimationConsumed,
 }: ToolClusterCardProps) {
   const transformed = useMemo(
-    () => transformToolCluster(cluster, { suppressedThinkingCursor }),
+    () => {
+      const base = transformToolCluster(cluster, { suppressedThinkingCursor })
+      if (!cluster.visibleDisplayEntryIds?.length) {
+        return base
+      }
+
+      const visibleIds = new Set(cluster.visibleDisplayEntryIds)
+      const entries = base.entries.filter((entry) => visibleIds.has(entry.id))
+      return {
+        ...base,
+        entries,
+        entryCount: entries.length,
+        collapsible: false,
+        collapseThreshold: Infinity,
+      }
+    },
     [cluster, suppressedThinkingCursor],
   )
   const resolvedTransformed = useMemo(() => {
@@ -135,6 +150,7 @@ export const ToolClusterCard = memo(function ToolClusterCard({
     }
     return resolvedTransformed.entries.some((entry) => isStatusDisplayEntry(entry) && !entry.separateFromPreview)
   }, [hasExpandedStatusEntry, resolvedTransformed.collapsible, resolvedTransformed.entries, statusExpansionTargets])
+  const shouldCollapsePreviewEntries = hasExpandedStatusEntry && previewEntries.length > 1
 
   if (!isClusterRenderable(resolvedTransformed)) {
     return null
@@ -199,15 +215,23 @@ export const ToolClusterCard = memo(function ToolClusterCard({
         ) : null}
         {hasPreviewEntries ? (
           <div className="tool-cluster-summary">
-            <ToolClusterLivePreview
-              cluster={resolvedTransformed}
-              isLatestEvent={isLatestEvent}
-              animateIncoming={animateIncoming}
-              previewEntryLimit={previewEntries.length}
-              onOpenTimeline={handleToggleCluster}
-              onSelectEntry={handlePreviewEntrySelect}
-              onIncomingAnimationConsumed={onIncomingAnimationConsumed}
-            />
+            {shouldCollapsePreviewEntries ? (
+              <CollapsedActivityCard
+                overlayId={`${resolvedTransformed.cursor}:preview`}
+                entries={previewEntries}
+                label={buildActionCountLabel(previewEntries.length)}
+              />
+            ) : (
+              <ToolClusterLivePreview
+                cluster={resolvedTransformed}
+                isLatestEvent={isLatestEvent}
+                animateIncoming={animateIncoming}
+                previewEntryLimit={previewEntries.length}
+                onOpenTimeline={handleToggleCluster}
+                onSelectEntry={handlePreviewEntrySelect}
+                onIncomingAnimationConsumed={onIncomingAnimationConsumed}
+              />
+            )}
           </div>
         ) : null}
         {separatedEntryPlacement.afterPreview.length ? (

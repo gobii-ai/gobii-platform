@@ -23,7 +23,7 @@ from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.core.prompt_context import build_prompt_context
 from api.agent.peer_comm import PeerMessagingService
-from api.agent.tools.sqlite_kanban import KanbanBoardSnapshot, KanbanCardChange
+from api.agent.tools.plan import PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, PlanStepChange
 from api.models import (
     AgentCollaborator,
     AgentPeerLink,
@@ -65,10 +65,10 @@ from api.agent.core.processing_flags import (
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.services.pipedream_apps import get_owner_apps_state
 from api.services.web_sessions import heartbeat_web_session, start_web_session
-from console.agent_chat.kanban_events import persist_kanban_event
+from console.agent_chat.plan_events import persist_plan_event
 from console.agent_chat.timeline import build_processing_snapshot
 from console.agent_chat.timeline import fetch_timeline_window
-from console.agent_chat.timeline import serialize_kanban_event
+from console.agent_chat.timeline import serialize_plan_event
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
@@ -1130,14 +1130,14 @@ class AgentChatAPITests(TestCase):
         self.assertIsNone(peer_event["message"].get("peerLinkId"))
 
     @tag("batch_agent_chat")
-    def test_timeline_includes_kanban_events(self):
+    def test_timeline_includes_plan_events(self):
         card = PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
-            title="Investigate kanban persistence",
-            description="Ensure kanban survives refresh.",
+            title="Investigate plan persistence",
+            description="Ensure plan survives refresh.",
             status=PersistentAgentKanbanCard.Status.TODO,
         )
-        snapshot = KanbanBoardSnapshot(
+        snapshot = PlanSnapshot(
             todo_count=1,
             doing_count=0,
             done_count=0,
@@ -1146,7 +1146,7 @@ class AgentChatAPITests(TestCase):
             done_titles=[],
         )
         changes = [
-            KanbanCardChange(
+            PlanStepChange(
                 card_id=str(card.id),
                 title=card.title,
                 action="created",
@@ -1154,24 +1154,25 @@ class AgentChatAPITests(TestCase):
             )
         ]
         agent_name = (self.agent.name or "Agent").split()[0]
-        kanban_payload = serialize_kanban_event(agent_name, changes, snapshot)
-        persist_kanban_event(self.agent, kanban_payload)
+        plan_payload = serialize_plan_event(agent_name, changes, snapshot, agent_id=self.agent.id)
+        persist_plan_event(self.agent, plan_payload)
 
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
         timeline_payload = response.json()
         events = timeline_payload.get("events", [])
-        kanban_event = next(event for event in events if event.get("kind") == "kanban")
+        plan_event = next(event for event in events if event.get("kind") == "plan")
 
-        self.assertEqual(kanban_event.get("displayText"), kanban_payload.get("displayText"))
-        self.assertEqual(kanban_event.get("primaryAction"), kanban_payload.get("primaryAction"))
-        snapshot_payload = kanban_event.get("snapshot", {})
+        self.assertEqual(plan_event.get("displayText"), plan_payload.get("displayText"))
+        self.assertEqual(plan_event.get("primaryAction"), plan_payload.get("primaryAction"))
+        snapshot_payload = plan_event.get("snapshot", {})
         self.assertEqual(snapshot_payload.get("todoCount"), 1)
         self.assertEqual(snapshot_payload.get("todoTitles"), [card.title])
-        self.assertEqual(kanban_event.get("changes")[0].get("cardId"), str(card.id))
+        self.assertEqual(plan_event.get("changes")[0].get("stepId"), str(card.id))
+        self.assertEqual(timeline_payload.get("current_plan", {}).get("todoTitles"), [card.title])
 
     @tag("batch_agent_chat")
-    def test_timeline_creates_baseline_kanban_event(self):
+    def test_timeline_creates_baseline_plan_event(self):
         card = PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Baseline task",
@@ -1182,12 +1183,52 @@ class AgentChatAPITests(TestCase):
         response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
         self.assertEqual(response.status_code, 200)
         events = response.json().get("events", [])
-        kanban_event = next(event for event in events if event.get("kind") == "kanban")
+        plan_event = next(event for event in events if event.get("kind") == "plan")
 
-        snapshot_payload = kanban_event.get("snapshot", {})
+        snapshot_payload = plan_event.get("snapshot", {})
         self.assertEqual(snapshot_payload.get("todoCount"), 1)
         self.assertEqual(snapshot_payload.get("todoTitles"), [card.title])
         self.assertTrue(PersistentAgentKanbanEvent.objects.filter(agent=self.agent).exists())
+
+    @tag("batch_agent_chat")
+    def test_timeline_persists_deliverable_only_plan_events(self):
+        message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            body="Final report",
+            owner_agent=self.agent,
+        )
+        snapshot = PlanSnapshot(
+            todo_count=0,
+            doing_count=0,
+            done_count=1,
+            todo_titles=[],
+            doing_titles=[],
+            done_titles=["Deliver report"],
+            files=[PlanFileDeliverable(path="/exports/report.csv", label="Final CSV")],
+            messages=[PlanMessageDeliverable(message_id=str(message.id), label="Final report")],
+        )
+        plan_payload = serialize_plan_event(
+            (self.agent.name or "Agent").split()[0],
+            [],
+            snapshot,
+            explanation="Agent attached final deliverables",
+            agent_id=self.agent.id,
+        )
+
+        event = persist_plan_event(self.agent, plan_payload)
+
+        self.assertIsNotNone(event)
+        response = self.client.get(f"/console/api/agents/{self.agent.id}/timeline/")
+        self.assertEqual(response.status_code, 200)
+        plan_event = next(event for event in response.json().get("events", []) if event.get("kind") == "plan")
+        self.assertEqual(plan_event.get("displayText"), "Agent attached final deliverables")
+        self.assertEqual(plan_event.get("changes"), [])
+        self.assertEqual(plan_event.get("snapshot", {}).get("doneTitles"), ["Deliver report"])
+        self.assertEqual(plan_event.get("snapshot", {}).get("files")[0].get("path"), "/exports/report.csv")
+        self.assertIn(f"/console/api/agents/{self.agent.id}/files/download/", plan_event.get("snapshot", {}).get("files")[0].get("downloadUrl"))
+        self.assertEqual(plan_event.get("snapshot", {}).get("messages")[0].get("messageId"), str(message.id))
 
     @tag("batch_agent_chat")
     def test_timeline_preserves_html_email_body(self):

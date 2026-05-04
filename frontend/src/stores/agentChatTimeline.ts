@@ -1,8 +1,19 @@
-import type { KanbanEvent, ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
+import type { PlanEvent, ThinkingEvent, TimelineEvent, ToolClusterEvent, ToolCallEntry } from '../types/agentChat'
 import { pickHtmlCandidate, sanitizeHtml } from '../util/sanitize'
 import { compareTimelineCursors } from '../util/timelineCursor'
 
 export function normalizeTimelineEvent(event: TimelineEvent): TimelineEvent {
+  if (event.kind === 'kanban') {
+    return {
+      ...event,
+      kind: 'plan',
+      changes: event.changes.map((change) => ({
+        ...change,
+        stepId: change.stepId ?? change.cardId,
+      })),
+    }
+  }
+
   if (event.kind !== 'message') {
     return event
   }
@@ -76,7 +87,7 @@ function sortThinkingEntries(entries: ThinkingEvent[]): ThinkingEvent[] {
   return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
 }
 
-function sortKanbanEntries(entries: KanbanEvent[]): KanbanEvent[] {
+function sortPlanEntries(entries: PlanEvent[]): PlanEvent[] {
   return [...entries].sort((left, right) => compareTimelineCursors(left.cursor, right.cursor))
 }
 
@@ -105,15 +116,15 @@ function mergeThinkingEntries(
   return sortThinkingEntries(Array.from(entryMap.values()))
 }
 
-function mergeKanbanEntries(
-  base: KanbanEvent[] | undefined,
-  incoming: KanbanEvent[] | undefined,
-): KanbanEvent[] | undefined {
+function mergePlanEntries(
+  base: PlanEvent[] | undefined,
+  incoming: PlanEvent[] | undefined,
+): PlanEvent[] | undefined {
   if (!base?.length && !incoming?.length) {
     return undefined
   }
 
-  const entryMap = new Map<string, KanbanEvent>()
+  const entryMap = new Map<string, PlanEvent>()
   for (const entry of base ?? []) {
     if (!entry?.cursor) {
       continue
@@ -127,7 +138,7 @@ function mergeKanbanEntries(
     entryMap.set(entry.cursor, entry)
   }
 
-  return sortKanbanEntries(Array.from(entryMap.values()))
+  return sortPlanEntries(Array.from(entryMap.values()))
 }
 
 function mergeToolEntry(base: ToolCallEntry, incoming: ToolCallEntry): ToolCallEntry {
@@ -188,10 +199,10 @@ function resolveClusterCursor(
   fallback: string,
   secondaryFallback: string,
   _thinkingEntries: ThinkingEvent[] | undefined,
-  _kanbanEntries: KanbanEvent[] | undefined,
+  _planEntries: PlanEvent[] | undefined,
 ): string {
   // Anchor the cluster position to the first tool-call entry's cursor.
-  // This prevents the cluster from jumping when thinking/kanban entries
+  // This prevents the cluster from jumping when thinking/plan entries
   // with earlier timestamps get folded in later.
   const entryCursors = entries
     .map((entry) => entry.cursor)
@@ -203,10 +214,10 @@ function resolveClusterCursor(
   const thinkingCursors = (_thinkingEntries ?? [])
     .map((entry) => entry.cursor)
     .filter((cursor): cursor is string => Boolean(cursor))
-  const kanbanCursors = (_kanbanEntries ?? [])
+  const planCursors = (_planEntries ?? [])
     .map((entry) => entry.cursor)
     .filter((cursor): cursor is string => Boolean(cursor))
-  const nonToolCursors = [...thinkingCursors, ...kanbanCursors]
+  const nonToolCursors = [...thinkingCursors, ...planCursors]
   if (nonToolCursors.length) {
     return nonToolCursors.reduce((earliest, cursor) => (compareTimelineCursors(cursor, earliest) < 0 ? cursor : earliest))
   }
@@ -232,10 +243,10 @@ function pickTimestamp(entries: ToolCallEntry[], direction: 'earliest' | 'latest
 
 function pickNonToolTimestamp(
   thinkingEntries: ThinkingEvent[] | undefined,
-  kanbanEntries: KanbanEvent[] | undefined,
+  planEntries: PlanEvent[] | undefined,
   direction: 'earliest' | 'latest',
 ): string | null {
-  const combined = [...(thinkingEntries ?? []), ...(kanbanEntries ?? [])]
+  const combined = [...(thinkingEntries ?? []), ...(planEntries ?? [])]
   if (!combined.length) {
     return null
   }
@@ -255,14 +266,14 @@ function buildCluster(
   threshold: number,
   secondaryCursor: string,
   thinkingEntries?: ThinkingEvent[] | undefined,
-  kanbanEntries?: KanbanEvent[] | undefined,
+  planEntries?: PlanEvent[] | undefined,
 ): ToolClusterEvent {
   const sortedEntries = sortToolEntries(dedupeToolEntries(entries))
-  const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor, thinkingEntries, kanbanEntries)
+  const cursor = resolveClusterCursor(sortedEntries, base.cursor, secondaryCursor, thinkingEntries, planEntries)
   const earliestTimestamp =
-    pickTimestamp(sortedEntries, 'earliest') ?? pickNonToolTimestamp(thinkingEntries, kanbanEntries, 'earliest')
+    pickTimestamp(sortedEntries, 'earliest') ?? pickNonToolTimestamp(thinkingEntries, planEntries, 'earliest')
   const latestTimestamp =
-    pickTimestamp(sortedEntries, 'latest') ?? pickNonToolTimestamp(thinkingEntries, kanbanEntries, 'latest')
+    pickTimestamp(sortedEntries, 'latest') ?? pickNonToolTimestamp(thinkingEntries, planEntries, 'latest')
   return {
     kind: 'steps',
     cursor,
@@ -273,15 +284,15 @@ function buildCluster(
     earliestTimestamp,
     latestTimestamp,
     thinkingEntries: thinkingEntries?.length ? thinkingEntries : undefined,
-    kanbanEntries: kanbanEntries?.length ? kanbanEntries : undefined,
+    planEntries: planEntries?.length ? planEntries : undefined,
   }
 }
 
 export function mergeToolClusters(base: ToolClusterEvent, incoming: ToolClusterEvent): ToolClusterEvent {
   const threshold = Math.max(base.collapseThreshold, incoming.collapseThreshold)
   const thinkingEntries = mergeThinkingEntries(base.thinkingEntries, incoming.thinkingEntries)
-  const kanbanEntries = mergeKanbanEntries(base.kanbanEntries, incoming.kanbanEntries)
-  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries, kanbanEntries)
+  const planEntries = mergePlanEntries(base.planEntries, incoming.planEntries)
+  return buildCluster(base, [...base.entries, ...incoming.entries], threshold, incoming.cursor, thinkingEntries, planEntries)
 }
 
 function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
@@ -303,7 +314,7 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
     }
 
     let stepThinking: ThinkingEvent[] | undefined
-    let stepKanban: KanbanEvent[] | undefined
+    let stepPlan: PlanEvent[] | undefined
     const toolEntryMap = new Map<string, ToolCallEntry>()
     let collapseThreshold = 0
 
@@ -312,8 +323,8 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
       if (event.thinkingEntries?.length) {
         stepThinking = mergeThinkingEntries(stepThinking, event.thinkingEntries) ?? stepThinking
       }
-      if (event.kanbanEntries?.length) {
-        stepKanban = mergeKanbanEntries(stepKanban, event.kanbanEntries) ?? stepKanban
+      if (event.planEntries?.length) {
+        stepPlan = mergePlanEntries(stepPlan, event.planEntries) ?? stepPlan
       }
       for (const entry of event.entries) {
         if (!entry?.id || seenToolEntryIds.has(entry.id)) {
@@ -330,7 +341,7 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
 
     const toolEntries = Array.from(toolEntryMap.values())
     const mergedThinking = mergeThinkingEntries(stepThinking, thinkingEvents)
-    const mergedKanban = stepKanban
+    const mergedPlan = stepPlan
 
     if (toolEntries.length) {
       const threshold = collapseThreshold || 3
@@ -345,8 +356,8 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
         undefined,
       )
       deduped.push(mergedCluster)
-      if (mergedKanban?.length) {
-        deduped.push(...mergedKanban)
+      if (mergedPlan?.length) {
+        deduped.push(...mergedPlan)
       }
       segment = []
       return
@@ -355,8 +366,8 @@ function coalesceTimelineEvents(events: TimelineEvent[]): TimelineEvent[] {
     if (mergedThinking?.length) {
       deduped.push(...mergedThinking)
     }
-    if (mergedKanban?.length) {
-      deduped.push(...mergedKanban)
+    if (mergedPlan?.length) {
+      deduped.push(...mergedPlan)
       segment = []
       return
     }

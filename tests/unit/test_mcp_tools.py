@@ -93,7 +93,12 @@ def _default_fake_run_completion(*args, **kwargs):
         if line == "Available tools:":
             in_tool_section = True
             continue
-        if line == "Available Pipedream apps:":
+        if line in {
+            "Available agent skills:",
+            "Available global skills:",
+            "Available system skills:",
+            "Available Pipedream apps:",
+        }:
             in_tool_section = False
             continue
         if not in_tool_section or not line.startswith("- "):
@@ -1801,6 +1806,116 @@ class MCPToolFunctionsTests(TestCase):
             ["enable_tools", "enable_global_skills"],
         )
         mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_includes_agent_skill_prompt_section(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="customer-research",
+            description="Research customer accounts",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Review local account data before summarizing.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "customer research")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available agent skills:", user_message)
+        self.assertIn(
+            "- customer-research | use when: Research customer accounts | enables: sqlite_batch | secrets: (none)",
+            user_message,
+        )
+        system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertIn("Treat agent skills as this agent's saved workflows", system_message)
+        tool_defs = mock_run_completion.call_args.kwargs["tools"]
+        self.assertEqual(
+            [tool_def["function"]["name"] for tool_def in tool_defs],
+            ["enable_tools", "enable_agent_skills"],
+        )
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_refreshes_agent_skill_and_enables_required_tools(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="customer-research",
+            description="Research customer accounts",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Review local account data before summarizing.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+        mock_enable_tools.return_value = {
+            "status": "success",
+            "enabled": ["sqlite_batch"],
+            "already_enabled": [],
+            "evicted": [],
+            "invalid": [],
+        }
+
+        msg = MagicMock()
+        msg.content = "Use the saved customer research skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_agent_skills",
+                    "arguments": json.dumps({"skill_names": ["customer-research"]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "customer research")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["agent_skills"]["enabled"], ["customer-research"])
+        skill.refresh_from_db()
+        self.assertIsNotNone(skill.last_used_at)
+        self.assertEqual(skill.usage_count, 1)
+        mock_enable_tools.assert_called_once_with(self.agent, ["sqlite_batch"])
 
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')

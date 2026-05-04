@@ -45,7 +45,7 @@ from api.agent.comms.message_reads import (
 )
 
 from .access import user_can_manage_agent_settings
-from .kanban_events import persist_kanban_event
+from .plan_events import persist_plan_event
 from .pending_actions import (
     expire_pending_action_requests,
     get_legacy_pending_human_input_requests,
@@ -55,7 +55,7 @@ from .timeline import (
     build_processing_snapshot,
     build_tool_cluster_from_steps,
     is_chat_hidden_message,
-    serialize_kanban_event,
+    serialize_plan_event,
     serialize_message_event,
     serialize_processing_snapshot,
     serialize_thinking_event,
@@ -652,15 +652,15 @@ def _broadcast_processing(agent):
         logger.debug("Failed to broadcast processing status to audit channel for agent %s", agent.id, exc_info=True)
 
 
-def broadcast_kanban_changes(agent, changes, snapshot) -> None:
-    """Broadcast kanban card changes to the agent's chat timeline.
+def broadcast_plan_changes(agent, changes, snapshot, *, explanation: str = "") -> None:
+    """Broadcast plan step changes to the agent's chat timeline.
 
     Args:
-        agent: The PersistentAgent that owns the kanban board
-        changes: Sequence of KanbanCardChange objects
-        snapshot: KanbanBoardSnapshot with current board state
+        agent: The PersistentAgent that owns the plan
+        changes: Sequence of plan step changes
+        snapshot: Current plan snapshot
     """
-    if not changes or not snapshot:
+    if not snapshot:
         return
     if not agent or not agent.id:
         return
@@ -670,10 +670,10 @@ def broadcast_kanban_changes(agent, changes, snapshot) -> None:
         # Use first name if available
         if " " in agent_name:
             agent_name = agent_name.split()[0]
-        payload = serialize_kanban_event(agent_name, changes, snapshot)
+        payload = serialize_plan_event(agent_name, changes, snapshot, explanation=explanation, agent_id=agent.id)
     except Exception:
         logger.debug(
-            "Failed to serialize kanban changes for agent %s",
+            "Failed to serialize plan changes for agent %s",
             getattr(agent, "id", None),
             exc_info=True,
         )
@@ -683,16 +683,16 @@ def broadcast_kanban_changes(agent, changes, snapshot) -> None:
         _send(_group_name(agent.id), "timeline_event", payload, agent_id=str(agent.id))
     except Exception:
         logger.debug(
-            "Failed to broadcast kanban changes for agent %s",
+            "Failed to broadcast plan changes for agent %s",
             getattr(agent, "id", None),
             exc_info=True,
         )
 
     try:
-        persist_kanban_event(agent, payload)
+        persist_plan_event(agent, payload)
     except Exception:
         logger.debug(
-            "Failed to persist kanban changes for agent %s",
+            "Failed to persist plan changes for agent %s",
             getattr(agent, "id", None),
             exc_info=True,
         )

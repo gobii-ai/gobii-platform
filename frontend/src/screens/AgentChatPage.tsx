@@ -80,7 +80,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { AgentMessageNotification, KanbanBoardSnapshot, PendingActionRequest, PendingHumanInputRequest, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -147,15 +147,38 @@ function navigateToAgentChat(agentId: string): void {
   window.history.pushState({ agentId }, '', nextUrl)
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
-function getLatestKanbanSnapshot(events: TimelineEvent[]): KanbanBoardSnapshot | null {
-  // Find the most recent kanban event (they're ordered oldest to newest)
+
+function mergePlanDeliverablesFromCurrentSnapshot(snapshot: PlanSnapshot, currentPlan?: PlanSnapshot | null): PlanSnapshot {
+  if (!currentPlan) {
+    return snapshot
+  }
+
+  const hasSnapshotFiles = (snapshot.files?.length ?? 0) > 0
+  const hasSnapshotMessages = (snapshot.messages?.length ?? 0) > 0
+  const hasCurrentFiles = (currentPlan.files?.length ?? 0) > 0
+  const hasCurrentMessages = (currentPlan.messages?.length ?? 0) > 0
+
+  if (hasSnapshotFiles || hasSnapshotMessages || (!hasCurrentFiles && !hasCurrentMessages)) {
+    return snapshot
+  }
+
+  return {
+    ...snapshot,
+    files: currentPlan.files,
+    messages: currentPlan.messages,
+  }
+}
+
+function getLatestPlanSnapshot(events: TimelineEvent[], currentPlan?: PlanSnapshot | null): PlanSnapshot | null {
+  // Find the most recent plan event (events are ordered oldest to newest). Fall back
+  // to the API snapshot so the panel survives timeline windowing.
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i]
-    if (event.kind === 'kanban') {
-      return event.snapshot
+    if (event.kind === 'plan') {
+      return mergePlanDeliverablesFromCurrentSnapshot(event.snapshot, currentPlan)
     }
   }
-  return null
+  return currentPlan ?? null
 }
 
 function adjustHexColor(hexColor: string, ratio: number): string {
@@ -1167,9 +1190,14 @@ export function AgentChatPage({
     () => findLatestStatusExpansionTargets(timelineEvents),
     [timelineEvents],
   )
+  const keepTrailingActivityExpanded = Boolean(
+    timelineProcessingActive
+    || timelineAwaitingResponse
+    || (timelineStreaming && !timelineStreaming.done),
+  )
   const displayEvents = useMemo(
-    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets),
-    [timelineEvents, statusExpansionTargets],
+    () => collapseDetailedStatusRuns(timelineEvents, statusExpansionTargets, { keepTrailingActivityExpanded }),
+    [keepTrailingActivityExpanded, timelineEvents, statusExpansionTargets],
   )
   const [timelineCanScrollForOlder, setTimelineCanScrollForOlder] = useState(false)
   const [isNearBottom, setIsNearBottom] = useState(true)
@@ -2518,7 +2546,10 @@ export function AgentChatPage({
   const spawnIntentAutoSubmittedRef = useRef(false)
   const spawnIntentRequestIdRef = useRef(0)
   const agentFirstName = useMemo(() => deriveFirstName(resolvedAgentName), [resolvedAgentName])
-  const latestKanbanSnapshot = useMemo(() => getLatestKanbanSnapshot(timelineEvents), [timelineEvents])
+  const latestPlanSnapshot = useMemo(
+    () => getLatestPlanSnapshot(timelineEvents, initialPageResponse?.current_plan ?? null),
+    [timelineEvents, initialPageResponse?.current_plan],
+  )
   const hasSelectedAgent = Boolean(activeAgentId)
   const allowAgentRefresh = hasSelectedAgent && !contextSwitching && agentContextReady && !rosterContextMismatch
   useEffect(() => {
@@ -4327,7 +4358,7 @@ export function AgentChatPage({
         connectionStatus={connectionIndicator.status}
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
-        kanbanSnapshot={latestKanbanSnapshot}
+        planSnapshot={latestPlanSnapshot}
         agentRoster={sidebarAgents}
         favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}

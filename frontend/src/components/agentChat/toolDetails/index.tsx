@@ -24,7 +24,6 @@ import { UpdateScheduleDetail, AgentConfigUpdateDetail } from './details/schedul
 import { ChartDetail } from './details/chart'
 import { ImageDetail } from './details/image'
 import { VideoDetail } from './details/video'
-import { KanbanUpdateDetail } from './details/kanban'
 import {
   CreateCustomToolDetail,
   CustomToolRunDetail,
@@ -73,7 +72,6 @@ export {
   ChartDetail,
   ImageDetail,
   VideoDetail,
-  KanbanUpdateDetail,
   RunCommandDetail,
   PythonExecDetail,
   FileStringReplaceDetail,

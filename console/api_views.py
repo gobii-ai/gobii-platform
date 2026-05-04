@@ -228,7 +228,6 @@ from api.agent.core.llm_utils import run_completion
 from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
 from api.agent.core.token_usage import extract_token_usage
 from api.agent.tools.sqlite_agent_config import seed_sqlite_agent_config
-from api.agent.tools.sqlite_kanban import seed_sqlite_kanban
 from api.agent.tools.sqlite_skills import seed_sqlite_skills
 from api.pipedream_app_utils import normalize_app_slugs
 from api.evals.tasks import gc_eval_runs_task
@@ -292,6 +291,7 @@ from console.role_constants import BILLING_MANAGE_ROLES
 
 logger = logging.getLogger(__name__)
 User = get_user_model()
+
 
 GOOGLE_PROVIDER_KEYS = {"gmail", "google"}
 MICROSOFT_PROVIDER_KEYS = {"outlook", "o365", "office365", "microsoft"}
@@ -3358,6 +3358,7 @@ class AgentTimelineAPIView(LoginRequiredMixin, View):
             "has_more_newer": window.has_more_newer,
             "processing_active": window.processing_active,
             "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
+            "current_plan": window.current_plan,
             "agent_color_hex": agent.get_display_color(),
             "agent_name": agent.name,
             "agent_avatar_url": agent.get_avatar_thumbnail_url(),
@@ -4849,7 +4850,6 @@ class LLMPerformanceTestAPIView(SystemAdminAPIView):
 
         try:
             seed_sqlite_agent_config(agent)
-            seed_sqlite_kanban(agent)
             seed_sqlite_skills(agent)
             messages, prompt_tokens, prompt_metadata = build_prompt_context_preview(
                 agent,
