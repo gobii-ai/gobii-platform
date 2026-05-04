@@ -1,8 +1,5 @@
 import type { EmailProviderDefaults } from '../api/agentEmailSettings'
 
-export type OAuthProviderKey = 'gmail' | 'microsoft' | 'outlook'
-export type ProviderKey = OAuthProviderKey | 'custom'
-
 export type ProviderConfig = {
   label: string
   authorizationEndpoint: string
@@ -16,14 +13,13 @@ export type ProviderConfig = {
   guidanceContinueLabel?: string
 }
 
-export const EMAIL_PROVIDER_OPTIONS: ReadonlyArray<{ value: ProviderKey; label: string }> = [
-  { value: 'gmail', label: 'Gmail' },
-  { value: 'microsoft', label: 'Microsoft 365' },
-  { value: 'outlook', label: 'Outlook.com' },
-  { value: 'custom', label: 'Other provider' },
-]
+function defineProviderConfig<const T extends Record<string, ProviderConfig>>(
+  config: T,
+): { [K in keyof T]: ProviderConfig } {
+  return config
+}
 
-export const EMAIL_OAUTH_PROVIDER_CONFIG: Record<OAuthProviderKey, ProviderConfig> = {
+export const EMAIL_OAUTH_PROVIDER_CONFIG = defineProviderConfig({
   gmail: {
     label: 'Gmail',
     authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
@@ -57,10 +53,23 @@ export const EMAIL_OAUTH_PROVIDER_CONFIG: Record<OAuthProviderKey, ProviderConfi
       prompt: 'select_account',
     },
   },
-}
+})
+
+export type OAuthProviderKey = keyof typeof EMAIL_OAUTH_PROVIDER_CONFIG
+export type ProviderKey = OAuthProviderKey | 'custom'
+
+const OAUTH_PROVIDER_KEYS = Object.keys(EMAIL_OAUTH_PROVIDER_CONFIG) as OAuthProviderKey[]
+
+export const EMAIL_PROVIDER_OPTIONS: ReadonlyArray<{ value: ProviderKey; label: string }> = [
+  ...OAUTH_PROVIDER_KEYS.map((provider) => ({
+    value: provider,
+    label: EMAIL_OAUTH_PROVIDER_CONFIG[provider].label,
+  })),
+  { value: 'custom', label: 'Other provider' },
+]
 
 export function isOAuthProviderKey(value: string): value is OAuthProviderKey {
-  return value === 'gmail' || value === 'microsoft' || value === 'outlook'
+  return Object.prototype.hasOwnProperty.call(EMAIL_OAUTH_PROVIDER_CONFIG, value)
 }
 
 export function getProviderLabel(provider: string): string {
@@ -75,7 +84,7 @@ export function matchProviderFromDefaults(
   if (!normalizedHost) {
     return null
   }
-  for (const provider of Object.keys(EMAIL_OAUTH_PROVIDER_CONFIG) as OAuthProviderKey[]) {
+  for (const provider of OAUTH_PROVIDER_KEYS) {
     const defaults = providerDefaults[provider]
     if (defaults && defaults.smtp_host.toLowerCase() === normalizedHost) {
       return provider
