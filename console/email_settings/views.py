@@ -26,7 +26,7 @@ from api.services.agent_email_aliases import (
     is_default_agent_email_address,
 )
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
-from console.api_views import (
+from console.api_helpers import (
     ApiLoginRequiredMixin,
     _coerce_bool,
     _parse_json_body,
