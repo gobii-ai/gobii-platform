@@ -1430,15 +1430,15 @@
   flex-direction: column;
   min-height: 0;
   border-radius: 1.05rem;
-  border: 1px solid rgba(196, 181, 253, 0.16);
+  border: 1px solid rgba(196, 181, 253, 0.2);
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
-    rgba(42, 27, 78, 0.5);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.022)),
+    #685d7e;
+  background-clip: border-box;
   color: rgba(255, 255, 255, 0.9);
-  -webkit-backdrop-filter: blur(30px) saturate(1.55);
-  backdrop-filter: blur(30px) saturate(1.55);
+  clip-path: inset(0 round 1.05rem);
   box-shadow:
-    0 18px 52px rgba(24, 16, 48, 0.3),
+    0 16px 42px rgba(24, 16, 48, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.11);
   overflow: hidden;
   isolation: isolate;
@@ -1451,8 +1451,8 @@
   z-index: 0;
   border-radius: inherit;
   background:
-    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.13), transparent 34%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.015));
+    radial-gradient(circle at 18% 0%, rgba(255, 255, 255, 0.08), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.01));
   pointer-events: none;
 }
 
