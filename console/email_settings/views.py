@@ -88,6 +88,7 @@ def _sync_oauth_usernames_to_endpoint(
     account: AgentEmailAccount,
     endpoint_address: str,
     previous_endpoint_address: str = "",
+    force: bool = False,
 ) -> None:
     if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
         return
@@ -99,7 +100,7 @@ def _sync_oauth_usernames_to_endpoint(
 
     for field in ("smtp_username", "imap_username"):
         username = (getattr(account, field) or "").strip()
-        if not username or (previous_address and username.casefold() == previous_address.casefold()):
+        if force or not username or (previous_address and username.casefold() == previous_address.casefold()):
             setattr(account, field, current_address)
 
 
@@ -255,7 +256,6 @@ def _apply_email_account_settings(
     if account.connection_mode == AgentEmailAccount.ConnectionMode.OAUTH2:
         account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
         account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-        _sync_oauth_usernames_to_endpoint(account, endpoint.address, previous_endpoint_address)
 
         provider_key = (provider or "").lower()
         if not provider_key:
@@ -263,11 +263,16 @@ def _apply_email_account_settings(
                 provider_key = (account.oauth_credential.provider or "").lower()
             except AgentEmailOAuthCredential.DoesNotExist:
                 provider_key = ""
+        _sync_oauth_usernames_to_endpoint(
+            account,
+            endpoint.address,
+            previous_endpoint_address,
+            force=provider_key in EMAIL_OAUTH_PROVIDER_DEFAULTS,
+        )
         defaults = EMAIL_OAUTH_PROVIDER_DEFAULTS.get(provider_key)
         if defaults:
             for key, value in defaults.items():
-                if not getattr(account, key):
-                    setattr(account, key, value)
+                setattr(account, key, value)
 
 
 def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, str]:
@@ -438,10 +443,12 @@ def _format_email_connection_error(
     is_microsoft = provider_key in {"microsoft", "outlook", "o365", "office365"}
     if "empty username or password" in lowered:
         return "Username or password is missing. Enter both values and try again."
+    if "smtpclientauthentication is disabled for the mailbox" in lowered:
+        return "Microsoft says SMTP AUTH is disabled for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider."
     if "smtpclientauthentication is disabled for the tenant" in lowered or "smtp auth is disabled" in lowered:
-        return "SMTP AUTH is disabled for this Microsoft 365 tenant or mailbox. Enable authenticated SMTP and try again."
+        return "Microsoft says SMTP AUTH is disabled for this tenant. Enable authenticated SMTP, or use a different outbound mail provider."
     if "user is authenticated but not connected" in lowered or "5.7.139" in lowered:
-        return "Microsoft accepted the sign-in but blocked SMTP AUTH for this mailbox. Enable authenticated SMTP and try again."
+        return "Microsoft accepted the sign-in but blocked SMTP AUTH for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider."
     if (
         "imap is disabled" in lowered
         or "pop is disabled" in lowered

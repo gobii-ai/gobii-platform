@@ -864,6 +864,78 @@ class AgentEmailOAuthApiTests(TestCase):
 
     @patch("console.email_settings.views._validate_agent_imap_connection")
     @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_email_settings_test_endpoint_replaces_stale_first_party_oauth_usernames(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_host = "smtp.office365.com"
+        self.account.imap_host = "imap.gmail.com"
+        self.account.smtp_username = "stale-gmail@example.com"
+        self.account.imap_username = "stale-gmail@example.com"
+        self.account.save()
+
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="outlook",
+        )
+
+        mailbox_address = "matt.greathouse@outlook.com"
+
+        def smtp_side_effect(account):
+            self.assertEqual(account.smtp_username, mailbox_address)
+            self.assertEqual(account.smtp_host, "smtp-mail.outlook.com")
+            return True, ""
+
+        def imap_side_effect(account):
+            self.assertEqual(account.imap_username, mailbox_address)
+            self.assertEqual(account.imap_host, "outlook.office365.com")
+            return True, ""
+
+        mock_validate_smtp.side_effect = smtp_side_effect
+        mock_validate_imap.side_effect = imap_side_effect
+
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": mailbox_address,
+                    "previousEndpointAddress": self.endpoint.address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "outlook",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "testOutbound": True,
+                    "testInbound": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": "stale-gmail@example.com",
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": "stale-gmail@example.com",
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["ok"])
+
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
     def test_email_settings_save_rebinds_oauth_usernames_after_test_address_change(
         self,
         mock_validate_smtp,
@@ -1046,7 +1118,16 @@ class AgentEmailOAuthApiTests(TestCase):
         message = _format_email_connection_error("535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Tenant.")
         self.assertEqual(
             message,
-            "SMTP AUTH is disabled for this Microsoft 365 tenant or mailbox. Enable authenticated SMTP and try again.",
+            "Microsoft says SMTP AUTH is disabled for this tenant. Enable authenticated SMTP, or use a different outbound mail provider.",
+        )
+
+    def test_format_email_connection_error_humanizes_microsoft_mailbox_smtp_auth_disabled(self):
+        message = _format_email_connection_error(
+            "535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Mailbox."
+        )
+        self.assertEqual(
+            message,
+            "Microsoft says SMTP AUTH is disabled for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider.",
         )
 
     def test_format_email_connection_error_humanizes_microsoft_smtp_oauth_failure(self):

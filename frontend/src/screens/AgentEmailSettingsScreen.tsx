@@ -153,6 +153,7 @@ function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
         ? 'oauth'
         : 'manual'
   const providerDefaults = isOAuthProviderKey(provider) ? settings.providerDefaults[provider] : undefined
+  const oauthIdentity = connectionType === 'oauth' ? settings.endpoint.address || '' : ''
 
   return {
     endpointAddress: settings.endpoint.address || '',
@@ -160,17 +161,17 @@ function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
     connectionType,
     isOutboundEnabled: directionSelection.isOutboundEnabled,
     isInboundEnabled: directionSelection.isInboundEnabled,
-    smtpHost: settings.account.smtpHost || providerDefaults?.smtp_host || '',
-    smtpPort: settings.account.smtpPort ? String(settings.account.smtpPort) : (providerDefaults ? String(providerDefaults.smtp_port) : ''),
-    smtpSecurity: settings.account.smtpSecurity || providerDefaults?.smtp_security || 'starttls',
+    smtpHost: connectionType === 'oauth' && providerDefaults ? providerDefaults.smtp_host : settings.account.smtpHost || '',
+    smtpPort: connectionType === 'oauth' && providerDefaults ? String(providerDefaults.smtp_port) : settings.account.smtpPort ? String(settings.account.smtpPort) : '',
+    smtpSecurity: connectionType === 'oauth' && providerDefaults ? providerDefaults.smtp_security : settings.account.smtpSecurity || 'starttls',
     smtpAuth: connectionType === 'oauth' ? 'oauth2' : settings.account.smtpAuth || 'login',
-    smtpUsername: settings.account.smtpUsername || settings.endpoint.address || '',
+    smtpUsername: oauthIdentity || settings.account.smtpUsername || settings.endpoint.address || '',
     smtpPassword: '',
-    imapHost: settings.account.imapHost || providerDefaults?.imap_host || '',
-    imapPort: settings.account.imapPort ? String(settings.account.imapPort) : (providerDefaults ? String(providerDefaults.imap_port) : ''),
-    imapSecurity: settings.account.imapSecurity || providerDefaults?.imap_security || 'ssl',
+    imapHost: connectionType === 'oauth' && providerDefaults ? providerDefaults.imap_host : settings.account.imapHost || '',
+    imapPort: connectionType === 'oauth' && providerDefaults ? String(providerDefaults.imap_port) : settings.account.imapPort ? String(settings.account.imapPort) : '',
+    imapSecurity: connectionType === 'oauth' && providerDefaults ? providerDefaults.imap_security : settings.account.imapSecurity || 'ssl',
     imapAuth: connectionType === 'oauth' ? 'oauth2' : settings.account.imapAuth || 'login',
-    imapUsername: settings.account.imapUsername || settings.endpoint.address || '',
+    imapUsername: oauthIdentity || settings.account.imapUsername || settings.endpoint.address || '',
     imapPassword: '',
     imapFolder: settings.account.imapFolder || 'INBOX',
     imapIdleEnabled: settings.account.imapIdleEnabled,
@@ -247,8 +248,9 @@ function syncUsernamesWithEndpoint(current: DraftState, endpointAddress: string)
 
 function buildSavePayload(draft: DraftState, previousEndpointAddress: string): EmailSettingsSaveRequest {
   const oauthMode = isOAuthProviderKey(draft.provider) && draft.connectionType === 'oauth'
+  const oauthIdentity = draft.endpointAddress.trim()
   return {
-    endpointAddress: draft.endpointAddress.trim(),
+    endpointAddress: oauthIdentity,
     previousEndpointAddress: previousEndpointAddress.trim(),
     connectionMode: oauthMode ? 'oauth2' : 'custom',
     oauthProvider: oauthMode ? draft.provider : '',
@@ -256,13 +258,13 @@ function buildSavePayload(draft: DraftState, previousEndpointAddress: string): E
     smtpPort: toPortValue(draft.smtpPort),
     smtpSecurity: draft.smtpSecurity,
     smtpAuth: oauthMode ? 'oauth2' : draft.smtpAuth,
-    smtpUsername: draft.smtpUsername.trim(),
+    smtpUsername: oauthMode ? oauthIdentity : draft.smtpUsername.trim(),
     smtpPassword: draft.smtpPassword.trim(),
     imapHost: draft.imapHost.trim(),
     imapPort: toPortValue(draft.imapPort),
     imapSecurity: draft.imapSecurity,
     imapAuth: oauthMode ? 'oauth2' : draft.imapAuth,
-    imapUsername: draft.imapUsername.trim(),
+    imapUsername: oauthMode ? oauthIdentity : draft.imapUsername.trim(),
     imapPassword: draft.imapPassword.trim(),
     imapFolder: draft.imapFolder.trim() || 'INBOX',
     isOutboundEnabled: draft.isOutboundEnabled,
