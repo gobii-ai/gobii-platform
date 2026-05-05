@@ -1912,6 +1912,7 @@ class MCPToolManager:
 
         fallback_params = dict(original_params)
         fallback_params["engine"] = "bing"
+        fallback_params["geo_location"] = "us"
         logger.warning(
             "Bright Data Google search failed with non-JSON response twice; retrying with Bing. Last failure: %s",
             last_failure or "unknown",
