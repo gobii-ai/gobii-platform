@@ -96,8 +96,42 @@ function toPortValue(value: string): number | null {
   return Number.isFinite(num) ? num : null
 }
 
+function inferOAuthDirectionSelection(settings: AgentEmailSettingsPayload): {
+  isOutboundEnabled: boolean
+  isInboundEnabled: boolean
+} {
+  if (settings.account.isOutboundEnabled || settings.account.isInboundEnabled) {
+    return {
+      isOutboundEnabled: settings.account.isOutboundEnabled,
+      isInboundEnabled: settings.account.isInboundEnabled,
+    }
+  }
+
+  const oauthProvider = settings.oauth.provider.toLowerCase()
+  const scope = settings.oauth.scope.toLowerCase()
+  if (!settings.oauth.connected && settings.account.connectionMode !== 'oauth2') {
+    return {
+      isOutboundEnabled: settings.account.isOutboundEnabled,
+      isInboundEnabled: settings.account.isInboundEnabled,
+    }
+  }
+
+  if (oauthProvider === 'gmail') {
+    return {
+      isOutboundEnabled: true,
+      isInboundEnabled: true,
+    }
+  }
+
+  return {
+    isOutboundEnabled: scope.includes('smtp.send'),
+    isInboundEnabled: scope.includes('imap.accessasuser'),
+  }
+}
+
 function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
-  const hasMailDirectionSelected = settings.account.isInboundEnabled || settings.account.isOutboundEnabled
+  const directionSelection = inferOAuthDirectionSelection(settings)
+  const hasMailDirectionSelected = directionSelection.isInboundEnabled || directionSelection.isOutboundEnabled
   const hasOAuthConfigured =
     settings.oauth.connected
     || settings.account.smtpAuth === 'oauth2'
@@ -124,8 +158,8 @@ function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
     endpointAddress: settings.endpoint.address || '',
     provider,
     connectionType,
-    isOutboundEnabled: settings.account.isOutboundEnabled,
-    isInboundEnabled: settings.account.isInboundEnabled,
+    isOutboundEnabled: directionSelection.isOutboundEnabled,
+    isInboundEnabled: directionSelection.isInboundEnabled,
     smtpHost: settings.account.smtpHost || providerDefaults?.smtp_host || '',
     smtpPort: settings.account.smtpPort ? String(settings.account.smtpPort) : (providerDefaults ? String(providerDefaults.smtp_port) : ''),
     smtpSecurity: settings.account.smtpSecurity || providerDefaults?.smtp_security || 'starttls',

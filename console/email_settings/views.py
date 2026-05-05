@@ -306,7 +306,21 @@ def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, s
                     logger.debug("SMTP close failed during connection test cleanup: %s", close_exc, exc_info=close_exc)
         return True, ""
     except Exception as exc:
-        return False, _format_email_connection_error(exc)
+        logger.warning(
+            "SMTP connection test failed for agent email account %s endpoint %s provider %s auth %s: %r",
+            account.pk,
+            account.endpoint_id,
+            _email_oauth_provider(account),
+            account.smtp_auth,
+            exc,
+            exc_info=exc,
+        )
+        return False, _format_email_connection_error(
+            exc,
+            channel="smtp",
+            auth_mode=account.smtp_auth,
+            provider=_email_oauth_provider(account),
+        )
 
 
 def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, str]:
@@ -348,7 +362,21 @@ def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, s
                     )
         return True, ""
     except Exception as exc:
-        return False, _format_email_connection_error(exc)
+        logger.warning(
+            "IMAP connection test failed for agent email account %s endpoint %s provider %s auth %s: %r",
+            account.pk,
+            account.endpoint_id,
+            _email_oauth_provider(account),
+            account.imap_auth,
+            exc,
+            exc_info=exc,
+        )
+        return False, _format_email_connection_error(
+            exc,
+            channel="imap",
+            auth_mode=account.imap_auth,
+            provider=_email_oauth_provider(account),
+        )
 
 
 def _decode_email_error_part(value: Any) -> str:
@@ -387,9 +415,27 @@ def _normalize_email_error_text(raw_error: Any) -> str:
     return text
 
 
-def _format_email_connection_error(raw_error: Any) -> str:
+def _email_oauth_provider(account: AgentEmailAccount) -> str:
+    try:
+        return (account.oauth_credential.provider or "").strip().lower()
+    except AgentEmailOAuthCredential.DoesNotExist:
+        return ""
+
+
+def _format_email_connection_error(
+    raw_error: Any,
+    *,
+    channel: str = "",
+    auth_mode: str = "",
+    provider: str = "",
+) -> str:
     normalized = _normalize_email_error_text(raw_error)
     lowered = normalized.lower()
+    channel_key = channel.strip().lower()
+    auth_key = auth_mode.strip().lower()
+    provider_key = provider.strip().lower()
+    is_oauth = auth_key == "oauth2"
+    is_microsoft = provider_key in {"microsoft", "outlook", "o365", "office365"}
     if "empty username or password" in lowered:
         return "Username or password is missing. Enter both values and try again."
     if "smtpclientauthentication is disabled for the tenant" in lowered or "smtp auth is disabled" in lowered:
@@ -410,6 +456,12 @@ def _format_email_connection_error(raw_error: Any) -> str:
         or "5.7.3 authentication unsuccessful" in lowered
         or "535 5.7.3" in lowered
     ):
+        if is_oauth:
+            if is_microsoft and channel_key == "smtp":
+                return "Microsoft rejected SMTP OAuth for this mailbox. Confirm Authenticated SMTP is enabled for the mailbox and try reconnecting OAuth."
+            if is_microsoft and channel_key == "imap":
+                return "Microsoft rejected IMAP OAuth for this mailbox. Confirm IMAP access is enabled for the mailbox and try reconnecting OAuth."
+            return "OAuth authentication failed. Reconnect this email account and try again."
         return "Authentication failed. Check your username and password. For Gmail manual setup, use an app password."
     return normalized or "Connection test failed."
 

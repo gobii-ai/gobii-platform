@@ -1049,6 +1049,27 @@ class AgentEmailOAuthApiTests(TestCase):
             "SMTP AUTH is disabled for this Microsoft 365 tenant or mailbox. Enable authenticated SMTP and try again.",
         )
 
+    def test_format_email_connection_error_humanizes_microsoft_smtp_oauth_failure(self):
+        message = _format_email_connection_error(
+            "535 5.7.3 Authentication unsuccessful",
+            channel="smtp",
+            auth_mode="oauth2",
+            provider="outlook",
+        )
+        self.assertEqual(
+            message,
+            "Microsoft rejected SMTP OAuth for this mailbox. Confirm Authenticated SMTP is enabled for the mailbox and try reconnecting OAuth.",
+        )
+
+    def test_format_email_connection_error_humanizes_generic_oauth_failure(self):
+        message = _format_email_connection_error(
+            "Authentication failed",
+            channel="imap",
+            auth_mode="oauth2",
+            provider="custom",
+        )
+        self.assertEqual(message, "OAuth authentication failed. Reconnect this email account and try again.")
+
     def test_format_email_connection_error_humanizes_disabled_imap(self):
         message = _format_email_connection_error("IMAP is disabled for this account.")
         self.assertEqual(
