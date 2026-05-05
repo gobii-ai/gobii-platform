@@ -1,4 +1,5 @@
 import json
+from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, JsonResponse
@@ -23,7 +24,7 @@ def _parse_json_body(request: HttpRequest) -> dict:
     return payload
 
 
-def _coerce_bool(value) -> bool:
+def _coerce_bool(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     if isinstance(value, str):
