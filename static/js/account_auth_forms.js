@@ -655,7 +655,6 @@
       });
       return;
     }
-    form.dataset.submitting = "true";
     form.requestSubmit(form.querySelector("[data-turnstile-submit]") || undefined);
   }
 
