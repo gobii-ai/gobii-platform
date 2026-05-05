@@ -31,6 +31,7 @@ from constants.feature_flags import (
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
     CTA_UNLOCK_AGENT_COPY,
+    PRICING_FREE_OSS_PLAN,
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import (
@@ -114,6 +115,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         )
         cta_no_charge_during_trial = is_waffle_flag_active(
             CTA_NO_CHARGE_DURING_TRIAL,
+            self.request,
+            default=False,
+        )
+        show_free_oss_plan = is_waffle_flag_active(
+            PRICING_FREE_OSS_PLAN,
             self.request,
             default=False,
         )
@@ -246,12 +252,14 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         startup_uses_trial_copy = startup_cta_text.startswith("Start ")
         scale_uses_trial_copy = scale_cta_text.startswith("Start ")
 
-        context["pricing_plans"] = [
+        pricing_plans = [
             {
                 "code": PlanNames.STARTUP,
                 "name": "Pro",
                 "price": startup_price,
                 "price_label": f"${startup_price}",
+                "price_prefix": "$",
+                "price_amount": startup_price,
                 "desc": "For growing teams",
                 "task_credits": startup_task_credits,
                 "tasks": startup_task_credits_display,
@@ -268,12 +276,15 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": startup_features,
                 "cta": startup_cta_text,
                 "cta_url": reverse("proprietary:startup_checkout") if not startup_cta_disabled else "",
+                "cta_variant": "primary",
             },
             {
                 "code": PlanNames.SCALE,
                 "name": "Scale",
                 "price": scale_price,
                 "price_label": f"${scale_price}",
+                "price_prefix": "$",
+                "price_amount": scale_price,
                 "desc": "For teams scaling fast",
                 "task_credits": scale_task_credits,
                 "tasks": scale_task_credits_display,
@@ -289,9 +300,49 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "features": scale_features,
                 "cta": scale_cta_text,
                 "cta_url": reverse("proprietary:scale_checkout") if not scale_cta_disabled else "",
+                "cta_variant": "primary",
                 "disabled": False,
             },
         ]
+
+        if show_free_oss_plan:
+            pricing_plans.insert(
+                0,
+                {
+                    "code": "free_oss",
+                    "name": "Free",
+                    "price": 0,
+                    "price_label": "$0",
+                    "price_prefix": "$",
+                    "price_amount": 0,
+                    "desc": "Self-Hosted Agents",
+                    "tasks": None,
+                    "pricing_model": "Self-hosted, open source",
+                    "highlight": False,
+                    "badge": "Open source",
+                    "disabled": False,
+                    "cta_disabled": False,
+                    "current_plan": False,
+                    "trial_cancel_text": None,
+                    "features": [
+                        "Run on your own computer or server",
+                        "Bring your own AI models",
+                        "Always-on agents with browser automation",
+                        "Open source and MIT licensed",
+                    ],
+                    "cta": "View on GitHub",
+                    "cta_url": "https://github.com/gobii-ai/gobii-platform",
+                    "cta_icon": "github",
+                    "cta_variant": "outline",
+                    "external": True,
+                    "signup_modal": False,
+                    "analytics_cta_id": "pricing_free_oss_plan",
+                    "analytics_intent": "view_open_source",
+                },
+            )
+
+        context["pricing_plans"] = pricing_plans
+        context["pricing_grid_has_free_oss_plan"] = show_free_oss_plan
 
         # Plan limits pulled from plan configuration to keep the table in sync
         max_contacts_per_agent = [

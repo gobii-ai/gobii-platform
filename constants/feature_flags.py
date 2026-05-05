@@ -38,6 +38,9 @@ CTA_CONTINUE_AGENT_BTN = "cta_continue_agent_btn"
 # Controls whether pricing trial CTA helper text emphasizes no charge during the trial.
 CTA_NO_CHARGE_DURING_TRIAL = "cta_no_charge_during_trial"
 
+# Controls whether /pricing shows the open-source self-serve Free option.
+PRICING_FREE_OSS_PLAN = "pricing_free_oss_plan"
+
 # Controls whether anonymous marketing CTA flows go to signup before continuing.
 CTA_SIGNUP_FIRST = "cta_signup_first"
 
