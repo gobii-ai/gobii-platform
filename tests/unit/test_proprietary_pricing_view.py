@@ -138,6 +138,8 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, 'data-analytics-cta-id="pricing_startup_plan"')
         self.assertContains(response, 'data-analytics-placement="pricing_grid"')
         self.assertContains(response, 'data-analytics-intent="select_plan"')
+        self.assertContains(response, "Simple Pricing")
+        self.assertContains(response, "Choose the plan that fits your team.")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
@@ -187,20 +189,17 @@ class PricingPageCtaCopyTests(TestCase):
 
         free_plan = plans[0]
         self.assertEqual(free_plan["name"], "Free")
-        self.assertEqual(free_plan["desc"], "Run Gobii yourself on your computer or server")
+        self.assertEqual(free_plan["desc"], "Self-Hosted Agents")
         self.assertEqual(free_plan["price_label"], "$0")
+        self.assertEqual(free_plan["price_amount"], 0)
         self.assertIsNone(free_plan["tasks"])
-        self.assertEqual(
-            free_plan["pricing_model"],
-            "Open source, self-hosted, bring your own models",
-        )
+        self.assertEqual(free_plan["pricing_model"], "Self-hosted, open source")
         self.assertIn("Run on your own computer or server", free_plan["features"])
-        self.assertIn(
-            "Use OpenAI, OpenRouter, Anthropic, Fireworks, or a custom endpoint",
-            free_plan["features"],
-        )
+        self.assertIn("Bring your own AI models", free_plan["features"])
         self.assertEqual(free_plan["cta"], "View on GitHub")
         self.assertEqual(free_plan["cta_url"], "https://github.com/gobii-ai/gobii-platform")
+        self.assertEqual(free_plan["cta_icon"], "github")
+        self.assertEqual(free_plan["cta_variant"], "outline")
         self.assertTrue(free_plan["external"])
         self.assertFalse(free_plan["signup_modal"])
         self.assertEqual(free_plan["analytics_cta_id"], "pricing_free_oss_plan")
@@ -641,12 +640,12 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertEqual(plans[PlanNames.SCALE]["tasks"], "12,500")
         self.assertContains(
             response,
-            '<li><span class="font-semibold">750</span> tasks included</li>',
+            '<span><span class="font-semibold">750</span> tasks included</span>',
             html=True,
         )
         self.assertContains(
             response,
-            '<li><span class="font-semibold">12,500</span> tasks included</li>',
+            '<span><span class="font-semibold">12,500</span> tasks included</span>',
             html=True,
         )
         self.assertContains(response, "$0.10 per task beyond 750")
