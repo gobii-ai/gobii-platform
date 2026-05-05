@@ -107,6 +107,26 @@ class LinkShortenerTests(TestCase):
 
 
 @tag("batch_link_shortener")
+class BelugaTrackingRedirectTests(TestCase):
+    def test_redirects_code_to_beluga_tracking_url(self):
+        for path in ("/r/spring-launch", "/r/spring-launch/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["Location"], "https://go.trybeluga.ai/spring-launch")
+
+    def test_preserves_query_string(self):
+        response = self.client.get("/r/spring-launch/?utm_source=newsletter&utm_campaign=alpha")
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            "https://go.trybeluga.ai/spring-launch?utm_source=newsletter&utm_campaign=alpha",
+        )
+
+
+@tag("batch_link_shortener")
 class ShortenLinksInBodyTests(TestCase):
     """Unit tests around shorten_links_in_body."""
 

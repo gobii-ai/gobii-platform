@@ -4,6 +4,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.urls.conf import re_path
 from django.shortcuts import redirect
+from django.views.generic.base import RedirectView
 from drf_spectacular.views import (
     SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 )
@@ -284,9 +285,15 @@ from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
 
 API_REFERENCE_DOCS_URL = "https://docs.gobii.ai/api-reference"
+BELUGA_TRACKING_REDIRECT_URL = "https://go.trybeluga.ai/%(code)s"
 
 _schema_swagger_view = SpectacularSwaggerView.as_view(url_name="schema")
 _schema_redoc_view = SpectacularRedocView.as_view(url_name="schema")
+_beluga_tracking_redirect_view = RedirectView.as_view(
+    url=BELUGA_TRACKING_REDIRECT_URL,
+    permanent=False,
+    query_string=True,
+)
 
 
 def schema_swagger_view(request, *args, **kwargs):
@@ -303,6 +310,8 @@ def schema_redoc_view(request, *args, **kwargs):
 urlpatterns = [
     path("setup/", include("setup.urls")),
 
+    path("r/<slug:code>/", _beluga_tracking_redirect_view, name="beluga_tracking_redirect"),
+    path("r/<slug:code>", _beluga_tracking_redirect_view, name="beluga_tracking_redirect_no_slash"),
     path("m/<slug:code>/", LinkShortenerRedirectView.as_view(), name="short_link"),
     path("d/<str:token>/", SignedAgentFsNodeDownloadAPIView.as_view(), name="signed_agent_fs_download"),
 
