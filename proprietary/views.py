@@ -31,6 +31,7 @@ from constants.feature_flags import (
     CTA_PRICING_CANCEL_TEXT_UNDER_BTN,
     CTA_START_FREE_TRIAL,
     CTA_UNLOCK_AGENT_COPY,
+    PRICING_FREE_OSS_PLAN,
     SUPPORT_INTERCOM,
 )
 from util.trial_eligibility import (
@@ -114,6 +115,11 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         )
         cta_no_charge_during_trial = is_waffle_flag_active(
             CTA_NO_CHARGE_DURING_TRIAL,
+            self.request,
+            default=False,
+        )
+        show_free_oss_plan = is_waffle_flag_active(
+            PRICING_FREE_OSS_PLAN,
             self.request,
             default=False,
         )
@@ -246,7 +252,7 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
         startup_uses_trial_copy = startup_cta_text.startswith("Start ")
         scale_uses_trial_copy = scale_cta_text.startswith("Start ")
 
-        context["pricing_plans"] = [
+        pricing_plans = [
             {
                 "code": PlanNames.STARTUP,
                 "name": "Pro",
@@ -292,6 +298,41 @@ class PricingView(ProprietaryModeRequiredMixin, TemplateView):
                 "disabled": False,
             },
         ]
+
+        if show_free_oss_plan:
+            pricing_plans.insert(
+                0,
+                {
+                    "code": "free_oss",
+                    "name": "Free",
+                    "price": 0,
+                    "price_label": "$0",
+                    "desc": "Self-Hosted Agents",
+                    "tasks": None,
+                    "pricing_model": "Open source, self-hosted, bring your own infrastructure",
+                    "highlight": False,
+                    "badge": "Open source",
+                    "disabled": False,
+                    "cta_disabled": False,
+                    "current_plan": False,
+                    "trial_cancel_text": None,
+                    "features": [
+                        "Run on your own computer",
+                        "Bring your own AI models",
+                        "Always-on agents with browser automation",
+                        "Open Source and MIT licensed",
+                    ],
+                    "cta": "View on GitHub",
+                    "cta_url": "https://github.com/gobii-ai/gobii-platform",
+                    "external": True,
+                    "signup_modal": False,
+                    "analytics_cta_id": "pricing_free_oss_plan",
+                    "analytics_intent": "view_open_source",
+                },
+            )
+
+        context["pricing_plans"] = pricing_plans
+        context["pricing_grid_has_free_oss_plan"] = show_free_oss_plan
 
         # Plan limits pulled from plan configuration to keep the table in sync
         max_contacts_per_agent = [

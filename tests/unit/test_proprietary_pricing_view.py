@@ -7,6 +7,7 @@ from django.urls import reverse
 from waffle.testutils import override_flag
 
 from api.models import EntitlementDefinition, Plan, PlanVersion, PlanVersionEntitlement
+from constants.feature_flags import PRICING_FREE_OSS_PLAN
 from constants.plans import PLAN_SLUG_BY_LEGACY_CODE, PlanNames
 from pages.models import CallToAction
 
@@ -137,6 +138,88 @@ class PricingPageCtaCopyTests(TestCase):
         self.assertContains(response, 'data-analytics-cta-id="pricing_startup_plan"')
         self.assertContains(response, 'data-analytics-placement="pricing_grid"')
         self.assertContains(response, 'data-analytics-intent="select_plan"')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_omits_free_oss_plan_when_flag_disabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag(PRICING_FREE_OSS_PLAN, active=False):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plan_codes = [
+            plan["code"]
+            for plan in response.context["pricing_plans"]
+        ]
+        self.assertEqual(plan_codes, [PlanNames.STARTUP, PlanNames.SCALE])
+        self.assertFalse(response.context["pricing_grid_has_free_oss_plan"])
+        self.assertNotContains(response, "View on GitHub")
+        self.assertNotContains(response, 'data-analytics-cta-id="pricing_free_oss_plan"')
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_pricing_page_renders_free_oss_plan_when_flag_enabled(
+        self,
+        mock_get_stripe_settings,
+    ):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+
+        with override_flag(PRICING_FREE_OSS_PLAN, active=True):
+            response = self.client.get(reverse("proprietary:pricing"))
+
+        self.assertEqual(response.status_code, 200)
+        plans = response.context["pricing_plans"]
+        self.assertEqual(
+            [plan["code"] for plan in plans],
+            ["free_oss", PlanNames.STARTUP, PlanNames.SCALE],
+        )
+        self.assertTrue(response.context["pricing_grid_has_free_oss_plan"])
+
+        free_plan = plans[0]
+        self.assertEqual(free_plan["name"], "Free")
+        self.assertEqual(free_plan["desc"], "Run Gobii yourself on your computer or server")
+        self.assertEqual(free_plan["price_label"], "$0")
+        self.assertIsNone(free_plan["tasks"])
+        self.assertEqual(
+            free_plan["pricing_model"],
+            "Open source, self-hosted, bring your own models",
+        )
+        self.assertIn("Run on your own computer or server", free_plan["features"])
+        self.assertIn(
+            "Use OpenAI, OpenRouter, Anthropic, Fireworks, or a custom endpoint",
+            free_plan["features"],
+        )
+        self.assertEqual(free_plan["cta"], "View on GitHub")
+        self.assertEqual(free_plan["cta_url"], "https://github.com/gobii-ai/gobii-platform")
+        self.assertTrue(free_plan["external"])
+        self.assertFalse(free_plan["signup_modal"])
+        self.assertEqual(free_plan["analytics_cta_id"], "pricing_free_oss_plan")
+        self.assertEqual(free_plan["analytics_intent"], "view_open_source")
+
+        self.assertEqual(plans[1]["cta_url"], reverse("proprietary:startup_checkout"))
+        self.assertEqual(plans[2]["cta_url"], reverse("proprietary:scale_checkout"))
+
+        content = response.content.decode()
+        analytics_pos = content.index('data-analytics-cta-id="pricing_free_oss_plan"')
+        anchor_start = content.rfind("<a ", 0, analytics_pos)
+        anchor_end = content.index("</a>", analytics_pos)
+        free_anchor = content[anchor_start:anchor_end]
+        self.assertIn('href="https://github.com/gobii-ai/gobii-platform"', free_anchor)
+        self.assertIn('target="_blank"', free_anchor)
+        self.assertIn('rel="noopener noreferrer"', free_anchor)
+        self.assertIn('data-analytics-intent="view_open_source"', free_anchor)
+        self.assertNotIn("data-cta-signup-modal", free_anchor)
+        self.assertNotContains(response, "None tasks included")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("proprietary.views.get_stripe_settings")
