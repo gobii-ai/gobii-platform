@@ -1,3 +1,5 @@
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -83,3 +85,51 @@ class EvalExecutionProcessingTests(TestCase):
             throw=True,
         )
         mock_delay.assert_not_called()
+
+    @patch("api.agent.core.llm_config.get_llm_config_with_failover")
+    @patch("api.evals.execution.run_completion")
+    def test_llm_judge_forces_judgment_tool_when_supported(self, mock_run_completion, mock_get_config):
+        mock_get_config.return_value = [
+            (
+                "provider",
+                "model",
+                {
+                    "supports_tool_choice": True,
+                    "temperature": 0.2,
+                },
+            )
+        ]
+        mock_run_completion.return_value = SimpleNamespace(
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(
+                        tool_calls=[
+                            SimpleNamespace(
+                                function=SimpleNamespace(
+                                    name="submit_judgment",
+                                    arguments=json.dumps(
+                                        {
+                                            "choice": "Pass",
+                                            "reasoning": "Used the expected tool.",
+                                        }
+                                    ),
+                                )
+                            )
+                        ]
+                    )
+                )
+            ]
+        )
+
+        choice, reasoning = self.tools.llm_judge(
+            question="Did it pass?",
+            context="Tool call was observed.",
+            options=("Pass", "Fail"),
+        )
+
+        self.assertEqual(choice, "Pass")
+        self.assertEqual(reasoning, "Used the expected tool.")
+        self.assertEqual(
+            mock_run_completion.call_args.kwargs["tool_choice"],
+            {"type": "function", "function": {"name": "submit_judgment"}},
+        )

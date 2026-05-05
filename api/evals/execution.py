@@ -386,12 +386,16 @@ class ScenarioExecutionTools:
             {"role": "system", "content": "You are an impartial judge. Evaluate the context and answer the question by calling the `submit_judgment` tool."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
         ]
+        forced_tool_choice = {"type": "function", "function": {"name": "submit_judgment"}}
 
         # If caller provided both model and params, use them directly
         if model is not None and params is not None:
             safe_params = dict(params)
             if safe_params.get("temperature") is None:
                 safe_params["temperature"] = 0.0
+            run_kwargs = {}
+            if safe_params.get("supports_tool_choice", True):
+                run_kwargs["tool_choice"] = forced_tool_choice
             try:
                 response = run_completion(
                     model=model,
@@ -399,6 +403,7 @@ class ScenarioExecutionTools:
                     tools=[tool_definition],
                     params=safe_params,
                     drop_params=True,
+                    **run_kwargs,
                 )
                 return self._extract_judgment(response)
             except Exception as e:
@@ -422,6 +427,9 @@ class ScenarioExecutionTools:
             safe_params = dict(params or cfg_params or {})
             if safe_params.get("temperature") is None:
                 safe_params["temperature"] = 0.0
+            run_kwargs = {}
+            if safe_params.get("supports_tool_choice", True):
+                run_kwargs["tool_choice"] = forced_tool_choice
 
             try:
                 response = run_completion(
@@ -430,6 +438,7 @@ class ScenarioExecutionTools:
                     tools=[tool_definition],
                     params=safe_params,
                     drop_params=True,
+                    **run_kwargs,
                 )
                 return self._extract_judgment(response)
             except Exception as e:

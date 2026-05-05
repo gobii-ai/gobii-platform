@@ -142,6 +142,8 @@ jobs:
             tag: global_secrets_batch
           - batch: global_skill_evals
             tag: batch_global_skill_evals
+          - batch: real_world_evals
+            tag: batch_real_world_evals
           - batch: proxy_selection
             tag: batch_proxy_selection
           - batch: step_compaction

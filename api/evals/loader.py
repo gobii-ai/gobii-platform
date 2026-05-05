@@ -7,6 +7,10 @@ from api.evals.scenarios.behavior_micro import (
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
+from api.evals.scenarios.real_world_usage import (
+    REAL_WORLD_USAGE_SCENARIO_SLUGS,
+    REAL_WORLD_USAGE_SUITE_SLUG,
+)
 from api.evals.suites import EvalSuite, register_builtin_suites
 
 # Built-in suites (in addition to the dynamic "all" suite)
@@ -36,6 +40,11 @@ register_builtin_suites(
             slug="tool_choice_micro",
             description="Small deterministic obvious tool-choice behavior checks.",
             scenario_slugs=TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=REAL_WORLD_USAGE_SUITE_SLUG,
+            description="Real-world usage regression cases derived from production agent patterns.",
+            scenario_slugs=REAL_WORLD_USAGE_SCENARIO_SLUGS,
         ),
     ]
 )
