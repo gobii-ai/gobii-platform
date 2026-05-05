@@ -118,6 +118,7 @@ function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
       : hasOAuthConfigured || settings.account.connectionMode === 'oauth2'
         ? 'oauth'
         : 'manual'
+  const providerDefaults = isOAuthProviderKey(provider) ? settings.providerDefaults[provider] : undefined
 
   return {
     endpointAddress: settings.endpoint.address || '',
@@ -125,16 +126,16 @@ function draftFromSettings(settings: AgentEmailSettingsPayload): DraftState {
     connectionType,
     isOutboundEnabled: settings.account.isOutboundEnabled,
     isInboundEnabled: settings.account.isInboundEnabled,
-    smtpHost: settings.account.smtpHost || '',
-    smtpPort: settings.account.smtpPort ? String(settings.account.smtpPort) : '',
-    smtpSecurity: settings.account.smtpSecurity || 'starttls',
-    smtpAuth: settings.account.smtpAuth || 'login',
+    smtpHost: settings.account.smtpHost || providerDefaults?.smtp_host || '',
+    smtpPort: settings.account.smtpPort ? String(settings.account.smtpPort) : (providerDefaults ? String(providerDefaults.smtp_port) : ''),
+    smtpSecurity: settings.account.smtpSecurity || providerDefaults?.smtp_security || 'starttls',
+    smtpAuth: connectionType === 'oauth' ? 'oauth2' : settings.account.smtpAuth || 'login',
     smtpUsername: settings.account.smtpUsername || settings.endpoint.address || '',
     smtpPassword: '',
-    imapHost: settings.account.imapHost || '',
-    imapPort: settings.account.imapPort ? String(settings.account.imapPort) : '',
-    imapSecurity: settings.account.imapSecurity || 'ssl',
-    imapAuth: settings.account.imapAuth || 'login',
+    imapHost: settings.account.imapHost || providerDefaults?.imap_host || '',
+    imapPort: settings.account.imapPort ? String(settings.account.imapPort) : (providerDefaults ? String(providerDefaults.imap_port) : ''),
+    imapSecurity: settings.account.imapSecurity || providerDefaults?.imap_security || 'ssl',
+    imapAuth: connectionType === 'oauth' ? 'oauth2' : settings.account.imapAuth || 'login',
     imapUsername: settings.account.imapUsername || settings.endpoint.address || '',
     imapPassword: '',
     imapFolder: settings.account.imapFolder || 'INBOX',
