@@ -1376,7 +1376,7 @@
     overflow: visible;
     pointer-events: auto;
     transform: none;
-    z-index: 9;
+    z-index: 45;
     cursor: pointer;
   }
 
@@ -4762,6 +4762,11 @@
   overflow-wrap: anywhere;
   word-break: break-word;
   -webkit-overflow-scrolling: touch;
+}
+
+.spawn-agent-charter-scroll:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.28);
+  outline-offset: 2px;
 }
 
 .spawn-agent-action-btn {
