@@ -342,6 +342,68 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "purchase")
         self.assertEqual(kwargs["line_items"], [{"price": "price_org_team", "quantity": 2}])
 
+    @tag("batch_billing")
+    @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
+    @patch("console.billing_update_service.stripe.Subscription.modify")
+    @patch("console.billing_update_service.stripe.Subscription.retrieve")
+    @patch("console.billing_update_service.get_stripe_settings")
+    @patch("console.billing_update_service.stripe_status")
+    def test_org_seat_increase_omits_metadata_from_pending_update(
+        self,
+        mock_stripe_status,
+        mock_get_stripe_settings,
+        mock_retrieve_subscription,
+        mock_modify_subscription,
+        _mock_assign_key,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_get_stripe_settings.return_value = SimpleNamespace(org_team_price_id="price_org_team")
+        mock_retrieve_subscription.return_value = {
+            "id": "sub_org_seats",
+            "items": {
+                "data": [
+                    {
+                        "id": "si_org_seats",
+                        "quantity": 1,
+                        "price": {
+                            "id": "price_org_team",
+                            "recurring": {"usage_type": "licensed"},
+                        },
+                    }
+                ]
+            },
+            "metadata": {"foo": "bar"},
+        }
+        mock_modify_subscription.return_value = {"id": "sub_org_seats", "latest_invoice": None}
+
+        billing = self.org.billing
+        billing.purchased_seats = 1
+        billing.stripe_subscription_id = "sub_org_seats"
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id"])
+
+        resp = self.client.post(
+            self.url,
+            data=json.dumps(
+                {
+                    "ownerType": "organization",
+                    "organizationId": str(self.org.id),
+                    "seatsTarget": 3,
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("ok"))
+        mock_modify_subscription.assert_called_once()
+
+        seat_update_call = mock_modify_subscription.call_args_list[0]
+        self.assertEqual(seat_update_call.args[0], "sub_org_seats")
+        self.assertEqual(seat_update_call.kwargs["items"], [{"id": "si_org_seats", "quantity": 3}])
+        self.assertEqual(seat_update_call.kwargs["payment_behavior"], "pending_if_incomplete")
+        self.assertEqual(seat_update_call.kwargs["proration_behavior"], "always_invoice")
+        self.assertNotIn("metadata", seat_update_call.kwargs)
+
     @patch("console.billing_update_service._assign_stripe_api_key", return_value=None)
     @patch("console.billing_update_service.stripe.Subscription.retrieve")
     @patch(
