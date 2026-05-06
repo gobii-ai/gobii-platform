@@ -142,6 +142,7 @@ from api.services.signup_preview import (
     resume_signup_preview_agent_if_eligible,
 )
 from api.services.agent_planning import skip_agent_planning
+from api.services.referral_service import ReferralService
 from api.services.web_sessions import (
     WEB_SESSION_TTL_SECONDS,
     end_web_session,
@@ -196,7 +197,7 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
-from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm
+from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, UserProfileForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
@@ -467,6 +468,81 @@ class UserPreferencesAPIView(ApiLoginRequiredMixin, View):
             return HttpResponseBadRequest(str(exc))
 
         return JsonResponse({"preferences": resolved_preferences})
+
+
+def _serialize_user_profile_options(form: UserProfileForm) -> list[dict[str, str]]:
+    return [
+        {
+            "value": str(value),
+            "label": str(label),
+        }
+        for value, label in form.fields["timezone"].choices
+    ]
+
+
+def _serialize_user_profile_payload(request: HttpRequest) -> dict[str, Any]:
+    user = request.user
+    form = UserProfileForm(instance=user)
+    base_url = request.build_absolute_uri("/").rstrip("/")
+    phone = get_primary_phone(user)
+    return {
+        "profile": {
+            "firstName": user.first_name or "",
+            "lastName": user.last_name or "",
+            "timezone": form.fields["timezone"].initial or "",
+        },
+        "timezoneOptions": _serialize_user_profile_options(form),
+        "referralLink": ReferralService.get_referral_link(
+            user,
+            base_url=base_url,
+            track=False,
+        ),
+        "emailVerification": _serialize_email_verification(user),
+        "phone": serialize_phone(phone),
+    }
+
+
+def _serialize_profile_form_errors(form: UserProfileForm) -> dict[str, list[str]]:
+    field_names = {
+        "first_name": "firstName",
+        "last_name": "lastName",
+        "timezone": "timezone",
+        "__all__": "nonFieldErrors",
+    }
+    return {
+        field_names.get(field, field): [str(error) for error in errors]
+        for field, errors in form.errors.items()
+    }
+
+
+class UserProfileAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "patch"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(_serialize_user_profile_payload(request))
+
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        raw_profile = payload.get("profile", payload)
+        if not isinstance(raw_profile, dict):
+            return JsonResponse({"errors": {"profile": ["Profile must be an object."]}}, status=400)
+
+        current_form = UserProfileForm(instance=request.user)
+        form_data = {
+            "first_name": raw_profile.get("firstName", raw_profile.get("first_name", request.user.first_name or "")),
+            "last_name": raw_profile.get("lastName", raw_profile.get("last_name", request.user.last_name or "")),
+            "timezone": raw_profile.get("timezone", current_form.fields["timezone"].initial or ""),
+        }
+        form = UserProfileForm(form_data, instance=request.user)
+        if not form.is_valid():
+            return JsonResponse({"errors": _serialize_profile_form_errors(form)}, status=400)
+
+        form.save()
+        return JsonResponse(_serialize_user_profile_payload(request))
 
 
 class AgentSpawnIntentAPIView(LoginRequiredMixin, View):

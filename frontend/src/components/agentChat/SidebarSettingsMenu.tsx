@@ -7,6 +7,7 @@ import {
   LockKeyhole,
   ServerCog,
   Settings,
+  User,
   UserRound,
 } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
@@ -26,6 +27,8 @@ export type SidebarSettingsInfo = {
   isProprietaryMode: boolean
   billingUrl?: string | null
   onOpenBilling?: (() => void) | null
+  profileUrl?: string | null
+  onOpenProfile?: (() => void) | null
   globalSecretsUrl?: string
   advancedMcpUrl?: string
   notificationsEnabled?: boolean
@@ -89,6 +92,8 @@ export function SidebarSettingsMenu({
   isProprietaryMode,
   billingUrl = null,
   onOpenBilling = null,
+  profileUrl = '/console/profile/',
+  onOpenProfile = null,
   globalSecretsUrl = '/console/secrets/',
   advancedMcpUrl = '/console/advanced/mcp-servers/',
   notificationsEnabled = true,
@@ -136,6 +141,7 @@ export function SidebarSettingsMenu({
     return viewerEmail?.trim() || context?.name || 'Personal workspace'
   }, [context, viewerEmail])
   const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
+  const canShowProfile = Boolean(profileUrl || onOpenProfile)
   const canShowTaskCredits = Boolean(isProprietaryMode && taskCredits)
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
@@ -207,6 +213,26 @@ export function SidebarSettingsMenu({
               </span>
             </button>
             <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+            {canShowProfile ? (
+              onOpenProfile ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenProfile()
+                  }}
+                >
+                  <User className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Profile</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={profileUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <User className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Profile</span>
+                </a>
+              )
+            ) : null}
             {canShowBilling ? (
               onOpenBilling ? (
                 <button

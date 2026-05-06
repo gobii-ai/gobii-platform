@@ -11,11 +11,12 @@ import {
   type Selection,
 } from 'react-aria-components'
 
-export type SelectionShellPage = 'agents' | 'billing'
+export type SelectionShellPage = 'agents' | 'billing' | 'profile'
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
   billing: 'Billing',
+  profile: 'Profile',
 }
 
 type SelectionPageOption = {

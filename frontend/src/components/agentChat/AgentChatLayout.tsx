@@ -132,6 +132,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   currentContext?: ConsoleContext | null
   sidebarBillingUrl?: string | null
   onOpenBilling?: () => void
+  sidebarProfileUrl?: string | null
+  onOpenProfile?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -141,6 +143,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   planSnapshot?: PlanSnapshot | null
   footer?: ReactNode
   galleryShellPage?: SelectionShellPage
+  galleryShellPanel?: ReactNode
   onGalleryShellPageChange?: (page: SelectionShellPage) => void
   showEmbeddedSettings?: boolean
   embeddedSettingsPanel?: ReactNode
@@ -299,6 +302,8 @@ export function AgentChatLayout({
   currentContext = null,
   sidebarBillingUrl = null,
   onOpenBilling,
+  sidebarProfileUrl = '/console/profile/',
+  onOpenProfile,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -308,6 +313,7 @@ export function AgentChatLayout({
   planSnapshot,
   footer,
   galleryShellPage = 'agents',
+  galleryShellPanel = null,
   onGalleryShellPageChange,
   showEmbeddedSettings = false,
   embeddedSettingsPanel,
@@ -458,6 +464,7 @@ export function AgentChatLayout({
   const hasStoredPlanPanelMode = agentId
     ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
     : defaultPlanPanelMode !== 'hidden'
+  const showGalleryShellPanel = galleryShellPage !== 'agents'
   const showPlanInterface = sidebarMode !== 'gallery'
   const previousPlanStateRef = useRef<{ total: number; active: boolean } | null>(null)
   const previousPlanSnapshotRef = useRef<PlanSnapshot | null>(null)
@@ -487,6 +494,12 @@ export function AgentChatLayout({
   }, [agentId, highPriorityBannerDismissible, highPriorityBannerId])
 
   const handleSidebarModeChange = useCallback((mode: 'collapsed' | 'list' | 'gallery') => {
+    if (showGalleryShellPanel && mode !== 'gallery') {
+      preEmbeddedSidebarModeRef.current = null
+      setSidebarMode(mode)
+      onGalleryShellPageChange?.('agents')
+      return
+    }
     if (showEmbeddedSettings && mode !== 'gallery') {
       preEmbeddedSidebarModeRef.current = null
       setSidebarMode(mode)
@@ -494,7 +507,7 @@ export function AgentChatLayout({
       return
     }
     setSidebarMode(mode)
-  }, [onBackFromEmbeddedSettings, showEmbeddedSettings])
+  }, [onBackFromEmbeddedSettings, onGalleryShellPageChange, showEmbeddedSettings, showGalleryShellPanel])
 
   const handleSettingsOpen = useCallback(() => {
     setSettingsOpen(true)
@@ -529,7 +542,7 @@ export function AgentChatLayout({
   }, [])
 
   useEffect(() => {
-    if (showEmbeddedSettings) {
+    if (showEmbeddedSettings || showGalleryShellPanel) {
       setSidebarMode((mode) => {
         if (mode !== 'gallery' && preEmbeddedSidebarModeRef.current === null) {
           preEmbeddedSidebarModeRef.current = mode
@@ -546,7 +559,7 @@ export function AgentChatLayout({
       }
       return mode
     })
-  }, [showEmbeddedSettings])
+  }, [showEmbeddedSettings, showGalleryShellPanel])
 
   useEffect(() => {
     if (!isUpgradeModalOpen) {
@@ -1155,10 +1168,12 @@ export function AgentChatLayout({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl: sidebarBillingUrl,
+    profileUrl: sidebarProfileUrl,
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
     onOpenBilling,
+    onOpenProfile,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -1172,7 +1187,9 @@ export function AgentChatLayout({
     isProprietaryMode,
     onSidebarNotificationsEnabledChange,
     onOpenBilling,
+    onOpenProfile,
     sidebarBillingUrl,
+    sidebarProfileUrl,
     sidebarCreditsResetOn,
     sidebarNotificationStatus,
     sidebarNotificationsEnabled,
@@ -1225,6 +1242,7 @@ export function AgentChatLayout({
         contextSwitcher={contextSwitcher}
         settings={sidebarSettings}
         galleryShellPage={galleryShellPage}
+        galleryShellPanel={galleryShellPanel}
         onGalleryShellPageChange={onGalleryShellPageChange}
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}

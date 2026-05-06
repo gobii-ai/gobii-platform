@@ -884,6 +884,7 @@ export type AgentChatPageProps = {
   selectionMainPanel?: ReactNode
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
+  onOpenProfile?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -931,6 +932,7 @@ export function AgentChatPage({
   selectionMainPanel = null,
   onSelectionPageChange,
   onOpenBilling,
+  onOpenProfile,
 }: AgentChatPageProps) {
   const initialThemeColorRef = useRef<string | null>(null)
   const fishFaviconSvgRef = useRef<string | null>(null)
@@ -3688,6 +3690,16 @@ export function AgentChatPage({
       window.location.assign(billingUrl)
     }
   }, [billingUrl, onOpenBilling])
+  const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
+  const handleOpenProfile = useCallback(() => {
+    if (onOpenProfile) {
+      onOpenProfile()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(profileUrl)
+    }
+  }, [onOpenProfile, profileUrl])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
@@ -3715,7 +3727,9 @@ export function AgentChatPage({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl,
+    profileUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
+    onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3728,8 +3742,11 @@ export function AgentChatPage({
     billingUrl,
     effectiveContext,
     handleOpenBilling,
+    handleOpenProfile,
     isProprietaryMode,
+    isImmersiveShellPath,
     onOpenBilling,
+    profileUrl,
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
@@ -3760,7 +3777,7 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
     galleryShellPage: selectionPage,
-    galleryShellPanel: selectionPage === 'billing' ? selectionShellPanel : null,
+    galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,
     onGalleryShellPageChange: onSelectionPageChange,
   }
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
@@ -4257,7 +4274,7 @@ export function AgentChatPage({
         </div>,
       )
     }
-    if (selectionPage === 'billing') {
+    if (selectionPage !== 'agents') {
       return renderSelectionLayout(
         selectionMainPanel ? (
           <div className="flex min-h-full w-full flex-1 md:hidden">
@@ -4379,12 +4396,15 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         sidebarBillingUrl={billingManageUrl}
         onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
+        sidebarProfileUrl={profileUrl}
+        onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}
         sidebarNotificationStatus={notificationStatus}
         onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
         galleryShellPage={selectionPage}
+        galleryShellPanel={selectionPage !== 'agents' ? selectionShellPanel : null}
         onGalleryShellPageChange={isImmersiveShellPath ? onSelectionPageChange : undefined}
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}

@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
+import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
+import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -15,10 +17,11 @@ type AppRoute =
   | { kind: 'command-center' }
   | { kind: 'agent-select' }
   | { kind: 'billing' }
+  | { kind: 'profile' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -36,6 +39,8 @@ type ImmersiveAppProps = {
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
 }
+
+type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile'>
 
 function readLocation(): LocationSnapshot {
   return {
@@ -94,6 +99,10 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'billing' }
   }
 
+  if (parts[0] === 'profile') {
+    return { kind: 'profile' }
+  }
+
   return { kind: 'not-found' }
 }
 
@@ -106,6 +115,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   }
   if (route.kind === 'billing') {
     return 'billing'
+  }
+  if (route.kind === 'profile') {
+    return 'profile'
   }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'agent_chat' : 'agent_new'
@@ -123,6 +135,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'billing') {
     return '/app/billing'
   }
+  if (route.kind === 'profile') {
+    return '/app/profile'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? '/app/agents/:id' : '/app/agents/new'
   }
@@ -139,6 +154,9 @@ function getAnalyticsTitle(route: AppRoute): string {
   if (route.kind === 'billing') {
     return 'Billing · Gobii'
   }
+  if (route.kind === 'profile') {
+    return 'Profile · Gobii'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
   }
@@ -151,6 +169,19 @@ function cleanQueryForTracking(search: string): string {
   params.delete('return_to')
   const cleaned = params.toString()
   return cleaned ? `?${cleaned}` : ''
+}
+
+function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
+  const page = new URLSearchParams(search).get('shell')
+  return page === 'billing' || page === 'profile' ? page : 'agents'
+}
+
+function buildAgentShellPath(agentId: string, page: SelectionShellPage): string {
+  const basePath = `/app/agents/${agentId}`
+  if (page === 'billing' || page === 'profile') {
+    return `${basePath}?shell=${page}`
+  }
+  return basePath
 }
 
 function parseBooleanFlag(value: string | null): boolean {
@@ -361,6 +392,7 @@ export function ImmersiveApp({
 }: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
+  const activeAgentShellPage = useMemo(() => parseAgentShellPage(location.search), [location.search])
   const embed = useMemo(() => {
     if (parseBooleanFlag(new URLSearchParams(location.search).get('embed'))) {
       return true
@@ -476,20 +508,52 @@ export function ImmersiveApp({
 
   const handleContextSwitch = useCallback((_context: ConsoleContext) => {
     setSelectionRefreshKey((current) => current + 1)
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, activeAgentShellPage))
+      return
+    }
     if (route.kind === 'billing') {
       navigateTo('/app/billing')
       return
     }
+    if (route.kind === 'profile') {
+      navigateTo('/app/profile')
+      return
+    }
     navigateTo('/app/agents')
-  }, [route.kind])
+  }, [activeAgentShellPage, route])
 
-  const handleSelectionPageChange = useCallback((page: 'agents' | 'billing') => {
-    navigateTo(page === 'billing' ? '/app/billing' : '/app/agents')
-  }, [])
+  const handleSelectionPageChange = useCallback((page: SelectionShellPage) => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, page))
+      return
+    }
+    if (page === 'billing') {
+      navigateTo('/app/billing')
+      return
+    }
+    if (page === 'profile') {
+      navigateTo('/app/profile')
+      return
+    }
+    navigateTo('/app/agents')
+  }, [route])
 
   const handleOpenBilling = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'billing'))
+      return
+    }
     navigateTo('/app/billing')
-  }, [])
+  }, [route])
+
+  const handleOpenProfile = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'profile'))
+      return
+    }
+    navigateTo('/app/profile')
+  }, [route])
 
   return (
     <div className="immersive-shell">
@@ -508,9 +572,17 @@ export function ImmersiveApp({
             showContextSwitcher
             persistContextSession={false}
             onContextSwitch={handleContextSwitch}
-            selectionPage="agents"
+            selectionPage={activeAgentShellPage}
+            selectionShellPanel={
+              activeAgentShellPage === 'billing' ? (
+                <ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
+              ) : activeAgentShellPage === 'profile' ? (
+                <ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
+              ) : null
+            }
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenProfile={handleOpenProfile}
           />
         ) : null}
         {route.kind === 'agent-select' ? (
@@ -529,6 +601,7 @@ export function ImmersiveApp({
             selectionPage="agents"
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenProfile={handleOpenProfile}
           />
         ) : null}
         {route.kind === 'billing' ? (
@@ -549,6 +622,28 @@ export function ImmersiveApp({
             selectionMainPanel={<ImmersiveBillingPage layout="main" refreshKey={selectionRefreshKey} />}
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenProfile={handleOpenProfile}
+          />
+        ) : null}
+        {route.kind === 'profile' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="profile"
+            selectionShellPanel={<ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveProfilePage layout="main" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+            onOpenProfile={handleOpenProfile}
           />
         ) : null}
         {route.kind === 'command-center' ? (
