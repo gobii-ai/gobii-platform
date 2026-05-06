@@ -1949,6 +1949,46 @@ class ConsoleViewsTest(TestCase):
         )
         self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
 
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @tag("batch_console_agents_management")
+    def test_quick_spawn_rejects_customer_account_pause(self, mock_process_events_delay):
+        from api.models import ExecutionPauseReasonChoices, PersistentAgent
+
+        resume_at = timezone.now() + timedelta(days=3)
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = resume_at
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+        session = self.client.session
+        session["agent_charter"] = "Help with tasks"
+        session.save()
+
+        response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlparse(response["Location"]).path, reverse("agents"))
+        response_messages = [message.message for message in get_messages(response.wsgi_request)]
+        self.assertTrue(
+            any("account is paused" in message.lower() for message in response_messages),
+            response_messages,
+        )
+        self.assertEqual(
+            PersistentAgent.objects.filter(user=self.user, organization__isnull=True).count(),
+            0,
+        )
+        self.assertEqual(self.client.session.get("agent_charter"), "Help with tasks")
+        mock_process_events_delay.assert_not_called()
+
     @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
     @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
     @patch("console.agent_creation.process_agent_events_task.delay")
