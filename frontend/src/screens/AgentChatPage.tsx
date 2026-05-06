@@ -887,6 +887,7 @@ export type AgentChatPageProps = {
   onOpenUsage?: () => void
   onOpenProfile?: () => void
   onOpenSecrets?: () => void
+  onOpenIntegrations?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -937,6 +938,7 @@ export function AgentChatPage({
   onOpenUsage,
   onOpenProfile,
   onOpenSecrets,
+  onOpenIntegrations,
 }: AgentChatPageProps) {
   const initialThemeColorRef = useRef<string | null>(null)
   const fishFaviconSvgRef = useRef<string | null>(null)
@@ -3724,6 +3726,16 @@ export function AgentChatPage({
       window.location.assign(secretsUrl)
     }
   }, [onOpenSecrets, secretsUrl])
+  const integrationsUrl = isImmersiveShellPath ? '/app/integrations' : '/console/advanced/mcp-servers/'
+  const handleOpenIntegrations = useCallback(() => {
+    if (onOpenIntegrations) {
+      onOpenIntegrations()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(integrationsUrl)
+    }
+  }, [integrationsUrl, onOpenIntegrations])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
@@ -3754,10 +3766,12 @@ export function AgentChatPage({
     usageUrl,
     profileUrl,
     secretsUrl,
+    integrationsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
     onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
     onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
     onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
+    onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3773,12 +3787,14 @@ export function AgentChatPage({
     handleOpenUsage,
     handleOpenProfile,
     handleOpenSecrets,
+    handleOpenIntegrations,
     isProprietaryMode,
     isImmersiveShellPath,
     onOpenBilling,
     usageUrl,
     profileUrl,
     secretsUrl,
+    integrationsUrl,
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
@@ -4434,6 +4450,8 @@ export function AgentChatPage({
         onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
         sidebarSecretsUrl={secretsUrl}
         onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
+        sidebarIntegrationsUrl={integrationsUrl}
+        onOpenIntegrations={isImmersiveShellPath ? handleOpenIntegrations : undefined}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}

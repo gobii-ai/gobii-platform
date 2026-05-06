@@ -138,6 +138,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenProfile?: () => void
   sidebarSecretsUrl?: string | null
   onOpenSecrets?: () => void
+  sidebarIntegrationsUrl?: string | null
+  onOpenIntegrations?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -312,6 +314,8 @@ export function AgentChatLayout({
   onOpenProfile,
   sidebarSecretsUrl = '/console/secrets/',
   onOpenSecrets,
+  sidebarIntegrationsUrl = '/console/advanced/mcp-servers/',
+  onOpenIntegrations,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -1179,6 +1183,7 @@ export function AgentChatLayout({
     usageUrl: sidebarUsageUrl,
     profileUrl: sidebarProfileUrl,
     secretsUrl: sidebarSecretsUrl,
+    integrationsUrl: sidebarIntegrationsUrl,
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
@@ -1186,6 +1191,7 @@ export function AgentChatLayout({
     onOpenUsage,
     onOpenProfile,
     onOpenSecrets,
+    onOpenIntegrations,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -1202,10 +1208,12 @@ export function AgentChatLayout({
     onOpenUsage,
     onOpenProfile,
     onOpenSecrets,
+    onOpenIntegrations,
     sidebarBillingUrl,
     sidebarUsageUrl,
     sidebarProfileUrl,
     sidebarSecretsUrl,
+    sidebarIntegrationsUrl,
     sidebarCreditsResetOn,
     sidebarNotificationStatus,
     sidebarNotificationsEnabled,

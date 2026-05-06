@@ -35,6 +35,8 @@ export type SidebarSettingsInfo = {
   secretsUrl?: string | null
   onOpenSecrets?: (() => void) | null
   globalSecretsUrl?: string | null
+  integrationsUrl?: string | null
+  onOpenIntegrations?: (() => void) | null
   advancedMcpUrl?: string
   notificationsEnabled?: boolean
   notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
@@ -104,6 +106,8 @@ export function SidebarSettingsMenu({
   secretsUrl = null,
   onOpenSecrets = null,
   globalSecretsUrl = '/console/secrets/',
+  integrationsUrl = null,
+  onOpenIntegrations = null,
   advancedMcpUrl = '/console/advanced/mcp-servers/',
   notificationsEnabled = true,
   notificationStatus = 'off',
@@ -154,6 +158,8 @@ export function SidebarSettingsMenu({
   const canShowProfile = Boolean(profileUrl || onOpenProfile)
   const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
   const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
+  const resolvedIntegrationsUrl = integrationsUrl ?? advancedMcpUrl
+  const canShowIntegrations = Boolean(resolvedIntegrationsUrl || onOpenIntegrations)
   const canShowTaskCredits = Boolean(isProprietaryMode && taskCredits)
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
@@ -305,10 +311,26 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
-            <a className="sidebar-settings__link" href={advancedMcpUrl} target="_blank" rel="noreferrer">
-              <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
-              <span>Integrations &amp; MCP</span>
-            </a>
+            {canShowIntegrations ? (
+              onOpenIntegrations ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenIntegrations()
+                  }}
+                >
+                  <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Integrations &amp; MCP</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={resolvedIntegrationsUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Integrations &amp; MCP</span>
+                </a>
+              )
+            ) : null}
           </div>
 
           {canShowTaskCredits ? (
