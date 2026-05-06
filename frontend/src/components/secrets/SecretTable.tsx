@@ -1,6 +1,7 @@
 import { Globe, KeyRound, Pencil, Trash2, ArrowUpFromLine, Terminal } from 'lucide-react'
 
 import type { SecretDTO } from '../../api/secrets'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../agentSettings/settingsSurfaceClasses'
 
 type SecretTableProps = {
   secrets: SecretDTO[]
@@ -29,17 +30,17 @@ export function SecretTable({
   onPromote,
 }: SecretTableProps) {
   const containerClassName = embedded
-    ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent shadow-none'
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
     : 'gobii-card-base'
   const headerClassName = embedded
-    ? 'border-b border-slate-200/70 px-6 py-4'
+    ? 'border-b border-slate-200/15 px-6 py-4'
     : 'px-6 py-4 border-b border-gray-200/70'
   const emptyIconClassName = embedded
     ? 'flex h-12 w-12 items-center justify-center rounded-full border border-slate-300/70 bg-slate-900/40'
     : 'flex h-12 w-12 items-center justify-center rounded-full bg-gray-100'
-  const tableClassName = embedded ? 'min-w-full divide-y divide-slate-200/70' : 'min-w-full divide-y divide-gray-200'
+  const tableClassName = embedded ? 'min-w-full divide-y divide-slate-200/15' : 'min-w-full divide-y divide-gray-200'
   const tableHeadClassName = embedded ? 'bg-slate-900/40' : 'bg-gray-50'
-  const tableBodyClassName = embedded ? 'divide-y divide-slate-200/70 bg-transparent' : 'divide-y divide-gray-200 bg-white'
+  const tableBodyClassName = embedded ? 'divide-y divide-slate-200/15 bg-transparent' : 'divide-y divide-gray-200 bg-white'
   const rowClassName = embedded ? 'hover:bg-slate-900/30' : 'hover:bg-gray-50'
   const codeClassName = embedded
     ? 'rounded bg-slate-900/60 px-1.5 py-0.5 text-xs text-slate-200'
