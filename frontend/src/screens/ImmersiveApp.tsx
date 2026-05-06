@@ -47,6 +47,7 @@ type ImmersiveAppProps = {
 }
 
 type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations'>
+const AGENT_SHELL_PRESERVED_QUERY_KEYS = ['embed', 'return_to'] as const
 
 function readLocation(): LocationSnapshot {
   return {
@@ -221,12 +222,21 @@ function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
   return page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' ? page : 'agents'
 }
 
-function buildAgentShellPath(agentId: string, page: SelectionShellPage): string {
+function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentSearch = ''): string {
   const basePath = `/app/agents/${agentId}`
-  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations') {
-    return `${basePath}?shell=${page}`
+  const currentParams = new URLSearchParams(currentSearch)
+  const nextParams = new URLSearchParams()
+  for (const key of AGENT_SHELL_PRESERVED_QUERY_KEYS) {
+    const value = currentParams.get(key)
+    if (value !== null) {
+      nextParams.set(key, value)
+    }
   }
-  return basePath
+  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations') {
+    nextParams.set('shell', page)
+  }
+  const query = nextParams.toString()
+  return query ? `${basePath}?${query}` : basePath
 }
 
 function parseBooleanFlag(value: string | null): boolean {
@@ -554,7 +564,7 @@ export function ImmersiveApp({
   const handleContextSwitch = useCallback((_context: ConsoleContext) => {
     setSelectionRefreshKey((current) => current + 1)
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, activeAgentShellPage))
+      navigateTo(buildAgentShellPath(route.agentId, activeAgentShellPage, location.search))
       return
     }
     if (route.kind === 'billing') {
@@ -578,11 +588,11 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/agents')
-  }, [activeAgentShellPage, route])
+  }, [activeAgentShellPage, location.search, route])
 
   const handleSelectionPageChange = useCallback((page: SelectionShellPage) => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, page))
+      navigateTo(buildAgentShellPath(route.agentId, page, location.search))
       return
     }
     if (page === 'billing') {
@@ -606,47 +616,47 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/agents')
-  }, [route])
+  }, [location.search, route])
 
   const handleOpenBilling = useCallback(() => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'billing'))
+      navigateTo(buildAgentShellPath(route.agentId, 'billing', location.search))
       return
     }
     navigateTo('/app/billing')
-  }, [route])
+  }, [location.search, route])
 
   const handleOpenProfile = useCallback(() => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'profile'))
+      navigateTo(buildAgentShellPath(route.agentId, 'profile', location.search))
       return
     }
     navigateTo('/app/profile')
-  }, [route])
+  }, [location.search, route])
 
   const handleOpenSecrets = useCallback(() => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'secrets'))
+      navigateTo(buildAgentShellPath(route.agentId, 'secrets', location.search))
       return
     }
     navigateTo('/app/secrets')
-  }, [route])
+  }, [location.search, route])
 
   const handleOpenUsage = useCallback(() => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'usage'))
+      navigateTo(buildAgentShellPath(route.agentId, 'usage', location.search))
       return
     }
     navigateTo('/app/usage')
-  }, [route])
+  }, [location.search, route])
 
   const handleOpenIntegrations = useCallback(() => {
     if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'integrations'))
+      navigateTo(buildAgentShellPath(route.agentId, 'integrations', location.search))
       return
     }
     navigateTo('/app/integrations')
-  }, [route])
+  }, [location.search, route])
 
   return (
     <div className="immersive-shell">
