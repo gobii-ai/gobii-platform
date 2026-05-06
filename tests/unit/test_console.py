@@ -3163,6 +3163,35 @@ class ConsoleViewsTest(TestCase):
         mock_get_available.assert_called()
 
     @tag("batch_console_agents_management")
+    def test_agent_list_payload_includes_customer_account_pause(self):
+        from api.models import ExecutionPauseReasonChoices
+
+        resume_at = timezone.now() + timedelta(days=5)
+        billing = self.user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = resume_at
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        response = self.client.get(reverse('agents'))
+
+        self.assertEqual(response.status_code, 200)
+        payload = self._get_agent_list_payload(response)
+        account_pause = payload.get("accountPause", {})
+        self.assertTrue(account_pause.get("paused"))
+        self.assertEqual(account_pause.get("reason"), ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE)
+        self.assertEqual(account_pause.get("resumeAt"), resume_at.isoformat())
+        self.assertEqual(account_pause.get("manageBillingUrl"), reverse("billing"))
+
+    @tag("batch_console_agents_management")
     @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)
     @patch('console.views.can_user_access_personal_agent_chat', return_value=True)
     def test_agent_list_payload_includes_personal_agents_for_chat_recovery_users(

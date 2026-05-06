@@ -2722,6 +2722,13 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 upgrade_url = None
 
         owner, owner_type, organization = self._resolve_context_owner(context)
+        manage_billing_url = reverse("billing")
+        if organization is not None:
+            manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
+        account_pause = build_account_pause_payload(
+            owner,
+            manage_billing_url=manage_billing_url,
+        )
 
         llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
         is_staff = bool(self.request.user and (self.request.user.is_staff or self.request.user.is_superuser))
@@ -2745,6 +2752,7 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
             'llmIntelligence': llm_intelligence,
             'isStaff': is_staff,
             'emailVerified': has_verified_email(self.request.user),
+            'accountPause': account_pause,
         }
 
     @tracer.start_as_current_span("CONSOLE Persistent Agents View")
