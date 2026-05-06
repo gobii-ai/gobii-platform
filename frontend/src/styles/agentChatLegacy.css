@@ -87,12 +87,11 @@
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    opacity: 1;
+    opacity: 0.55;
     background-image: var(--agent-chat-grain-texture);
     background-size: 200px 200px;
     background-repeat: repeat;
-    filter: invert(1);
-    mix-blend-mode: multiply;
+    mix-blend-mode: screen;
   }
 
   .agent-chat-page--framed .chat-sidebar {
@@ -6372,12 +6371,11 @@
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  opacity: 1;
+  opacity: 0.55;
   background-image: var(--agent-chat-grain-texture);
   background-size: 200px 200px;
   background-repeat: repeat;
-  filter: invert(1);
-  mix-blend-mode: multiply;
+  mix-blend-mode: screen;
 }
 
 /* Subtle inner highlight along the right edge */

@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
-import noiseLightTextureUrl from '../assets/textures/noise-light.png'
+import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
@@ -111,7 +111,7 @@ const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
-const RESOLVED_NOISE_LIGHT_TEXTURE_URL = new URL(noiseLightTextureUrl, import.meta.url).toString()
+const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
 const SELECTION_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
@@ -3829,7 +3829,7 @@ export function AgentChatPage({
     onGalleryShellPageChange: onSelectionPageChange,
   }
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
-    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_LIGHT_TEXTURE_URL}")`,
+    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_DARK_TEXTURE_URL}")`,
   }), [])
   const renderSelectionLayout = (content: ReactNode) => (
     <div
