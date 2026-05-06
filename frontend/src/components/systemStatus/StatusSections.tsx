@@ -1,4 +1,5 @@
 import type {
+  AgentErrorStatusSection,
   AgentProcessingStatusSection,
   BrowserTaskStatusSection,
   CeleryStatusSection,
@@ -201,6 +202,51 @@ function BrowserTaskSection({ section }: { section: BrowserTaskStatusSection }) 
   )
 }
 
+function AgentErrorsSection({ section }: { section: AgentErrorStatusSection }) {
+  return (
+    <SectionCard
+      title="Agent Errors"
+      status={section.status}
+      summary={[
+        { label: 'Total', value: section.summary.totalCount },
+        { label: 'Affected Agents', value: section.summary.affectedAgentCount },
+        { label: 'Signatures', value: section.summary.signatureCount },
+        { label: 'Window', value: `${section.summary.windowMinutes}m` },
+      ]}
+    >
+      {section.rows.length ? (
+        <DataTable
+          columns={[
+            { key: 'category', label: 'Category', render: (row) => formatStatusLabel(row.category) },
+            { key: 'source', label: 'Source', render: (row) => row.source || '—' },
+            { key: 'exceptionClass', label: 'Exception', render: (row) => row.exceptionClass || '—' },
+            { key: 'count', label: 'Count', align: 'right', render: (row) => row.count },
+            { key: 'latestAt', label: 'Latest', render: (row) => formatDateTime(row.latestAt) },
+            {
+              key: 'message',
+              label: 'Message',
+              render: (row) => (
+                <div className="max-w-xl">
+                  <div className="text-slate-700">{row.message || '—'}</div>
+                  {row.sampleAgentNames.length ? (
+                    <div className="mt-1 text-xs text-slate-500">
+                      {row.affectedAgentCount} agents: {row.sampleAgentNames.join(', ')}
+                    </div>
+                  ) : null}
+                </div>
+              ),
+            },
+          ]}
+          rows={section.rows}
+          getRowKey={(row) => `${row.category}:${row.source}:${row.exceptionClass}:${row.latestAt}:${row.message}`}
+        />
+      ) : (
+        <EmptyRows />
+      )}
+    </SectionCard>
+  )
+}
+
 export function StatusSections({ data }: { data: SystemStatusPayload }) {
   const sections = data.sections
 
@@ -219,6 +265,11 @@ export function StatusSections({ data }: { data: SystemStatusPayload }) {
         <BrowserTaskSection section={sections.browserTasks} />
       ) : (
         <UnavailableSection message={sections.browserTasks.error} />
+      )}
+      {sections.agentErrors.available ? (
+        <AgentErrorsSection section={sections.agentErrors} />
+      ) : (
+        <UnavailableSection message={sections.agentErrors.error} />
       )}
     </>
   )
