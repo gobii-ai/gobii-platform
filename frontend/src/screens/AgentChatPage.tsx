@@ -884,7 +884,9 @@ export type AgentChatPageProps = {
   selectionMainPanel?: ReactNode
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
+  onOpenUsage?: () => void
   onOpenProfile?: () => void
+  onOpenSecrets?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -932,7 +934,9 @@ export function AgentChatPage({
   selectionMainPanel = null,
   onSelectionPageChange,
   onOpenBilling,
+  onOpenUsage,
   onOpenProfile,
+  onOpenSecrets,
 }: AgentChatPageProps) {
   const initialThemeColorRef = useRef<string | null>(null)
   const fishFaviconSvgRef = useRef<string | null>(null)
@@ -3690,6 +3694,16 @@ export function AgentChatPage({
       window.location.assign(billingUrl)
     }
   }, [billingUrl, onOpenBilling])
+  const usageUrl = isImmersiveShellPath ? '/app/usage' : '/console/usage/'
+  const handleOpenUsage = useCallback(() => {
+    if (onOpenUsage) {
+      onOpenUsage()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(usageUrl)
+    }
+  }, [onOpenUsage, usageUrl])
   const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
   const handleOpenProfile = useCallback(() => {
     if (onOpenProfile) {
@@ -3700,6 +3714,16 @@ export function AgentChatPage({
       window.location.assign(profileUrl)
     }
   }, [onOpenProfile, profileUrl])
+  const secretsUrl = isImmersiveShellPath ? '/app/secrets' : '/console/secrets/'
+  const handleOpenSecrets = useCallback(() => {
+    if (onOpenSecrets) {
+      onOpenSecrets()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(secretsUrl)
+    }
+  }, [onOpenSecrets, secretsUrl])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const billingManageUrl = bannerBillingStatus?.manageBillingUrl || contactPackManageUrl || billingUrl
   const highPriorityBanner = useMemo(() => {
@@ -3727,9 +3751,13 @@ export function AgentChatPage({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl,
+    usageUrl,
     profileUrl,
+    secretsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
+    onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
     onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
+    onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3742,11 +3770,15 @@ export function AgentChatPage({
     billingUrl,
     effectiveContext,
     handleOpenBilling,
+    handleOpenUsage,
     handleOpenProfile,
+    handleOpenSecrets,
     isProprietaryMode,
     isImmersiveShellPath,
     onOpenBilling,
+    usageUrl,
     profileUrl,
+    secretsUrl,
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
@@ -4396,8 +4428,12 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         sidebarBillingUrl={billingManageUrl}
         onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
+        sidebarUsageUrl={usageUrl}
+        onOpenUsage={isImmersiveShellPath ? handleOpenUsage : undefined}
         sidebarProfileUrl={profileUrl}
         onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
+        sidebarSecretsUrl={secretsUrl}
+        onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}

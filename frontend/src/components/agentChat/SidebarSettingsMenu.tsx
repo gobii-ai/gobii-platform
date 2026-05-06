@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarChart3,
   Bell,
   ChevronDown,
   ClipboardList,
@@ -27,9 +28,13 @@ export type SidebarSettingsInfo = {
   isProprietaryMode: boolean
   billingUrl?: string | null
   onOpenBilling?: (() => void) | null
+  usageUrl?: string | null
+  onOpenUsage?: (() => void) | null
   profileUrl?: string | null
   onOpenProfile?: (() => void) | null
-  globalSecretsUrl?: string
+  secretsUrl?: string | null
+  onOpenSecrets?: (() => void) | null
+  globalSecretsUrl?: string | null
   advancedMcpUrl?: string
   notificationsEnabled?: boolean
   notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
@@ -92,8 +97,12 @@ export function SidebarSettingsMenu({
   isProprietaryMode,
   billingUrl = null,
   onOpenBilling = null,
+  usageUrl = '/console/usage/',
+  onOpenUsage = null,
   profileUrl = '/console/profile/',
   onOpenProfile = null,
+  secretsUrl = null,
+  onOpenSecrets = null,
   globalSecretsUrl = '/console/secrets/',
   advancedMcpUrl = '/console/advanced/mcp-servers/',
   notificationsEnabled = true,
@@ -141,7 +150,10 @@ export function SidebarSettingsMenu({
     return viewerEmail?.trim() || context?.name || 'Personal workspace'
   }, [context, viewerEmail])
   const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
+  const canShowUsage = Boolean(usageUrl || onOpenUsage)
   const canShowProfile = Boolean(profileUrl || onOpenProfile)
+  const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
+  const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
   const canShowTaskCredits = Boolean(isProprietaryMode && taskCredits)
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
@@ -253,10 +265,46 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
-            <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
-              <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
-              <span>Global Secrets</span>
-            </a>
+            {canShowUsage ? (
+              onOpenUsage ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenUsage()
+                  }}
+                >
+                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={usageUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </a>
+              )
+            ) : null}
+            {canShowSecrets ? (
+              onOpenSecrets ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenSecrets()
+                  }}
+                >
+                  <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Global Secrets</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={resolvedSecretsUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Global Secrets</span>
+                </a>
+              )
+            ) : null}
             <a className="sidebar-settings__link" href={advancedMcpUrl} target="_blank" rel="noreferrer">
               <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
               <span>Integrations &amp; MCP</span>

@@ -392,7 +392,7 @@ export const ChatSidebar = memo(function ChatSidebar({
           title={
             showSettingsView
               ? embeddedSettingsTitle
-              : (drawerViewMode === 'gallery' && galleryShellPage === 'billing' ? shellTitle : 'Switch agent')
+              : (drawerViewMode === 'gallery' && galleryShellPage !== 'agents' ? shellTitle : 'Switch agent')
           }
           icon={PanelLeft}
           bodyPadding={false}

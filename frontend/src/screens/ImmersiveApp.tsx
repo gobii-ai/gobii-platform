@@ -7,6 +7,8 @@ import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
+import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
+import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
@@ -18,10 +20,12 @@ type AppRoute =
   | { kind: 'agent-select' }
   | { kind: 'billing' }
   | { kind: 'profile' }
+  | { kind: 'secrets' }
+  | { kind: 'usage' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'secrets' | 'usage' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -40,7 +44,7 @@ type ImmersiveAppProps = {
   pipedreamAppSearchUrl?: string | null
 }
 
-type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile'>
+type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'secrets' | 'usage'>
 
 function readLocation(): LocationSnapshot {
   return {
@@ -103,6 +107,14 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'profile' }
   }
 
+  if (parts[0] === 'secrets') {
+    return { kind: 'secrets' }
+  }
+
+  if (parts[0] === 'usage') {
+    return { kind: 'usage' }
+  }
+
   return { kind: 'not-found' }
 }
 
@@ -118,6 +130,12 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   }
   if (route.kind === 'profile') {
     return 'profile'
+  }
+  if (route.kind === 'secrets') {
+    return 'secrets'
+  }
+  if (route.kind === 'usage') {
+    return 'usage'
   }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'agent_chat' : 'agent_new'
@@ -138,6 +156,12 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'profile') {
     return '/app/profile'
   }
+  if (route.kind === 'secrets') {
+    return '/app/secrets'
+  }
+  if (route.kind === 'usage') {
+    return '/app/usage'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? '/app/agents/:id' : '/app/agents/new'
   }
@@ -157,6 +181,12 @@ function getAnalyticsTitle(route: AppRoute): string {
   if (route.kind === 'profile') {
     return 'Profile · Gobii'
   }
+  if (route.kind === 'secrets') {
+    return 'Secrets · Gobii'
+  }
+  if (route.kind === 'usage') {
+    return 'Usage · Gobii'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
   }
@@ -173,12 +203,12 @@ function cleanQueryForTracking(search: string): string {
 
 function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
   const page = new URLSearchParams(search).get('shell')
-  return page === 'billing' || page === 'profile' ? page : 'agents'
+  return page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' ? page : 'agents'
 }
 
 function buildAgentShellPath(agentId: string, page: SelectionShellPage): string {
   const basePath = `/app/agents/${agentId}`
-  if (page === 'billing' || page === 'profile') {
+  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage') {
     return `${basePath}?shell=${page}`
   }
   return basePath
@@ -520,6 +550,14 @@ export function ImmersiveApp({
       navigateTo('/app/profile')
       return
     }
+    if (route.kind === 'secrets') {
+      navigateTo('/app/secrets')
+      return
+    }
+    if (route.kind === 'usage') {
+      navigateTo('/app/usage')
+      return
+    }
     navigateTo('/app/agents')
   }, [activeAgentShellPage, route])
 
@@ -534,6 +572,14 @@ export function ImmersiveApp({
     }
     if (page === 'profile') {
       navigateTo('/app/profile')
+      return
+    }
+    if (page === 'secrets') {
+      navigateTo('/app/secrets')
+      return
+    }
+    if (page === 'usage') {
+      navigateTo('/app/usage')
       return
     }
     navigateTo('/app/agents')
@@ -553,6 +599,22 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/profile')
+  }, [route])
+
+  const handleOpenSecrets = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'secrets'))
+      return
+    }
+    navigateTo('/app/secrets')
+  }, [route])
+
+  const handleOpenUsage = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'usage'))
+      return
+    }
+    navigateTo('/app/usage')
   }, [route])
 
   return (
@@ -578,11 +640,17 @@ export function ImmersiveApp({
                 <ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : activeAgentShellPage === 'profile' ? (
                 <ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
+              ) : activeAgentShellPage === 'secrets' ? (
+                <ImmersiveSecretsPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
+              ) : activeAgentShellPage === 'usage' ? (
+                <ImmersiveUsagePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : null
             }
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
           />
         ) : null}
         {route.kind === 'agent-select' ? (
@@ -601,7 +669,9 @@ export function ImmersiveApp({
             selectionPage="agents"
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
           />
         ) : null}
         {route.kind === 'billing' ? (
@@ -622,7 +692,9 @@ export function ImmersiveApp({
             selectionMainPanel={<ImmersiveBillingPage layout="main" refreshKey={selectionRefreshKey} />}
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
           />
         ) : null}
         {route.kind === 'profile' ? (
@@ -643,7 +715,55 @@ export function ImmersiveApp({
             selectionMainPanel={<ImmersiveProfilePage layout="main" refreshKey={selectionRefreshKey} />}
             onSelectionPageChange={handleSelectionPageChange}
             onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
+          />
+        ) : null}
+        {route.kind === 'secrets' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="secrets"
+            selectionShellPanel={<ImmersiveSecretsPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveSecretsPage layout="main" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
+            onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
+          />
+        ) : null}
+        {route.kind === 'usage' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="usage"
+            selectionShellPanel={<ImmersiveUsagePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveUsagePage layout="main" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
+            onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
           />
         ) : null}
         {route.kind === 'command-center' ? (

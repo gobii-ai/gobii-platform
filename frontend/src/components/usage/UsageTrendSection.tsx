@@ -40,6 +40,7 @@ type UsageTrendSectionProps = {
   fallbackRange: DateRangeValue | null
   timezone?: string
   agentIds: string[]
+  embedded?: boolean
 }
 
 type TooltipPrimitiveValue = number | string | Date | null | undefined
@@ -50,6 +51,7 @@ export function UsageTrendSection({
   fallbackRange,
   timezone,
   agentIds,
+  embedded = false,
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
@@ -146,8 +148,14 @@ export function UsageTrendSection({
 
     return {
       ...(palette.length ? { color: palette } : {}),
+      textStyle: {
+        color: embedded ? '#cbd5e1' : '#334155',
+      },
       tooltip: {
         trigger: 'axis',
+        backgroundColor: embedded ? 'rgba(15, 23, 42, 0.96)' : undefined,
+        borderColor: embedded ? 'rgba(148, 163, 184, 0.25)' : undefined,
+        textStyle: embedded ? { color: '#f8fafc' } : undefined,
         valueFormatter: (value: TooltipFormatterValue, _dataIndex: number) => {
           const numericValue = Array.isArray(value) ? value[0] : value
           return typeof numericValue === 'number' ? creditFormatter.format(numericValue) : `${numericValue ?? ''}`
@@ -160,6 +168,9 @@ export function UsageTrendSection({
           'Total credits',
         ],
         top: 0,
+        textStyle: {
+          color: embedded ? '#cbd5e1' : '#334155',
+        },
       },
       grid: {
         top: 48,
@@ -173,6 +184,17 @@ export function UsageTrendSection({
         boundaryGap: false,
         axisLabel: {
           interval: trendData.resolution === 'hour' ? 2 : 'auto',
+          color: embedded ? '#94a3b8' : '#64748b',
+        },
+        axisLine: {
+          lineStyle: {
+            color: embedded ? 'rgba(148, 163, 184, 0.25)' : '#cbd5e1',
+          },
+        },
+        axisTick: {
+          lineStyle: {
+            color: embedded ? 'rgba(148, 163, 184, 0.25)' : '#cbd5e1',
+          },
         },
       },
       yAxis: {
@@ -180,6 +202,12 @@ export function UsageTrendSection({
         min: 0,
         axisLabel: {
           formatter: (value: number | string) => (typeof value === 'number' ? creditFormatter.format(value) : `${value}`),
+          color: embedded ? '#94a3b8' : '#64748b',
+        },
+        splitLine: {
+          lineStyle: {
+            color: embedded ? 'rgba(148, 163, 184, 0.14)' : '#e2e8f0',
+          },
         },
       },
       series: [
@@ -193,16 +221,16 @@ export function UsageTrendSection({
           z: 3,
           lineStyle: {
             width: 2.5,
-            color: '#0f172a',
+            color: embedded ? '#e0f2fe' : '#0f172a',
           },
           itemStyle: {
-            color: '#0f172a',
+            color: embedded ? '#e0f2fe' : '#0f172a',
           },
           data: currentSeries,
         },
       ],
     }
-  }, [creditFormatter, timezone, trendData])
+  }, [creditFormatter, embedded, timezone, trendData])
 
   const hasData = useMemo(() => {
     if (!trendData) {
@@ -236,30 +264,43 @@ export function UsageTrendSection({
     ? 'No task activity recorded for this window.'
     : 'Select a billing period to view task trends.'
 
+  const sectionClassName = embedded
+    ? 'flex flex-col gap-4 rounded-xl border border-slate-200/20 bg-slate-950/35 p-6'
+    : 'gobii-card-base flex flex-col gap-4 p-6'
+  const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
+  const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
+  const loadingClassName = embedded
+    ? 'flex h-full items-center justify-center text-sm text-slate-400'
+    : 'flex h-full items-center justify-center text-sm text-slate-400'
+  const errorClassName = embedded
+    ? 'flex h-full items-center justify-center text-sm text-rose-300'
+    : 'flex h-full items-center justify-center text-sm text-red-600'
+  const emptyClassName = embedded ? 'text-slate-400' : 'text-slate-400'
+
   return (
-    <section className="gobii-card-base flex flex-col gap-4 p-6">
+    <section className={sectionClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Task consumption trend</h2>
-          <p className="text-sm text-slate-500">{trendModeDetail} · Total tasks over time.</p>
+          <h2 className={titleClassName}>Task consumption trend</h2>
+          <p className={subtitleClassName}>{trendModeDetail} · Total tasks over time.</p>
         </div>
       </div>
       <div className="h-80 w-full">
         {isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading trends…</div>
+          <div className={loadingClassName}>Loading trends…</div>
         ) : isTrendError && trendErrorMessage ? (
-          <div className="flex h-full items-center justify-center text-sm text-red-600">{trendErrorMessage}</div>
+          <div className={errorClassName}>{trendErrorMessage}</div>
         ) : chartOption ? (
           <div className="flex h-full flex-col">
             <div className="flex-1">
               <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{height: '100%', width: '100%'}} />
             </div>
             {!hasData ? (
-              <div className="mt-2 text-center text-xs text-slate-400">{emptyMessage}</div>
+              <div className={`mt-2 text-center text-xs ${emptyClassName}`}>{emptyMessage}</div>
             ) : null}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">
+          <div className={loadingClassName}>
             {emptyMessage}
           </div>
         )}

@@ -132,8 +132,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   currentContext?: ConsoleContext | null
   sidebarBillingUrl?: string | null
   onOpenBilling?: () => void
+  sidebarUsageUrl?: string | null
+  onOpenUsage?: () => void
   sidebarProfileUrl?: string | null
   onOpenProfile?: () => void
+  sidebarSecretsUrl?: string | null
+  onOpenSecrets?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -302,8 +306,12 @@ export function AgentChatLayout({
   currentContext = null,
   sidebarBillingUrl = null,
   onOpenBilling,
+  sidebarUsageUrl = '/console/usage/',
+  onOpenUsage,
   sidebarProfileUrl = '/console/profile/',
   onOpenProfile,
+  sidebarSecretsUrl = '/console/secrets/',
+  onOpenSecrets,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -1168,12 +1176,16 @@ export function AgentChatLayout({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl: sidebarBillingUrl,
+    usageUrl: sidebarUsageUrl,
     profileUrl: sidebarProfileUrl,
+    secretsUrl: sidebarSecretsUrl,
     notificationsEnabled: sidebarNotificationsEnabled,
     notificationStatus: sidebarNotificationStatus,
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
     onOpenBilling,
+    onOpenUsage,
     onOpenProfile,
+    onOpenSecrets,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -1187,9 +1199,13 @@ export function AgentChatLayout({
     isProprietaryMode,
     onSidebarNotificationsEnabledChange,
     onOpenBilling,
+    onOpenUsage,
     onOpenProfile,
+    onOpenSecrets,
     sidebarBillingUrl,
+    sidebarUsageUrl,
     sidebarProfileUrl,
+    sidebarSecretsUrl,
     sidebarCreditsResetOn,
     sidebarNotificationStatus,
     sidebarNotificationsEnabled,

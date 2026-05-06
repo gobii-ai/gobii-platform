@@ -30,6 +30,7 @@ type UsageRangeControlsProps = {
   isCurrentSelection: boolean
   isViewingCurrentBilling: boolean
   maxValue?: DateValue | null
+  embedded?: boolean
 }
 
 export function UsageRangeControls(props: UsageRangeControlsProps) {
@@ -49,6 +50,7 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
     isCurrentSelection,
     isViewingCurrentBilling,
     maxValue,
+    embedded = false,
   } = props
 
   const selection = calendarRange ?? effectiveRange
@@ -56,41 +58,62 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
     selection && selection.start && selection.end && maxValue
       ? clampRangeToMax(selection, maxValue)
       : selection
+  const secondaryButtonClassName = embedded
+    ? 'rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white disabled:cursor-not-allowed disabled:border-slate-200/10 disabled:bg-slate-950/20 disabled:text-slate-600'
+    : 'rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300'
+  const primaryButtonClassName = embedded
+    ? 'rounded-md border border-sky-300/25 bg-sky-900/45 px-3 py-2 text-sm font-medium text-sky-100 transition-colors hover:border-sky-200/40 hover:bg-sky-900/65 disabled:cursor-not-allowed disabled:border-slate-200/10 disabled:bg-slate-950/20 disabled:text-slate-600'
+    : 'rounded-md border border-transparent bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300'
+  const customButtonClassName = embedded
+    ? 'rounded-md border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-200 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
+    : 'rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700'
+  const popoverClassName = embedded
+    ? 'z-50 mt-2 rounded-xl border border-slate-200/20 bg-slate-950 p-0 text-slate-100 shadow-none'
+    : 'z-50 mt-2 rounded-xl border border-slate-200 bg-white shadow-xl'
+  const calendarNavButtonClassName = embedded
+    ? 'rounded-md px-2 py-1 text-sm text-slate-300 transition-colors hover:bg-slate-800'
+    : 'rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100'
+  const calendarGridClassName = embedded
+    ? 'border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-400'
+    : 'border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-500'
+  const calendarCellClassName = embedded
+    ? 'm-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-200 transition-colors hover:bg-sky-900/45 data-[disabled]:text-slate-700 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-sky-400 data-[selected]:bg-sky-500 data-[selected]:text-white data-[range-selection]:bg-sky-900/55 data-[outside-month]:text-slate-700'
+    : 'm-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-700 transition-colors hover:bg-blue-100 data-[disabled]:text-slate-300 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-blue-400 data-[selected]:bg-blue-600 data-[selected]:text-white data-[range-selection]:bg-blue-100 data-[outside-month]:text-slate-300'
 
   return (
     <div className="flex flex-1 flex-wrap items-center gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <AriaButton
-          className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+          className={secondaryButtonClassName}
           isDisabled={!hasEffectiveRange}
           onPress={onPrevious}
         >
           ‹ Previous
         </AriaButton>
         <AriaButton
-          className="rounded-md border border-transparent bg-blue-50 px-3 py-2 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-300"
+          className={primaryButtonClassName}
           isDisabled={!hasInitialRange || isCurrentSelection}
           onPress={onResetCurrent}
         >
           Current period
         </AriaButton>
         <AriaButton
-          className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 disabled:cursor-not-allowed disabled:border-slate-100 disabled:bg-slate-50 disabled:text-slate-300"
+          className={secondaryButtonClassName}
           isDisabled={!hasEffectiveRange || isViewingCurrentBilling}
           onPress={onNext}
         >
           Next ›
         </AriaButton>
       </div>
-      <div className="hidden h-10 w-px bg-slate-200 sm:block" aria-hidden="true" />
+      {!embedded ? <div className="hidden h-10 w-px bg-slate-200 sm:block" aria-hidden="true" /> : null}
       <DialogTrigger isOpen={isPickerOpen} onOpenChange={onOpenChange}>
         <AriaButton
-          className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-700"
+          className={customButtonClassName}
           onPress={onCustomRangePress}
         >
           Custom range
         </AriaButton>
-        <Popover className="z-50 mt-2 rounded-xl border border-slate-200 bg-white shadow-xl">
+        <Popover className={popoverClassName}>
           <Dialog className="p-4">
             <RangeCalendar
               aria-label="Select billing period"
@@ -107,19 +130,19 @@ export function UsageRangeControls(props: UsageRangeControlsProps) {
               className="flex flex-col gap-3"
             >
               <header className="flex items-center justify-between gap-2">
-                <AriaButton slot="previous" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                <AriaButton slot="previous" className={calendarNavButtonClassName}>
                   ‹
                 </AriaButton>
-                <Heading className="text-sm font-medium text-slate-700" />
-                <AriaButton slot="next" className="rounded-md px-2 py-1 text-sm text-slate-600 transition-colors hover:bg-slate-100">
+                <Heading className={embedded ? 'text-sm font-medium text-slate-100' : 'text-sm font-medium text-slate-700'} />
+                <AriaButton slot="next" className={calendarNavButtonClassName}>
                   ›
                 </AriaButton>
               </header>
-              <CalendarGrid className="border-spacing-1 border-separate gap-y-1 text-center text-xs font-medium uppercase text-slate-500">
+              <CalendarGrid className={calendarGridClassName}>
                 {(date) => (
                   <CalendarCell
                     date={date}
-                    className="m-0.5 flex h-8 w-8 items-center justify-center rounded-md text-sm text-slate-700 transition-colors hover:bg-blue-100 data-[disabled]:text-slate-300 data-[focused]:outline data-[focused]:outline-2 data-[focused]:outline-blue-400 data-[selected]:bg-blue-600 data-[selected]:text-white data-[range-selection]:bg-blue-100 data-[outside-month]:text-slate-300"
+                    className={calendarCellClassName}
                   />
                 )}
               </CalendarGrid>
