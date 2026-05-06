@@ -21,7 +21,9 @@ export function PendingSpawnRequestPanel({
       <div className="space-y-3 text-sm text-slate-700">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Charter</p>
-          <p className="mt-1 whitespace-pre-line rounded-xl bg-white px-3 py-3 text-slate-800">{action.requestedCharter}</p>
+          <div className="spawn-agent-charter-scroll mt-1 whitespace-pre-line rounded-xl bg-white px-3 py-3 text-slate-800">
+            {action.requestedCharter}
+          </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <button
