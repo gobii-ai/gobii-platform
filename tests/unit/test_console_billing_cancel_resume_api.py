@@ -5,6 +5,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
+from django.utils import timezone
 
 
 @tag("batch_billing")
@@ -162,6 +163,51 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertEqual(kwargs.get("cancel_at_period_end"), False)
 
     @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
+    @patch("console.views._sync_subscription_after_direct_update")
+    @patch("console.views.stripe.Subscription.modify")
+    def test_resume_subscription_clears_pause_collection_when_customer_paused(
+        self,
+        mock_modify,
+        mock_sync_subscription,
+        mock_get_active_subscription,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        self.user.billing.execution_paused = True
+        self.user.billing.execution_pause_reason = "customer_account_pause"
+        self.user.billing.execution_paused_at = timezone.now()
+        self.user.billing.execution_pause_resume_at = timezone.now()
+        self.user.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+        mock_modify.return_value = SimpleNamespace(
+            id="sub_123",
+            pause_collection=None,
+        )
+
+        resp = self.client.post(reverse("resume_subscription"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("success"))
+
+        mock_modify.assert_called_once()
+        _, kwargs = mock_modify.call_args
+        self.assertEqual(kwargs.get("cancel_at_period_end"), False)
+        self.assertEqual(kwargs.get("pause_collection"), "")
+        mock_sync_subscription.assert_called_once_with(mock_modify.return_value)
+        self.user.billing.refresh_from_db()
+        self.assertFalse(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, "")
+        self.assertIsNone(self.user.billing.execution_pause_resume_at)
+
+    @patch("console.views.stripe_status")
     @patch("console.views.get_active_subscription", return_value=None)
     def test_resume_subscription_without_active_subscription_returns_400(
         self,
@@ -177,12 +223,14 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views.stripe_status")
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.retrieve")
     def test_sync_billing_subscription_state_refreshes_user_subscription(
         self,
         mock_retrieve,
         mock_sync_subscription,
+        mock_get_active_subscription,
         mock_get_stripe_customer,
         mock_assign_key,
         mock_stripe_status,
@@ -204,12 +252,54 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
     @patch("console.views.stripe_status")
     @patch("console.views._assign_stripe_api_key", return_value=None)
     @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
+    @patch("console.views._sync_subscription_after_direct_update")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_marks_customer_account_pause(
+        self,
+        mock_retrieve,
+        mock_sync_subscription,
+        mock_get_active_subscription,
+        mock_get_stripe_customer,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        resume_at = int((timezone.now().replace(microsecond=0)).timestamp()) + 3600
+        mock_retrieve.return_value = SimpleNamespace(
+            id="sub_123",
+            customer="cus_123",
+            pause_collection=SimpleNamespace(
+                behavior="mark_uncollectible",
+                resumes_at=resume_at,
+            ),
+        )
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps({"subscriptionId": "sub_123"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json().get("success"))
+        self.user.billing.refresh_from_db()
+        self.assertTrue(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, "customer_account_pause")
+        self.assertIsNotNone(self.user.billing.execution_pause_resume_at)
+        mock_sync_subscription.assert_called_once_with(mock_retrieve.return_value)
+
+    @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_123"))
     @patch("console.views._sync_subscription_after_direct_update")
     @patch("console.views.stripe.Subscription.retrieve")
     def test_sync_billing_subscription_state_rejects_foreign_subscription(
         self,
         mock_retrieve,
         mock_sync_subscription,
+        mock_get_active_subscription,
         mock_get_stripe_customer,
         mock_assign_key,
         mock_stripe_status,
@@ -226,6 +316,47 @@ class ConsoleBillingCancelResumeApiTests(TestCase):
         self.assertEqual(resp.status_code, 403)
         self.assertFalse(resp.json().get("success", True))
         mock_sync_subscription.assert_not_called()
+
+    @patch("console.views.stripe_status")
+    @patch("console.views._assign_stripe_api_key", return_value=None)
+    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123"))
+    @patch("console.views.get_active_subscription", return_value=SimpleNamespace(id="sub_active"))
+    @patch("console.views._sync_subscription_after_direct_update")
+    @patch("console.views.stripe.Subscription.retrieve")
+    def test_sync_billing_subscription_state_rejects_non_active_same_customer_subscription(
+        self,
+        mock_retrieve,
+        mock_sync_subscription,
+        mock_get_active_subscription,
+        mock_get_stripe_customer,
+        mock_assign_key,
+        mock_stripe_status,
+    ):
+        mock_stripe_status.return_value = SimpleNamespace(enabled=True)
+        mock_retrieve.return_value = SimpleNamespace(id="sub_old", customer="cus_123")
+        self.user.billing.execution_paused = True
+        self.user.billing.execution_pause_reason = "customer_account_pause"
+        self.user.billing.execution_paused_at = timezone.now()
+        self.user.billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+            ]
+        )
+
+        resp = self.client.post(
+            reverse("sync_billing_subscription_state"),
+            data=json.dumps({"subscriptionId": "sub_old"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertFalse(resp.json().get("success", True))
+        mock_sync_subscription.assert_not_called()
+        self.user.billing.refresh_from_db()
+        self.assertTrue(self.user.billing.execution_paused)
+        self.assertEqual(self.user.billing.execution_pause_reason, "customer_account_pause")
 
     @patch("console.views.stripe_status")
     @patch("console.views.get_stripe_customer")

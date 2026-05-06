@@ -1,3 +1,4 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -5,6 +6,7 @@ from django.contrib import admin
 from django.contrib.auth import get_user_model
 from django.test import Client, RequestFactory, TestCase, tag
 from django.urls import reverse
+from django.utils import timezone
 
 from api.admin import CustomUserAdmin
 from api.models import ExecutionPauseReasonChoices
@@ -41,8 +43,31 @@ class UserAdminExecutionPauseTests(TestCase):
         self.assertContains(response, "Execution Control")
         self.assertContains(response, 'name="execution_paused_admin"')
         self.assertContains(response, 'name="execution_pause_reason_admin"')
+        self.assertContains(response, "Execution Pause Resume At")
         self.assertContains(response, f'value="{ExecutionPauseReasonChoices.ADMIN_MANUAL_PAUSE}"')
         self.assertContains(response, f'value="{ExecutionPauseReasonChoices.BILLING_DELINQUENCY}"')
+
+    def test_user_change_form_renders_execution_pause_resume_date(self):
+        resume_at = timezone.now() + timedelta(days=14)
+        billing = self.target_user.billing
+        billing.execution_paused = True
+        billing.execution_pause_reason = ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE
+        billing.execution_paused_at = timezone.now()
+        billing.execution_pause_resume_at = resume_at
+        billing.save(
+            update_fields=[
+                "execution_paused",
+                "execution_pause_reason",
+                "execution_paused_at",
+                "execution_pause_resume_at",
+            ]
+        )
+
+        response = self.client.get(self._change_url())
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Execution Pause Resume At")
+        self.assertContains(response, str(resume_at.year))
 
     @patch("api.services.owner_execution_pause.Analytics.track_event")
     def test_save_model_can_pause_user_execution(self, mock_track_event):

@@ -8,6 +8,7 @@ import { track } from '../util/analytics'
 import { leaveCollaboration } from '../api/agents'
 import { useModal } from '../hooks/useModal'
 import { buildAgentSearchBlob, styleStringToObject } from '../util/agentCards'
+import type { AccountPauseInfo } from '../types/agentAddons'
 
 type AgentSummary = {
   id: string
@@ -56,6 +57,7 @@ type AgentListPayload = {
   agentsUnlimited: boolean
   isStaff: boolean
   emailVerified: boolean
+  accountPause?: AccountPauseInfo | null
 }
 
 export type PersistentAgentsScreenProps = {
@@ -84,11 +86,26 @@ function formatCreditBurn(value: number | null): string {
   return `${value.toFixed(fractionDigits)} credits/day`
 }
 
+function formatAccountPauseResumeLabel(resumeAt?: string | null): string | null {
+  if (!resumeAt) return null
+  const resumeDate = new Date(resumeAt)
+  if (Number.isNaN(resumeDate.getTime())) return null
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(resumeDate)
+}
+
 export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenProps) {
   const [query, setQuery] = useState('')
   const [showVerificationDialog, setShowVerificationDialog] = useState(false)
   const [sharedAgents, setSharedAgents] = useState<NormalizedAgent[]>(() => normalizeAgents(initialData.sharedAgents))
   const [modal, showModal] = useModal()
+  const accountPause = initialData.accountPause ?? null
+  const accountPaused = Boolean(accountPause?.paused)
 
   const normalizedAgents = useMemo<NormalizedAgent[]>(() => {
     return normalizeAgents(initialData.agents)
@@ -145,16 +162,21 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
         <EmailVerificationDialog onClose={() => setShowVerificationDialog(false)} />
       )}
       {modal}
+      {accountPaused ? <AccountPausedBanner accountPause={accountPause} /> : null}
       {showEmptyState ? (
-        <AgentEmptyState spawnUrl={initialData.spawnAgentUrl} analyticsEvent={initialData.createFirstAgentEvent} />
+        <AgentEmptyState
+          spawnUrl={initialData.spawnAgentUrl}
+          analyticsEvent={initialData.createFirstAgentEvent}
+          accountPaused={accountPaused}
+        />
       ) : (
         <>
           <AgentListHeader
             query={query}
             onSearchChange={setQuery}
-            canSpawnAgents={initialData.canSpawnAgents}
+            canSpawnAgents={initialData.canSpawnAgents && !accountPaused}
             spawnUrl={initialData.spawnAgentUrl}
-            showUpgradeCta={initialData.showUpgradeCta}
+            showUpgradeCta={initialData.showUpgradeCta && !accountPaused}
             upgradeUrl={initialData.upgradeUrl}
           />
 
@@ -206,6 +228,37 @@ export function PersistentAgentsScreen({ initialData }: PersistentAgentsScreenPr
           )}
         </>
       )}
+    </div>
+  )
+}
+
+function AccountPausedBanner({ accountPause }: { accountPause: AccountPauseInfo | null }) {
+  const resumeLabel = formatAccountPauseResumeLabel(accountPause?.resumeAt)
+  const message = resumeLabel
+    ? `Your account is paused until ${resumeLabel}. New agents and messages are disabled until billing resumes.`
+    : 'Your account is paused. New agents and messages are disabled until billing resumes.'
+
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-950">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="mt-0.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg bg-amber-100 text-amber-700">
+            <Ban className="size-4" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Account paused</p>
+            <p className="mt-1 text-sm text-amber-900">{message}</p>
+          </div>
+        </div>
+        {accountPause?.manageBillingUrl ? (
+          <a
+            href={accountPause.manageBillingUrl}
+            className="inline-flex shrink-0 items-center justify-center rounded-lg bg-amber-700 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-800 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
+          >
+            Open billing
+          </a>
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -528,9 +581,10 @@ function AgentCard({ agent, onContactClick, onLeaveCollaboration }: AgentCardPro
 type AgentEmptyStateProps = {
   spawnUrl: string
   analyticsEvent: string | null
+  accountPaused: boolean
 }
 
-function AgentEmptyState({ spawnUrl, analyticsEvent }: AgentEmptyStateProps) {
+function AgentEmptyState({ spawnUrl, analyticsEvent, accountPaused }: AgentEmptyStateProps) {
   const handleClick = () => {
     if (analyticsEvent) {
       track(analyticsEvent)
@@ -548,14 +602,25 @@ function AgentEmptyState({ spawnUrl, analyticsEvent }: AgentEmptyStateProps) {
           Create your first AI agent that works 24/7. Agents can automate tasks, monitor changes, send notifications, and much more while you focus on what matters.
         </p>
         <div className="flex flex-col gap-3">
-          <a
-            href={spawnUrl}
-            onClick={handleClick}
-            className="group inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-          >
-            <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
-            Create Your First Agent
-          </a>
+          {accountPaused ? (
+            <button
+              type="button"
+              disabled
+              className="inline-flex cursor-not-allowed items-center justify-center gap-x-2 rounded-lg bg-amber-100 px-6 py-3 font-semibold text-amber-800"
+            >
+              <Ban className="size-5 shrink-0" aria-hidden="true" />
+              Account paused
+            </button>
+          ) : (
+            <a
+              href={spawnUrl}
+              onClick={handleClick}
+              className="group inline-flex items-center justify-center gap-x-2 rounded-lg bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-semibold text-white shadow-lg transition-all duration-300 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              <Plus className="size-5 shrink-0 transition-transform duration-300 group-hover:rotate-12" aria-hidden="true" />
+              Create Your First Agent
+            </a>
+          )}
         </div>
       </div>
     </div>

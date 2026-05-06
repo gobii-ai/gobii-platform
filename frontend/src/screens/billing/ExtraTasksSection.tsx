@@ -11,6 +11,7 @@ type ExtraTasksSectionProps = {
 
 export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
   const initial = initialData.extraTasks
+  const accountPaused = Boolean(initialData.accountPause?.paused)
   const isTrialing = Boolean(initialData.trial?.isTrialing)
   const eligible = useMemo(() => {
     if (isTrialing) return false
@@ -39,9 +40,15 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
     setError(null)
   }, [initial])
 
-  const canModify = Boolean(settings.canModify) && !busy
+  const canModify = Boolean(settings.canModify) && !busy && !accountPaused
+  const disabledReason = accountPaused
+    ? 'Billing changes are unavailable while your account is paused.'
+    : null
 
   const postUpdate = useCallback(async (payload: { enabled: boolean; infinite: boolean; maxTasks: number }) => {
+    if (accountPaused) {
+      return
+    }
     setBusy(true)
     setError(null)
     try {
@@ -78,7 +85,7 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
         setBusy(false)
       }
     }
-  }, [settings.canModify, settings.endpoints])
+  }, [accountPaused, settings.endpoints.updateUrl])
 
   const handleEnabledChange = useCallback(async (nextEnabled: boolean) => {
     const next = {
@@ -131,6 +138,12 @@ export function ExtraTasksSection({ initialData }: ExtraTasksSectionProps) {
       </div>
 
       <div className="mt-4 space-y-3">
+        {disabledReason ? (
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+            {disabledReason}
+          </div>
+        ) : null}
+
         <ToggleSwitch
           checked={settings.enabled}
           disabled={!canModify}

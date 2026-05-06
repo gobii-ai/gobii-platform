@@ -8,6 +8,7 @@ from django.db import transaction
 from django.http import HttpRequest
 from django.contrib import messages
 from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html
 
 from agents.services import PretrainedWorkerTemplateService
@@ -35,6 +36,7 @@ from api.services.persistent_agents import (
     PersistentAgentProvisioningService,
     ensure_default_agent_email_endpoint,
 )
+from api.services.owner_execution_pause import get_owner_account_pause_state
 from api.services.signup_preview import get_signup_preview_creation_state
 from api.services.signup_preview import user_has_existing_personal_agent_for_signup_preview
 from api.pipedream_app_utils import normalize_app_slugs
@@ -58,6 +60,19 @@ from util.trial_enforcement import (
 
 logger = logging.getLogger(__name__)
 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY = "agent_selected_pipedream_app_slugs"
+
+
+def _customer_account_pause_creation_message(owner) -> str:
+    state = get_owner_account_pause_state(owner)
+    resume_at = state.get("resume_at")
+    if resume_at is not None:
+        local_resume_at = timezone.localtime(resume_at)
+        return (
+            "Your account is paused until "
+            f"{local_resume_at.strftime('%b %d, %Y at %I:%M %p %Z')}. "
+            "New agent creation is disabled until billing resumes."
+        )
+    return "Your account is paused. New agent creation is disabled until billing resumes."
 
 
 def _apply_pending_pipedream_app_selections(
@@ -161,6 +176,11 @@ def create_persistent_agent_from_charter(
         else:
             organization = membership.org
 
+    owner = organization or request.user
+    if get_owner_account_pause_state(owner).get("customer_paused"):
+        raise ValidationError(_customer_account_pause_creation_message(owner))
+
+    if organization is not None:
         billing = getattr(organization, "billing", None)
         seats_purchased = getattr(billing, "purchased_seats", 0) if billing else 0
         if seats_purchased <= 0:

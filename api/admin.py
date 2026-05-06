@@ -2667,7 +2667,12 @@ class CustomUserAdmin(UserAdmin):
     def get_readonly_fields(self, request, obj=None):
         # Preserve any readonly fields defined by UserAdmin.
         base = super().get_readonly_fields(request, obj)
-        return base + ("taskcredit_summary_link", "timezone_display", "execution_paused_at_display")
+        return base + (
+            "taskcredit_summary_link",
+            "timezone_display",
+            "execution_paused_at_display",
+            "execution_pause_resume_at_display",
+        )
 
     def get_fieldsets(self, request, obj=None):
         if obj is None:
@@ -2688,6 +2693,7 @@ class CustomUserAdmin(UserAdmin):
                             "execution_paused_admin",
                             "execution_pause_reason_admin",
                             "execution_paused_at_display",
+                            "execution_pause_resume_at_display",
                         )
                     },
                 )
@@ -2703,6 +2709,12 @@ class CustomUserAdmin(UserAdmin):
         pause_state = get_owner_execution_pause_state(obj)
         paused_at = pause_state["paused_at"]
         return paused_at or ""
+
+    @admin.display(description="Execution Pause Resume At")
+    def execution_pause_resume_at_display(self, obj):
+        pause_state = get_owner_execution_pause_state(obj)
+        resume_at = pause_state["resume_at"]
+        return resume_at or ""
 
     @admin.display(description="Task Credits")
     def taskcredit_summary_link(self, obj):
@@ -5195,8 +5207,11 @@ class UserBillingAdmin(admin.ModelAdmin):
         'max_extra_tasks',
         'max_contacts_per_agent',
         'billing_cycle_anchor',
+        'execution_paused',
+        'execution_pause_reason',
+        'execution_pause_resume_at',
     ]
-    list_filter = ['subscription', 'user_id']
+    list_filter = ['subscription', 'user_id', 'execution_paused', 'execution_pause_reason']
     search_fields = [
         'id',
         'subscription',
@@ -5220,6 +5235,14 @@ class UserBillingAdmin(admin.ModelAdmin):
         }),
         ('Contact and Task Limits', {
             'fields': ('max_extra_tasks', 'max_contacts_per_agent'),
+        }),
+        ('Execution Control', {
+            'fields': (
+                'execution_paused',
+                'execution_pause_reason',
+                'execution_paused_at',
+                'execution_pause_resume_at',
+            ),
         }),
     )
     actions = [
@@ -5277,8 +5300,11 @@ class OrganizationBillingAdmin(admin.ModelAdmin):
         'stripe_subscription_id',
         'cancel_at',
         'cancel_at_period_end',
+        'execution_paused',
+        'execution_pause_reason',
+        'execution_pause_resume_at',
     ]
-    list_filter = ['subscription', 'cancel_at_period_end']
+    list_filter = ['subscription', 'cancel_at_period_end', 'execution_paused', 'execution_pause_reason']
     search_fields = [
         'id',
         'organization__name',

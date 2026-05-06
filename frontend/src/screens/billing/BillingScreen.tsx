@@ -102,6 +102,7 @@ async function waitForChurnKeyReady(timeoutMs = 1500): Promise<boolean> {
 
 function computeAddonsDisabledReason(initialData: BillingInitialData): string | null {
   if (!initialData.canManageBilling) return 'You do not have permission to manage billing.'
+  if (initialData.accountPause?.paused) return 'Billing changes are unavailable while your account is paused.'
   if (initialData.addonsDisabled) return 'Add-ons are unavailable for this subscription.'
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) {
     return 'Purchase at least one seat to manage add-ons.'
@@ -111,6 +112,7 @@ function computeAddonsDisabledReason(initialData: BillingInitialData): string | 
 
 function computeDedicatedInteractable(initialData: BillingInitialData): boolean {
   if (!initialData.canManageBilling) return false
+  if (initialData.accountPause?.paused) return false
   if (!initialData.dedicatedIps.allowed) return false
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) return false
   return true
@@ -118,6 +120,7 @@ function computeDedicatedInteractable(initialData: BillingInitialData): boolean 
 
 function computeAddonsInteractable(initialData: BillingInitialData): boolean {
   if (!initialData.canManageBilling) return false
+  if (initialData.accountPause?.paused) return false
   if (initialData.addonsDisabled) return false
   if (initialData.contextType === 'organization' && initialData.seats.purchased <= 0) return false
   return true
@@ -139,6 +142,7 @@ function isDraftDirty(initialData: BillingInitialData, draft: BillingDraftState)
 
 export function BillingScreen({ initialData, variant = 'standalone' }: BillingScreenProps) {
   const isOrg = initialData.contextType === 'organization'
+  const accountPaused = Boolean(initialData.accountPause?.paused)
   const isEmbedded = variant === 'embedded'
   const rootClassName = isEmbedded ? 'billing-screen billing-screen--embedded grid w-full gap-6' : 'billing-screen app-shell'
   const mainClassName = isEmbedded ? 'billing-screen__main grid gap-6' : 'billing-screen__main app-main'
@@ -462,6 +466,7 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
         },
         onPause: (_customer, data) => {
           markMutation()
+          shouldSyncSubscriptionState = true
           track(AnalyticsEvent.BILLING_CANCEL_FLOW_ACTION_SELECTED, {
             ...churnKeyAnalyticsBase,
             action: 'pause',
@@ -601,7 +606,7 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
           onResume={!isOrg
             && initialData.contextType === 'personal'
             && initialData.paidSubscriber
-            && initialData.cancelAtPeriodEnd
+            && (initialData.cancelAtPeriodEnd || accountPaused)
             && initialData.endpoints.resumeSubscriptionUrl
             ? resumeAction.openDialog
             : undefined}
@@ -740,15 +745,17 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
 
       <ConfirmDialog
         open={resumeAction.open}
-        title="Resume subscription?"
+        title={accountPaused ? 'Resume now?' : 'Resume subscription?'}
         description={
           <>
-            Your subscription will stay active and renew normally.
+            {accountPaused
+              ? 'Your billing pause will end immediately and your subscription will resume normal collection.'
+              : 'Your subscription will stay active and renew normally.'}
             {resumeAction.error ? <div className="mt-2 text-sm font-semibold text-rose-700">{resumeAction.error}</div> : null}
           </>
         }
-        confirmLabel="Resume subscription"
-        cancelLabel="Keep cancellation"
+        confirmLabel={accountPaused ? 'Resume now' : 'Resume subscription'}
+        cancelLabel={accountPaused ? 'Keep paused' : 'Keep cancellation'}
         icon={<ShieldAlert className="h-5 w-5" />}
         busy={resumeAction.busy}
         onConfirm={() => resumeAction.confirm()}
