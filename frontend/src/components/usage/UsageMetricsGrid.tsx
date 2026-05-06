@@ -32,9 +32,10 @@ const metricDefinitions: MetricDefinition[] = [
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
   agentIds: string[]
+  embedded?: boolean
 }
 
-export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps) {
+export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: UsageMetricsGridProps) {
   const setSummaryLoading = useUsageStore((state) => state.setSummaryLoading)
   const setSummaryData = useUsageStore((state) => state.setSummaryData)
   const setSummaryError = useUsageStore((state) => state.setSummaryError)
@@ -104,7 +105,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
     return metricDefinitions.map((metric) => {
       let value = '—'
       let caption = metric.baseCaption
-      let valueClasses = 'text-slate-900'
+      let valueClasses = embedded ? 'text-slate-50' : 'text-slate-900'
       let progressPct: number | undefined
       let progressClass: string | undefined
 
@@ -187,7 +188,16 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         progressClass,
       }
     })
-  }, [creditFormatter, isError, isPending, periodDayCount, resolvedSummary])
+  }, [creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
+
+  const cardClassName = embedded
+    ? 'flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 bg-slate-950/35 p-5'
+    : 'gobii-card-base flex h-full flex-col justify-between gap-3 p-5'
+  const labelClassName = embedded
+    ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'
+    : 'text-xs font-semibold uppercase tracking-wide text-slate-500'
+  const captionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
+  const progressTrackClassName = embedded ? 'relative h-2 rounded-full bg-slate-900/70' : 'relative h-2 rounded-full bg-white/50'
 
   return (
     <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -195,16 +205,16 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
         <article
           key={card.id}
           data-usage-metric={card.id}
-          className="gobii-card-base flex h-full flex-col justify-between gap-3 p-5"
+          className={cardClassName}
         >
           <div>
-            <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <span className={labelClassName}>
               {card.label}
             </span>
             <p className={`mt-2 text-2xl font-semibold ${card.valueClasses}`}>{card.value}</p>
             {typeof card.progressPct === 'number' ? (
               <div className="mt-3">
-                <div className="relative h-2 rounded-full bg-white/50">
+                <div className={progressTrackClassName}>
                   <div
                     className={`absolute inset-y-0 left-0 rounded-full ${card.progressClass ?? ''}`}
                     style={{ width: `${card.progressPct}%` }}
@@ -214,7 +224,7 @@ export function UsageMetricsGrid({ queryInput, agentIds }: UsageMetricsGridProps
               </div>
             ) : null}
           </div>
-          <p className="text-sm text-slate-500">{card.caption}</p>
+          <p className={captionClassName}>{card.caption}</p>
         </article>
       ))}
     </section>

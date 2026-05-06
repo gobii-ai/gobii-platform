@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  BarChart3,
   Bell,
   ChevronDown,
   ClipboardList,
   CreditCard,
+  KeyRound,
   LockKeyhole,
   ServerCog,
   Settings,
+  User,
   UserRound,
 } from 'lucide-react'
 import { Button, Dialog, Popover } from 'react-aria-components'
@@ -26,7 +29,16 @@ export type SidebarSettingsInfo = {
   isProprietaryMode: boolean
   billingUrl?: string | null
   onOpenBilling?: (() => void) | null
-  globalSecretsUrl?: string
+  usageUrl?: string | null
+  onOpenUsage?: (() => void) | null
+  apiKeysUrl?: string | null
+  profileUrl?: string | null
+  onOpenProfile?: (() => void) | null
+  secretsUrl?: string | null
+  onOpenSecrets?: (() => void) | null
+  globalSecretsUrl?: string | null
+  integrationsUrl?: string | null
+  onOpenIntegrations?: (() => void) | null
   advancedMcpUrl?: string
   notificationsEnabled?: boolean
   notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
@@ -89,7 +101,16 @@ export function SidebarSettingsMenu({
   isProprietaryMode,
   billingUrl = null,
   onOpenBilling = null,
+  usageUrl = '/console/usage/',
+  onOpenUsage = null,
+  apiKeysUrl = '/console/api-keys/',
+  profileUrl = '/console/profile/',
+  onOpenProfile = null,
+  secretsUrl = null,
+  onOpenSecrets = null,
   globalSecretsUrl = '/console/secrets/',
+  integrationsUrl = null,
+  onOpenIntegrations = null,
   advancedMcpUrl = '/console/advanced/mcp-servers/',
   notificationsEnabled = true,
   notificationStatus = 'off',
@@ -136,6 +157,13 @@ export function SidebarSettingsMenu({
     return viewerEmail?.trim() || context?.name || 'Personal workspace'
   }, [context, viewerEmail])
   const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
+  const canShowUsage = Boolean(usageUrl || onOpenUsage)
+  const canShowApiKeys = Boolean(apiKeysUrl)
+  const canShowProfile = Boolean(profileUrl || onOpenProfile)
+  const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
+  const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
+  const resolvedIntegrationsUrl = integrationsUrl ?? advancedMcpUrl
+  const canShowIntegrations = Boolean(resolvedIntegrationsUrl || onOpenIntegrations)
   const canShowTaskCredits = Boolean(isProprietaryMode && taskCredits)
   const remainingLabel = taskCredits?.unlimited
     ? 'Unlimited'
@@ -207,6 +235,26 @@ export function SidebarSettingsMenu({
               </span>
             </button>
             <div className="sidebar-settings__rule" role="separator" aria-hidden="true" />
+            {canShowProfile ? (
+              onOpenProfile ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenProfile()
+                  }}
+                >
+                  <User className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Profile</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={profileUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <User className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Profile</span>
+                </a>
+              )
+            ) : null}
             {canShowBilling ? (
               onOpenBilling ? (
                 <button
@@ -227,14 +275,72 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
-            <a className="sidebar-settings__link" href={globalSecretsUrl} target="_blank" rel="noreferrer">
-              <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
-              <span>Global Secrets</span>
-            </a>
-            <a className="sidebar-settings__link" href={advancedMcpUrl} target="_blank" rel="noreferrer">
-              <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
-              <span>Integrations &amp; MCP</span>
-            </a>
+            {canShowUsage ? (
+              onOpenUsage ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenUsage()
+                  }}
+                >
+                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={usageUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <BarChart3 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Usage</span>
+                </a>
+              )
+            ) : null}
+            {canShowSecrets ? (
+              onOpenSecrets ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenSecrets()
+                  }}
+                >
+                  <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Global Secrets</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={resolvedSecretsUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <LockKeyhole className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Global Secrets</span>
+                </a>
+              )
+            ) : null}
+            {canShowIntegrations ? (
+              onOpenIntegrations ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenIntegrations()
+                  }}
+                >
+                  <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Integrations &amp; MCP</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={resolvedIntegrationsUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <ServerCog className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Integrations &amp; MCP</span>
+                </a>
+              )
+            ) : null}
+            {canShowApiKeys ? (
+              <a className="sidebar-settings__link" href={apiKeysUrl ?? undefined} target="_blank" rel="noreferrer">
+                <KeyRound className="sidebar-settings__link-icon" aria-hidden="true" />
+                <span>API Keys</span>
+              </a>
+            ) : null}
           </div>
 
           {canShowTaskCredits ? (

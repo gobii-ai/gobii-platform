@@ -43,9 +43,10 @@ type UsageToolChartProps = {
   fallbackRange: DateRangeValue | null
   agentIds: string[]
   timezone?: string
+  embedded?: boolean
 }
 
-export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezone }: UsageToolChartProps) {
+export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezone, embedded = false }: UsageToolChartProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
   const creditFormatter = useMemo(
@@ -157,8 +158,14 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
     }))
 
     return {
+      textStyle: {
+        color: embedded ? '#cbd5e1' : '#334155',
+      },
       tooltip: {
         trigger: 'item',
+        backgroundColor: embedded ? 'rgba(15, 23, 42, 0.96)' : undefined,
+        borderColor: embedded ? 'rgba(148, 163, 184, 0.25)' : undefined,
+        textStyle: embedded ? { color: '#f8fafc' } : undefined,
         formatter: (params: TopLevelFormatterParams) => {
           const detail = Array.isArray(params) ? params[0] : params
           if (!detail) {
@@ -192,6 +199,9 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         right: 0,
         top: 'middle',
         align: 'left',
+        textStyle: {
+          color: embedded ? '#cbd5e1' : '#334155',
+        },
       },
       series: [
         {
@@ -202,12 +212,13 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
           avoidLabelOverlap: false,
           itemStyle: {
             borderRadius: 6,
-            borderColor: '#fff',
+            borderColor: embedded ? '#0f172a' : '#fff',
             borderWidth: 1,
           },
           label: {
             show: true,
             formatter: '{b}: {d}%',
+            color: embedded ? '#cbd5e1' : '#334155',
           },
           labelLine: {
             show: true,
@@ -216,7 +227,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
         },
       ],
     }
-  }, [processedSegments, creditFormatter])
+  }, [embedded, processedSegments, creditFormatter])
 
   const isLoading = Boolean(queryInput) && isPending
 
@@ -246,38 +257,52 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
   }, [timezone, toolData])
 
   const totalCredits = toolData?.total_credits ?? processedSegments.reduce((acc, segment) => acc + segment.value, 0)
+  const sectionClassName = embedded
+    ? 'flex flex-col gap-4 rounded-xl border border-slate-200/20 bg-slate-950/35 p-6'
+    : 'gobii-card-base flex flex-col gap-4 p-6'
+  const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
+  const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
+  const totalClassName = embedded
+    ? 'rounded-md border border-slate-200/20 bg-slate-900/45 px-3 py-1 text-sm text-slate-300'
+    : 'rounded-md border border-white/60 bg-white/60 px-3 py-1 text-sm text-slate-600'
+  const totalValueClassName = embedded ? 'font-medium text-slate-50' : 'font-medium text-slate-900'
+  const loadingClassName = 'flex h-full items-center justify-center text-sm text-slate-400'
+  const errorClassName = embedded
+    ? 'flex h-full items-center justify-center text-sm text-rose-300'
+    : 'flex h-full items-center justify-center text-sm text-red-600'
+  const emptyClassName = embedded ? 'text-slate-400' : 'text-slate-400'
 
   return (
-    <section className="gobii-card-base flex flex-col gap-4 p-6">
+    <section className={sectionClassName}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-lg font-semibold text-slate-900">Tool credit breakdown</h2>
-          <p className="text-sm text-slate-500">
+          <h2 className={titleClassName}>Tool credit breakdown</h2>
+          <p className={subtitleClassName}>
             Credits billed by tool{summaryRange ? ` · ${summaryRange}` : ''}
           </p>
         </div>
         {toolData ? (
-          <div className="rounded-md border border-white/60 bg-white/60 px-3 py-1 text-sm text-slate-600">
-            <span className="font-medium text-slate-900">{creditFormatter.format(totalCredits)}</span> credits
+          <div className={totalClassName}>
+            <span className={totalValueClassName}>{creditFormatter.format(totalCredits)}</span> credits
           </div>
         ) : null}
       </div>
       <div className="h-80 w-full">
         {isLoading ? (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">Loading tool usage…</div>
+          <div className={loadingClassName}>Loading tool usage…</div>
         ) : isError && errorMessage ? (
-          <div className="flex h-full items-center justify-center text-sm text-red-600">{errorMessage}</div>
+          <div className={errorClassName}>{errorMessage}</div>
         ) : chartOption ? (
           <div className="flex h-full flex-col">
             <div className="flex-1">
               <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{ height: '100%', width: '100%' }} />
             </div>
             {processedSegments.length === 0 ? (
-              <div className="mt-2 text-center text-xs text-slate-400">{emptyMessage}</div>
+              <div className={`mt-2 text-center text-xs ${emptyClassName}`}>{emptyMessage}</div>
             ) : null}
           </div>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-slate-400">{emptyMessage}</div>
+          <div className={loadingClassName}>{emptyMessage}</div>
         )}
       </div>
     </section>

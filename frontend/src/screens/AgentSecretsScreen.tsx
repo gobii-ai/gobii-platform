@@ -17,6 +17,7 @@ import { SecretTable } from '../components/secrets/SecretTable'
 import { SecretFormModal } from '../components/secrets/SecretFormModal'
 import { DeleteSecretDialog } from '../components/secrets/DeleteSecretDialog'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 import { useModal } from '../hooks/useModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 
@@ -171,15 +172,15 @@ export function AgentSecretsScreen({
       />
 
       {/* Security Notice */}
-      <div className={isEmbedded ? 'overflow-hidden rounded-xl border border-blue-300/30 bg-blue-950/20 shadow-none' : 'bg-blue-50/80 backdrop-blur-sm border border-blue-200/60 shadow-xl rounded-xl overflow-hidden'}>
+      <div className={isEmbedded ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none` : 'bg-blue-50/80 backdrop-blur-sm border border-blue-200/60 shadow-xl rounded-xl overflow-hidden'}>
         <div className="p-4 sm:p-6">
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
-              <ShieldCheck className={isEmbedded ? 'h-6 w-6 text-blue-300' : 'w-6 h-6 text-blue-600'} />
+              <ShieldCheck className={isEmbedded ? 'h-6 w-6 text-slate-300' : 'w-6 h-6 text-blue-600'} />
             </div>
             <div>
-              <h3 className={isEmbedded ? 'mb-1 text-sm font-semibold text-blue-100' : 'text-sm font-semibold text-blue-800 mb-1'}>Secure Encryption</h3>
-              <p className={isEmbedded ? 'text-sm text-blue-200/85' : 'text-sm text-blue-700'}>
+              <h3 className={isEmbedded ? 'mb-1 text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-blue-800 mb-1'}>Secure Encryption</h3>
+              <p className={isEmbedded ? 'text-sm text-slate-300' : 'text-sm text-blue-700'}>
                 All secrets are encrypted with AES-256-GCM before storage. Credential secrets can be used via
                 placeholders.
               </p>
@@ -244,8 +245,8 @@ export function AgentSecretsScreen({
 
           {/* Requested Secrets */}
           {requestedSecrets.length > 0 && (
-            <div className={isEmbedded ? 'overflow-hidden rounded-xl border border-slate-200/70 bg-transparent shadow-none' : 'gobii-card-base'}>
-              <div className="px-6 py-4 border-b border-gray-200/70 flex items-center justify-between">
+            <div className={isEmbedded ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none` : 'gobii-card-base'}>
+              <div className={isEmbedded ? 'flex items-center justify-between border-b border-slate-200/15 px-6 py-4' : 'flex items-center justify-between border-b border-gray-200/70 px-6 py-4'}>
                 <div>
                   <h2 className={isEmbedded ? 'text-lg font-semibold text-slate-100' : 'text-lg font-semibold text-gray-800'}>Requested Secrets</h2>
                   <p className={isEmbedded ? 'mt-1 text-sm text-slate-400' : 'text-sm text-gray-500 mt-1'}>
@@ -259,7 +260,7 @@ export function AgentSecretsScreen({
                   Provide Values
                 </a>
               </div>
-              <div className={isEmbedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-100'}>
+              <div className={isEmbedded ? 'divide-y divide-slate-200/15' : 'divide-y divide-gray-100'}>
                 {requestedSecrets.map((s) => (
                   <div key={s.id} className="px-6 py-4 flex items-center justify-between">
                     <div>

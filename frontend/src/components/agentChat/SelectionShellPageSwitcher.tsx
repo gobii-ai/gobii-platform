@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Check, ChevronDown, CreditCard, LayoutGrid, type LucideIcon } from 'lucide-react'
+import { BarChart3, Check, ChevronDown, CreditCard, KeyRound, LayoutGrid, ServerCog, UserRound, type LucideIcon } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -11,11 +11,15 @@ import {
   type Selection,
 } from 'react-aria-components'
 
-export type SelectionShellPage = 'agents' | 'billing'
+export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations'
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
   billing: 'Billing',
+  profile: 'Profile',
+  secrets: 'Secrets',
+  usage: 'Usage',
+  integrations: 'Integrations',
 }
 
 type SelectionPageOption = {
@@ -27,6 +31,10 @@ type SelectionPageOption = {
 const PAGE_OPTIONS: SelectionPageOption[] = [
   { key: 'agents', label: SELECTION_SHELL_PAGE_LABELS.agents, icon: LayoutGrid },
   { key: 'billing', label: SELECTION_SHELL_PAGE_LABELS.billing, icon: CreditCard },
+  { key: 'profile', label: SELECTION_SHELL_PAGE_LABELS.profile, icon: UserRound },
+  { key: 'secrets', label: SELECTION_SHELL_PAGE_LABELS.secrets, icon: KeyRound },
+  { key: 'usage', label: SELECTION_SHELL_PAGE_LABELS.usage, icon: BarChart3 },
+  { key: 'integrations', label: SELECTION_SHELL_PAGE_LABELS.integrations, icon: ServerCog },
 ]
 
 type SelectionShellPageSwitcherProps = {

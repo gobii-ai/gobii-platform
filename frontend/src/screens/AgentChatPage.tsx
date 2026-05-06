@@ -13,7 +13,7 @@ import {
 } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
 import { AlertTriangle, Plus } from 'lucide-react'
-import noiseLightTextureUrl from '../assets/textures/noise-light.png'
+import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
 import {
@@ -111,7 +111,7 @@ const AUDIT_URL_TEMPLATE_PLACEHOLDER = '00000000-0000-0000-0000-000000000000'
 const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
-const RESOLVED_NOISE_LIGHT_TEXTURE_URL = new URL(noiseLightTextureUrl, import.meta.url).toString()
+const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
 const SELECTION_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
@@ -913,6 +913,10 @@ export type AgentChatPageProps = {
   selectionMainPanel?: ReactNode
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
+  onOpenUsage?: () => void
+  onOpenProfile?: () => void
+  onOpenSecrets?: () => void
+  onOpenIntegrations?: () => void
 }
 
 const STREAMING_STALE_MS = 6000
@@ -960,6 +964,10 @@ export function AgentChatPage({
   selectionMainPanel = null,
   onSelectionPageChange,
   onOpenBilling,
+  onOpenUsage,
+  onOpenProfile,
+  onOpenSecrets,
+  onOpenIntegrations,
 }: AgentChatPageProps) {
   const initialThemeColorRef = useRef<string | null>(null)
   const fishFaviconSvgRef = useRef<string | null>(null)
@@ -3725,6 +3733,46 @@ export function AgentChatPage({
       window.location.assign(billingUrl)
     }
   }, [billingUrl, onOpenBilling])
+  const usageUrl = isImmersiveShellPath ? '/app/usage' : '/console/usage/'
+  const handleOpenUsage = useCallback(() => {
+    if (onOpenUsage) {
+      onOpenUsage()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(usageUrl)
+    }
+  }, [onOpenUsage, usageUrl])
+  const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
+  const handleOpenProfile = useCallback(() => {
+    if (onOpenProfile) {
+      onOpenProfile()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(profileUrl)
+    }
+  }, [onOpenProfile, profileUrl])
+  const secretsUrl = isImmersiveShellPath ? '/app/secrets' : '/console/secrets/'
+  const handleOpenSecrets = useCallback(() => {
+    if (onOpenSecrets) {
+      onOpenSecrets()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(secretsUrl)
+    }
+  }, [onOpenSecrets, secretsUrl])
+  const integrationsUrl = isImmersiveShellPath ? '/app/integrations' : '/console/advanced/mcp-servers/'
+  const handleOpenIntegrations = useCallback(() => {
+    if (onOpenIntegrations) {
+      onOpenIntegrations()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(integrationsUrl)
+    }
+  }, [integrationsUrl, onOpenIntegrations])
   const bannerBillingStatus = selectedAgentBillingStatus ?? currentContextBillingStatus
   const bannerAccountPause = selectedAgentAccountPause?.paused
     ? selectedAgentAccountPause
@@ -3773,7 +3821,15 @@ export function AgentChatPage({
     viewerEmail: viewerEmail ?? null,
     isProprietaryMode,
     billingUrl,
+    usageUrl,
+    profileUrl,
+    secretsUrl,
+    integrationsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
+    onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
+    onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
+    onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
+    onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3786,8 +3842,17 @@ export function AgentChatPage({
     billingUrl,
     effectiveContext,
     handleOpenBilling,
+    handleOpenUsage,
+    handleOpenProfile,
+    handleOpenSecrets,
+    handleOpenIntegrations,
     isProprietaryMode,
+    isImmersiveShellPath,
     onOpenBilling,
+    usageUrl,
+    profileUrl,
+    secretsUrl,
+    integrationsUrl,
     taskQuota,
     usageSummary?.metrics.todayCredits?.total,
     usageSummary?.period?.resetOn,
@@ -3818,11 +3883,11 @@ export function AgentChatPage({
     contextSwitcher: contextSwitcher ?? undefined,
     settings: selectionSidebarSettings,
     galleryShellPage: selectionPage,
-    galleryShellPanel: selectionPage === 'billing' ? selectionShellPanel : null,
+    galleryShellPanel: selectionPage !== 'agents' ? selectionShellPanel : null,
     onGalleryShellPageChange: onSelectionPageChange,
   }
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
-    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_LIGHT_TEXTURE_URL}")`,
+    '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_DARK_TEXTURE_URL}")`,
   }), [])
   const renderSelectionLayout = (content: ReactNode) => (
     <div
@@ -4315,7 +4380,7 @@ export function AgentChatPage({
         </div>,
       )
     }
-    if (selectionPage === 'billing') {
+    if (selectionPage !== 'agents') {
       return renderSelectionLayout(
         selectionMainPanel ? (
           <div className="flex min-h-full w-full flex-1 md:hidden">
@@ -4437,12 +4502,21 @@ export function AgentChatPage({
         currentContext={effectiveContext}
         sidebarBillingUrl={billingManageUrl}
         onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
+        sidebarUsageUrl={usageUrl}
+        onOpenUsage={isImmersiveShellPath ? handleOpenUsage : undefined}
+        sidebarProfileUrl={profileUrl}
+        onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
+        sidebarSecretsUrl={secretsUrl}
+        onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
+        sidebarIntegrationsUrl={integrationsUrl}
+        onOpenIntegrations={isImmersiveShellPath ? handleOpenIntegrations : undefined}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}
         sidebarNotificationStatus={notificationStatus}
         onSidebarNotificationsEnabledChange={handleAgentChatNotificationsEnabledChange}
         galleryShellPage={selectionPage}
+        galleryShellPanel={selectionPage !== 'agents' ? selectionShellPanel : null}
         onGalleryShellPageChange={isImmersiveShellPath ? onSelectionPageChange : undefined}
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}
