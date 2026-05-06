@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0370_add_pricing_free_oss_plan_flag"),
+        ("api", "0371_merge_20260506_1404"),
     ]
 
     operations = [
