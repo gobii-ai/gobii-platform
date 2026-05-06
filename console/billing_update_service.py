@@ -601,10 +601,6 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                 updated = stripe.Subscription.modify(
                     subscription_id,
                     items=[{"id": licensed_item.get("id"), "quantity": seats_target_int}],
-                    metadata={
-                        **(subscription.get("metadata") or {}),
-                        "seat_requestor_id": str(request.user.id),
-                    },
                     proration_behavior="always_invoice",
                     payment_behavior="pending_if_incomplete",
                     expand=["latest_invoice.payment_intent", "latest_invoice"],
