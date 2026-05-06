@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone as dt_timezone
 from uuid import UUID
 
@@ -23,6 +24,7 @@ from api.models import (
     AgentComputeSession,
     BrowserUseAgentTask,
     PersistentAgent,
+    PersistentAgentError,
     ProxyHealthCheckResult,
     ProxyServer,
 )
@@ -37,6 +39,16 @@ logger = logging.getLogger(__name__)
 SYSTEM_STATUS_POLL_INTERVAL_SECONDS = 30
 SYSTEM_STATUS_PROXY_FRESHNESS_HOURS = 72
 SYSTEM_STATUS_ROW_LIMIT = 20
+SYSTEM_STATUS_AGENT_ERROR_WINDOW_MINUTES = 60
+SYSTEM_STATUS_AGENT_ERROR_CRITICAL_COUNT = 10
+SYSTEM_STATUS_AGENT_ERROR_CRITICAL_AGENT_COUNT = 5
+SYSTEM_STATUS_AGENT_ERROR_SAMPLE_AGENT_LIMIT = 3
+SYSTEM_STATUS_AGENT_ERROR_MESSAGE_LENGTH = 240
+
+UUID_PATTERN = re.compile(
+    r"\b[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\b",
+    re.IGNORECASE,
+)
 
 STATUS_HEALTHY = "healthy"
 STATUS_WARNING = "warning"
@@ -55,6 +67,7 @@ def build_system_status_payload():
         "compute": _collect_compute_section,
         "proxies": _collect_proxy_section,
         "browserTasks": _collect_browser_task_section,
+        "agentErrors": _collect_agent_error_section,
     }
 
     for section_name, collector in section_collectors.items():
@@ -464,6 +477,114 @@ def _collect_browser_task_section(*, now):
     }
 
 
+def _collect_agent_error_section(*, now):
+    window_start = now - timedelta(minutes=SYSTEM_STATUS_AGENT_ERROR_WINDOW_MINUTES)
+    ignored_categories = [
+        PersistentAgentError.Category.TASK_QUOTA_EXCEEDED,
+        PersistentAgentError.Category.CREDIT_FAILURE,
+    ]
+    errors = (
+        PersistentAgentError.objects.filter(
+            created_at__gte=window_start,
+            agent__execution_environment=settings.GOBII_RELEASE_ENV,
+            agent__is_deleted=False,
+        )
+        .exclude(category__in=ignored_categories)
+        .select_related("agent")
+        .only(
+            "id",
+            "agent_id",
+            "created_at",
+            "category",
+            "source",
+            "message",
+            "exception_class",
+            "agent__id",
+            "agent__name",
+            "agent__execution_environment",
+            "agent__is_deleted",
+        )
+        .order_by("-created_at")
+    )
+
+    grouped_errors = {}
+    affected_agent_ids = set()
+    total_count = 0
+
+    for error in errors:
+        total_count += 1
+        affected_agent_ids.add(error.agent_id)
+        message = _normalize_agent_error_message(error.message)
+        signature = (
+            error.category,
+            error.source or "",
+            error.exception_class or "",
+            message,
+        )
+        row = grouped_errors.get(signature)
+        if row is None:
+            row = {
+                "category": error.category,
+                "source": error.source or "",
+                "exceptionClass": error.exception_class or "",
+                "message": message[:SYSTEM_STATUS_AGENT_ERROR_MESSAGE_LENGTH],
+                "count": 0,
+                "affectedAgentIds": set(),
+                "sampleAgentNames": [],
+                "latestAt": error.created_at,
+            }
+            grouped_errors[signature] = row
+
+        row["count"] += 1
+        row["affectedAgentIds"].add(error.agent_id)
+        if (
+            error.agent.name not in row["sampleAgentNames"]
+            and len(row["sampleAgentNames"]) < SYSTEM_STATUS_AGENT_ERROR_SAMPLE_AGENT_LIMIT
+        ):
+            row["sampleAgentNames"].append(error.agent.name)
+
+    rows = sorted(
+        grouped_errors.values(),
+        key=lambda row: (-row["count"], -row["latestAt"].timestamp()),
+    )
+    serialized_rows = [
+        {
+            "category": row["category"],
+            "source": row["source"],
+            "exceptionClass": row["exceptionClass"],
+            "message": row["message"],
+            "count": row["count"],
+            "affectedAgentCount": len(row["affectedAgentIds"]),
+            "latestAt": row["latestAt"].isoformat(),
+            "sampleAgentNames": row["sampleAgentNames"],
+        }
+        for row in rows[:SYSTEM_STATUS_ROW_LIMIT]
+    ]
+
+    affected_agent_count = len(affected_agent_ids)
+    if (
+        total_count >= SYSTEM_STATUS_AGENT_ERROR_CRITICAL_COUNT
+        or affected_agent_count >= SYSTEM_STATUS_AGENT_ERROR_CRITICAL_AGENT_COUNT
+    ):
+        status = STATUS_CRITICAL
+    elif total_count > 0:
+        status = STATUS_WARNING
+    else:
+        status = STATUS_HEALTHY
+
+    return {
+        "available": True,
+        "status": status,
+        "summary": {
+            "totalCount": total_count,
+            "affectedAgentCount": affected_agent_count,
+            "signatureCount": len(grouped_errors),
+            "windowMinutes": SYSTEM_STATUS_AGENT_ERROR_WINDOW_MINUTES,
+        },
+        "rows": serialized_rows,
+    }
+
+
 def _build_overview_cards(sections):
     return [
         _overview_card(
@@ -517,6 +638,16 @@ def _build_overview_cards(sections):
             section=sections.get("browserTasks"),
             value_key="activeCount",
             subtitle_builder=lambda summary: f"{summary.get('failedCount', 0)} failed",
+        ),
+        _overview_card(
+            card_id="agent-errors",
+            label="Agent Errors",
+            section=sections.get("agentErrors"),
+            value_key="totalCount",
+            subtitle_builder=lambda summary: (
+                f"{summary.get('affectedAgentCount', 0)} agents, "
+                f"{summary.get('signatureCount', 0)} signatures in {summary.get('windowMinutes', 60)}m"
+            ),
         ),
     ]
 
@@ -635,6 +766,12 @@ def _celery_status(total_pending):
     if total_pending >= 10:
         return STATUS_WARNING
     return STATUS_HEALTHY
+
+
+def _normalize_agent_error_message(message):
+    normalized = UUID_PATTERN.sub("{uuid}", str(message or ""))
+    normalized = " ".join(normalized.split())
+    return normalized or "No message"
 
 
 def _safe_redis_int(value):

@@ -138,6 +138,28 @@ export type BrowserTaskStatusSection = {
   error?: string
 }
 
+export type AgentErrorStatusSection = {
+  available: boolean
+  status: SystemStatusLevel
+  summary: {
+    totalCount: number
+    affectedAgentCount: number
+    signatureCount: number
+    windowMinutes: number
+  }
+  rows: Array<{
+    category: string
+    source: string
+    exceptionClass: string
+    message: string
+    count: number
+    affectedAgentCount: number
+    latestAt: string
+    sampleAgentNames: string[]
+  }>
+  error?: string
+}
+
 export type SystemStatusPayload = {
   meta: SystemStatusMeta
   overview: SystemStatusCard[]
@@ -148,5 +170,6 @@ export type SystemStatusPayload = {
     compute: ComputeStatusSection
     proxies: ProxyStatusSection
     browserTasks: BrowserTaskStatusSection
+    agentErrors: AgentErrorStatusSection
   }
 }

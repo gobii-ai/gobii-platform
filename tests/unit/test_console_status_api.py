@@ -18,6 +18,7 @@ from api.models import (
     BrowserUseAgent,
     BrowserUseAgentTask,
     PersistentAgent,
+    PersistentAgentError,
     PersistentAgentWebSession,
     ProxyHealthCheckResult,
     ProxyHealthCheckSpec,
@@ -290,3 +291,107 @@ class SystemStatusAPITests(TestCase):
         self.assertEqual(section["summary"]["activeCount"], 1)
         self.assertEqual(len(section["rows"]), 1)
         self.assertEqual(section["rows"][0]["agentName"], "Current Browser Agent Browser")
+
+    @patch("console.system_status.get_redis_client")
+    def test_agent_error_section_groups_recent_platform_errors_and_ignores_expected_failures(self, mock_get_redis_client):
+        current_agent = self._create_agent("Current Error Agent")
+        second_agent = self._create_agent("Second Error Agent")
+        ignored_agent = self._create_agent("Ignored Error Agent")
+        other_env_agent = self._create_agent("Other Env Error Agent", execution_environment="staging")
+        deleted_agent = self._create_agent("Deleted Error Agent")
+        deleted_agent.is_deleted = True
+        deleted_agent.save(update_fields=["is_deleted"])
+
+        first_uuid = "11111111-1111-4111-8111-111111111111"
+        second_uuid = "22222222-2222-4222-8222-222222222222"
+        PersistentAgentError.objects.create(
+            agent=current_agent,
+            category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+            source="api.agent.tools.persistence",
+            exception_class="IntegrityError",
+            message=f"Tool failed for agent {first_uuid}",
+        )
+        PersistentAgentError.objects.create(
+            agent=second_agent,
+            category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+            source="api.agent.tools.persistence",
+            exception_class="IntegrityError",
+            message=f"Tool failed for agent   {second_uuid}",
+        )
+        PersistentAgentError.objects.create(
+            agent=ignored_agent,
+            category=PersistentAgentError.Category.TASK_QUOTA_EXCEEDED,
+            source="api.quota",
+            message="Task quota exceeded",
+        )
+        PersistentAgentError.objects.create(
+            agent=ignored_agent,
+            category=PersistentAgentError.Category.CREDIT_FAILURE,
+            source="api.credits",
+            message="Credit operation failed",
+        )
+        stale_error = PersistentAgentError.objects.create(
+            agent=current_agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="api.old",
+            message="Old platform issue",
+        )
+        PersistentAgentError.objects.filter(id=stale_error.id).update(created_at=timezone.now() - timedelta(hours=2))
+        PersistentAgentError.objects.create(
+            agent=other_env_agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="api.other_env",
+            message="Other environment issue",
+        )
+        PersistentAgentError.objects.create(
+            agent=deleted_agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="api.deleted",
+            message="Deleted agent issue",
+        )
+        mock_get_redis_client.return_value = _FakeRedis()
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        section = payload["sections"]["agentErrors"]
+        self.assertTrue(section["available"])
+        self.assertEqual(section["status"], "warning")
+        self.assertEqual(section["summary"]["totalCount"], 2)
+        self.assertEqual(section["summary"]["affectedAgentCount"], 2)
+        self.assertEqual(section["summary"]["signatureCount"], 1)
+        self.assertEqual(section["summary"]["windowMinutes"], 60)
+        self.assertEqual(len(section["rows"]), 1)
+        row = section["rows"][0]
+        self.assertEqual(row["category"], PersistentAgentError.Category.TOOL_PERSISTENCE)
+        self.assertEqual(row["source"], "api.agent.tools.persistence")
+        self.assertEqual(row["exceptionClass"], "IntegrityError")
+        self.assertEqual(row["message"], "Tool failed for agent {uuid}")
+        self.assertEqual(row["count"], 2)
+        self.assertEqual(row["affectedAgentCount"], 2)
+        self.assertEqual(row["sampleAgentNames"], ["Second Error Agent", "Current Error Agent"])
+
+        overview_card = next(card for card in payload["overview"] if card["id"] == "agent-errors")
+        self.assertEqual(overview_card["value"], 2)
+        self.assertEqual(overview_card["status"], "warning")
+
+    @patch("console.system_status.get_redis_client")
+    def test_agent_error_section_marks_high_recent_error_count_as_critical(self, mock_get_redis_client):
+        agent = self._create_agent("Critical Error Agent")
+        for index in range(10):
+            PersistentAgentError.objects.create(
+                agent=agent,
+                category=PersistentAgentError.Category.OTHER,
+                source="api.critical",
+                exception_class="RuntimeError",
+                message=f"Platform issue {index}",
+            )
+        mock_get_redis_client.return_value = _FakeRedis()
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        section = response.json()["sections"]["agentErrors"]
+        self.assertEqual(section["summary"]["totalCount"], 10)
+        self.assertEqual(section["status"], "critical")
