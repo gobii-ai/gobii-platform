@@ -5,6 +5,7 @@ import {
   ChevronDown,
   ClipboardList,
   CreditCard,
+  KeyRound,
   LockKeyhole,
   ServerCog,
   Settings,
@@ -30,6 +31,7 @@ export type SidebarSettingsInfo = {
   onOpenBilling?: (() => void) | null
   usageUrl?: string | null
   onOpenUsage?: (() => void) | null
+  apiKeysUrl?: string | null
   profileUrl?: string | null
   onOpenProfile?: (() => void) | null
   secretsUrl?: string | null
@@ -101,6 +103,7 @@ export function SidebarSettingsMenu({
   onOpenBilling = null,
   usageUrl = '/console/usage/',
   onOpenUsage = null,
+  apiKeysUrl = '/console/api-keys/',
   profileUrl = '/console/profile/',
   onOpenProfile = null,
   secretsUrl = null,
@@ -155,6 +158,7 @@ export function SidebarSettingsMenu({
   }, [context, viewerEmail])
   const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
   const canShowUsage = Boolean(usageUrl || onOpenUsage)
+  const canShowApiKeys = Boolean(apiKeysUrl)
   const canShowProfile = Boolean(profileUrl || onOpenProfile)
   const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
   const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
@@ -330,6 +334,12 @@ export function SidebarSettingsMenu({
                   <span>Integrations &amp; MCP</span>
                 </a>
               )
+            ) : null}
+            {canShowApiKeys ? (
+              <a className="sidebar-settings__link" href={apiKeysUrl ?? undefined} target="_blank" rel="noreferrer">
+                <KeyRound className="sidebar-settings__link-icon" aria-hidden="true" />
+                <span>API Keys</span>
+              </a>
             ) : null}
           </div>
 
