@@ -1376,7 +1376,7 @@
     overflow: visible;
     pointer-events: auto;
     transform: none;
-    z-index: 9;
+    z-index: 45;
     cursor: pointer;
   }
 
@@ -1481,7 +1481,7 @@
 .plan-panel-task-list {
   display: flex;
   flex-direction: column;
-  gap: 0.42rem;
+  gap: 0.62rem;
   margin: 0;
   padding: 0 1rem 0.9rem;
   list-style: none;
@@ -1493,9 +1493,8 @@
   grid-template-columns: 1rem minmax(0, 1fr);
   align-items: start;
   gap: 0.54rem;
-  min-height: 1.45rem;
   font-size: 0.83rem;
-  line-height: 1.34;
+  line-height: 1.42;
   color: rgba(255, 255, 255, 0.72);
 }
 
@@ -1525,6 +1524,7 @@
 .plan-panel-task-title {
   min-width: 0;
   overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .plan-panel-task[data-status='done'] .plan-panel-task-title {
@@ -4753,6 +4753,20 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.45rem;
+}
+
+.spawn-agent-charter-scroll {
+  max-height: min(28rem, 45vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  -webkit-overflow-scrolling: touch;
+}
+
+.spawn-agent-charter-scroll:focus-visible {
+  outline: 3px solid rgba(16, 185, 129, 0.28);
+  outline-offset: 2px;
 }
 
 .spawn-agent-action-btn {
