@@ -11456,6 +11456,7 @@ class PersistentAgentError(models.Model):
         indexes = [
             models.Index(fields=["agent", "-created_at"], name="pa_error_recent_idx"),
             models.Index(fields=["category"], name="pa_error_category_idx"),
+            models.Index(fields=["-created_at"], name="pa_error_created_idx"),
         ]
 
     def __str__(self):
