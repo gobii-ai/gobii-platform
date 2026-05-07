@@ -601,9 +601,6 @@
 
     const config = getRootConfig(authRoot);
     const submitButtons = getSubmitButtons(form);
-    form._gobiiTurnstileState = {
-      submitPending: false,
-    };
 
     if (!hasTurnstileToken(form) && form.querySelector(".cf-turnstile")) {
       setTurnstileSubmitEnabled(form, false);
@@ -617,9 +614,8 @@
 
       if (form.querySelector(".cf-turnstile") && !hasTurnstileToken(form)) {
         event.preventDefault();
-        form._gobiiTurnstileState.submitPending = true;
         setTurnstileSubmitEnabled(form, false);
-        setTurnstileMessage(form, "Completing verification...");
+        setTurnstileMessage(form, "Complete the verification, then sign in.");
         return;
       }
 
@@ -638,24 +634,6 @@
         submitButtons: submitButtons,
       });
     });
-  }
-
-  function finalizeLoginSubmit(form) {
-    const config = getRootConfig(form.closest("[data-account-auth-root]"));
-    if (config.mode === "modal") {
-      const submitButtons = getSubmitButtons(form);
-      trackModalCta(form, {
-        submitter: form.querySelector("[data-turnstile-submit]") || null,
-      });
-      form.dataset.submitting = "true";
-      setButtonsDisabled(submitButtons, true);
-      setModalSubmitPending(form, true);
-      submitModalFormWithCleanup(form, {
-        submitButtons: submitButtons,
-      });
-      return;
-    }
-    form.requestSubmit(form.querySelector("[data-turnstile-submit]") || undefined);
   }
 
   function bindSocialLinks(authRoot) {
@@ -735,18 +713,12 @@
     }
     setTurnstileSubmitEnabled(activeLoginForm, true);
     setTurnstileMessage(activeLoginForm, "");
-    if (!activeLoginForm._gobiiTurnstileState.submitPending) {
-      return;
-    }
-    activeLoginForm._gobiiTurnstileState.submitPending = false;
-    finalizeLoginSubmit(activeLoginForm);
   };
 
   window.gobiiLoginTurnstileExpired = function () {
     if (!activeLoginForm) {
       return;
     }
-    activeLoginForm._gobiiTurnstileState.submitPending = false;
     setTurnstileSubmitEnabled(activeLoginForm, false);
     setTurnstileMessage(activeLoginForm, "Verification expired. Please try again.");
     resetTurnstile(activeLoginForm);
@@ -756,7 +728,6 @@
     if (!activeLoginForm) {
       return;
     }
-    activeLoginForm._gobiiTurnstileState.submitPending = false;
     setTurnstileSubmitEnabled(activeLoginForm, false);
     setTurnstileMessage(activeLoginForm, "Verification failed. Please try again.");
     resetTurnstile(activeLoginForm);

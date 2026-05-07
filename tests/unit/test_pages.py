@@ -3634,6 +3634,100 @@ class AuthLinkTests(TestCase):
 
 @tag("batch_pages")
 class LoginTurnstilePageTests(TestCase):
+    def _login_request(self, *, ajax=False, user_agent="Chrome Mac Test/1.0"):
+        request = RequestFactory().post(reverse("account_login"))
+        request.META["HTTP_USER_AGENT"] = user_agent
+        if ajax:
+            request.META["HTTP_X_REQUESTED_WITH"] = "XMLHttpRequest"
+        return request
+
+    @tag("batch_pages")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_invalid_login_post_logs_missing_password_diagnostics(self, _mock_turnstile_validate):
+        from turnstile_signup import LoginFormWithTurnstile
+
+        form = LoginFormWithTurnstile(
+            data={
+                "login": "john@example.com",
+                "cf-turnstile-response": "stub-token",
+            },
+            request=self._login_request(ajax=True, user_agent="Mozilla/5.0 Macintosh"),
+        )
+
+        with self.assertLogs("turnstile_signup", level="WARNING") as captured:
+            self.assertFalse(form.is_valid())
+
+        self.assertEqual(len(captured.records), 1)
+        record = captured.records[0]
+        self.assertIn("Invalid login POST", record.getMessage())
+        self.assertIn("login=j***@example.com", record.getMessage())
+        self.assertIn("error_fields=password", record.getMessage())
+        self.assertIn("password_present=false", record.getMessage())
+        self.assertIn("turnstile_token_present=true", record.getMessage())
+        self.assertIn("ajax=true", record.getMessage())
+        self.assertIn("user_agent=Mozilla/5.0 Macintosh", record.getMessage())
+        self.assertFalse(record.password_present)
+        self.assertTrue(record.turnstile_token_present)
+        self.assertEqual(record.error_fields, "password")
+
+    @tag("batch_pages")
+    def test_invalid_login_post_logs_missing_turnstile_diagnostics(self):
+        from turnstile_signup import LoginFormWithTurnstile
+
+        form = LoginFormWithTurnstile(
+            data={
+                "login": "john@example.com",
+                "password": "secret-password",
+            },
+            request=self._login_request(user_agent="Chrome Mac Test/1.0"),
+        )
+
+        with self.assertLogs("turnstile_signup", level="WARNING") as captured:
+            self.assertFalse(form.is_valid())
+
+        self.assertEqual(len(captured.records), 1)
+        record = captured.records[0]
+        self.assertIn("Invalid login POST", record.getMessage())
+        self.assertIn("error_fields=turnstile", record.getMessage())
+        self.assertIn("password_present=true", record.getMessage())
+        self.assertIn("turnstile_token_present=false", record.getMessage())
+        self.assertIn("ajax=false", record.getMessage())
+        self.assertTrue(record.password_present)
+        self.assertFalse(record.turnstile_token_present)
+        self.assertEqual(record.error_fields, "turnstile")
+
+    @tag("batch_pages")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_invalid_login_post_logs_once_per_form_instance(self, _mock_turnstile_validate):
+        from turnstile_signup import LoginFormWithTurnstile
+
+        form = LoginFormWithTurnstile(
+            data={
+                "login": "john@example.com",
+                "cf-turnstile-response": "stub-token",
+            },
+            request=self._login_request(),
+        )
+
+        with self.assertLogs("turnstile_signup", level="WARNING") as captured:
+            self.assertFalse(form.is_valid())
+            self.assertFalse(form.is_valid())
+
+        self.assertEqual(len(captured.records), 1)
+
+    @tag("batch_pages")
+    def test_login_turnstile_success_does_not_auto_submit(self):
+        with open("static/js/account_auth_forms.js", encoding="utf-8") as js_file:
+            script = js_file.read()
+
+        success_callback = script.split("window.gobiiLoginTurnstileSuccess = function ()", 1)[1].split(
+            "window.gobiiLoginTurnstileExpired = function ()", 1
+        )[0]
+        self.assertNotIn("finalizeLoginSubmit", script)
+        self.assertNotIn("requestSubmit", success_callback)
+        self.assertNotIn("submitPending", success_callback)
+        self.assertIn("Complete the verification, then sign in.", script)
+
     @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
