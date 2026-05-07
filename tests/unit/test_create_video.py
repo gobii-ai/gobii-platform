@@ -3,12 +3,14 @@ from io import BytesIO
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
+import httpx
 from django.test import TestCase, tag
 from PIL import Image
 
 from api.models import PersistentAgentCompletion
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
+    OpenAIVideoStatusError,
     ResolvedSourceImage,
     VideoGenerationResponseError,
     _create_openai_video_job,
@@ -23,7 +25,7 @@ from api.agent.core.video_generation_config import VideoGenerationLLMConfig
 
 def _make_config(**overrides):
     defaults = {
-        "model": "sora-2",
+        "model": "ltx/ltx-2-3-fast",
         "params": {"api_key": "sk-test"},
         "endpoint_key": "test-ep",
         "supports_image_to_video": False,
@@ -107,6 +109,79 @@ class WaitForVideoCompletionTests(TestCase):
         result = _wait_for_video_completion(pending_obj, params={"api_key": "sk-test"})
         self.assertEqual(result.status, "completed")
         mock_sleep.assert_called_once()
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_continues_after_read_timeout(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        completed_obj = _make_video_obj(status="completed")
+        mock_status.side_effect = [httpx.ReadTimeout("read timed out"), completed_obj]
+
+        result = _wait_for_video_completion(
+            pending_obj,
+            params={"api_key": "sk-test"},
+            use_openai_api=True,
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_continues_after_request_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        completed_obj = _make_video_obj(status="completed")
+        mock_status.side_effect = [httpx.ConnectError("connection reset"), completed_obj]
+
+        result = _wait_for_video_completion(
+            pending_obj,
+            params={"api_key": "sk-test"},
+            use_openai_api=True,
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_continues_after_transient_status_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        completed_obj = _make_video_obj(status="completed")
+        mock_status.side_effect = [
+            OpenAIVideoStatusError("bad gateway", status_code=502, response="bad gateway"),
+            completed_obj,
+        ]
+
+        result = _wait_for_video_completion(
+            pending_obj,
+            params={"api_key": "sk-test"},
+            use_openai_api=True,
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_reraises_non_transient_status_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        mock_status.side_effect = OpenAIVideoStatusError("bad request", status_code=400, response="bad request")
+
+        with self.assertRaises(OpenAIVideoStatusError):
+            _wait_for_video_completion(
+                pending_obj,
+                params={"api_key": "sk-test"},
+                use_openai_api=True,
+            )
+
+    @patch("api.agent.tools.create_video.litellm")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_non_openai_polling_reraises_read_timeout(self, mock_sleep, mock_litellm):
+        pending_obj = _make_video_obj(status="pending")
+        mock_litellm.video_status.side_effect = httpx.ReadTimeout("read timed out")
+
+        with self.assertRaises(httpx.ReadTimeout):
+            _wait_for_video_completion(pending_obj, params={"api_key": "sk-test"})
 
     @patch("api.agent.tools.create_video.litellm")
     @patch("api.agent.tools.create_video.time.sleep")
@@ -316,6 +391,49 @@ class GenerateVideoTests(TestCase):
             (1792, 1024),
         )
 
+    @patch("api.agent.tools.create_video.httpx.Client")
+    def test_create_openai_video_job_accepts_sora_2_pro_1080_portrait_source_size(self, mock_client_cls):
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.json.return_value = {
+            "id": "video_123",
+            "object": "video",
+            "status": "queued",
+            "created_at": 123,
+            "progress": 0,
+            "seconds": "4",
+            "size": "1080x1920",
+            "model": "sora-2-pro",
+        }
+        mock_response.raise_for_status.return_value = None
+        mock_client.post.return_value = mock_response
+        mock_client_cls.return_value.__enter__.return_value = mock_client
+
+        config = _make_config(model="openai/sora-2-pro", supports_image_to_video=True)
+        source_image = ResolvedSourceImage(
+            image_bytes=_make_png_bytes((1080, 1920)),
+            mime_type="image/png",
+            path="/Inbox/source.png",
+            width=1080,
+            height=1920,
+        )
+
+        result = _create_openai_video_job(
+            config=config,
+            prompt="animate this",
+            duration="4",
+            size=None,
+            source_image=source_image,
+        )
+
+        self.assertEqual(result.id, "video_123")
+        posted_json = mock_client.post.call_args.kwargs["json"]
+        self.assertEqual(posted_json["size"], "1080x1920")
+        self.assertEqual(
+            _decode_data_url_image_size(posted_json["input_reference"]["image_url"]),
+            (1080, 1920),
+        )
+
     @patch("api.agent.tools.create_video.litellm")
     def test_generates_video_successfully(self, mock_litellm):
         video_obj = _make_video_obj(status="completed")
@@ -330,6 +448,27 @@ class GenerateVideoTests(TestCase):
         self.assertEqual(result.mime_type, "video/mp4")
         mock_litellm.video_generation.assert_called_once()
 
+    @patch("api.agent.tools.create_video._download_openai_video_content", return_value=b"video")
+    @patch("api.agent.tools.create_video._create_openai_video_job")
+    @patch("api.agent.tools.create_video.litellm")
+    def test_openai_text_request_bypasses_litellm_video_generation(
+        self,
+        mock_litellm,
+        mock_create_job,
+        mock_download,
+    ):
+        video_obj = _make_video_obj(status="completed", video_id="video_123")
+        mock_create_job.return_value = video_obj
+
+        config = _make_config(model="openai/sora-2-pro")
+        _generate_video(config, prompt="make a video")
+
+        mock_create_job.assert_called_once()
+        self.assertIsNone(mock_create_job.call_args.kwargs["source_image"])
+        mock_litellm.video_generation.assert_not_called()
+        mock_litellm.video_content.assert_not_called()
+        mock_download.assert_called_once_with("video_123", params={"api_key": "sk-test"})
+
     @patch("api.agent.tools.create_video.litellm")
     def test_passes_duration_and_size(self, mock_litellm):
         video_obj = _make_video_obj(status="completed")
@@ -343,12 +482,17 @@ class GenerateVideoTests(TestCase):
         self.assertEqual(call_kwargs["seconds"], "10")
         self.assertEqual(call_kwargs["size"], "1920x1080")
 
+    @patch("api.agent.tools.create_video._download_openai_video_content", return_value=b"video")
     @patch("api.agent.tools.create_video._create_openai_video_job")
     @patch("api.agent.tools.create_video.litellm")
-    def test_openai_source_image_bypasses_litellm_video_generation(self, mock_litellm, mock_create_job):
+    def test_openai_source_image_bypasses_litellm_video_generation(
+        self,
+        mock_litellm,
+        mock_create_job,
+        mock_download,
+    ):
         video_obj = _make_video_obj(status="completed", video_id="video_123")
         mock_create_job.return_value = video_obj
-        mock_litellm.video_content.return_value = b"video"
 
         config = _make_config(model="sora-2-pro", supports_image_to_video=True)
         source_image = ResolvedSourceImage(
@@ -360,6 +504,8 @@ class GenerateVideoTests(TestCase):
 
         mock_create_job.assert_called_once()
         mock_litellm.video_generation.assert_not_called()
+        mock_litellm.video_content.assert_not_called()
+        mock_download.assert_called_once_with("video_123", params={"api_key": "sk-test"})
         self.assertEqual(
             mock_create_job.call_args.kwargs,
             {
@@ -464,7 +610,7 @@ class ExecuteCreateVideoTests(TestCase):
         mock_set_var,
     ):
         mock_resolve.return_value = ("/exports/test.mp4", False, None)
-        config = _make_config()
+        config = _make_config(model="sora-2")
         mock_configs.return_value = [config]
         mock_generate.return_value = GeneratedVideoResult(
             video_bytes=b"video-data",

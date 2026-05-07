@@ -25,13 +25,16 @@ from api.agent.tools.file_export_helpers import resolve_export_target
 
 logger = logging.getLogger(__name__)
 
-MAX_POLL_SECONDS = 600
-POLL_INTERVAL_SECONDS = 5
+MAX_POLL_SECONDS = 900
+POLL_INTERVAL_SECONDS = 10
+OPENAI_VIDEO_HTTP_TIMEOUT_SECONDS = 120
 OPENAI_VIDEO_SUPPORTED_SIZES = {
     "720x1280",
     "1280x720",
     "1024x1792",
     "1792x1024",
+    "1080x1920",
+    "1920x1080",
 }
 OPENAI_SORA_2_SUPPORTED_SIZES = {
     "720x1280",
@@ -59,6 +62,12 @@ class VideoGenerationResponseError(ValueError):
     def __init__(self, message: str, *, response: Any = None) -> None:
         super().__init__(message)
         self.response = response
+
+
+class OpenAIVideoStatusError(VideoGenerationResponseError):
+    def __init__(self, message: str, *, status_code: int, response: Any = None) -> None:
+        super().__init__(message, response=response)
+        self.status_code = status_code
 
 
 def _log_video_generation_completion(
@@ -266,6 +275,69 @@ def _resolve_openai_video_source_image(
     raise ValueError("Unable to determine source_image dimensions for Sora image-to-video.")
 
 
+def _get_openai_video_api_base(params: Dict[str, Any]) -> str:
+    return str(params.get("api_base") or "https://api.openai.com/v1").rstrip("/")
+
+
+def _get_openai_video_request_timeout(params: Dict[str, Any]) -> float:
+    raw_timeout = params.get("timeout", OPENAI_VIDEO_HTTP_TIMEOUT_SECONDS)
+    try:
+        timeout = float(raw_timeout)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("OpenAI video generation timeout must be numeric.") from exc
+    if timeout <= 0:
+        raise ValueError("OpenAI video generation timeout must be greater than 0.")
+    return timeout
+
+
+def _build_openai_video_headers(params: Dict[str, Any]) -> dict[str, str]:
+    api_key = params.get("api_key")
+    if not api_key:
+        raise ValueError("OpenAI video generation requires an api_key.")
+
+    headers: dict[str, str] = {
+        "Authorization": f"Bearer {api_key}",
+    }
+    extra_headers = params.get("extra_headers")
+    if isinstance(extra_headers, dict):
+        for key, value in extra_headers.items():
+            if value is not None:
+                headers[str(key)] = str(value)
+    return headers
+
+
+def _openai_video_error_detail(response: httpx.Response) -> str:
+    detail = response.text
+    try:
+        response_json = response.json()
+    except ValueError:
+        return detail
+    if not isinstance(response_json, dict):
+        return detail
+    error_payload = response_json.get("error")
+    if isinstance(error_payload, dict):
+        return str(error_payload.get("message") or detail)
+    return detail
+
+
+def _parse_openai_video_object(response: httpx.Response) -> VideoObject:
+    try:
+        response_json = response.json()
+    except ValueError as exc:
+        raise VideoGenerationResponseError(
+            "Video generation returned a non-JSON response",
+            response=response.text,
+        ) from exc
+
+    try:
+        return VideoObject(**response_json)
+    except Exception as exc:
+        raise VideoGenerationResponseError(
+            "Video generation returned an invalid response payload",
+            response=response_json,
+        ) from exc
+
+
 def _create_openai_video_job(
     *,
     config,
@@ -275,20 +347,9 @@ def _create_openai_video_job(
     source_image: ResolvedSourceImage | None,
 ) -> VideoObject:
     params = dict(config.params or {})
-    api_key = params.get("api_key")
-    if not api_key:
-        raise ValueError("OpenAI video generation requires an api_key.")
-
-    api_base = str(params.get("api_base") or "https://api.openai.com/v1").rstrip("/")
-    headers: dict[str, str] = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    }
-    extra_headers = params.get("extra_headers")
-    if isinstance(extra_headers, dict):
-        for key, value in extra_headers.items():
-            if value is not None:
-                headers[str(key)] = str(value)
+    api_base = _get_openai_video_api_base(params)
+    headers = _build_openai_video_headers(params)
+    headers["Content-Type"] = "application/json"
 
     payload: Dict[str, Any] = {
         "prompt": prompt,
@@ -309,7 +370,7 @@ def _create_openai_video_job(
             "image_url": _build_source_image_data_url(resolved_source_image),
         }
 
-    timeout = params.get("timeout", MAX_POLL_SECONDS)
+    timeout = _get_openai_video_request_timeout(params)
     with httpx.Client(timeout=timeout) as client:
         response = client.post(
             f"{api_base}/videos",
@@ -320,35 +381,61 @@ def _create_openai_video_job(
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        detail = response.text
-        try:
-            response_json = response.json()
-        except ValueError:
-            response_json = None
-        if isinstance(response_json, dict):
-            error_payload = response_json.get("error")
-            if isinstance(error_payload, dict):
-                detail = str(error_payload.get("message") or detail)
         raise VideoGenerationResponseError(
-            f"Video generation failed: {detail}",
-            response=response_json,
-        ) from exc
-
-    try:
-        response_json = response.json()
-    except ValueError as exc:
-        raise VideoGenerationResponseError(
-            "Video generation returned a non-JSON response",
+            f"Video generation failed: {_openai_video_error_detail(response)}",
             response=response.text,
         ) from exc
 
+    return _parse_openai_video_object(response)
+
+
+def _get_openai_video_status(video_id: str, *, params: Dict[str, Any]) -> VideoObject:
+    api_base = _get_openai_video_api_base(params)
+    headers = _build_openai_video_headers(params)
+    timeout = _get_openai_video_request_timeout(params)
+
+    with httpx.Client(timeout=timeout) as client:
+        response = client.get(
+            f"{api_base}/videos/{video_id}",
+            headers=headers,
+        )
+
     try:
-        return VideoObject(**response_json)
-    except Exception as exc:
-        raise VideoGenerationResponseError(
-            "Video generation returned an invalid response payload",
-            response=response_json,
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise OpenAIVideoStatusError(
+            f"Video generation status check failed: {_openai_video_error_detail(response)}",
+            status_code=response.status_code,
+            response=response.text,
         ) from exc
+
+    return _parse_openai_video_object(response)
+
+
+def _is_transient_openai_status_error(exc: OpenAIVideoStatusError) -> bool:
+    return 500 <= exc.status_code < 600
+
+
+def _download_openai_video_content(video_id: str, *, params: Dict[str, Any]) -> bytes:
+    api_base = _get_openai_video_api_base(params)
+    headers = _build_openai_video_headers(params)
+    timeout = _get_openai_video_request_timeout(params)
+
+    with httpx.Client(timeout=timeout) as client:
+        response = client.get(
+            f"{api_base}/videos/{video_id}/content",
+            headers=headers,
+        )
+
+    try:
+        response.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        raise VideoGenerationResponseError(
+            f"Video generation download failed: {_openai_video_error_detail(response)}",
+            response=response.text,
+        ) from exc
+
+    return response.content
 
 
 def _resolve_source_image(
@@ -412,7 +499,7 @@ def _resolve_source_image(
     ), None
 
 
-def _wait_for_video_completion(video_obj, *, params: Dict[str, Any]) -> Any:
+def _wait_for_video_completion(video_obj, *, params: Dict[str, Any], use_openai_api: bool = False) -> Any:
     """Poll video_status until the video is completed, failed, or times out."""
     video_id = video_obj.id
     elapsed = 0.0
@@ -424,7 +511,21 @@ def _wait_for_video_completion(video_obj, *, params: Dict[str, Any]) -> Any:
             )
         time.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
-        video_obj = litellm.video_status(video_id, **params)
+        if use_openai_api:
+            try:
+                video_obj = _get_openai_video_status(video_id, params=params)
+            except httpx.RequestError:
+                logger.info("OpenAI video status request failed; continuing to poll video_id=%s", video_id)
+            except OpenAIVideoStatusError as exc:
+                if not _is_transient_openai_status_error(exc):
+                    raise
+                logger.info(
+                    "OpenAI video status returned transient HTTP %s; continuing to poll video_id=%s",
+                    exc.status_code,
+                    video_id,
+                )
+        else:
+            video_obj = litellm.video_status(video_id, **params)
     if video_obj.status != "completed":
         error_detail = "unknown error"
         if video_obj.error and isinstance(video_obj.error, dict):
@@ -445,7 +546,7 @@ def _generate_video(
     source_image: ResolvedSourceImage | None = None,
 ) -> GeneratedVideoResult:
     params = dict(config.params or {})
-    is_openai_source_image_request = source_image is not None and _is_openai_sora_model(config.model)
+    is_openai_sora_request = _is_openai_sora_model(config.model)
 
     gen_kwargs: Dict[str, Any] = {
         "prompt": prompt,
@@ -455,13 +556,13 @@ def _generate_video(
         gen_kwargs["seconds"] = str(duration)
     if size:
         gen_kwargs["size"] = size
-    if source_image is not None and not is_openai_source_image_request:
+    if source_image is not None and not is_openai_sora_request:
         gen_kwargs["input_reference"] = _build_source_image_input_reference(
             model_name=config.model,
             source_image=source_image,
         )
 
-    if is_openai_source_image_request:
+    if is_openai_sora_request:
         video_obj = _create_openai_video_job(
             config=config,
             prompt=prompt,
@@ -475,9 +576,12 @@ def _generate_video(
 
     # Poll until completed
     if video_obj.status != "completed":
-        video_obj = _wait_for_video_completion(video_obj, params=params)
+        video_obj = _wait_for_video_completion(video_obj, params=params, use_openai_api=is_openai_sora_request)
 
-    video_bytes = litellm.video_content(video_obj.id, **params)
+    if is_openai_sora_request:
+        video_bytes = _download_openai_video_content(video_obj.id, params=params)
+    else:
+        video_bytes = litellm.video_content(video_obj.id, **params)
     if not video_bytes:
         raise VideoGenerationResponseError(
             "Video generation returned empty content",
