@@ -20,6 +20,7 @@ import contextlib
 import contextvars
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import dataclass, field
@@ -383,6 +384,27 @@ class MCPToolManager:
             # task than they were entered in, which raises during parallel MCP teardown.
             asyncio.set_event_loop(None)
             loop.close()
+
+    def _run_coroutine_sync(self, coroutine):
+        """Run async MCP work from sync code, including async caller contexts."""
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        cached_loop_running = (
+            self._loop is not None
+            and not self._loop.is_closed()
+            and self._loop.is_running()
+        )
+        if (running_loop and running_loop.is_running()) or cached_loop_running:
+            # Python disallows nesting run_until_complete in a thread that is
+            # already running an event loop, including one cached on the manager.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                return executor.submit(self._run_coroutine_isolated, coroutine).result()
+
+        loop = self._ensure_event_loop()
+        return loop.run_until_complete(coroutine)
 
     def _close_client_sync(self, client: Optional[Client], *, context: str) -> None:
         """Close a FastMCP client from sync code."""
@@ -1513,10 +1535,9 @@ class MCPToolManager:
         ):
             return
 
-        loop = self._ensure_event_loop()
         http_proxy_url = discovery_proxy_url if server.url else None
         with _use_mcp_proxy(http_proxy_url):
-            tools = loop.run_until_complete(
+            tools = self._run_coroutine_sync(
                 self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
             )
         slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
@@ -2039,10 +2060,9 @@ class MCPToolManager:
                 return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
 
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return loop.run_until_complete(
+                    return self._run_coroutine_sync(
                         self._execute_async(
                             client,
                             info.tool_name,
@@ -2238,10 +2258,9 @@ class MCPToolManager:
         
         try:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return loop.run_until_complete(
+                    return self._run_coroutine_sync(
                         self._execute_async(
                             client,
                             actual_tool_name,

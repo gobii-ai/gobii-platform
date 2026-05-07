@@ -1,3 +1,4 @@
+import asyncio
 import json
 from contextlib import ExitStack
 from datetime import timedelta
@@ -23,6 +24,7 @@ from api.models import (
 from console.forms import MCPServerConfigForm
 from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
 from api.services.mcp_servers import update_agent_personal_servers
+from api.agent.tools.mcp_manager import MCPToolManager
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
@@ -752,6 +754,33 @@ class MCPServerTestAPITests(TestCase):
         self.assertEqual(payload["details"]["message"], "connection refused")
         self.assertNotIn("env", payload["details"])
         self.assertEqual(payload["tools"], [])
+
+    def test_mcp_sync_runner_handles_running_event_loop(self):
+        manager = MCPToolManager()
+
+        async def sample():
+            return "ok"
+
+        async def run_inside_event_loop():
+            return manager._run_coroutine_sync(sample())
+
+        self.assertEqual(asyncio.run(run_inside_event_loop()), "ok")
+
+    def test_mcp_sync_runner_avoids_cached_running_event_loop(self):
+        manager = MCPToolManager()
+        running_loop = SimpleNamespace(
+            is_closed=lambda: False,
+            is_running=lambda: True,
+            run_until_complete=lambda _coroutine: (_ for _ in ()).throw(
+                RuntimeError("this event loop is already running.")
+            ),
+        )
+        manager._loop = running_loop
+
+        async def sample():
+            return "ok"
+
+        self.assertEqual(manager._run_coroutine_sync(sample()), "ok")
 
     def test_existing_owner_test_api_still_rejects_platform_servers_for_staff(self):
         staff_user = get_user_model().objects.create_user(
