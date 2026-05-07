@@ -500,13 +500,13 @@ def _wait_for_video_completion(video_obj, *, params: Dict[str, Any], use_openai_
             )
         time.sleep(POLL_INTERVAL_SECONDS)
         elapsed += POLL_INTERVAL_SECONDS
-        try:
-            if use_openai_api:
+        if use_openai_api:
+            try:
                 video_obj = _get_openai_video_status(video_id, params=params)
-            else:
-                video_obj = litellm.video_status(video_id, **params)
-        except httpx.TimeoutException:
-            logger.info("OpenAI video status check timed out; continuing to poll video_id=%s", video_id)
+            except httpx.TimeoutException:
+                logger.info("OpenAI video status check timed out; continuing to poll video_id=%s", video_id)
+        else:
+            video_obj = litellm.video_status(video_id, **params)
     if video_obj.status != "completed":
         error_detail = "unknown error"
         if video_obj.error and isinstance(video_obj.error, dict):

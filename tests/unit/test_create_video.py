@@ -127,6 +127,15 @@ class WaitForVideoCompletionTests(TestCase):
 
     @patch("api.agent.tools.create_video.litellm")
     @patch("api.agent.tools.create_video.time.sleep")
+    def test_non_openai_polling_reraises_read_timeout(self, mock_sleep, mock_litellm):
+        pending_obj = _make_video_obj(status="pending")
+        mock_litellm.video_status.side_effect = httpx.ReadTimeout("read timed out")
+
+        with self.assertRaises(httpx.ReadTimeout):
+            _wait_for_video_completion(pending_obj, params={"api_key": "sk-test"})
+
+    @patch("api.agent.tools.create_video.litellm")
+    @patch("api.agent.tools.create_video.time.sleep")
     def test_raises_on_failure(self, mock_sleep, mock_litellm):
         pending_obj = _make_video_obj(status="pending")
         failed_obj = _make_video_obj(status="failed", error={"message": "content moderation"})
