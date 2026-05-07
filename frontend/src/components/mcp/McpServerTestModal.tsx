@@ -99,8 +99,9 @@ export function McpServerTestModal({
       footer={footer}
       icon={Stethoscope}
       widthClass="sm:max-w-4xl"
+      bodyClassName="overflow-x-hidden"
     >
-      <div className="space-y-5">
+      <div className="min-w-0 space-y-5">
         {requiresAgent && (
           <div className="space-y-4">
             {assignmentsQuery.isLoading ? (
@@ -181,14 +182,14 @@ export function McpServerTestModal({
             ) : (
               <CheckCircle2 className="mt-0.5 h-4 w-4 flex-none" aria-hidden="true" />
             )}
-            <span>{statusMessage}</span>
+            <span className="min-w-0 break-words">{statusMessage}</span>
           </div>
         )}
 
         {testMutation.data?.status === 'error' && (
-          <details className="rounded-lg border border-slate-200 px-4 py-3 text-sm">
+          <details className="min-w-0 rounded-lg border border-slate-200 px-4 py-3 text-sm">
             <summary className="cursor-pointer font-medium text-slate-700">Diagnostic details</summary>
-            <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
+            <pre className="mt-3 max-h-64 max-w-full overflow-auto rounded-lg bg-slate-950 p-3 text-xs text-slate-100">
               {JSON.stringify(testMutation.data.details, null, 2)}
             </pre>
           </details>
@@ -223,16 +224,16 @@ export function McpServerTestModal({
 
 function AgentSummary({ agent }: { agent: McpServerAssignmentAgent }) {
   return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <p className="text-sm font-medium text-slate-800">{agent.name}</p>
+    <div className="min-w-0 space-y-1">
+      <div className="flex min-w-0 items-center gap-2">
+        <p className="min-w-0 break-words text-sm font-medium text-slate-800">{agent.name}</p>
         {!agent.isActive && (
           <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-700">
             Inactive
           </span>
         )}
       </div>
-      {agent.description && <p className="text-xs text-slate-600">{agent.description}</p>}
+      {agent.description && <p className="break-words text-xs text-slate-600">{agent.description}</p>}
     </div>
   )
 }
@@ -242,16 +243,16 @@ function ToolList({ tools }: { tools: McpServerTestTool[] }) {
     return <div className="rounded-lg border border-slate-200 px-4 py-6 text-sm text-slate-500">No tools match your filter.</div>
   }
   return (
-    <ul className="divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
+    <ul className="min-w-0 max-w-full divide-y divide-slate-200 overflow-hidden rounded-lg border border-slate-200">
       {tools.map((tool) => (
-        <li key={tool.fullName || tool.toolName} className="space-y-2 px-4 py-3">
-          <div>
-            <p className="font-mono text-sm font-semibold text-slate-900">{tool.fullName || tool.toolName}</p>
-            {tool.description && <p className="mt-1 text-sm text-slate-600">{tool.description}</p>}
+        <li key={tool.fullName || tool.toolName} className="min-w-0 space-y-2 px-4 py-3">
+          <div className="min-w-0">
+            <p className="break-all font-mono text-sm font-semibold text-slate-900">{tool.fullName || tool.toolName}</p>
+            {tool.description && <p className="mt-1 break-words text-sm text-slate-600">{tool.description}</p>}
           </div>
-          <details className="text-xs">
+          <details className="min-w-0 text-xs">
             <summary className="cursor-pointer font-medium text-slate-600">Parameters</summary>
-            <pre className="mt-2 max-h-56 overflow-auto rounded-lg bg-slate-950 p-3 text-slate-100">
+            <pre className="mt-2 max-h-56 max-w-full overflow-auto rounded-lg bg-slate-950 p-3 text-slate-100">
               {JSON.stringify(tool.parameters, null, 2)}
             </pre>
           </details>

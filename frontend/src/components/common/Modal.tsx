@@ -74,9 +74,9 @@ export function Modal({
                   <Icon aria-hidden="true" className={`h-5 w-5 ${iconColorClass}`} strokeWidth={2} />
                 </div>
               )}
-              <div className="mt-3 w-full text-center sm:mt-0 sm:text-left">
+              <div className="mt-3 min-w-0 w-full text-center sm:mt-0 sm:text-left">
                 <div className="flex items-start justify-between gap-4">
-                  <div>
+                  <div className="min-w-0">
                     <h2 className="text-lg font-semibold text-slate-900" id="modal-title">
                       {title}
                     </h2>
