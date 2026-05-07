@@ -3151,6 +3151,13 @@ export function AgentChatPage({
     navigateToShellSubview(nextSubview, activeAgentIdRef.current)
   }, [navigateToShellSubview, shellSubview])
 
+  const handleExitEmbeddedSettings = useCallback(() => {
+    if (!activeAgentIdRef.current) {
+      return
+    }
+    navigateToShellSubview('chat', activeAgentIdRef.current)
+  }, [navigateToShellSubview])
+
   const handleEmbeddedSettingsDeleted = useCallback(() => {
     const selectionPath = buildAgentChatShellSelectionPath(window.location.pathname)
     if (selectionPath.startsWith('/app')) {
@@ -4521,7 +4528,7 @@ export function AgentChatPage({
         showEmbeddedSettings={showEmbeddedSettings}
         embeddedSettingsPanel={embeddedSettingsPanel}
         embeddedSettingsTitle={embeddedSettingsTitle}
-        onBackFromEmbeddedSettings={handleCloseEmbeddedSettings}
+        onBackFromEmbeddedSettings={handleExitEmbeddedSettings}
         onComposerFocus={handleComposerFocus}
         onClose={onClose}
         dailyCredits={dailyCreditsInfo}

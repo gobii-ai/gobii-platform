@@ -828,6 +828,24 @@ describe('AgentChatPage trial onboarding', () => {
     })
   })
 
+  it('exits nested embedded settings to chat when the sidebar back action is triggered', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    window.history.pushState({}, '', '/app/agents/agent-1/email')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('true')
+    })
+
+    fireEvent.click(screen.getByTestId('back-from-settings'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('embedded-settings-open')).toHaveTextContent('false')
+      expect(window.location.pathname).toBe('/app/agents/agent-1')
+    })
+  })
+
   it('opens embedded settings from the quick settings callback', async () => {
     rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
     window.history.pushState({}, '', '/app/agents/agent-1')
