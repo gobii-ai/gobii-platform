@@ -22,6 +22,7 @@ export function ImmersiveMcpServersPage({
         listUrl="/console/api/mcp/servers/"
         detailUrlTemplate={`/console/api/mcp/servers/${MCP_PLACEHOLDER_ID}/`}
         assignmentUrlTemplate={`/console/api/mcp/servers/${MCP_PLACEHOLDER_ID}/assignments/`}
+        testUrlTemplate={`/console/api/mcp/servers/${MCP_PLACEHOLDER_ID}/test/`}
         allowCommands={false}
         pipedreamAppsUrl={pipedreamAppsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}

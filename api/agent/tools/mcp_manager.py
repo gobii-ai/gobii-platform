@@ -20,6 +20,7 @@ import contextlib
 import contextvars
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
 from dataclasses import dataclass, field
@@ -80,6 +81,7 @@ from ...services.pipedream_apps import (
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+_MCP_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp-sync")
 
 _proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "mcp_http_proxy_url", default=None
@@ -383,6 +385,26 @@ class MCPToolManager:
             # task than they were entered in, which raises during parallel MCP teardown.
             asyncio.set_event_loop(None)
             loop.close()
+
+    def _run_coroutine_sync(self, coroutine):
+        """Run async MCP work from sync code, including async caller contexts."""
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+
+        cached_loop_running = (
+            self._loop is not None
+            and not self._loop.is_closed()
+            and self._loop.is_running()
+        )
+        if (running_loop and running_loop.is_running()) or cached_loop_running:
+            # Python disallows nesting run_until_complete in a thread that is
+            # already running an event loop, including one cached on the manager.
+            return _MCP_SYNC_EXECUTOR.submit(self._run_coroutine_isolated, coroutine).result()
+
+        loop = self._ensure_event_loop()
+        return loop.run_until_complete(coroutine)
 
     def _close_client_sync(self, client: Optional[Client], *, context: str) -> None:
         """Close a FastMCP client from sync code."""
@@ -780,6 +802,70 @@ class MCPToolManager:
             logger.exception("Failed to discover MCP tools for %s", config_id)
             return False
         return True
+
+    def test_server_tools(
+        self,
+        config_id: str,
+        *,
+        agent: Optional[PersistentAgent] = None,
+    ) -> Tuple[bool, List[MCPToolInfo], Dict[str, str]]:
+        """Run fresh tool discovery for a saved active server and return diagnostic details."""
+        if not config_id:
+            return False, [], {
+                "phase": "load_config",
+                "error_type": "missing_config_id",
+                "message": "MCP server config id is required.",
+            }
+
+        try:
+            cfg = (
+                MCPServerConfig.objects.filter(id=config_id, is_active=True)
+                .select_related("oauth_credential")
+                .first()
+            )
+        except DatabaseError as exc:
+            logger.exception("Failed to load MCP server %s during test discovery", config_id)
+            return False, [], {
+                "phase": "load_config",
+                "error_type": exc.__class__.__name__,
+                "message": "Failed to load MCP server config.",
+            }
+
+        if not cfg:
+            return False, [], {
+                "phase": "load_config",
+                "error_type": "not_found",
+                "message": "MCP server config is not active or does not exist.",
+            }
+
+        runtime = self._build_runtime_from_config(cfg)
+        sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
+        slot_key = self._tool_cache_slot_key(runtime, sandbox_context=sandbox_context)
+        self._tools_cache.pop(slot_key, None)
+        self._tool_cache_fingerprints.pop(slot_key, None)
+        try:
+            self._register_server(
+                runtime,
+                agent=agent,
+                force_local=True,
+                prefer_cache=False,
+                sandbox_context=sandbox_context,
+            )
+        except (ValueError, RuntimeError, OSError, TimeoutError, httpx.HTTPError, ToolError) as exc:
+            logger.warning("MCP test discovery failed for %s: %s", config_id, exc)
+            return False, [], {
+                "phase": "discover_tools",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            }
+
+        if slot_key not in self._tools_cache:
+            return False, [], {
+                "phase": "discover_tools",
+                "error_type": "discovery_not_completed",
+                "message": "MCP server test did not complete tool discovery.",
+            }
+        return True, list(self._tools_cache.get(slot_key) or []), {}
 
     def remove_server(self, config_id: str) -> None:
         if not config_id:
@@ -1457,10 +1543,9 @@ class MCPToolManager:
         ):
             return
 
-        loop = self._ensure_event_loop()
         http_proxy_url = discovery_proxy_url if server.url else None
         with _use_mcp_proxy(http_proxy_url):
-            tools = loop.run_until_complete(
+            tools = self._run_coroutine_sync(
                 self._fetch_server_tools(client, server, pipedream_context=pipedream_context)
             )
         slot_key = self._tool_cache_slot_key(server, pipedream_context, sandbox_context)
@@ -1983,10 +2068,9 @@ class MCPToolManager:
                 return {"status": "error", "message": f"MCP server '{info.server_name}' not available"}
 
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return loop.run_until_complete(
+                    return self._run_coroutine_sync(
                         self._execute_async(
                             client,
                             info.tool_name,
@@ -2182,10 +2266,9 @@ class MCPToolManager:
         
         try:
             timeout_seconds = self._get_timeout_for_runtime(runtime)
-            loop = self._ensure_event_loop()
             with _use_mcp_proxy(proxy_url):
                 def run_once(attempt_params: Dict[str, Any]) -> Any:
-                    return loop.run_until_complete(
+                    return self._run_coroutine_sync(
                         self._execute_async(
                             client,
                             actual_tool_name,

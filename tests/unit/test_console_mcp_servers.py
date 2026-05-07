@@ -1,6 +1,8 @@
+import asyncio
 import json
 from contextlib import ExitStack
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -22,6 +24,7 @@ from api.models import (
 from console.forms import MCPServerConfigForm
 from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
 from api.services.mcp_servers import update_agent_personal_servers
+from api.agent.tools.mcp_manager import MCPToolManager
 from util.analytics import AnalyticsEvent, AnalyticsSource
 
 
@@ -377,6 +380,585 @@ class MCPServerManagementPageTests(TestCase):
         self.assertContains(response, 'data-app="mcp-servers"')
         self.assertNotContains(response, 'data-pipedream-apps-url=')
         self.assertNotContains(response, 'data-pipedream-app-search-url=')
+
+    def test_platform_management_page_requires_staff(self):
+        response = self.client.get(reverse("staff-platform-mcp"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_platform_management_page_mounts_platform_api(self):
+        staff_user = get_user_model().objects.create_user(
+            username="mcp-platform-staff",
+            email="mcp-platform-staff@example.com",
+            password="test-pass-123",
+            is_staff=True,
+        )
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse("staff-platform-mcp"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'data-app="mcp-servers"')
+        self.assertContains(response, 'data-owner-scope="platform"')
+        self.assertContains(response, 'data-owner-label="Platform"')
+        self.assertContains(response, reverse("staff-platform-mcp-server-list"))
+        self.assertNotContains(response, "Console Menu")
+        self.assertContains(response, 'href="/staff/mcp/"')
+        self.assertNotContains(response, 'data-pipedream-apps-url=')
+
+    def test_staff_menu_links_platform_mcp_below_llm_config(self):
+        staff_user = get_user_model().objects.create_user(
+            username="mcp-menu-staff",
+            email="mcp-menu-staff@example.com",
+            password="test-pass-123",
+            is_staff=True,
+        )
+        self.client.force_login(staff_user)
+
+        response = self.client.get(reverse("llm-config"))
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        llm_index = content.index("LLM Config")
+        platform_index = content.index("Platform MCP")
+        self.assertLess(llm_index, platform_index)
+
+
+@tag("batch_console_mcp_servers")
+class PlatformMCPServerAPITests(TestCase):
+    def setUp(self):
+        self.staff_user = get_user_model().objects.create_user(
+            username="platform-mcp-staff",
+            email="platform-mcp-staff@example.com",
+            password="test-pass-123",
+            is_staff=True,
+        )
+        self.regular_user = get_user_model().objects.create_user(
+            username="platform-mcp-user",
+            email="platform-mcp-user@example.com",
+            password="test-pass-123",
+        )
+        self.client.force_login(self.staff_user)
+
+    def test_platform_list_requires_staff(self):
+        self.client.force_login(self.regular_user)
+
+        response = self.client.get(reverse("staff-platform-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_platform_list_filters_to_platform_scope(self):
+        platform_server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-list",
+            display_name="Platform List",
+            url="https://platform.example.com/mcp",
+        )
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.regular_user,
+            name="user-list",
+            display_name="User List",
+            url="https://user.example.com/mcp",
+        )
+
+        response = self.client.get(reverse("staff-platform-mcp-server-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["owner_scope"], MCPServerConfig.Scope.PLATFORM)
+        self.assertEqual(payload["owner_label"], "Platform")
+        self.assertEqual(payload["result_count"], 1)
+        self.assertEqual(payload["servers"][0]["id"], str(platform_server.id))
+        self.assertEqual(payload["servers"][0]["scope"], MCPServerConfig.Scope.PLATFORM)
+
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_create_platform_server_via_staff_api(self, mock_get_mcp_manager, mock_track_event):
+        payload = {
+            "display_name": "Platform Command",
+            "command": "npx",
+            "command_args": ["-y", "@example/mcp"],
+            "auth_method": MCPServerConfig.AuthMethod.NONE,
+            "is_active": True,
+            "environment": {"API_TOKEN": "secret"},
+            "headers": {"X-Platform": "1"},
+            "prefetch_apps": ["Google Sheets", "greenhouse", "google_sheets", ""],
+        }
+
+        response = self.client.post(
+            reverse("staff-platform-mcp-server-list"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        server = MCPServerConfig.objects.get()
+        self.assertEqual(server.scope, MCPServerConfig.Scope.PLATFORM)
+        self.assertIsNone(server.user)
+        self.assertIsNone(server.organization)
+        self.assertEqual(server.command, "npx")
+        self.assertEqual(server.command_args, ["-y", "@example/mcp"])
+        self.assertEqual(server.environment, {"API_TOKEN": "secret"})
+        self.assertEqual(server.headers, {"X-Platform": "1"})
+        self.assertEqual(server.prefetch_apps, ["google_sheets", "greenhouse"])
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
+        track_args, _track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_CREATED)
+        self.assertEqual(track_args[2]["server_scope"], MCPServerConfig.Scope.PLATFORM)
+        self.assertEqual(track_args[2]["owner_scope"], MCPServerConfig.Scope.PLATFORM)
+
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_update_platform_server_via_staff_api(self, mock_get_mcp_manager, mock_track_event):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-update",
+            display_name="Platform Update",
+            command="npx",
+            command_args=["old"],
+        )
+
+        response = self.client.patch(
+            reverse("staff-platform-mcp-server-detail", args=[server.id]),
+            data=json.dumps(
+                {
+                    "display_name": "Platform Updated",
+                    "name": server.name,
+                    "url": "https://updated.example.com/mcp",
+                    "auth_method": MCPServerConfig.AuthMethod.BEARER_TOKEN,
+                    "is_active": False,
+                    "headers": {"Authorization": "Bearer updated"},
+                    "environment": {},
+                    "command": "",
+                    "command_args": [],
+                    "prefetch_apps": ["slack", "Google Docs"],
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        server.refresh_from_db()
+        self.assertEqual(server.display_name, "Platform Updated")
+        self.assertEqual(server.scope, MCPServerConfig.Scope.PLATFORM)
+        self.assertEqual(server.url, "https://updated.example.com/mcp")
+        self.assertEqual(server.command, "")
+        self.assertEqual(server.auth_method, MCPServerConfig.AuthMethod.BEARER_TOKEN)
+        self.assertEqual(server.headers, {"Authorization": "Bearer updated"})
+        self.assertEqual(server.prefetch_apps, ["slack", "google_docs"])
+        self.assertFalse(server.is_active)
+        mock_get_mcp_manager.return_value.refresh_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
+        track_args, _track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_UPDATED)
+        self.assertEqual(track_args[2]["server_scope"], MCPServerConfig.Scope.PLATFORM)
+
+    @patch("console.api_views._track_org_event_for_console")
+    @patch("console.api_views.get_mcp_manager")
+    def test_delete_platform_server_via_staff_api(self, mock_get_mcp_manager, mock_track_event):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-delete",
+            display_name="Platform Delete",
+            url="https://delete.example.com/mcp",
+        )
+
+        response = self.client.delete(reverse("staff-platform-mcp-server-detail", args=[server.id]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(MCPServerConfig.objects.filter(id=server.id).exists())
+        mock_get_mcp_manager.return_value.remove_server.assert_called_once_with(str(server.id))
+        mock_track_event.assert_called_once()
+        track_args, _track_kwargs = mock_track_event.call_args
+        self.assertEqual(track_args[1], AnalyticsEvent.MCP_SERVER_DELETED)
+        self.assertEqual(track_args[2]["server_scope"], MCPServerConfig.Scope.PLATFORM)
+
+    def test_existing_owner_detail_api_still_rejects_platform_servers_for_staff(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-existing-api",
+            display_name="Platform Existing API",
+            url="https://platform.example.com/mcp",
+        )
+
+        response = self.client.get(reverse("console-mcp-server-detail", args=[server.id]))
+
+        self.assertEqual(response.status_code, 403)
+
+    def test_staff_can_start_platform_mcp_oauth_session(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-oauth",
+            display_name="Platform OAuth",
+            url="https://oauth.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-oauth-start"),
+            data=json.dumps(
+                {
+                    "server_config_id": str(server.id),
+                    "state": "platform-state",
+                    "redirect_uri": "https://testserver/console/mcp/oauth/callback/",
+                    "token_endpoint": "https://oauth.example.com/token",
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201)
+        session = MCPServerOAuthSession.objects.get(server_config=server)
+        self.assertEqual(session.initiated_by, self.staff_user)
+        self.assertIsNone(session.organization)
+        self.assertIsNone(session.user)
+
+    def test_non_staff_cannot_start_platform_mcp_oauth_session(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-oauth-forbidden",
+            display_name="Platform OAuth Forbidden",
+            url="https://oauth.example.com/mcp",
+            auth_method=MCPServerConfig.AuthMethod.OAUTH2,
+        )
+        self.client.force_login(self.regular_user)
+
+        response = self.client.post(
+            reverse("console-mcp-oauth-start"),
+            data=json.dumps({"server_config_id": str(server.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+
+@tag("batch_console_mcp_servers")
+class MCPServerTestAPITests(TestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            username="mcp-test-user",
+            email="mcp-test-user@example.com",
+            password="test-pass-123",
+        )
+        self.other_user = get_user_model().objects.create_user(
+            username="mcp-test-other",
+            email="mcp-test-other@example.com",
+            password="test-pass-123",
+        )
+
+    def _tool(self, *, full_name="mcp_demo_search", tool_name="search"):
+        return SimpleNamespace(
+            full_name=full_name,
+            tool_name=tool_name,
+            server_name="demo",
+            description="Search things",
+            parameters={"type": "object", "properties": {"query": {"type": "string"}}},
+        )
+
+    def test_test_endpoint_requires_login(self):
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="login-test",
+            display_name="Login Test",
+            url="https://example.com/mcp",
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 302)
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_test_http_server_success_returns_tools(self, mock_get_mcp_manager):
+        self.client.force_login(self.user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="http-test",
+            display_name="HTTP Test",
+            url="https://example.com/mcp",
+        )
+        mock_get_mcp_manager.return_value.test_server_tools.return_value = (True, [self._tool()], {})
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertFalse(payload["sandboxed"])
+        self.assertEqual(payload["tools"][0]["full_name"], "mcp_demo_search")
+        self.assertEqual(payload["tools"][0]["parameters"]["properties"]["query"]["type"], "string")
+        mock_get_mcp_manager.return_value.test_server_tools.assert_called_once_with(str(server.id))
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_test_inactive_server_returns_bad_request(self, mock_get_mcp_manager):
+        self.client.force_login(self.user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="inactive-test",
+            display_name="Inactive Test",
+            url="https://example.com/mcp",
+            is_active=False,
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        mock_get_mcp_manager.assert_not_called()
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_test_discovery_failure_returns_safe_details(self, mock_get_mcp_manager):
+        self.client.force_login(self.user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="failure-test",
+            display_name="Failure Test",
+            url="https://example.com/mcp",
+        )
+        mock_get_mcp_manager.return_value.test_server_tools.return_value = (
+            False,
+            [],
+            {
+                "phase": "discover_tools",
+                "error_type": "RuntimeError",
+                "message": "connection refused",
+                "env": {"SECRET": "redacted"},
+            },
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["details"]["message"], "connection refused")
+        self.assertNotIn("env", payload["details"])
+        self.assertEqual(payload["tools"], [])
+
+    def test_mcp_sync_runner_handles_running_event_loop(self):
+        manager = MCPToolManager()
+
+        async def sample():
+            return "ok"
+
+        async def run_inside_event_loop():
+            return manager._run_coroutine_sync(sample())
+
+        self.assertEqual(asyncio.run(run_inside_event_loop()), "ok")
+
+    def test_mcp_sync_runner_avoids_cached_running_event_loop(self):
+        manager = MCPToolManager()
+        running_loop = SimpleNamespace(
+            is_closed=lambda: False,
+            is_running=lambda: True,
+            run_until_complete=lambda _coroutine: (_ for _ in ()).throw(
+                RuntimeError("this event loop is already running.")
+            ),
+        )
+        manager._loop = running_loop
+
+        async def sample():
+            return "ok"
+
+        self.assertEqual(manager._run_coroutine_sync(sample()), "ok")
+
+    def test_existing_owner_test_api_still_rejects_platform_servers_for_staff(self):
+        staff_user = get_user_model().objects.create_user(
+            username="mcp-test-staff",
+            email="mcp-test-staff@example.com",
+            password="test-pass-123",
+            is_staff=True,
+        )
+        self.client.force_login(staff_user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-owner-test",
+            display_name="Platform Owner Test",
+            url="https://platform.example.com/mcp",
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("console.api_views.get_mcp_manager")
+    def test_staff_can_test_platform_server(self, mock_get_mcp_manager):
+        staff_user = get_user_model().objects.create_user(
+            username="mcp-test-platform-staff",
+            email="mcp-test-platform-staff@example.com",
+            password="test-pass-123",
+            is_staff=True,
+        )
+        self.client.force_login(staff_user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-test",
+            display_name="Platform Test",
+            url="https://platform.example.com/mcp",
+        )
+        mock_get_mcp_manager.return_value.test_server_tools.return_value = (True, [self._tool()], {})
+
+        response = self.client.post(
+            reverse("staff-platform-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "ok")
+        mock_get_mcp_manager.return_value.test_server_tools.assert_called_once_with(str(server.id))
+
+    def test_non_staff_cannot_test_platform_server(self):
+        self.client.force_login(self.user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="platform-test-forbidden",
+            display_name="Platform Test Forbidden",
+            url="https://platform.example.com/mcp",
+        )
+
+        response = self.client.post(
+            reverse("staff-platform-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_user_stdio_test_requires_agent_id(self, mock_sandbox_service):
+        self.client.force_login(self.user)
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="stdio-test",
+            display_name="Stdio Test",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        mock_sandbox_service.assert_not_called()
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_user_stdio_test_rejects_ineligible_agent_id(self, mock_sandbox_service):
+        self.client.force_login(self.user)
+        other_agent = _create_console_test_agent(user=self.other_user, name="Other Agent")
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="stdio-invalid-agent",
+            display_name="Stdio Invalid Agent",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({"agent_id": str(other_agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        mock_sandbox_service.assert_not_called()
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_user_stdio_test_uses_sandbox_discovery_with_agent_context(self, mock_sandbox_service):
+        self.client.force_login(self.user)
+        agent = _create_console_test_agent(user=self.user, name="Sandbox Agent")
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="stdio-valid-agent",
+            display_name="Stdio Valid Agent",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+        mock_sandbox_service.return_value.discover_mcp_tools.return_value = {
+            "status": "ok",
+            "tools": [
+                {
+                    "full_name": "mcp_stdio_valid_agent_lookup",
+                    "tool_name": "lookup",
+                    "server_name": "stdio-valid-agent",
+                    "description": "Lookup records",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+        }
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({"agent_id": str(agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["sandboxed"])
+        self.assertEqual(payload["agent"]["id"], str(agent.id))
+        self.assertEqual(payload["tools"][0]["tool_name"], "lookup")
+        mock_sandbox_service.return_value.discover_mcp_tools.assert_called_once_with(
+            str(server.id),
+            reason="manual_test",
+            agent=agent,
+        )
+
+    @patch("console.api_views.SandboxComputeService")
+    def test_user_stdio_test_reports_sandbox_unavailable(self, mock_sandbox_service):
+        self.client.force_login(self.user)
+        agent = _create_console_test_agent(user=self.user, name="Unavailable Agent")
+        server = MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.USER,
+            user=self.user,
+            name="stdio-unavailable",
+            display_name="Stdio Unavailable",
+            command="npx",
+            command_args=["-y", "@example/mcp"],
+        )
+        mock_sandbox_service.side_effect = RuntimeError("sandbox disabled")
+
+        response = self.client.post(
+            reverse("console-mcp-server-test", args=[server.id]),
+            data=json.dumps({"agent_id": str(agent.id)}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["details"]["phase"], "sandbox_discovery")
 
 
 @tag("batch_console_mcp_servers")

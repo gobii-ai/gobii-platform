@@ -42,6 +42,7 @@ type FormState = {
   connectionType: 'http' | 'stdio'
   commandLine: string
   environmentEntries: EnvEntry[]
+  prefetchAppsInput: string
   isActive: boolean
   authMethod: string
   headers: HeaderEntry[]
@@ -116,6 +117,7 @@ export function McpServerFormModal({
   }, [formErrors])
 
   const nonFieldErrors = formErrors?.non_field_errors ?? []
+  const showPipedreamPrefetchApps = ownerScope === 'platform' && state.slug.trim().toLowerCase() === 'pipedream'
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
@@ -158,6 +160,9 @@ export function McpServerFormModal({
       command,
       command_args: commandArgs,
     }
+    if (showPipedreamPrefetchApps) {
+      payload.prefetch_apps = parsePrefetchAppsInput(state.prefetchAppsInput)
+    }
 
     setFormErrors(null)
     setStatusMessage(null)
@@ -196,7 +201,8 @@ export function McpServerFormModal({
 
   const formTitle =
     mode === 'create' ? 'Add MCP Server' : `Edit ${server?.displayName ?? 'MCP Server'}`
-  const ownerLabelText = ownerScope === 'organization' ? 'your organization' : 'your workspace'
+  const ownerLabelText =
+    ownerScope === 'platform' ? 'the platform' : ownerScope === 'organization' ? 'your organization' : 'your workspace'
   const modalSubtitle =
     mode === 'create'
       ? `Connect a new MCP integration for ${ownerLabelText}.`
@@ -475,6 +481,26 @@ export function McpServerFormModal({
               Only members with manage permissions can update organization servers.
             </div>
           )}
+
+          {showPipedreamPrefetchApps && (
+            <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-4 py-4">
+              <label className="block text-sm font-semibold text-slate-700">Prefetch Apps</label>
+              <textarea
+                className="min-h-28 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono text-sm focus:border-blue-500 focus:ring-blue-500"
+                value={state.prefetchAppsInput}
+                onChange={(event) => setState((prev) => ({ ...prev, prefetchAppsInput: event.target.value }))}
+                placeholder={'google_sheets\ngreenhouse\ngoogle_docs'}
+              />
+              <p className="text-xs text-slate-500">
+                One Pipedream app slug per line, or separate with commas.
+              </p>
+              {getFieldErrors('prefetch_apps', formErrors).map((error) => (
+                <p key={error} className="text-xs text-red-600">
+                  {error}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
 
         {state.connectionType !== 'stdio' && state.authMethod === 'oauth2' && (
@@ -683,6 +709,7 @@ function getInitialState(server?: McpServerDetail, allowCommands = false): FormS
       connectionType: 'http',
       commandLine: '',
       environmentEntries: createBlankEnvEntries(),
+      prefetchAppsInput: '',
       isActive: true,
       authMethod: 'none',
       headers: createBlankHeaders(),
@@ -699,6 +726,7 @@ function getInitialState(server?: McpServerDetail, allowCommands = false): FormS
     connectionType,
     commandLine: hasCommand ? formatCommandLine(server.command ?? '', server.commandArgs ?? []) : '',
     environmentEntries: environmentToEntries(server.environment),
+    prefetchAppsInput: (server.prefetchApps ?? []).join('\n'),
     isActive: server.isActive,
     authMethod: server.authMethod,
     headers: headerEntries,
@@ -788,6 +816,22 @@ function entriesToObject(entries: EnvEntry[]): Record<string, string> {
     }
   })
   return result
+}
+
+function parsePrefetchAppsInput(raw: string): string[] {
+  const seen = new Set<string>()
+  const slugs: string[] = []
+  raw
+    .split(/[\n,]/)
+    .map((item) => item.trim().toLowerCase().replace(/\s+/g, '_'))
+    .forEach((slug) => {
+      if (!slug || seen.has(slug)) {
+        return
+      }
+      seen.add(slug)
+      slugs.push(slug)
+    })
+  return slugs
 }
 
 function environmentToEntries(environment?: Record<string, string> | null): EnvEntry[] {
