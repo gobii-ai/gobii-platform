@@ -230,6 +230,56 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(seeded_message.conversation.channel, CommsChannel.WEB)
         self.assertEqual(seeded_message.conversation.address, expected_sender)
 
+    @tag("batch_agent_chat")
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    def test_quick_create_accepts_initial_attachment(self, mock_delay):
+        message_text = "Use this screenshot to create the agent"
+        attachment = SimpleUploadedFile("screenshot.png", b"fake-image-bytes", content_type="image/png")
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data={
+                    "message": message_text,
+                    "preferred_llm_tier": "standard",
+                    "attachments": attachment,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
+        seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
+        attachment_row = seeded_message.attachments.get()
+
+        self.assertEqual(attachment_row.filename, "screenshot.png")
+        self.assertEqual(attachment_row.content_type, "image/png")
+        self.assertIsNotNone(attachment_row.filespace_node)
+        self.assertEqual(attachment_row.filespace_node.name, "screenshot.png")
+        mock_delay.assert_called_once_with(str(created_agent.id))
+
+    @override_settings(MAX_FILE_SIZE=5)
+    @tag("batch_agent_chat")
+    def test_quick_create_rejects_over_limit_initial_attachment(self):
+        attachment = SimpleUploadedFile("screenshot.png", b"too-large", content_type="image/png")
+        before_count = PersistentAgent.objects.count()
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data={
+                "message": "Create an agent with an oversized screenshot",
+                "preferred_llm_tier": "standard",
+                "attachments": attachment,
+            },
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.json(),
+            {"error": '"screenshot.png" is too large. Max file size is 5 bytes.'},
+        )
+        self.assertEqual(PersistentAgent.objects.count(), before_count)
+
     @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     @tag("batch_agent_chat")
     def test_quick_create_allows_email_preference_override(self):

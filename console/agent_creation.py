@@ -12,7 +12,8 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from agents.services import PretrainedWorkerTemplateService
-from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation
+from api.agent.comms.message_service import _ensure_participant, _get_or_create_conversation, _save_attachments
+from api.agent.files.filespace_service import import_message_attachments_to_filespace
 from api.agent.tasks import process_agent_events_task
 from api.agent.tools.custom_tools import CUSTOM_TOOL_PREFIX
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
@@ -135,6 +136,7 @@ def create_persistent_agent_from_charter(
     request: HttpRequest,
     *,
     initial_message: str,
+    initial_attachments: Iterable[object] | None = None,
     contact_email: str | None,
     email_enabled: bool,
     sms_enabled: bool,
@@ -147,6 +149,7 @@ def create_persistent_agent_from_charter(
     initial_message = (initial_message or "").strip()
     if not initial_message:
         raise ValidationError("Please start by describing what your agent should do.")
+    initial_attachments_list = list(initial_attachments or [])
     charter_text = (charter_override or initial_message).strip()
 
     preferred_contact_method = (preferred_contact_method or "email").strip().lower()
@@ -402,7 +405,7 @@ def create_persistent_agent_from_charter(
                 PersistentAgentConversationParticipant.ParticipantRole.AGENT,
             )
 
-        PersistentAgentMessage.objects.create(
+        initial_message_obj = PersistentAgentMessage.objects.create(
             is_outbound=False,
             from_endpoint=preferred_endpoint,
             to_endpoint=agent_channel_endpoint,
@@ -410,6 +413,8 @@ def create_persistent_agent_from_charter(
             body=initial_message,
             owner_agent=persistent_agent,
         )
+        if initial_attachments_list:
+            _save_attachments(initial_message_obj, initial_attachments_list)
 
         if selected_template and selected_template.default_tools:
             for tool_name in selected_template.default_tools:
@@ -431,7 +436,23 @@ def create_persistent_agent_from_charter(
             selected_pipedream_app_slugs=selected_pipedream_app_slugs,
         )
 
-        transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
+        initial_message_id = str(initial_message_obj.id)
+        has_initial_attachments = initial_message_obj.attachments.exists()
+
+        def _import_initial_attachments_then_process() -> None:
+            try:
+                import_message_attachments_to_filespace(initial_message_id)
+            except (PersistentAgentMessage.DoesNotExist, OSError, ValueError):
+                logger.exception(
+                    "Failed synchronous filespace import for initial agent message %s",
+                    initial_message_id,
+                )
+            process_agent_events_task.delay(str(persistent_agent.id))
+
+        if has_initial_attachments:
+            transaction.on_commit(_import_initial_attachments_then_process)
+        else:
+            transaction.on_commit(lambda: process_agent_events_task.delay(str(persistent_agent.id)))
 
         for key in (
             "agent_charter",

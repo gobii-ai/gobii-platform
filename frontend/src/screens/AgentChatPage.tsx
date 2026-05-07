@@ -3273,18 +3273,31 @@ export function AgentChatPage({
       tier: IntelligenceTierKey,
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
+      attachments: File[] = [],
     ) => {
       setCreateAgentError(null)
       setCreateAgentTrialOnboarding(null)
       try {
         const preferredContactMethod = spawnFlow ? 'email' : 'web'
-        const result = await createAgent(
-          body,
-          tier,
-          charterOverride,
-          selectedPipedreamAppSlugs,
-          preferredContactMethod,
-        )
+        let result: Awaited<ReturnType<typeof createAgent>>
+        if (attachments.length > 0) {
+          result = await createAgent(
+            body,
+            tier,
+            charterOverride,
+            selectedPipedreamAppSlugs,
+            preferredContactMethod,
+            attachments,
+          )
+        } else {
+          result = await createAgent(
+            body,
+            tier,
+            charterOverride,
+            selectedPipedreamAppSlugs,
+            preferredContactMethod,
+          )
+        }
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
         const createdPlanningState = normalizePlanningState(result.planning_state)
@@ -3988,6 +4001,7 @@ export function AgentChatPage({
       tierToUse,
       pending.charterOverride,
       pending.selectedPipedreamAppSlugs,
+      pending.attachments,
     )
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
@@ -4004,7 +4018,7 @@ export function AgentChatPage({
     if (sendMessageDisabledReason) {
       return
     }
-    const hasMessageContent = body.trim().length > 0 || attachments.length > 0
+    const hasMessageContent = isNewAgent ? body.trim().length > 0 : body.trim().length > 0 || attachments.length > 0
     if (!hasMessageContent) {
       return
     }
@@ -4075,6 +4089,7 @@ export function AgentChatPage({
         selectedTier,
         charterOverride,
         selectedPipedreamAppSlugs,
+        attachments,
       )
       return
     }

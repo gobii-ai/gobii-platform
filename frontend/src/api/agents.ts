@@ -151,6 +151,7 @@ export async function createAgent(
   charterOverride?: string | null,
   selectedPipedreamAppSlugs?: string[],
   preferredContactMethod?: 'email' | 'web',
+  attachments: File[] = [],
 ): Promise<CreateAgentResponse> {
   const payload: CreateAgentPayload = { message, preferred_llm_tier: preferredLlmTier }
   if (charterOverride) {
@@ -161,6 +162,29 @@ export async function createAgent(
   }
   if (preferredContactMethod) {
     payload.preferred_contact_method = preferredContactMethod
+  }
+  if (attachments.length > 0) {
+    const formData = new FormData()
+    formData.append('message', message)
+    if (preferredLlmTier) {
+      formData.append('preferred_llm_tier', preferredLlmTier)
+    }
+    if (charterOverride) {
+      formData.append('charter_override', charterOverride)
+    }
+    selectedPipedreamAppSlugs?.forEach((slug) => {
+      formData.append('selected_pipedream_app_slugs', slug)
+    })
+    if (preferredContactMethod) {
+      formData.append('preferred_contact_method', preferredContactMethod)
+    }
+    attachments.forEach((file) => {
+      formData.append('attachments', file)
+    })
+    return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
+      method: 'POST',
+      body: formData,
+    })
   }
   return jsonFetch<CreateAgentResponse>('/console/api/agents/create/', {
     method: 'POST',

@@ -3005,10 +3005,27 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         from console.agent_creation import create_persistent_agent_from_charter
 
-        try:
-            body = json.loads(request.body or "{}")
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON body")
+        attachments: list[Any] = []
+        if request.content_type and request.content_type.startswith("multipart/form-data"):
+            try:
+                body = request.POST
+                attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+            except (MultiPartParserError, RequestDataTooBig):
+                max_size_label = filesizeformat(get_max_file_size() or 0).replace("\xa0", " ")
+                return JsonResponse(
+                    {"error": f"Upload is too large. Max file size is {max_size_label}."},
+                    status=400,
+                )
+            oversize_error = _validate_console_chat_attachments(attachments)
+            if oversize_error is not None:
+                return JsonResponse({"error": oversize_error}, status=400)
+            selected_pipedream_app_slugs_raw = body.getlist("selected_pipedream_app_slugs")
+        else:
+            try:
+                body = json.loads(request.body or "{}")
+            except json.JSONDecodeError:
+                return HttpResponseBadRequest("Invalid JSON body")
+            selected_pipedream_app_slugs_raw = body.get("selected_pipedream_app_slugs")
 
         initial_message = (body.get("message") or "").strip()
         if not initial_message:
@@ -3020,7 +3037,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "Preferred contact method must be 'email' or 'web'."}, status=400)
         try:
             selected_pipedream_app_slugs = normalize_app_slugs(
-                body.get("selected_pipedream_app_slugs"),
+                selected_pipedream_app_slugs_raw,
                 strict=True,
                 require_list=True,
             )
@@ -3047,6 +3064,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
                 preferred_llm_tier_key=preferred_llm_tier_key,
                 charter_override=charter_override,
                 selected_pipedream_app_slugs=selected_pipedream_app_slugs,
+                initial_attachments=attachments,
             )
         except PermissionDenied:
             return JsonResponse({"error": "Invalid context override."}, status=403)

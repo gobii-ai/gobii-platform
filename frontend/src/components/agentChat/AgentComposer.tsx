@@ -1,4 +1,4 @@
-import type { ChangeEvent, FormEvent, KeyboardEvent } from 'react'
+import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { ArrowUp, ChevronDown, ChevronUp, Loader2, Paperclip, Plus, Sparkles, X } from 'lucide-react'
@@ -449,6 +449,7 @@ export const AgentComposer = memo(function AgentComposer({
   const isPlanningMode = planningState === 'planning'
   const isStopping = Boolean(isProcessing && stopProcessingRequested)
   const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
+  const requiresMessageBody = agentId === null
   const handleIntelligenceUpsell = useCallback(async () => {
     const authenticated = await ensureAuthenticated()
     if (!authenticated) {
@@ -1042,7 +1043,8 @@ export const AgentComposer = memo(function AgentComposer({
 
   const submitMessage = useCallback(async () => {
     const trimmed = body.trim()
-    if ((!trimmed && attachments.length === 0) || disabled || isSending) {
+    const lacksRequiredContent = requiresMessageBody ? !trimmed : !trimmed && attachments.length === 0
+    if (lacksRequiredContent || disabled || isSending) {
       return
     }
     const attachmentsSnapshot = attachments.slice()
@@ -1078,6 +1080,7 @@ export const AgentComposer = memo(function AgentComposer({
     disabled,
     isSending,
     onSubmit,
+    requiresMessageBody,
   ])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1127,6 +1130,20 @@ export const AgentComposer = memo(function AgentComposer({
     const files = Array.from(event.target.files ?? [])
     addAttachments(files)
     event.target.value = ''
+  }, [addAttachments])
+
+  const handlePaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const clipboardData = event.clipboardData
+    const itemFiles = Array.from(clipboardData.items ?? [])
+      .filter((item) => item.kind === 'file')
+      .map((item) => item.getAsFile())
+      .filter((file): file is File => Boolean(file))
+    const files = itemFiles.length > 0 ? itemFiles : Array.from(clipboardData.files ?? [])
+    if (!files.length) {
+      return
+    }
+    event.preventDefault()
+    addAttachments(files)
   }, [addAttachments])
 
   const handleOpenFilePicker = useCallback(() => {
@@ -1210,7 +1227,9 @@ export const AgentComposer = memo(function AgentComposer({
       : ''
   }`
   const composerActionsDisabled = disabled || isSending
-  const sendDisabled = composerActionsDisabled || stopProcessingBusy || (!body.trim() && attachments.length === 0)
+  const sendDisabled = composerActionsDisabled
+    || stopProcessingBusy
+    || (requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
   const sendTitle = stopProcessingBusy
     ? 'Stopping'
     : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
@@ -1482,12 +1501,13 @@ export const AgentComposer = memo(function AgentComposer({
                 <textarea
                   name="body"
                   rows={1}
-                  required={attachments.length === 0}
+                  required={requiresMessageBody || attachments.length === 0}
                   className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
                   placeholder={composerPlaceholder}
                   value={body}
                   onChange={(event) => setBody(event.target.value)}
                   onKeyDown={handleKeyDown}
+                  onPaste={handlePaste}
                   onFocus={() => {
                     onFocus?.()
                     if (!isTouchDevice) return
