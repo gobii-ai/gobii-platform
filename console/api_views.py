@@ -1403,10 +1403,21 @@ def _run_video_generation_test(endpoint: VideoGenerationModelEndpoint) -> dict[s
     }
 
 
-def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
+def _is_system_admin_user(user) -> bool:
+    return bool(user.is_authenticated and (user.is_staff or user.is_superuser))
+
+
+def _resolve_mcp_server_config(
+    request: HttpRequest,
+    config_id: str,
+    *,
+    allow_platform_staff: bool = False,
+) -> MCPServerConfig:
     """Resolve an MCP server configuration the user is allowed to manage."""
     config = get_object_or_404(MCPServerConfig, pk=config_id)
     if config.scope == MCPServerConfig.Scope.PLATFORM:
+        if allow_platform_staff and _is_system_admin_user(request.user):
+            return config
         raise PermissionDenied("Platform-managed MCP servers cannot be modified from the console.")
 
     if config.scope == MCPServerConfig.Scope.USER:
@@ -1425,6 +1436,17 @@ def _resolve_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServe
     return config
 
 
+def _resolve_platform_mcp_server_config(request: HttpRequest, config_id: str) -> MCPServerConfig:
+    """Resolve a platform MCP server for staff-only management surfaces."""
+    if not _is_system_admin_user(request.user):
+        raise PermissionDenied("You do not have permission to manage platform MCP servers.")
+    return get_object_or_404(
+        MCPServerConfig,
+        pk=config_id,
+        scope=MCPServerConfig.Scope.PLATFORM,
+    )
+
+
 def _require_active_session(request: HttpRequest, session_id: uuid.UUID) -> MCPServerOAuthSession:
     """Fetch a pending OAuth session and enforce ownership + expiry."""
     session = get_object_or_404(MCPServerOAuthSession, pk=session_id)
@@ -1437,7 +1459,7 @@ def _require_active_session(request: HttpRequest, session_id: uuid.UUID) -> MCPS
         raise PermissionDenied("OAuth session has expired. Restart the flow.")
 
     # Re-check access against server configuration in case ownership changed mid-flow.
-    _resolve_mcp_server_config(request, str(session.server_config_id))
+    _resolve_mcp_server_config(request, str(session.server_config_id), allow_platform_staff=True)
     return session
 
 
@@ -7283,7 +7305,10 @@ class MCPServerListAPIView(LoginRequiredMixin, View):
                     expires_at__gt=timezone.now(),
                 ).values_list("server_config_id", flat=True)
             }
-        servers = [_serialize_mcp_server(server, request=request, pending_servers=pending_servers) for server in queryset]
+        servers = [
+            _serialize_mcp_server(server, request=request, pending_servers=pending_servers)
+            for server in queryset
+        ]
         return JsonResponse(
             {
                 "owner_scope": owner_scope,
@@ -7453,6 +7478,122 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
 
 
+class PlatformMCPServerListAPIView(SystemAdminAPIView):
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        queryset = list(
+            MCPServerConfig.objects.select_related("oauth_credential")
+            .filter(scope=MCPServerConfig.Scope.PLATFORM)
+            .order_by("display_name")
+        )
+        pending_servers: set[str] = set()
+        if queryset:
+            server_ids = [server.id for server in queryset]
+            pending_servers = {
+                str(server_id)
+                for server_id in MCPServerOAuthSession.objects.filter(
+                    server_config_id__in=server_ids,
+                    initiated_by=request.user,
+                    expires_at__gt=timezone.now(),
+                ).values_list("server_config_id", flat=True)
+            }
+        servers = [
+            _serialize_mcp_server(server, request=request, pending_servers=pending_servers)
+            for server in queryset
+        ]
+        return JsonResponse(
+            {
+                "owner_scope": MCPServerConfig.Scope.PLATFORM,
+                "owner_label": "Platform",
+                "result_count": len(servers),
+                "servers": servers,
+            }
+        )
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        form = MCPServerConfigForm(payload, allow_commands=True, allow_prefetch_apps=True)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    server = form.save(platform=True)
+            except IntegrityError:
+                form.add_error("name", "A server with that identifier already exists.")
+            else:
+                get_mcp_manager().refresh_server(str(server.id))
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_CREATED,
+                    _mcp_server_event_properties(request, server, MCPServerConfig.Scope.PLATFORM),
+                )
+                return JsonResponse(
+                    {
+                        "server": _serialize_mcp_server_detail(server, request),
+                        "message": "MCP server saved.",
+                    },
+                    status=201,
+                )
+
+        return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+
+class PlatformMCPServerDetailAPIView(SystemAdminAPIView):
+    http_method_names = ["get", "patch", "delete"]
+
+    def get(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_platform_mcp_server_config(request, server_id)
+        return JsonResponse({"server": _serialize_mcp_server_detail(server, request)})
+
+    def patch(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_platform_mcp_server_config(request, server_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        form = MCPServerConfigForm(payload, instance=server, allow_commands=True, allow_prefetch_apps=True)
+        if form.is_valid():
+            try:
+                with transaction.atomic():
+                    updated = form.save(platform=True)
+            except IntegrityError:
+                form.add_error("name", "A server with that identifier already exists.")
+            else:
+                get_mcp_manager().refresh_server(str(updated.id))
+                _track_org_event_for_console(
+                    request,
+                    AnalyticsEvent.MCP_SERVER_UPDATED,
+                    _mcp_server_event_properties(request, updated, MCPServerConfig.Scope.PLATFORM),
+                )
+                return JsonResponse(
+                    {
+                        "server": _serialize_mcp_server_detail(updated, request),
+                        "message": "MCP server updated.",
+                    }
+                )
+
+        return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+    def delete(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_platform_mcp_server_config(request, server_id)
+        server_name = server.display_name
+        props = _mcp_server_event_properties(request, server, MCPServerConfig.Scope.PLATFORM)
+        cached_server_id = str(server.id)
+        server.delete()
+        get_mcp_manager().remove_server(cached_server_id)
+        _track_org_event_for_console(
+            request,
+            AnalyticsEvent.MCP_SERVER_DELETED,
+            props,
+        )
+        return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
+
+
 class MCPOAuthStartView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
@@ -7466,7 +7607,7 @@ class MCPOAuthStartView(LoginRequiredMixin, View):
         if not config_id:
             return HttpResponseBadRequest("server_config_id is required")
 
-        config = _resolve_mcp_server_config(request, str(config_id))
+        config = _resolve_mcp_server_config(request, str(config_id), allow_platform_staff=True)
         if config.auth_method != MCPServerConfig.AuthMethod.OAUTH2:
             return HttpResponseBadRequest("This MCP server is not configured for OAuth 2.0.")
 
@@ -7611,7 +7752,7 @@ class MCPOAuthMetadataProxyView(LoginRequiredMixin, View):
         if not config_id or not resource:
             return HttpResponseBadRequest("server_config_id and resource are required")
 
-        config = _resolve_mcp_server_config(request, str(config_id))
+        config = _resolve_mcp_server_config(request, str(config_id), allow_platform_staff=True)
         base_url = config.url
         if not base_url:
             return HttpResponseBadRequest("This MCP server does not define a base URL.")
@@ -7794,7 +7935,7 @@ class MCPOAuthStatusView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, server_config_id: uuid.UUID, *args: Any, **kwargs: Any):
-        config = _resolve_mcp_server_config(request, str(server_config_id))
+        config = _resolve_mcp_server_config(request, str(server_config_id), allow_platform_staff=True)
         try:
             credential = config.oauth_credential
         except MCPServerOAuthCredential.DoesNotExist:
@@ -7815,7 +7956,7 @@ class MCPOAuthRevokeView(LoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, server_config_id: uuid.UUID, *args: Any, **kwargs: Any):
-        config = _resolve_mcp_server_config(request, str(server_config_id))
+        config = _resolve_mcp_server_config(request, str(server_config_id), allow_platform_staff=True)
         try:
             credential = config.oauth_credential
         except MCPServerOAuthCredential.DoesNotExist:

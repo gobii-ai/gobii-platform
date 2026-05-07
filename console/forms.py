@@ -269,6 +269,7 @@ class MCPServerConfigForm(forms.Form):
         help_text="Select how Gobii should authenticate requests to this MCP server.",
     )
     command_args = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of command arguments, e.g. ['-y', '@pkg@1.0.0'].")
+    prefetch_apps = forms.JSONField(required=False, initial=list, empty_value=list, help_text="JSON array of Pipedream app slugs to prefetch.")
     metadata = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="Additional JSON metadata (optional).")
     environment = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of environment variables.")
     headers = forms.JSONField(required=False, initial=dict, empty_value=dict, help_text="JSON object of HTTP headers.")
@@ -279,10 +280,12 @@ class MCPServerConfigForm(forms.Form):
         *args,
         instance: MCPServerConfig | None = None,
         allow_commands: bool = True,
+        allow_prefetch_apps: bool = False,
         **kwargs,
     ):
         self.instance = instance
         self.allow_commands = allow_commands
+        self.allow_prefetch_apps = allow_prefetch_apps
         initial = kwargs.setdefault('initial', {})
         if instance is not None:
             initial.setdefault('name', instance.name)
@@ -291,6 +294,7 @@ class MCPServerConfigForm(forms.Form):
             initial.setdefault('url', instance.url)
             initial.setdefault('auth_method', instance.auth_method)
             initial.setdefault('command_args', instance.command_args or [])
+            initial.setdefault('prefetch_apps', instance.prefetch_apps or [])
             initial.setdefault('metadata', instance.metadata or {})
             initial.setdefault('environment', instance.environment or {})
             initial.setdefault('headers', instance.headers or {})
@@ -331,6 +335,8 @@ class MCPServerConfigForm(forms.Form):
             self.fields['command_args'].widget = forms.HiddenInput()
             self.fields['environment'].widget = forms.HiddenInput()
             self.fields['metadata'].widget = forms.HiddenInput()
+        if not self.allow_prefetch_apps:
+            self.fields['prefetch_apps'].widget = forms.HiddenInput()
 
     def clean(self):
         cleaned = super().clean()
@@ -377,6 +383,23 @@ class MCPServerConfigForm(forms.Form):
             raise forms.ValidationError("Metadata must be a JSON object.")
         return value
 
+    def clean_prefetch_apps(self):
+        value = self.cleaned_data.get('prefetch_apps') or []
+        if not isinstance(value, list):
+            raise forms.ValidationError("Prefetch apps must be a JSON array.")
+
+        normalized: list[str] = []
+        seen: set[str] = set()
+        for item in value:
+            if not isinstance(item, str):
+                raise forms.ValidationError("Prefetch apps must be app slug strings.")
+            slug = item.strip().lower().replace(" ", "_")
+            if not slug or slug in seen:
+                continue
+            seen.add(slug)
+            normalized.append(slug)
+        return normalized
+
     def clean_environment(self):
         value = self.cleaned_data.get('environment') or {}
         if not self.allow_commands:
@@ -392,7 +415,7 @@ class MCPServerConfigForm(forms.Form):
             raise forms.ValidationError("Headers must be a JSON object.")
         return value
 
-    def save(self, *, user=None, organization=None) -> MCPServerConfig:
+    def save(self, *, user=None, organization=None, platform: bool = False) -> MCPServerConfig:
         if self.instance is None:
             config = MCPServerConfig()
             if organization is not None:
@@ -404,6 +427,11 @@ class MCPServerConfigForm(forms.Form):
         else:
             config = self.instance
 
+        if platform:
+            config.scope = MCPServerConfig.Scope.PLATFORM
+            config.organization = None
+            config.user = None
+
         config.name = self.cleaned_data['name']
         config.display_name = self.cleaned_data['display_name']
         config.command = self.cleaned_data.get('command', '')
@@ -413,7 +441,7 @@ class MCPServerConfigForm(forms.Form):
         if not self.allow_commands:
             config.command = ''
             config.command_args = []
-        if 'prefetch_apps' in self.cleaned_data:
+        if self.allow_prefetch_apps and 'prefetch_apps' in self.cleaned_data:
             config.prefetch_apps = self.cleaned_data.get('prefetch_apps') or []
         config.metadata = self.cleaned_data.get('metadata') or {}
         config.is_active = bool(self.cleaned_data.get('is_active'))

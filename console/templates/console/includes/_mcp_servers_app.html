@@ -1,0 +1,19 @@
+<div class="space-y-4">
+  <div id="gobii-frontend-root"
+       class="min-h-[50vh]"
+       data-app="mcp-servers"
+       data-list-url="{{ mcp_server_list_url }}"
+       data-detail-url-template="{{ mcp_server_detail_url_template }}"
+       data-assign-url-template="{{ mcp_server_assign_url_template }}"
+       {% if pipedream_integrations_enabled %}
+       data-pipedream-apps-url="{% url 'console-pipedream-apps' %}"
+       data-pipedream-app-search-url="{% url 'console-pipedream-app-search' %}"
+       {% endif %}
+       data-owner-scope="{{ owner_scope }}"
+       data-owner-label="{{ owner_label|escape }}"
+       data-allow-commands="{{ allow_mcp_commands|yesno:'true,false' }}"
+       data-oauth-start-url="{% url 'console-mcp-oauth-start' %}"
+       data-oauth-metadata-url="{% url 'console-mcp-oauth-metadata' %}"
+       data-oauth-callback-path="{% url 'console-mcp-oauth-callback-view' %}">
+  </div>
+</div>

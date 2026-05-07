@@ -5847,12 +5847,43 @@ class MCPServerManagementView(ConsoleOwnerScopeMixin, ConsoleViewMixin, Template
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        placeholder_id = "00000000-0000-0000-0000-000000000000"
         context.update(
             {
                 'owner_scope': self.owner_scope,
                 'owner_label': self.get_owner_label(),
                 'allow_mcp_commands': flag_is_active(self.request, SANDBOX_COMPUTE_WAFFLE_FLAG),
                 'pipedream_integrations_enabled': pipedream_status().enabled,
+                'mcp_server_list_url': reverse('console-mcp-server-list'),
+                'mcp_server_detail_url_template': reverse('console-mcp-server-detail', args=[placeholder_id]),
+                'mcp_server_assign_url_template': reverse('console-mcp-server-assignments', args=[placeholder_id]),
+            }
+        )
+        return context
+
+
+class PlatformMCPServerManagementView(SystemAdminRequiredMixin, TemplateView):
+    template_name = "console/staff_platform_mcp.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        placeholder_id = "00000000-0000-0000-0000-000000000000"
+        context.update(
+            {
+                "owner_scope": MCPServerConfig.Scope.PLATFORM,
+                "owner_label": "Platform",
+                "allow_mcp_commands": True,
+                "pipedream_integrations_enabled": False,
+                "mcp_server_list_url": reverse("staff-platform-mcp-server-list"),
+                "mcp_server_detail_url_template": reverse(
+                    "staff-platform-mcp-server-detail",
+                    args=[placeholder_id],
+                ),
+                # Platform MCP servers are globally available, so assignments stay hidden in the UI.
+                "mcp_server_assign_url_template": reverse(
+                    "console-mcp-server-assignments",
+                    args=[placeholder_id],
+                ),
             }
         )
         return context

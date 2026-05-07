@@ -131,6 +131,7 @@ export type McpServerPayload = {
   environment?: Record<string, unknown>
   command?: string
   command_args?: string[]
+  prefetch_apps?: string[]
 }
 
 export type McpServerAssignmentAgent = {

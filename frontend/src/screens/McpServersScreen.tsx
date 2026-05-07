@@ -69,7 +69,7 @@ export function McpServersScreen({
 
   const servers = data?.servers ?? []
   const resolvedOwnerScope = ownerScope ?? data?.ownerScope
-  const ownerLabelText = ownerLabel || data?.ownerLabel || 'your workspace'
+  const ownerLabelText = resolvedOwnerScope === 'platform' ? 'the platform' : ownerLabel || data?.ownerLabel || 'your workspace'
   const listError = error instanceof Error ? error.message : null
 
   const handleSuccess = useCallback(
