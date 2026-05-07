@@ -81,6 +81,7 @@ from ...services.pipedream_apps import (
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
+_MCP_SYNC_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcp-sync")
 
 _proxy_url_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "mcp_http_proxy_url", default=None
@@ -400,8 +401,7 @@ class MCPToolManager:
         if (running_loop and running_loop.is_running()) or cached_loop_running:
             # Python disallows nesting run_until_complete in a thread that is
             # already running an event loop, including one cached on the manager.
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                return executor.submit(self._run_coroutine_isolated, coroutine).result()
+            return _MCP_SYNC_EXECUTOR.submit(self._run_coroutine_isolated, coroutine).result()
 
         loop = self._ensure_event_loop()
         return loop.run_until_complete(coroutine)
@@ -840,6 +840,9 @@ class MCPToolManager:
 
         runtime = self._build_runtime_from_config(cfg)
         sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
+        slot_key = self._tool_cache_slot_key(runtime, sandbox_context=sandbox_context)
+        self._tools_cache.pop(slot_key, None)
+        self._tool_cache_fingerprints.pop(slot_key, None)
         try:
             self._register_server(
                 runtime,
@@ -856,7 +859,12 @@ class MCPToolManager:
                 "message": str(exc),
             }
 
-        slot_key = self._tool_cache_slot_key(runtime, sandbox_context=sandbox_context)
+        if slot_key not in self._tools_cache:
+            return False, [], {
+                "phase": "discover_tools",
+                "error_type": "discovery_not_completed",
+                "message": "MCP server test did not complete tool discovery.",
+            }
         return True, list(self._tools_cache.get(slot_key) or []), {}
 
     def remove_server(self, config_id: str) -> None:

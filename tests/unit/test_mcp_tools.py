@@ -1089,6 +1089,45 @@ class MCPToolManagerTests(TestCase):
         with patch.object(self.manager, "_register_server") as mock_register:
             self.manager.initialize(force=True)
         mock_register.assert_not_called()
+
+    def test_test_server_tools_fails_when_forced_discovery_does_not_refresh_cache(self):
+        """Manual tests should not report stale cached tools after an early registration return."""
+        runtime = self.manager._build_runtime_from_config(self.server_config)
+        slot_key = self.manager._tool_cache_slot_key(runtime)
+        stale_tool = MCPToolInfo(
+            self.config_id,
+            full_name="mcp_stale_lookup",
+            server_name=self.server_name,
+            tool_name="lookup",
+            description="Stale tool",
+            parameters={},
+        )
+        self.manager._tools_cache[slot_key] = [stale_tool]
+        self.manager._tool_cache_fingerprints[slot_key] = "stale-fingerprint"
+
+        with patch.object(self.manager, "_register_server", return_value=None):
+            ok, tools, details = self.manager.test_server_tools(self.config_id)
+
+        self.assertFalse(ok)
+        self.assertEqual(tools, [])
+        self.assertEqual(details["error_type"], "discovery_not_completed")
+        self.assertNotIn(slot_key, self.manager._tools_cache)
+        self.assertNotIn(slot_key, self.manager._tool_cache_fingerprints)
+
+    def test_test_server_tools_accepts_fresh_empty_tool_discovery(self):
+        """A successful discovery can legitimately expose zero tools."""
+        runtime = self.manager._build_runtime_from_config(self.server_config)
+        slot_key = self.manager._tool_cache_slot_key(runtime)
+
+        def register_server(_runtime, **_kwargs):
+            self.manager._tools_cache[slot_key] = []
+
+        with patch.object(self.manager, "_register_server", side_effect=register_server):
+            ok, tools, details = self.manager.test_server_tools(self.config_id)
+
+        self.assertTrue(ok)
+        self.assertEqual(tools, [])
+        self.assertEqual(details, {})
         
     def test_get_tools_for_agent_registers_accessible_servers_only(self):
         """Ensure discovery runs only for servers the agent can access."""
