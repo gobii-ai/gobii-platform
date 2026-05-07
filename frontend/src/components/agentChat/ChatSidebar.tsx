@@ -152,12 +152,11 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const handleStepLeft = useCallback(() => {
     if (showSettingsView) {
-      onBackFromEmbeddedSettings?.()
       onDesktopModeChange?.('list')
       return
     }
     onDesktopModeChange?.(getPreviousAgentChatSidebarMode(desktopMode))
-  }, [desktopMode, onBackFromEmbeddedSettings, onDesktopModeChange, showSettingsView])
+  }, [desktopMode, onDesktopModeChange, showSettingsView])
 
   const handleStepRight = useCallback(() => {
     if (showSettingsView) {

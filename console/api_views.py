@@ -194,6 +194,7 @@ from console.agent_chat.timeline import (
     serialize_processing_snapshot,
 )
 from console.agent_chat.suggestions import DEFAULT_PROMPT_COUNT, build_agent_timeline_suggestions
+from console.api_helpers import ApiLoginRequiredMixin, _coerce_bool, _parse_json_body
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
@@ -400,15 +401,6 @@ def _pending_action_payload(agent: PersistentAgent, viewer_user) -> dict[str, An
         "pending_human_input_requests": get_legacy_pending_human_input_requests(pending_action_requests),
         "pending_action_requests": pending_action_requests,
     }
-
-
-class ApiLoginRequiredMixin(LoginRequiredMixin):
-    """Return JSON 401 instead of redirecting to the login page."""
-
-    def handle_no_permission(self):
-        if not self.request.user.is_authenticated:
-            return JsonResponse({"error": "Authentication required"}, status=401)
-        return super().handle_no_permission()
 
 
 class ConsolePersistentAgentViewSet(PersistentAgentViewSet):
@@ -1562,28 +1554,10 @@ def _form_errors(form: MCPServerConfigForm) -> dict[str, list[str]]:
     return errors
 
 
-def _parse_json_body(request: HttpRequest) -> dict:
-    try:
-        payload = json.loads(request.body or "{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("Invalid JSON body") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("JSON object expected")
-    return payload
-
-
 def _json_ok(**extra):
     payload = {"ok": True}
     payload.update(extra)
     return JsonResponse(payload)
-
-
-def _coerce_bool(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        return value.strip().lower() in {"1", "true", "yes", "on"}
-    return bool(value)
 
 
 _REASONING_EFFORT_VALUES = set(PersistentModelEndpoint.ReasoningEffort.values)

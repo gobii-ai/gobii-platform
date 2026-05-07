@@ -26,11 +26,12 @@ from api.services.agent_email_aliases import (
     is_default_agent_email_address,
 )
 from api.services.persistent_agents import ensure_default_agent_email_endpoint
-from console.api_views import (
+from console.api_helpers import (
     ApiLoginRequiredMixin,
     _coerce_bool,
     _parse_json_body,
 )
+from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.forms import AgentEmailAccountConsoleForm
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -38,16 +39,6 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
-EMAIL_OAUTH_PROVIDER_DEFAULTS = {
-    "gmail": {
-        "smtp_host": "smtp.gmail.com",
-        "smtp_port": 587,
-        "smtp_security": "starttls",
-        "imap_host": "imap.gmail.com",
-        "imap_port": 993,
-        "imap_security": "ssl",
-    },
-}
 EMAIL_ENDPOINT_REQUIRED_ERROR = "Please provide a valid email address."
 EMAIL_ENDPOINT_CONFLICT_ERROR = "That email address is already assigned to another agent."
 AGENT_EMAIL_ACCOUNT_COPY_EXCLUDED_FIELDS = {"endpoint", "created_at", "updated_at"}
@@ -97,6 +88,7 @@ def _sync_oauth_usernames_to_endpoint(
     account: AgentEmailAccount,
     endpoint_address: str,
     previous_endpoint_address: str = "",
+    force: bool = False,
 ) -> None:
     if account.connection_mode != AgentEmailAccount.ConnectionMode.OAUTH2:
         return
@@ -108,7 +100,7 @@ def _sync_oauth_usernames_to_endpoint(
 
     for field in ("smtp_username", "imap_username"):
         username = (getattr(account, field) or "").strip()
-        if not username or (previous_address and username.casefold() == previous_address.casefold()):
+        if force or not username or (previous_address and username.casefold() == previous_address.casefold()):
             setattr(account, field, current_address)
 
 
@@ -264,7 +256,6 @@ def _apply_email_account_settings(
     if account.connection_mode == AgentEmailAccount.ConnectionMode.OAUTH2:
         account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
         account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-        _sync_oauth_usernames_to_endpoint(account, endpoint.address, previous_endpoint_address)
 
         provider_key = (provider or "").lower()
         if not provider_key:
@@ -272,11 +263,16 @@ def _apply_email_account_settings(
                 provider_key = (account.oauth_credential.provider or "").lower()
             except AgentEmailOAuthCredential.DoesNotExist:
                 provider_key = ""
+        _sync_oauth_usernames_to_endpoint(
+            account,
+            endpoint.address,
+            previous_endpoint_address,
+            force=provider_key in EMAIL_OAUTH_PROVIDER_DEFAULTS,
+        )
         defaults = EMAIL_OAUTH_PROVIDER_DEFAULTS.get(provider_key)
         if defaults:
             for key, value in defaults.items():
-                if not getattr(account, key):
-                    setattr(account, key, value)
+                setattr(account, key, value)
 
 
 def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, str]:
@@ -315,7 +311,21 @@ def _validate_agent_smtp_connection(account: AgentEmailAccount) -> tuple[bool, s
                     logger.debug("SMTP close failed during connection test cleanup: %s", close_exc, exc_info=close_exc)
         return True, ""
     except Exception as exc:
-        return False, _format_email_connection_error(exc)
+        logger.warning(
+            "SMTP connection test failed for agent email account %s endpoint %s provider %s auth %s: %r",
+            account.pk,
+            account.endpoint_id,
+            _email_oauth_provider(account),
+            account.smtp_auth,
+            exc,
+            exc_info=exc,
+        )
+        return False, _format_email_connection_error(
+            exc,
+            channel="smtp",
+            auth_mode=account.smtp_auth,
+            provider=_email_oauth_provider(account),
+        )
 
 
 def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, str]:
@@ -357,7 +367,21 @@ def _validate_agent_imap_connection(account: AgentEmailAccount) -> tuple[bool, s
                     )
         return True, ""
     except Exception as exc:
-        return False, _format_email_connection_error(exc)
+        logger.warning(
+            "IMAP connection test failed for agent email account %s endpoint %s provider %s auth %s: %r",
+            account.pk,
+            account.endpoint_id,
+            _email_oauth_provider(account),
+            account.imap_auth,
+            exc,
+            exc_info=exc,
+        )
+        return False, _format_email_connection_error(
+            exc,
+            channel="imap",
+            auth_mode=account.imap_auth,
+            provider=_email_oauth_provider(account),
+        )
 
 
 def _decode_email_error_part(value: Any) -> str:
@@ -396,17 +420,55 @@ def _normalize_email_error_text(raw_error: Any) -> str:
     return text
 
 
-def _format_email_connection_error(raw_error: Any) -> str:
+def _email_oauth_provider(account: AgentEmailAccount) -> str:
+    try:
+        return (account.oauth_credential.provider or "").strip().lower()
+    except AgentEmailOAuthCredential.DoesNotExist:
+        return ""
+
+
+def _format_email_connection_error(
+    raw_error: Any,
+    *,
+    channel: str = "",
+    auth_mode: str = "",
+    provider: str = "",
+) -> str:
     normalized = _normalize_email_error_text(raw_error)
     lowered = normalized.lower()
+    channel_key = channel.strip().lower()
+    auth_key = auth_mode.strip().lower()
+    provider_key = provider.strip().lower()
+    is_oauth = auth_key == "oauth2"
+    is_microsoft = provider_key in {"microsoft", "outlook", "o365", "office365"}
     if "empty username or password" in lowered:
         return "Username or password is missing. Enter both values and try again."
+    if "smtpclientauthentication is disabled for the mailbox" in lowered:
+        return "Microsoft says SMTP AUTH is disabled for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider."
+    if "smtpclientauthentication is disabled for the tenant" in lowered or "smtp auth is disabled" in lowered:
+        return "Microsoft says SMTP AUTH is disabled for this tenant. Enable authenticated SMTP, or use a different outbound mail provider."
+    if "user is authenticated but not connected" in lowered or "5.7.139" in lowered:
+        return "Microsoft accepted the sign-in but blocked SMTP AUTH for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider."
+    if (
+        "imap is disabled" in lowered
+        or "pop is disabled" in lowered
+        or "application-specific password required" in lowered
+    ):
+        return "IMAP access is disabled for this mailbox. Enable IMAP for the account and try again."
     if (
         "username and password not accepted" in lowered
         or "badcredentials" in lowered
         or "authentication failed" in lowered
         or "invalid credentials" in lowered
+        or "5.7.3 authentication unsuccessful" in lowered
+        or "535 5.7.3" in lowered
     ):
+        if is_oauth:
+            if is_microsoft and channel_key == "smtp":
+                return "Microsoft rejected SMTP OAuth for this mailbox. Confirm Authenticated SMTP is enabled for the mailbox and try reconnecting OAuth."
+            if is_microsoft and channel_key == "imap":
+                return "Microsoft rejected IMAP OAuth for this mailbox. Confirm IMAP access is enabled for the mailbox and try reconnecting OAuth."
+            return "OAuth authentication failed. Reconnect this email account and try again."
         return "Authentication failed. Check your username and password. For Gmail manual setup, use an app password."
     return normalized or "Connection test failed."
 

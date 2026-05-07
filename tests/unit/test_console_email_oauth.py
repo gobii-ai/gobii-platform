@@ -130,6 +130,66 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertEqual(session.client_id, "managed-client-id")
         self.assertEqual(session.client_secret, "managed-secret")
 
+    @patch.dict(
+        os.environ,
+        {
+            "MICROSOFT_CLIENT_ID": "managed-ms-client-id",
+            "MICROSOFT_CLIENT_SECRET": "managed-ms-secret",
+        },
+        clear=False,
+    )
+    def test_start_uses_managed_microsoft_app(self):
+        url = reverse("console-email-oauth-start")
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "account_id": str(self.account.pk),
+                    "provider": "microsoft",
+                    "scope": "offline_access",
+                    "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    "use_gobii_app": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["client_id"], "managed-ms-client-id")
+        session = AgentEmailOAuthSession.objects.get(id=payload["session_id"])
+        self.assertEqual(session.client_id, "managed-ms-client-id")
+        self.assertEqual(session.client_secret, "managed-ms-secret")
+
+    @patch.dict(
+        os.environ,
+        {
+            "MICROSOFT_CLIENT_ID": "managed-ms-client-id",
+            "MICROSOFT_CLIENT_SECRET": "managed-ms-secret",
+        },
+        clear=False,
+    )
+    def test_start_uses_managed_outlook_app(self):
+        url = reverse("console-email-oauth-start")
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "account_id": str(self.account.pk),
+                    "provider": "outlook",
+                    "scope": "offline_access",
+                    "token_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+                    "use_gobii_app": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["client_id"], "managed-ms-client-id")
+        session = AgentEmailOAuthSession.objects.get(id=payload["session_id"])
+        self.assertEqual(session.client_id, "managed-ms-client-id")
+        self.assertEqual(session.client_secret, "managed-ms-secret")
+
     @patch("console.api_views.httpx.post")
     def test_callback_stores_credentials(self, mock_httpx_post):
         session = AgentEmailOAuthSession.objects.create(
@@ -178,6 +238,58 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertFalse(
             AgentEmailOAuthSession.objects.filter(id=session.id).exists(),
             "OAuth session should be removed after callback completion",
+        )
+
+    @patch("console.api_views.httpx.post")
+    def test_callback_persists_microsoft_provider_metadata(self, mock_httpx_post):
+        session = AgentEmailOAuthSession.objects.create(
+            account=self.account,
+            initiated_by=self.user,
+            user=self.user,
+            state="state-msft",
+            scope="offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
+            token_endpoint="https://login.microsoftonline.com/common/oauth2/v2.0/token",
+            client_id="client-id",
+            expires_at=timezone.now() + timedelta(minutes=5),
+            metadata={
+                "provider": "microsoft",
+                "authorization_endpoint": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+            },
+        )
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "access_token": "access123",
+            "refresh_token": "refresh123",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
+        }
+        mock_httpx_post.return_value = mock_response
+
+        url = reverse("console-email-oauth-callback")
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "session_id": str(session.id),
+                    "authorization_code": "code-abc",
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        credential = AgentEmailOAuthCredential.objects.get(account=self.account)
+        self.assertEqual(credential.provider, "microsoft")
+        self.assertEqual(
+            credential.scope,
+            "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send",
+        )
+        self.assertEqual(
+            credential.metadata["token_endpoint"],
+            "https://login.microsoftonline.com/common/oauth2/v2.0/token",
         )
 
     def test_status_without_credentials(self):
@@ -255,6 +367,9 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertIn("exists", payload["defaultEndpoint"])
         self.assertIn("address", payload["defaultEndpoint"])
         self.assertIn("isInboundAliasActive", payload["defaultEndpoint"])
+        self.assertIn("gmail", payload["providerDefaults"])
+        self.assertIn("microsoft", payload["providerDefaults"])
+        self.assertIn("outlook", payload["providerDefaults"])
 
     def test_email_settings_api_get_includes_default_endpoint_payload(self):
         with override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True):
@@ -547,6 +662,64 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["results"]["smtp"]["ok"])
 
+    @patch("console.email_settings.views._validate_agent_imap_connection", return_value=(True, ""))
+    @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(True, ""))
+    def test_email_settings_test_endpoint_applies_microsoft_oauth_defaults(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="microsoft",
+        )
+        mock_validate_smtp.side_effect = lambda account: (
+            self.assertEqual(account.smtp_host, "smtp.office365.com") or True,
+            "",
+        )
+        mock_validate_imap.side_effect = lambda account: (
+            self.assertEqual(account.imap_host, "outlook.office365.com") or True,
+            "",
+        )
+
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": self.endpoint.address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "microsoft",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "testOutbound": True,
+                    "testInbound": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": self.endpoint.address,
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": self.endpoint.address,
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(mock_validate_smtp.call_count, 1)
+        self.assertEqual(mock_validate_imap.call_count, 1)
+
     @patch("console.email_settings.views._validate_agent_smtp_connection", return_value=(False, "mock-smtp-error"))
     def test_email_settings_test_endpoint_does_not_persist_draft_settings(self, _mock_validate_smtp):
         self.account.smtp_host = "saved.smtp.example.com"
@@ -691,6 +864,78 @@ class AgentEmailOAuthApiTests(TestCase):
 
     @patch("console.email_settings.views._validate_agent_imap_connection")
     @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_email_settings_test_endpoint_replaces_stale_first_party_oauth_usernames(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_host = "smtp.office365.com"
+        self.account.imap_host = "imap.gmail.com"
+        self.account.smtp_username = "stale-gmail@example.com"
+        self.account.imap_username = "stale-gmail@example.com"
+        self.account.save()
+
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="outlook",
+        )
+
+        mailbox_address = "matt.greathouse@outlook.com"
+
+        def smtp_side_effect(account):
+            self.assertEqual(account.smtp_username, mailbox_address)
+            self.assertEqual(account.smtp_host, "smtp-mail.outlook.com")
+            return True, ""
+
+        def imap_side_effect(account):
+            self.assertEqual(account.imap_username, mailbox_address)
+            self.assertEqual(account.imap_host, "outlook.office365.com")
+            return True, ""
+
+        mock_validate_smtp.side_effect = smtp_side_effect
+        mock_validate_imap.side_effect = imap_side_effect
+
+        url = reverse("console_agent_email_settings_test", args=[self.agent.pk])
+        response = self.client.post(
+            url,
+            data=json.dumps(
+                {
+                    "endpointAddress": mailbox_address,
+                    "previousEndpointAddress": self.endpoint.address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "outlook",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "testOutbound": True,
+                    "testInbound": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": "stale-gmail@example.com",
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": "stale-gmail@example.com",
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["ok"])
+
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
     def test_email_settings_save_rebinds_oauth_usernames_after_test_address_change(
         self,
         mock_validate_smtp,
@@ -702,6 +947,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
         self.account.smtp_username = old_address
         self.account.imap_username = old_address
+        self.account.connection_last_ok_at = timezone.now()
         self.account.save()
 
         AgentEmailOAuthCredential.objects.create(
@@ -791,6 +1037,72 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertEqual(self.account.smtp_username, new_address)
         self.assertEqual(self.account.imap_username, new_address)
 
+    @patch("console.email_settings.views._validate_agent_imap_connection")
+    @patch("console.email_settings.views._validate_agent_smtp_connection")
+    def test_email_settings_save_rebinds_microsoft_oauth_usernames_after_test_address_change(
+        self,
+        mock_validate_smtp,
+        mock_validate_imap,
+    ):
+        old_address = self.endpoint.address
+        self.account.connection_mode = AgentEmailAccount.ConnectionMode.OAUTH2
+        self.account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
+        self.account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
+        self.account.smtp_username = old_address
+        self.account.imap_username = old_address
+        self.account.connection_last_ok_at = timezone.now()
+        self.account.save()
+
+        AgentEmailOAuthCredential.objects.create(
+            account=self.account,
+            user=self.user,
+            provider="microsoft",
+        )
+
+        mock_validate_smtp.return_value = True, ""
+        mock_validate_imap.return_value = True, ""
+
+        new_address = "renamed-agent-microsoft@example.com"
+        save_url = reverse("console_agent_email_settings", args=[self.agent.pk])
+
+        save_response = self.client.post(
+            save_url,
+            data=json.dumps(
+                {
+                    "endpointAddress": new_address,
+                    "previousEndpointAddress": old_address,
+                    "connectionMode": "oauth2",
+                    "oauthProvider": "microsoft",
+                    "isOutboundEnabled": True,
+                    "isInboundEnabled": True,
+                    "smtpHost": "",
+                    "smtpPort": None,
+                    "smtpSecurity": "starttls",
+                    "smtpAuth": "oauth2",
+                    "smtpUsername": old_address,
+                    "smtpPassword": "",
+                    "imapHost": "",
+                    "imapPort": None,
+                    "imapSecurity": "ssl",
+                    "imapAuth": "oauth2",
+                    "imapUsername": old_address,
+                    "imapPassword": "",
+                    "imapFolder": "INBOX",
+                    "imapIdleEnabled": False,
+                    "pollIntervalSec": 120,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(save_response.status_code, 200, save_response.content)
+
+        self.account.refresh_from_db()
+        self.assertEqual(self.account.endpoint.address, new_address)
+        self.assertEqual(self.account.smtp_username, new_address)
+        self.assertEqual(self.account.imap_username, new_address)
+        self.assertEqual(self.account.smtp_host, "smtp.office365.com")
+        self.assertEqual(self.account.imap_host, "outlook.office365.com")
+
     def test_normalize_email_error_text_flattens_tuple_and_bytes(self):
         normalized = _normalize_email_error_text(
             "(535, b'5.7.8 Username and Password not accepted. Learn more at https://support.google.com/mail/?p=BadCredentials x - gsmtp')"
@@ -801,3 +1113,47 @@ class AgentEmailOAuthApiTests(TestCase):
     def test_format_email_connection_error_humanizes_missing_credentials(self):
         message = _format_email_connection_error("b'Empty username or password. af79cd13be357-8cb2e53b218mb5783094385a'")
         self.assertEqual(message, "Username or password is missing. Enter both values and try again.")
+
+    def test_format_email_connection_error_humanizes_microsoft_smtp_auth_disabled(self):
+        message = _format_email_connection_error("535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Tenant.")
+        self.assertEqual(
+            message,
+            "Microsoft says SMTP AUTH is disabled for this tenant. Enable authenticated SMTP, or use a different outbound mail provider.",
+        )
+
+    def test_format_email_connection_error_humanizes_microsoft_mailbox_smtp_auth_disabled(self):
+        message = _format_email_connection_error(
+            "535 5.7.139 Authentication unsuccessful, SmtpClientAuthentication is disabled for the Mailbox."
+        )
+        self.assertEqual(
+            message,
+            "Microsoft says SMTP AUTH is disabled for this mailbox. Enable authenticated SMTP for the mailbox, or use a different outbound mail provider.",
+        )
+
+    def test_format_email_connection_error_humanizes_microsoft_smtp_oauth_failure(self):
+        message = _format_email_connection_error(
+            "535 5.7.3 Authentication unsuccessful",
+            channel="smtp",
+            auth_mode="oauth2",
+            provider="outlook",
+        )
+        self.assertEqual(
+            message,
+            "Microsoft rejected SMTP OAuth for this mailbox. Confirm Authenticated SMTP is enabled for the mailbox and try reconnecting OAuth.",
+        )
+
+    def test_format_email_connection_error_humanizes_generic_oauth_failure(self):
+        message = _format_email_connection_error(
+            "Authentication failed",
+            channel="imap",
+            auth_mode="oauth2",
+            provider="custom",
+        )
+        self.assertEqual(message, "OAuth authentication failed. Reconnect this email account and try again.")
+
+    def test_format_email_connection_error_humanizes_disabled_imap(self):
+        message = _format_email_connection_error("IMAP is disabled for this account.")
+        self.assertEqual(
+            message,
+            "IMAP access is disabled for this mailbox. Enable IMAP for the account and try again.",
+        )

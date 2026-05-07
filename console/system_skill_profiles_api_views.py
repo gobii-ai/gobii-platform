@@ -1,6 +1,5 @@
 """Console API views for owner-scoped system skill profile management."""
 
-import json
 from typing import Any
 
 from django.contrib.auth.mixins import LoginRequiredMixin
@@ -18,6 +17,7 @@ from api.services.system_skill_profiles import (
     trigger_agents_for_system_skill_profile_change,
     upsert_system_skill_profile_values,
 )
+from console.api_helpers import _parse_json_body
 from console.context_helpers import build_console_context
 
 
@@ -29,16 +29,6 @@ def _resolve_profiles_owner(request: HttpRequest):
             raise PermissionDenied("You do not have permission to manage organization system skill profiles.")
         return ("organization", None, membership.org)
     return ("user", request.user, None)
-
-
-def _parse_json_body(request: HttpRequest) -> dict:
-    try:
-        payload = json.loads(request.body or "{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("Invalid JSON body") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("JSON object expected")
-    return payload
 
 
 def _serialize_definition(skill_key: str) -> dict[str, object]:

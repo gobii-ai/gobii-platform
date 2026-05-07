@@ -1,6 +1,5 @@
 """Console API views for global secrets and agent secrets management."""
 
-import json
 import logging
 from typing import Any
 
@@ -16,6 +15,7 @@ from api.services.persistent_agent_secrets import (
     move_agent_secret_to_global,
     resolve_global_secret_owner_for_agent,
 )
+from console.api_helpers import _parse_json_body
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.context_helpers import build_console_context
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -39,16 +39,6 @@ def _resolve_secrets_owner(request: HttpRequest):
             raise PermissionDenied("You do not have permission to manage organization secrets.")
         return ("organization", None, membership.org)
     return ("user", request.user, None)
-
-
-def _parse_json_body(request: HttpRequest) -> dict:
-    try:
-        payload = json.loads(request.body or "{}")
-    except json.JSONDecodeError as exc:
-        raise ValueError("Invalid JSON body") from exc
-    if not isinstance(payload, dict):
-        raise ValueError("JSON object expected")
-    return payload
 
 
 def _serialize_global_secret(secret: GlobalSecret) -> dict:
