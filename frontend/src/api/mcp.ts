@@ -51,6 +51,26 @@ type McpServerAssignmentAgentDTO = {
   last_interaction_at?: string | null
 }
 
+type McpServerTestToolDTO = {
+  full_name: string
+  tool_name: string
+  server_name: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+type McpServerTestResponseDTO = {
+  status: 'ok' | 'error'
+  message: string
+  sandboxed?: boolean
+  agent?: {
+    id: string
+    name: string
+  } | null
+  tools?: McpServerTestToolDTO[]
+  details?: Record<string, unknown>
+}
+
 type McpServerAssignmentsResponseDTO = {
   server: {
     id: string
@@ -157,6 +177,26 @@ export type McpServerAssignmentResponse = {
   message?: string
 }
 
+export type McpServerTestTool = {
+  fullName: string
+  toolName: string
+  serverName: string
+  description: string
+  parameters: Record<string, unknown>
+}
+
+export type McpServerTestResponse = {
+  status: 'ok' | 'error'
+  message: string
+  sandboxed: boolean
+  agent: {
+    id: string
+    name: string
+  } | null
+  tools: McpServerTestTool[]
+  details: Record<string, unknown>
+}
+
 export type PipedreamAppSummary = {
   slug: string
   name: string
@@ -224,6 +264,23 @@ const mapAssignments = (payload: McpServerAssignmentsResponseDTO): McpServerAssi
   totalAgents: payload.total_agents ?? 0,
   assignedCount: payload.assigned_count ?? 0,
   message: payload.message,
+})
+
+const mapTestTool = (tool: McpServerTestToolDTO): McpServerTestTool => ({
+  fullName: tool.full_name ?? '',
+  toolName: tool.tool_name ?? '',
+  serverName: tool.server_name ?? '',
+  description: tool.description ?? '',
+  parameters: tool.parameters ?? {},
+})
+
+const mapTestResponse = (payload: McpServerTestResponseDTO): McpServerTestResponse => ({
+  status: payload.status,
+  message: payload.message ?? '',
+  sandboxed: Boolean(payload.sandboxed),
+  agent: payload.agent ? { id: payload.agent.id, name: payload.agent.name } : null,
+  tools: (payload.tools ?? []).map(mapTestTool),
+  details: payload.details ?? {},
 })
 
 export const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummary => ({
@@ -294,6 +351,15 @@ export async function updateMcpServerAssignments(assignmentsUrl: string, agentId
     json: { agent_ids: agentIds },
   })
   return mapAssignments(payload)
+}
+
+export async function testMcpServer(testUrl: string, agentId?: string | null): Promise<McpServerTestResponse> {
+  const payload = await jsonRequest<McpServerTestResponseDTO>(testUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    json: agentId ? { agent_id: agentId } : {},
+  })
+  return mapTestResponse(payload)
 }
 
 export async function fetchPipedreamAppSettings(settingsUrl: string): Promise<PipedreamAppSettings> {

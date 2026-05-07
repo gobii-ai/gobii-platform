@@ -218,6 +218,10 @@ switch (appName) {
     if (!assignTemplate) {
       throw new Error('MCP server assignment URL template is required')
     }
+    const testTemplate = mountNode.dataset.testUrlTemplate
+    if (!testTemplate) {
+      throw new Error('MCP server test URL template is required')
+    }
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
@@ -231,6 +235,7 @@ switch (appName) {
         listUrl={listUrl}
         detailUrlTemplate={detailTemplate}
         assignmentUrlTemplate={assignTemplate}
+        testUrlTemplate={testTemplate}
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}

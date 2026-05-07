@@ -10,6 +10,7 @@ import {
 import { McpServerFormModal } from '../components/mcp/McpServerFormModal'
 import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'
+import { McpServerTestModal } from '../components/mcp/McpServerTestModal'
 import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
 import { useModal } from '../hooks/useModal'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
@@ -18,6 +19,7 @@ type McpServersScreenProps = {
   listUrl: string
   detailUrlTemplate: string
   assignmentUrlTemplate: string
+  testUrlTemplate: string
   ownerScope?: string
   ownerLabel?: string
   allowCommands?: boolean
@@ -35,6 +37,7 @@ export function McpServersScreen({
   listUrl,
   detailUrlTemplate,
   assignmentUrlTemplate,
+  testUrlTemplate,
   ownerScope,
   ownerLabel,
   allowCommands = false,
@@ -185,6 +188,24 @@ export function McpServersScreen({
     [showModal, detailUrlTemplate, handleSuccess, handleError],
   )
 
+  const openTestModal = useCallback(
+    (server: McpServer) => {
+      const testUrl = buildUrl(testUrlTemplate, server.id)
+      const assignmentUrl = buildUrl(assignmentUrlTemplate, server.id)
+      showModal((onClose) => (
+        <McpServerTestModal
+          server={server}
+          testUrl={testUrl}
+          assignmentUrl={assignmentUrl}
+          requiresAgent={requiresSandboxAgent(server)}
+          onClose={onClose}
+          onError={handleError}
+        />
+      ))
+    },
+    [showModal, testUrlTemplate, assignmentUrlTemplate, handleError],
+  )
+
   const rootClassName = isEmbedded ? 'space-y-5' : 'space-y-4'
   const successBannerClassName = isEmbedded
     ? 'rounded-xl border border-emerald-300/25 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-100'
@@ -230,6 +251,9 @@ export function McpServersScreen({
   const editButtonClassName = isEmbedded
     ? 'inline-flex items-center justify-center rounded-lg border border-slate-200/20 bg-slate-950/20 px-3 py-2 text-sm font-medium text-slate-200 transition hover:border-slate-100/35 hover:bg-slate-900/40'
     : 'inline-flex items-center justify-center rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50'
+  const testButtonClassName = isEmbedded
+    ? 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300/25 bg-emerald-950/20 px-3 py-2 text-sm font-medium text-emerald-100 transition hover:border-emerald-200/40 hover:bg-emerald-900/35 disabled:cursor-not-allowed disabled:opacity-50'
+    : 'inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-200 px-3 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50'
   const deleteButtonClassName = isEmbedded
     ? 'inline-flex items-center justify-center rounded-lg border border-rose-300/25 bg-rose-950/20 px-3 py-2 text-sm font-medium text-rose-200 transition hover:border-rose-200/40 hover:bg-rose-900/35'
     : 'inline-flex items-center justify-center rounded-lg border border-red-200 px-3 py-2 text-sm font-medium text-red-600 hover:bg-red-50'
@@ -390,6 +414,15 @@ export function McpServersScreen({
                         )}
                         <button
                           type="button"
+                          className={testButtonClassName}
+                          onClick={() => openTestModal(server)}
+                          disabled={!server.isActive}
+                          title={!server.isActive ? 'Activate this MCP server before testing.' : undefined}
+                        >
+                          Test
+                        </button>
+                        <button
+                          type="button"
                           className={editButtonClassName}
                           onClick={() => openEditModal(server)}
                         >
@@ -415,6 +448,10 @@ export function McpServersScreen({
       {modal}
     </div>
   )
+}
+
+function requiresSandboxAgent(server: McpServer): boolean {
+  return server.scope !== 'platform' && Boolean(server.command) && !server.url
 }
 
 function buildUrl(template: string, id: string): string {

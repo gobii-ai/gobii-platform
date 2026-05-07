@@ -221,7 +221,7 @@ from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KE
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
-from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
+from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG, SandboxComputeService, SandboxComputeUnavailable
 from waffle import flag_is_active
 from console.llm_serializers import build_llm_overview
 import litellm
@@ -1572,6 +1572,139 @@ def _serialize_mcp_server_detail(server: MCPServerConfig, request: HttpRequest |
         data["oauth_status_url"] = reverse("console-mcp-oauth-status", args=[server.id])
         data["oauth_revoke_url"] = reverse("console-mcp-oauth-revoke", args=[server.id])
     return data
+
+
+def _mcp_server_requires_sandbox_test(server: MCPServerConfig) -> bool:
+    return (
+        server.scope != MCPServerConfig.Scope.PLATFORM
+        and bool(server.command)
+        and not bool(server.url)
+    )
+
+
+def _serialize_mcp_test_tool(tool) -> dict[str, object]:
+    return {
+        "full_name": str(getattr(tool, "full_name", "") or ""),
+        "tool_name": str(getattr(tool, "tool_name", "") or ""),
+        "server_name": str(getattr(tool, "server_name", "") or ""),
+        "description": str(getattr(tool, "description", "") or ""),
+        "parameters": getattr(tool, "parameters", None) if isinstance(getattr(tool, "parameters", None), dict) else {},
+    }
+
+
+def _serialize_mcp_test_tool_dict(tool: dict[str, object]) -> dict[str, object]:
+    parameters = tool.get("parameters")
+    return {
+        "full_name": str(tool.get("full_name") or ""),
+        "tool_name": str(tool.get("tool_name") or ""),
+        "server_name": str(tool.get("server_name") or ""),
+        "description": str(tool.get("description") or ""),
+        "parameters": parameters if isinstance(parameters, dict) else {},
+    }
+
+
+def _mcp_test_error_response(message: str, *, phase: str, error_type: str, details: dict[str, object] | None = None):
+    safe_details: dict[str, object] = {
+        "phase": phase,
+        "error_type": error_type,
+        "message": message,
+    }
+    if details:
+        for key in ("phase", "error_type", "message", "reason", "server_id"):
+            value = details.get(key)
+            if isinstance(value, (str, int, float, bool)):
+                safe_details[key] = value
+    return JsonResponse(
+        {
+            "status": "error",
+            "message": message,
+            "details": safe_details,
+            "sandboxed": False,
+            "agent": None,
+            "tools": [],
+        }
+    )
+
+
+def _resolve_mcp_test_agent(server: MCPServerConfig, agent_id: object) -> PersistentAgent | None:
+    agent_id_text = str(agent_id or "").strip()
+    if not agent_id_text:
+        return None
+    return mcp_server_service.assignable_agents(server).filter(id=agent_id_text).first()
+
+
+def _run_mcp_server_test(server: MCPServerConfig, payload: dict[str, object] | None = None) -> JsonResponse:
+    payload = payload or {}
+    if not server.is_active:
+        return HttpResponseBadRequest("MCP server must be active before it can be tested.")
+
+    if _mcp_server_requires_sandbox_test(server):
+        agent = _resolve_mcp_test_agent(server, payload.get("agent_id"))
+        if agent is None:
+            return HttpResponseBadRequest("agent_id is required and must identify an eligible agent for this MCP server.")
+        try:
+            result = SandboxComputeService().discover_mcp_tools(
+                str(server.id),
+                reason="manual_test",
+                agent=agent,
+            )
+        except (SandboxComputeUnavailable, ValueError, RuntimeError) as exc:
+            return _mcp_test_error_response(
+                "Sandbox MCP discovery could not run.",
+                phase="sandbox_discovery",
+                error_type=exc.__class__.__name__,
+                details={"message": str(exc)},
+            )
+
+        if not isinstance(result, dict):
+            return _mcp_test_error_response(
+                "Sandbox MCP discovery returned an invalid response.",
+                phase="sandbox_discovery",
+                error_type="invalid_response",
+            )
+        if result.get("status") != "ok":
+            message = str(result.get("message") or "Sandbox MCP discovery failed.")
+            return _mcp_test_error_response(
+                message,
+                phase="sandbox_discovery",
+                error_type=str(result.get("error_type") or "sandbox_error"),
+                details=result,
+            )
+
+        tools = [
+            _serialize_mcp_test_tool_dict(tool)
+            for tool in result.get("tools", [])
+            if isinstance(tool, dict)
+        ]
+        return JsonResponse(
+            {
+                "status": "ok",
+                "message": f"Discovered {len(tools)} tool{'s' if len(tools) != 1 else ''}.",
+                "sandboxed": True,
+                "agent": {"id": str(agent.id), "name": agent.name},
+                "tools": tools,
+            }
+        )
+
+    ok, tools, details = get_mcp_manager().test_server_tools(str(server.id))
+    if not ok:
+        return _mcp_test_error_response(
+            str(details.get("message") or "MCP discovery failed."),
+            phase=str(details.get("phase") or "discover_tools"),
+            error_type=str(details.get("error_type") or "discovery_error"),
+            details=details,
+        )
+
+    serialized_tools = [_serialize_mcp_test_tool(tool) for tool in tools]
+    return JsonResponse(
+        {
+            "status": "ok",
+            "message": f"Discovered {len(serialized_tools)} tool{'s' if len(serialized_tools) != 1 else ''}.",
+            "sandboxed": False,
+            "agent": None,
+            "tools": serialized_tools,
+        }
+    )
 
 
 def _form_errors(form: MCPServerConfigForm) -> dict[str, list[str]]:
@@ -7478,6 +7611,18 @@ class MCPServerDetailAPIView(LoginRequiredMixin, View):
         return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
 
 
+class MCPServerTestAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_mcp_server_config(request, server_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        return _run_mcp_server_test(server, payload)
+
+
 class PlatformMCPServerListAPIView(SystemAdminAPIView):
     http_method_names = ["get", "post"]
 
@@ -7592,6 +7737,18 @@ class PlatformMCPServerDetailAPIView(SystemAdminAPIView):
             props,
         )
         return JsonResponse({"message": f"MCP server '{server_name}' was deleted."})
+
+
+class PlatformMCPServerTestAPIView(SystemAdminAPIView):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, server_id: str, *args: Any, **kwargs: Any):
+        server = _resolve_platform_mcp_server_config(request, server_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        return _run_mcp_server_test(server, payload)
 
 
 class MCPOAuthStartView(LoginRequiredMixin, View):

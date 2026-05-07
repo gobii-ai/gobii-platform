@@ -781,6 +781,62 @@ class MCPToolManager:
             return False
         return True
 
+    def test_server_tools(
+        self,
+        config_id: str,
+        *,
+        agent: Optional[PersistentAgent] = None,
+    ) -> Tuple[bool, List[MCPToolInfo], Dict[str, str]]:
+        """Run fresh tool discovery for a saved active server and return diagnostic details."""
+        if not config_id:
+            return False, [], {
+                "phase": "load_config",
+                "error_type": "missing_config_id",
+                "message": "MCP server config id is required.",
+            }
+
+        try:
+            cfg = (
+                MCPServerConfig.objects.filter(id=config_id, is_active=True)
+                .select_related("oauth_credential")
+                .first()
+            )
+        except DatabaseError as exc:
+            logger.exception("Failed to load MCP server %s during test discovery", config_id)
+            return False, [], {
+                "phase": "load_config",
+                "error_type": exc.__class__.__name__,
+                "message": "Failed to load MCP server config.",
+            }
+
+        if not cfg:
+            return False, [], {
+                "phase": "load_config",
+                "error_type": "not_found",
+                "message": "MCP server config is not active or does not exist.",
+            }
+
+        runtime = self._build_runtime_from_config(cfg)
+        sandbox_context = self._sandbox_cache_context_for_runtime(runtime, agent)
+        try:
+            self._register_server(
+                runtime,
+                agent=agent,
+                force_local=True,
+                prefer_cache=False,
+                sandbox_context=sandbox_context,
+            )
+        except (ValueError, RuntimeError, OSError, TimeoutError, httpx.HTTPError, ToolError) as exc:
+            logger.warning("MCP test discovery failed for %s: %s", config_id, exc)
+            return False, [], {
+                "phase": "discover_tools",
+                "error_type": exc.__class__.__name__,
+                "message": str(exc),
+            }
+
+        slot_key = self._tool_cache_slot_key(runtime, sandbox_context=sandbox_context)
+        return True, list(self._tools_cache.get(slot_key) or []), {}
+
     def remove_server(self, config_id: str) -> None:
         if not config_id:
             return

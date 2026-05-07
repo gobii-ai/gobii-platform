@@ -5857,6 +5857,7 @@ class MCPServerManagementView(ConsoleOwnerScopeMixin, ConsoleViewMixin, Template
                 'mcp_server_list_url': reverse('console-mcp-server-list'),
                 'mcp_server_detail_url_template': reverse('console-mcp-server-detail', args=[placeholder_id]),
                 'mcp_server_assign_url_template': reverse('console-mcp-server-assignments', args=[placeholder_id]),
+                'mcp_server_test_url_template': reverse('console-mcp-server-test', args=[placeholder_id]),
             }
         )
         return context
@@ -5877,6 +5878,10 @@ class PlatformMCPServerManagementView(SystemAdminRequiredMixin, TemplateView):
                 "mcp_server_list_url": reverse("staff-platform-mcp-server-list"),
                 "mcp_server_detail_url_template": reverse(
                     "staff-platform-mcp-server-detail",
+                    args=[placeholder_id],
+                ),
+                "mcp_server_test_url_template": reverse(
+                    "staff-platform-mcp-server-test",
                     args=[placeholder_id],
                 ),
                 # Platform MCP servers are globally available, so assignments stay hidden in the UI.
