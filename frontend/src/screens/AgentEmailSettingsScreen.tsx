@@ -877,7 +877,7 @@ export function AgentEmailSettingsScreen({
                     {oauthConnected ? <CheckCircle2 className={isEmbedded ? 'h-4 w-4 text-emerald-300' : 'h-4 w-4 text-emerald-600'} /> : <Mail className={isEmbedded ? 'h-4 w-4 text-blue-300' : 'h-4 w-4 text-blue-700'} />}
                     <span>{oauthConnected ? `${oauthProviderConfig.label} OAuth connected` : `${oauthProviderConfig.label} OAuth connection required before saving`}</span>
                   </div>
-                  {(oauthProvider === 'microsoft' || oauthProvider === 'outlook') && (
+                  {oauthProvider === 'microsoft' && (
                     <p className="text-slate-700">
                       Gobii will open Microsoft sign-in in a popup. Tenant consent, authenticated SMTP, or mailbox IMAP settings can still block delivery even after OAuth succeeds.
                     </p>

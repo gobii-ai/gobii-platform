@@ -44,15 +44,6 @@ export const EMAIL_OAUTH_PROVIDER_CONFIG = defineProviderConfig({
       prompt: 'select_account',
     },
   },
-  outlook: {
-    label: 'Outlook.com',
-    authorizationEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
-    tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
-    scope: 'offline_access https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send',
-    authorizationParams: {
-      prompt: 'select_account',
-    },
-  },
 })
 
 export type OAuthProviderKey = keyof typeof EMAIL_OAUTH_PROVIDER_CONFIG
