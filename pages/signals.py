@@ -86,8 +86,10 @@ from api.services.dedicated_proxy_service import (
     DedicatedProxyUnavailableError,
 )
 from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
     get_owner_execution_pause_state,
     is_billing_recovery_resumable_pause_reason,
+    pause_owner_execution,
     resume_owner_execution,
     sync_owner_customer_account_pause,
 )
@@ -3581,13 +3583,15 @@ def handle_subscription_event(event, **kwargs):
 
             downgrade_owner_to_free_plan(owner)
             try:
-                resume_owner_execution(
+                pause_owner_execution(
                     owner,
-                    source=f"stripe.{event_type}.downgrade_to_free",
+                    EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
+                    source=f"stripe.{event_type}.account_cancellation",
+                    paused_at=timezone.now(),
                 )
             except Exception:
                 logger.exception(
-                    "Failed to resume owner execution after downgrade for owner %s",
+                    "Failed to pause owner execution after cancellation for owner %s",
                     getattr(owner, "id", None) or owner,
                 )
 

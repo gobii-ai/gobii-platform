@@ -23,11 +23,17 @@ _BILLING_EXECUTION_PAUSE_REASONS = frozenset(
         ExecutionPauseReasonChoices.BILLING_DELINQUENCY,
         ExecutionPauseReasonChoices.TRIAL_CONVERSION_FAILED,
         ExecutionPauseReasonChoices.TRIAL_ENDED_NON_RENEWAL,
+        ExecutionPauseReasonChoices.ACCOUNT_CANCELLATION,
     }
 )
 _TRIAL_ENDED_EXECUTION_PAUSE_REASONS = frozenset(
     {
         ExecutionPauseReasonChoices.TRIAL_ENDED_NON_RENEWAL,
+    }
+)
+_ACCOUNT_CANCELLATION_EXECUTION_PAUSE_REASONS = frozenset(
+    {
+        ExecutionPauseReasonChoices.ACCOUNT_CANCELLATION,
     }
 )
 
@@ -192,16 +198,23 @@ def _send_billing_pause_message(agent, recipient_endpoint, *, reason: str, audie
 
 
 def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -> dict[str, Any] | None:
-    is_trial_end = str(reason or "").strip() in _TRIAL_ENDED_EXECUTION_PAUSE_REASONS
+    normalized_reason = str(reason or "").strip()
+    is_trial_end = normalized_reason in _TRIAL_ENDED_EXECUTION_PAUSE_REASONS
+    is_account_cancellation = normalized_reason in _ACCOUNT_CANCELLATION_EXECUTION_PAUSE_REASONS
     billing_url = _build_billing_url(agent)
     logo_url = _build_logo_url()
 
     if audience == "owner":
         if is_trial_end:
-            subject = f"I am is paused because your trial ended"
+            subject = f"I am paused because your trial ended"
             intro_text = "Your trial ended, so I'm paused for now."
             detail_text = "Restart billing to let me reply again."
             sms_body = f"My trial ended, so I'm paused. Restart billing to resume replies.{_sms_link_suffix(billing_url)}"
+        elif is_account_cancellation:
+            subject = f"I am paused because your subscription ended"
+            intro_text = "Your subscription ended, so I'm paused for now."
+            detail_text = "Restart billing to let me reply again."
+            sms_body = f"My subscription ended, so I'm paused. Restart billing to resume replies.{_sms_link_suffix(billing_url)}"
         else:
             subject = f"I am paused until billing is resolved"
             intro_text = "I'm paused until billing is resolved."
@@ -228,6 +241,14 @@ def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -
             detail_text = "If you're the account owner, restart billing to resume replies. Otherwise, contact the owner."
             sms_body = (
                 f"I can't reply right now because the trial ended. "
+                f"If you're the account owner, restart billing.{_sms_link_suffix(billing_url)}"
+            )
+        elif is_account_cancellation:
+            subject = f"I can't reply right now"
+            intro_text = f"I am paused because the subscription ended."
+            detail_text = "If you're the account owner, restart billing to resume replies. Otherwise, contact the owner."
+            sms_body = (
+                f"I can't reply right now because the subscription ended. "
                 f"If you're the account owner, restart billing.{_sms_link_suffix(billing_url)}"
             )
         else:
