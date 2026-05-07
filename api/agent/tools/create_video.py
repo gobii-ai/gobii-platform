@@ -64,6 +64,12 @@ class VideoGenerationResponseError(ValueError):
         self.response = response
 
 
+class OpenAIVideoStatusError(VideoGenerationResponseError):
+    def __init__(self, message: str, *, status_code: int, response: Any = None) -> None:
+        super().__init__(message, response=response)
+        self.status_code = status_code
+
+
 def _log_video_generation_completion(
     *,
     agent: PersistentAgent,
@@ -397,12 +403,17 @@ def _get_openai_video_status(video_id: str, *, params: Dict[str, Any]) -> VideoO
     try:
         response.raise_for_status()
     except httpx.HTTPStatusError as exc:
-        raise VideoGenerationResponseError(
+        raise OpenAIVideoStatusError(
             f"Video generation status check failed: {_openai_video_error_detail(response)}",
+            status_code=response.status_code,
             response=response.text,
         ) from exc
 
     return _parse_openai_video_object(response)
+
+
+def _is_transient_openai_status_error(exc: OpenAIVideoStatusError) -> bool:
+    return 500 <= exc.status_code < 600
 
 
 def _download_openai_video_content(video_id: str, *, params: Dict[str, Any]) -> bytes:
@@ -503,8 +514,16 @@ def _wait_for_video_completion(video_obj, *, params: Dict[str, Any], use_openai_
         if use_openai_api:
             try:
                 video_obj = _get_openai_video_status(video_id, params=params)
-            except httpx.TimeoutException:
-                logger.info("OpenAI video status check timed out; continuing to poll video_id=%s", video_id)
+            except httpx.RequestError:
+                logger.info("OpenAI video status request failed; continuing to poll video_id=%s", video_id)
+            except OpenAIVideoStatusError as exc:
+                if not _is_transient_openai_status_error(exc):
+                    raise
+                logger.info(
+                    "OpenAI video status returned transient HTTP %s; continuing to poll video_id=%s",
+                    exc.status_code,
+                    video_id,
+                )
         else:
             video_obj = litellm.video_status(video_id, **params)
     if video_obj.status != "completed":

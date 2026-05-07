@@ -10,6 +10,7 @@ from PIL import Image
 from api.models import PersistentAgentCompletion
 from api.agent.tools.create_video import (
     GeneratedVideoResult,
+    OpenAIVideoStatusError,
     ResolvedSourceImage,
     VideoGenerationResponseError,
     _create_openai_video_job,
@@ -124,6 +125,54 @@ class WaitForVideoCompletionTests(TestCase):
 
         self.assertEqual(result.status, "completed")
         self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_continues_after_request_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        completed_obj = _make_video_obj(status="completed")
+        mock_status.side_effect = [httpx.ConnectError("connection reset"), completed_obj]
+
+        result = _wait_for_video_completion(
+            pending_obj,
+            params={"api_key": "sk-test"},
+            use_openai_api=True,
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_continues_after_transient_status_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        completed_obj = _make_video_obj(status="completed")
+        mock_status.side_effect = [
+            OpenAIVideoStatusError("bad gateway", status_code=502, response="bad gateway"),
+            completed_obj,
+        ]
+
+        result = _wait_for_video_completion(
+            pending_obj,
+            params={"api_key": "sk-test"},
+            use_openai_api=True,
+        )
+
+        self.assertEqual(result.status, "completed")
+        self.assertEqual(mock_status.call_count, 2)
+
+    @patch("api.agent.tools.create_video._get_openai_video_status")
+    @patch("api.agent.tools.create_video.time.sleep")
+    def test_openai_polling_reraises_non_transient_status_error(self, mock_sleep, mock_status):
+        pending_obj = _make_video_obj(status="pending")
+        mock_status.side_effect = OpenAIVideoStatusError("bad request", status_code=400, response="bad request")
+
+        with self.assertRaises(OpenAIVideoStatusError):
+            _wait_for_video_completion(
+                pending_obj,
+                params={"api_key": "sk-test"},
+                use_openai_api=True,
+            )
 
     @patch("api.agent.tools.create_video.litellm")
     @patch("api.agent.tools.create_video.time.sleep")
