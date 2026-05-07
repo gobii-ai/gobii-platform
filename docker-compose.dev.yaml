@@ -290,10 +290,6 @@ services:
       - "4317:4317"    # gRPC OTLP
       - "4318:4318"    # HTTP OTLP
       - "55679:55679"  # tracer
-    environment:
-      GRAFANA_CLOUD_OTLP_ENDPOINT: ${GRAFANA_CLOUD_OTLP_ENDPOINT:-}
-      GRAFANA_CLOUD_INSTANCE_ID: ${GRAFANA_CLOUD_INSTANCE_ID:-}
-      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY:-}
     profiles: ["obs"]
 
 volumes:

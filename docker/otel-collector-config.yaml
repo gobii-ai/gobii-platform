@@ -69,33 +69,17 @@ processors:
           - set(attributes["service.version"], resource.attributes["service.version"])
 
 exporters:
-  otlphttp/grafana_cloud:
-    # https://github.com/open-telemetry/opentelemetry-collector/tree/main/exporter/otlphttpexporter
-    endpoint: "${GRAFANA_CLOUD_OTLP_ENDPOINT}"
-    auth:
-      authenticator: basicauth/grafana_cloud
-
-  debug:
-    verbosity: detailed
+  nop:
+    # Keep the collector available for app OTLP exports after Grafana Cloud
+    # was canceled, but avoid noisy permanent export failures.
 
 extensions:
   zpages:
     endpoint: "0.0.0.0:55679"
-  basicauth/grafana_cloud:
-    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/basicauthextension
-    client_auth:
-      username: "${GRAFANA_CLOUD_INSTANCE_ID}"
-      password: "${GRAFANA_CLOUD_API_KEY}"
-
-connectors:
-  grafanacloud:
-    # https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/connector/grafanacloudconnector
-    host_identifiers: ["k8s.node.name"]
 
 service:
   extensions:
     [
-      basicauth/grafana_cloud,
       zpages
     ]
   pipelines:
@@ -103,7 +87,7 @@ service:
       receivers: [otlp]
       processors:
         [resourcedetection, transform/drop_unneeded_resource_attributes, batch]
-      exporters: [otlphttp/grafana_cloud, debug]
+      exporters: [nop]
     logs:
       receivers: [otlp]
       processors:
@@ -112,4 +96,4 @@ service:
           transform/drop_unneeded_resource_attributes,
           batch,
         ]
-      exporters: [otlphttp/grafana_cloud, debug]
+      exporters: [nop]
