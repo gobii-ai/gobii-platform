@@ -3716,13 +3716,41 @@ class LoginTurnstilePageTests(TestCase):
         self.assertEqual(len(captured.records), 1)
 
     @tag("batch_pages")
+    @patch("turnstile.fields.TurnstileField.validate", return_value=None)
+    def test_invalid_login_post_sanitizes_and_truncates_redacted_login(self, _mock_turnstile_validate):
+        from turnstile_signup import LoginFormWithTurnstile
+
+        crafted_login = f"john@example.com\nturnstile_token_present=true{'x' * 180}"
+        form = LoginFormWithTurnstile(
+            data={
+                "login": crafted_login,
+                "cf-turnstile-response": "stub-token",
+            },
+            request=self._login_request(),
+        )
+
+        with self.assertLogs("turnstile_signup", level="WARNING") as captured:
+            self.assertFalse(form.is_valid())
+
+        record = captured.records[0]
+        self.assertLessEqual(len(record.login), 120)
+        self.assertNotIn("\n", record.login)
+        self.assertNotIn("turnstile_token_present=true", record.login)
+        self.assertIn("login=j***@example.com_turnstile_token_present_true", record.getMessage())
+
+    @tag("batch_pages")
     def test_login_turnstile_success_does_not_auto_submit(self):
         with open("static/js/account_auth_forms.js", encoding="utf-8") as js_file:
             script = js_file.read()
 
-        success_callback = script.split("window.gobiiLoginTurnstileSuccess = function ()", 1)[1].split(
-            "window.gobiiLoginTurnstileExpired = function ()", 1
-        )[0]
+        success_callback_match = re.search(
+            r"window\.gobiiLoginTurnstileSuccess\s*=\s*function\s*\(\)\s*\{(?P<body>.*?)^\s*\};",
+            script,
+            flags=re.DOTALL | re.MULTILINE,
+        )
+        self.assertIsNotNone(success_callback_match)
+        success_callback = success_callback_match.group("body")
+
         self.assertNotIn("finalizeLoginSubmit", script)
         self.assertNotIn("requestSubmit", success_callback)
         self.assertNotIn("submitPending", success_callback)

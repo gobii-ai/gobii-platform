@@ -40,6 +40,17 @@ def _truncate_for_log(value, max_length=180):
     return f"{normalized[:max_length - 3]}..."
 
 
+def _sanitize_log_token(value, max_length=120):
+    normalized = "_".join((value or "").split())
+    sanitized = "".join(
+        char if char.isalnum() or char in "@._+-*" else "_"
+        for char in normalized
+    )
+    if len(sanitized) <= max_length:
+        return sanitized
+    return f"{sanitized[:max_length - 3]}..."
+
+
 class AuthTurnstileWidget(TurnstileWidget):
     def render(self, name, value, attrs=None, renderer=None):
         if self.is_hidden:
@@ -102,7 +113,7 @@ class LoginFormWithTurnstile(LoginForm):
         )
         ajax = get_adapter(request).is_ajax(request)
         user_agent = _truncate_for_log(request.META.get("HTTP_USER_AGENT", ""))
-        redacted_login = _redact_login(login)
+        redacted_login = _sanitize_log_token(_redact_login(login))
         path = request.path
 
         log_fields = {
