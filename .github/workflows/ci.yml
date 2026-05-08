@@ -108,196 +108,29 @@ jobs:
     timeout-minutes: 25
     strategy:
       fail-fast: false
+      max-parallel: 10
       matrix:
         include:
-          - batch: email
-            tag: batch_email
-          - batch: sms
-            tag: batch_sms
-          - batch: email_body
-            tag: batch_email_body
-          - batch: email_small
-            tag: smtp batch_outbound_email batch_email_allowlist batch_email_footer batch_outbound_dedupe
-          - batch: pages
-            tag: batch_pages
-          - batch: pages_signals
-            tag: batch_pages_signals
-          - batch: public_templates
-            tag: batch_public_templates
-          - batch: marketing_events
-            tag: batch_marketing_events
-          - batch: contact_requests
-            tag: batch_contact_requests
-          - batch: console_agents
-            tag: batch_console_agents
-          - batch: console_agents_management
-            tag: batch_console_agents_management
-          - batch: api_console_small
-            tag: batch_api_serializer batch_api_org_keys batch_console_allowlist batch_console_api_keys batch_mcp_admin mcp_org_assignment_batch
-          - batch: secrets
-            tag: batch_secrets
-          - batch: secrets_profiles
-            tag: batch_secrets_profiles
-          - batch: global_secrets
-            tag: global_secrets_batch
-          - batch: global_skill_evals
-            tag: batch_global_skill_evals
-          - batch: proxy_selection
-            tag: batch_proxy_selection
-          - batch: step_compaction
-            tag: batch_step_compaction
-          - batch: subscription
-            tag: batch_subscription
-          - batch: task_credits
-            tag: batch_task_credits
-          - batch: output_schema
-            tag: batch_output_schema
-          - batch: link_shortener
-            tag: batch_link_shortener
-          - batch: organizations
-            tag: batch_organizations
-          - batch: browser_proxy_small
-            tag: batch_browser_agent_max_tokens batch_browser_config batch_browser_profile batch_dedicated_proxy_models
-          - batch: forward_detection
-            tag: batch_forward_detection
-          - batch: agent_limits
-            tag: batch_agent_limits
-          - batch: agent_credit_soft_target
-            tag: agent_credit_soft_target_batch
-          - batch: api_agents
-            tag: batch_api_agents
-          - batch: api_tasks
-            tag: batch_api_tasks
-          - batch: api_tasks_reads
-            tag: batch_api_tasks_reads
-          - batch: api_tasks_mutations
-            tag: batch_api_tasks_mutations
-          - batch: celery_redbeat
-            tag: batch_celery_redbeat
-          - batch: email_verification
-            tag: batch_email_verification
-          - batch: email_sender_db
-            tag: batch_email_sender_db
-          - batch: attachment_guidance
-            tag: batch_attachment_guidance
-          - batch: outbound_delivery
-            tag: batch_outbound_delivery
-          - batch: browser_task_db
-            tag: batch_browser_task_db
-          - batch: agent_invite
-            tag: batch_agent_invite
-          - batch: agent_collaborators
-            tag: batch_agent_collaborators
-          - batch: agent_filesystem
-            tag: batch_agent_filesystem
-          - batch: agent_secrets_ctx
-            tag: batch_agent_secrets_ctx
-          - batch: allowlist_rules
-            tag: batch_allowlist_rules
-          - batch: api_decodo
-            tag: batch_api_decodo
-          - batch: api_persistent_agents
-            tag: batch_api_persistent_agents
-          - batch: billing
-            tag: batch_billing
-          - batch: billing_small
-            tag: batch_org_billing batch_plan_versioning batch_soft_expiration batch_stripe_config
-          - batch: event_llm
-            tag: batch_event_llm
-          - batch: event_processing
-            tag: batch_event_processing
-          - batch: event_processing_credits
-            tag: batch_event_processing_credits
-          - batch: event_parallel
-            tag: batch_event_parallel
-          - batch: mcp_tools
-            tag: batch_mcp_tools
-          - batch: pipedream_connect
-            tag: pipedream_connect
-          - batch: promptree
-            tag: batch_promptree
-          - batch: xvfb
-            tag: batch_xvfb
-          - batch: agent_webhooks
-            tag: batch_agent_webhooks
-          - batch: agent_chat
-            tag: batch_agent_chat
-          - batch: human_input
-            tag: batch_human_input
-          - batch: peer_dm
-            tag: batch_peer_dm
-          - batch: allowlist_direction
-            tag: batch_allowlist_direction
-          - batch: console_context
-            tag: batch_console_context
-          - batch: token_usage
-            tag: batch_token_usage
-          - batch: batch_sqlite
-            tag: batch_sqlite
-          - batch: infra_small
-            tag: batch_charter_tools batch_compaction batch_fbp_middleware batch_web_task_followup batch_periodic batch_redis_leaks batch_redis_budget_cleanup enable_database eval_sim oss_readiness_batch batch_setup_cookies batch_websocket
-          - batch: tool_costs
-            tag: batch_tool_costs
-          - batch: tool_results
-            tag: batch_tool_results
-          - batch: context_hints
-            tag: context_hints_batch
-          - batch: result_analysis
-            tag: batch_result_analysis
-          - batch: content_skeleton
-            tag: content_skeleton
-          - batch: sqlite_analysis
-            tag: sqlite_analysis
-          - batch: http_request
-            tag: http_request_batch
-          - batch: billing_rollup
-            tag: batch_billing_rollup
-          - batch: agent_lifecycle
-            tag: batch_agent_lifecycle
-          - batch: agent_short_description
-            tag: batch_agent_short_description
-          - batch: video_generation
-            tag: batch_video_generation
-          - batch: agent_small
-            tag: batch_agent_colors batch_agent_tags batch_agent_transfer batch_peer_intro batch_pa_shutdown_triggers batch_pa_step_credits batch_spawn_depth
-          - batch: agent_tools
-            tag: batch_agent_tools
-          - batch: user_flags
-            tag: batch_user_flags
-          - batch: llm_tier_preferences
-            tag: batch_llm_intelligence
-          - batch: llm_routing_profiles
-            tag: llm_routing_profiles_batch
-          - batch: schedule
-            tag: batch_schedule
-          - batch: owner_billing
-            tag: batch_owner_billing
-          - batch: email_blocklist
-            tag: batch_email_blocklist
-          - batch: system_settings
-            tag: batch_system_settings
-          - batch: console_api
-            tag: batch_console_api
-          - batch: console_mcp_oauth
-            tag: batch_console_mcp_oauth
-          - batch: console_email_oauth
-            tag: batch_console_email_oauth
-          - batch: console_mcp_servers
-            tag: batch_console_mcp_servers
-          - batch: text_sanitization
-            tag: batch_text_sanitization
-          - batch: usage_api
-            tag: batch_usage_api
-          - batch: dedicated_proxy_service
-            tag: batch_dedicated_proxy_service
-          - batch: support_turnstile
-            tag: batch_support_turnstile
-          - batch: eval_fingerprint
-            tag: batch_eval_fingerprint
-          - batch: batch_pipedream_jit_connect
-            tag: pipedream_jit_connect
-          - batch: referral
-            tag: referral_batch
+          - batch: shard_01
+            tag: batch_pages batch_sms batch_console_email_oauth batch_token_usage batch_event_parallel batch_allowlist_direction batch_tool_costs batch_output_schema batch_soft_expiration batch_console_api_keys batch_console_allowlist batch_pa_shutdown_triggers
+          - batch: shard_02
+            tag: batch_mcp_tools batch_human_input batch_eval_fingerprint batch_user_flags batch_api_agents batch_api_tasks pipedream_jit_connect batch_browser_task_db batch_agent_transfer batch_periodic batch_mcp_admin mcp_org_assignment_batch
+          - batch: shard_03
+            tag: batch_pages_signals batch_console_agents batch_organizations referral_batch batch_subscription batch_email_body batch_support_turnstile batch_billing_rollup batch_agent_collaborators batch_api_org_keys batch_spawn_depth batch_compaction batch_browser_agent_max_tokens
+          - batch: shard_04
+            tag: batch_agent_chat batch_console_api batch_agent_webhooks batch_usage_api batch_forward_detection pipedream_connect http_request_batch batch_system_settings batch_schedule batch_plan_versioning smtp batch_browser_config batch_org_billing
+          - batch: shard_05
+            tag: batch_event_processing batch_result_analysis batch_promptree llm_routing_profiles_batch global_secrets_batch batch_agent_invite batch_api_tasks_reads batch_secrets batch_celery_redbeat batch_setup_cookies batch_redis_budget_cleanup batch_dedicated_proxy_models batch_charter_tools
+          - batch: shard_06
+            tag: batch_event_processing_credits batch_marketing_events batch_email batch_video_generation batch_proxy_selection batch_public_templates batch_email_blocklist batch_global_skill_evals batch_xvfb batch_websocket enable_database batch_stripe_config batch_peer_intro
+          - batch: shard_07
+            tag: batch_sqlite batch_agent_lifecycle batch_console_mcp_servers batch_agent_short_description batch_api_tasks_mutations batch_email_verification batch_peer_dm agent_credit_soft_target_batch batch_console_mcp_oauth batch_agent_tags eval_sim batch_agent_colors
+          - batch: shard_08
+            tag: batch_agent_tools sqlite_analysis batch_event_llm batch_agent_secrets_ctx batch_task_credits batch_allowlist_rules batch_api_decodo batch_llm_intelligence batch_dedicated_proxy_service batch_pa_step_credits oss_readiness_batch batch_api_serializer batch_fbp_middleware
+          - batch: shard_09
+            tag: context_hints_batch batch_text_sanitization batch_billing batch_outbound_delivery batch_console_context batch_agent_limits batch_email_sender_db batch_secrets_profiles batch_contact_requests batch_outbound_dedupe batch_email_allowlist batch_redis_leaks
+          - batch: shard_10
+            tag: batch_agent_filesystem batch_api_persistent_agents batch_console_agents_management batch_tool_results content_skeleton batch_owner_billing batch_attachment_guidance batch_link_shortener batch_step_compaction batch_browser_profile batch_email_footer batch_outbound_email batch_web_task_followup
     env:
       # Ensure Django loads test settings; manage.py still imports config.settings first
       DJANGO_SETTINGS_MODULE: config.test_settings
