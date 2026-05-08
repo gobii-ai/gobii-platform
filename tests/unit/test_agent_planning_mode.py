@@ -267,7 +267,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
         self.assertIn("Read-only research is allowed and often useful during planning", prompt)
-        self.assertIn("Pending request_human_input questions are unresolved context", prompt)
+        self.assertIn("Use request_human_input for planning questions", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
@@ -299,7 +299,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Pending human input requests", content)
         self.assertIn("Treat these as open questions", content)
         self.assertIn("What locations should I search?", content)
-        self.assertIn("Pending request_human_input questions are unresolved context", content)
+        self.assertIn("Do not assume they are answered unless a newer inbound message directly answers them", content)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
