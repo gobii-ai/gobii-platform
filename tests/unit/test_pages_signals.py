@@ -58,6 +58,7 @@ from api.services.owner_execution_pause import (
     EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
     EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+    EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
     resume_owner_execution as real_resume_owner_execution,
 )
 from constants.stripe import (
@@ -1999,6 +2000,12 @@ class SubscriptionSignalTests(TestCase):
 
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("trial_ended_non_renewal", emitted_names)
+        self.billing.refresh_from_db()
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(
+            self.billing.execution_pause_reason,
+            EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+        )
 
     @tag("batch_pages_signals")
     def test_dedicated_ip_allocation_from_subscription(self):
