@@ -530,6 +530,7 @@ describe('AgentChatPage trial onboarding', () => {
         null,
         ['slack'],
         'email',
+        [],
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
@@ -559,6 +560,7 @@ describe('AgentChatPage trial onboarding', () => {
         null,
         [],
         'email',
+        [],
       )
     })
     expect(screen.queryByTestId('upgrade-modal')).not.toBeInTheDocument()
