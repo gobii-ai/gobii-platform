@@ -323,6 +323,7 @@ class MCPToolManager:
     """Manages MCP tool connections and provides search/enable/disable functionality."""
 
     PIPEDREAM_RUNTIME_NAME = "pipedream"
+    PIPEDREAM_COMPONENT_OPTION_TOOLS = {"retrieve_options", "configure_component"}
 
     # Default MCP tools that should be enabled for all agents
     DEFAULT_ENABLED_TOOLS = [
@@ -2243,7 +2244,7 @@ class MCPToolManager:
                 return {"status": "error", "message": proxy_error}
 
         if server_name == self.PIPEDREAM_RUNTIME_NAME:
-            app_slug = self._pd_parse_tool(info.tool_name)
+            app_slug = self._pd_app_slug_for_tool_call(info.tool_name, params)
             try:
                 client = self._get_pipedream_agent_client(agent, app_slug=app_slug)
             except RuntimeError as exc:
@@ -2689,6 +2690,17 @@ class MCPToolManager:
         """
         app = tool_name.split("-", 1)[0] if "-" in tool_name else None
         return app or None
+
+    def _pd_app_slug_for_tool_call(self, tool_name: str, params: Dict[str, Any]) -> Optional[str]:
+        app_slug = self._pd_parse_tool(tool_name)
+        if app_slug:
+            return app_slug
+
+        if tool_name not in self.PIPEDREAM_COMPONENT_OPTION_TOOLS or not isinstance(params, dict):
+            return None
+
+        component_key = str(params.get("componentKey") or params.get("component_key") or "").strip()
+        return self._pd_parse_tool(component_key)
 
     def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str]) -> Client:
         """Get or create a Pipedream client for an agent/app pair."""
