@@ -47,6 +47,22 @@ def has_verified_email(user) -> bool:
     return EmailAddress.objects.filter(user=user, verified=True).exists()
 
 
+def get_email_address_for_verification(user) -> EmailAddress | None:
+    from allauth.account.internal.flows.email_verification import (
+        get_address_for_user,
+    )
+
+    return get_address_for_user(user)
+
+
+def send_email_verification(request, email_address: EmailAddress) -> bool:
+    from allauth.account.internal.flows.email_verification import (
+        send_verification_email_to_address,
+    )
+
+    return send_verification_email_to_address(request, email_address)
+
+
 def require_verified_email(user, *, action_description: str = "perform this action") -> None:
     """
     Raise EmailVerificationError if user does not have a verified email.
