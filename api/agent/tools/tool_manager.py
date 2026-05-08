@@ -17,6 +17,8 @@ from django.core.exceptions import ValidationError
 from django.db import DatabaseError
 from django.db.models import F
 
+from util.text_sanitizer import decode_unicode_escapes
+
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
 from ...services.sandbox_compute import (
     SandboxComputeService,
@@ -99,6 +101,20 @@ def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> 
                 pass
 
     return coerced
+
+
+def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
+    if isinstance(params, str):
+        return decode_unicode_escapes(params)
+    if isinstance(params, dict):
+        return {key: _normalize_tool_params_unicode_escapes(value) for key, value in params.items()}
+    if isinstance(params, list):
+        return [_normalize_tool_params_unicode_escapes(item) for item in params]
+    return params
+
+
+def _is_pipedream_entry(entry: "ToolCatalogEntry") -> bool:
+    return entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME
 
 SQLITE_TOOL_NAME = "sqlite_batch"
 HTTP_REQUEST_TOOL_NAME = "http_request"
@@ -1052,7 +1068,7 @@ def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
         return row.tool_server == PIPEDREAM_TOOL_SERVER_NAME
 
     entry = resolve_tool_entry(agent, tool_name)
-    return bool(entry and entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME)
+    return bool(entry and _is_pipedream_entry(entry))
 
 
 def _record_pipedream_tool_side_effects(
@@ -1061,7 +1077,7 @@ def _record_pipedream_tool_side_effects(
     params: Dict[str, Any],
     result: Dict[str, Any],
 ) -> None:
-    if entry.provider != "mcp" or entry.tool_server != PIPEDREAM_TOOL_SERVER_NAME:
+    if not _is_pipedream_entry(entry):
         return
     status = str(result.get("status") or "").strip().lower()
     if status not in PIPEDREAM_MESSAGE_SUCCESS_STATUSES:
@@ -1214,6 +1230,9 @@ def execute_enabled_tool(
                 "status": "error",
                 "message": auto_enable.get("message", f"Tool '{resolved_name}' is not enabled for this agent"),
             }
+
+    if _is_pipedream_entry(entry):
+        params = _normalize_tool_params_unicode_escapes(params)
 
     if entry.provider == "mcp":
         if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):

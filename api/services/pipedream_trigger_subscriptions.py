@@ -705,6 +705,11 @@ def _discord_channel_address(guild_id: str, channel_id: str) -> str:
     return f"discord://guild/{guild_part}/channel/{channel_id}"
 
 
+def _discord_conversation_address(agent_id: object, guild_id: str, channel_id: str) -> str:
+    guild_part = guild_id or "unknown"
+    return f"discord://agent/{agent_id}/guild/{guild_part}/channel/{channel_id}"
+
+
 def _discord_agent_address(agent_id: object) -> str:
     return f"discord://agent/{agent_id}"
 
@@ -749,6 +754,7 @@ def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id
         .filter(
             owner_agent=agent,
             channel=CommsChannel.DISCORD,
+            address__startswith=f"discord://agent/{agent.id}/",
             address__endswith=f"/channel/{channel_id}",
         )
         .order_by("-id")
@@ -756,7 +762,7 @@ def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id
     )
     if existing:
         return existing.address
-    return _discord_channel_address("unknown", channel_id)
+    return _discord_conversation_address(agent.id, "unknown", channel_id)
 
 
 def _get_or_create_discord_conversation(
@@ -793,6 +799,27 @@ def _discord_channel_endpoint(address: str) -> PersistentAgentCommsEndpoint:
     return endpoint
 
 
+def _ensure_discord_conversation_participants(
+    agent: PersistentAgent,
+    conversation: PersistentAgentConversation,
+    *,
+    platform_channel_address: str,
+) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
+    from_endpoint = _ensure_discord_agent_endpoint(agent)
+    channel_endpoint = _discord_channel_endpoint(platform_channel_address)
+    _ensure_conversation_participant(
+        conversation,
+        from_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+    )
+    _ensure_conversation_participant(
+        conversation,
+        channel_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+    )
+    return from_endpoint, channel_endpoint
+
+
 def _find_recent_discord_outbound(
     agent: PersistentAgent,
     *,
@@ -823,26 +850,20 @@ def _create_discord_outbound_message(
     channel_id: str,
     body: str,
     conversation_address: str,
+    platform_channel_address: str = "",
     channel_name: str = "",
     raw_payload: Mapping[str, object] | None = None,
 ) -> PersistentAgentMessage:
-    from_endpoint = _ensure_discord_agent_endpoint(agent)
-    channel_endpoint = _discord_channel_endpoint(conversation_address)
     conversation = _get_or_create_discord_conversation(
         agent,
         address=conversation_address,
         channel_id=channel_id,
         channel_name=channel_name,
     )
-    _ensure_conversation_participant(
+    from_endpoint, channel_endpoint = _ensure_discord_conversation_participants(
+        agent,
         conversation,
-        from_endpoint,
-        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-    )
-    _ensure_conversation_participant(
-        conversation,
-        channel_endpoint,
-        PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+        platform_channel_address=platform_channel_address or _discord_channel_address("", channel_id),
     )
     now = timezone.now()
     payload = dict(raw_payload or {})
@@ -852,6 +873,8 @@ def _create_discord_outbound_message(
     payload.setdefault("event_type", DISCORD_MESSAGE_EVENT_TYPE)
     payload.setdefault("discord_channel_id", channel_id)
     payload.setdefault("discord_channel_name", channel_name)
+    payload.setdefault("discord_platform_channel_address", channel_endpoint.address)
+    payload.setdefault("discord_conversation_address", conversation.address)
     return PersistentAgentMessage.objects.create(
         owner_agent=agent,
         from_endpoint=from_endpoint,
@@ -934,6 +957,8 @@ def _normalize_discord_event(
     channel_name = _event_value(event, "channelName", "channel_name") or subscription.platform_channel_name
     guild_name = _event_value(event, "guildName", "guild_name")
     author_id, author_name = _discord_author(event)
+    platform_channel_address = _discord_channel_address(guild_id, channel_id)
+    conversation_address = _discord_conversation_address(subscription.agent_id, guild_id, channel_id)
     source_label_parts = []
     if author_name:
         source_label_parts.append(author_name)
@@ -958,16 +983,19 @@ def _normalize_discord_event(
         "discord_author_id": author_id,
         "discord_author_name": author_name,
         "discord_attachments": attachments if isinstance(attachments, list) else [],
+        "discord_platform_channel_address": platform_channel_address,
+        "discord_conversation_address": conversation_address,
         "pipedream_payload": dict(payload),
     }
     parsed = ParsedMessage(
-        sender=_discord_channel_address(guild_id, channel_id),
+        sender=platform_channel_address,
         recipient=_discord_agent_address(subscription.agent_id),
         subject=None,
         body=body,
         attachments=[],
         raw_payload=normalized_payload,
         msg_channel=CommsChannel.DISCORD.value,
+        conversation_address=conversation_address,
     )
     display_name = f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
     return parsed, display_name
@@ -993,13 +1021,21 @@ def _merge_discord_echo_into_outbound(
     channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
     channel_name = str(raw_payload.get("discord_channel_name") or "").strip()
     guild_id = str(raw_payload.get("discord_guild_id") or "").strip()
+    platform_channel_address = str(raw_payload.get("discord_platform_channel_address") or "").strip()
     if guild_id and channel_id:
-        address = _discord_channel_address(guild_id, channel_id)
+        address = _discord_conversation_address(message.owner_agent_id, guild_id, channel_id)
+        if not platform_channel_address:
+            platform_channel_address = _discord_channel_address(guild_id, channel_id)
         conversation = _get_or_create_discord_conversation(
             message.owner_agent,
             address=address,
             channel_id=channel_id,
             channel_name=channel_name,
+        )
+        _ensure_discord_conversation_participants(
+            message.owner_agent,
+            conversation,
+            platform_channel_address=platform_channel_address,
         )
         if message.conversation_id != conversation.id:
             message.conversation = conversation
@@ -1014,6 +1050,8 @@ def _merge_discord_echo_into_outbound(
             "discord_author_id": raw_payload.get("discord_author_id", ""),
             "discord_author_name": raw_payload.get("discord_author_name", ""),
             "discord_attachments": raw_payload.get("discord_attachments", []),
+            "discord_platform_channel_address": platform_channel_address,
+            "discord_conversation_address": message.conversation.address if message.conversation_id else "",
             "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
         }
     )
@@ -1061,13 +1099,16 @@ def _upsert_discord_outbound_echo(
         "discord_author_id": raw_payload.get("discord_author_id", ""),
         "discord_author_name": raw_payload.get("discord_author_name", ""),
         "discord_attachments": raw_payload.get("discord_attachments", []),
+        "discord_platform_channel_address": raw_payload.get("discord_platform_channel_address", ""),
+        "discord_conversation_address": raw_payload.get("discord_conversation_address", ""),
         "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
     }
     return _create_discord_outbound_message(
         subscription.agent,
         channel_id=channel_id,
         body=body,
-        conversation_address=parsed.sender,
+        conversation_address=parsed.conversation_address or parsed.sender,
+        platform_channel_address=str(raw_payload.get("discord_platform_channel_address") or parsed.sender),
         channel_name=channel_name,
         raw_payload=outbound_payload,
     )

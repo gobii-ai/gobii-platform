@@ -461,7 +461,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         message = PersistentAgentMessage.objects.get(id=payload["messageId"])
         self.assertEqual(message.owner_agent_id, self.agent.id)
         self.assertEqual(message.conversation.channel, CommsChannel.DISCORD)
-        self.assertEqual(message.conversation.address, "discord://guild/g1/channel/12345")
+        self.assertEqual(
+            message.conversation.address,
+            f"discord://agent/{self.agent.id}/guild/g1/channel/12345",
+        )
+        self.assertEqual(message.from_endpoint.address, "discord://guild/g1/channel/12345")
         self.assertEqual(message.conversation.display_name, "#general")
         self.assertEqual(message.body, "hello from discord")
         self.assertEqual(message.raw_payload["source_kind"], "discord")
@@ -503,6 +507,75 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_author_id"], "177593384389705729")
         self.assertEqual(message.raw_payload["discord_author_name"], "_the_juicer_")
         mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_discord_conversations_are_scoped_per_agent_channel_subscription(self, mock_delay):
+        second_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Second PD Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second PD Receiver",
+            charter="Receive the same Discord channel",
+            browser_use_agent=second_browser_agent,
+        )
+        second_subscription = PersistentAgentPipedreamTriggerSubscription.objects.create(
+            agent=second_agent,
+            app_slug="discord",
+            event_type=DISCORD_MESSAGE_EVENT_TYPE,
+            platform_channel="12345",
+            platform_channel_name="general",
+            trigger_key="discord-new-message",
+            trigger_version="1.0.3",
+            external_user_id=str(second_agent.id),
+            deployed_trigger_id="dc_trigger_456",
+            configured_props={"channels": ["12345"]},
+        )
+        second_subscription.signing_key = "second-signing-secret"
+        second_subscription.save()
+        body = json.dumps(
+            {
+                "event": {
+                    "id": "shared-channel-message",
+                    "guildID": "g1",
+                    "channelID": "12345",
+                    "channelName": "general",
+                    "content": "hello both agents",
+                    "author": {"id": "u1", "username": "matt"},
+                }
+            }
+        ).encode("utf-8")
+
+        first_url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+        second_url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[second_subscription.id])}?t={second_subscription.webhook_secret}"
+        with self.captureOnCommitCallbacks(execute=True):
+            first_response = self.client.post(
+                first_url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+            )
+            second_response = self.client.post(
+                second_url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("second-signing-secret", body),
+            )
+
+        self.assertEqual(first_response.status_code, 202, first_response.content)
+        self.assertEqual(second_response.status_code, 202, second_response.content)
+        first_message = PersistentAgentMessage.objects.get(id=first_response.json()["messageId"])
+        second_message = PersistentAgentMessage.objects.get(id=second_response.json()["messageId"])
+        self.assertNotEqual(first_message.conversation_id, second_message.conversation_id)
+        self.assertEqual(
+            first_message.conversation.address,
+            f"discord://agent/{self.agent.id}/guild/g1/channel/12345",
+        )
+        self.assertEqual(
+            second_message.conversation.address,
+            f"discord://agent/{second_agent.id}/guild/g1/channel/12345",
+        )
+        self.assertEqual(first_message.from_endpoint_id, second_message.from_endpoint_id)
+        self.assertEqual(mock_delay.call_count, 2)
 
     @tag("batch_agent_webhooks")
     def test_record_discord_outbound_send_creates_visible_outbound_message(self):
@@ -567,7 +640,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         conversation = PersistentAgentConversation.objects.create(
             owner_agent=self.agent,
             channel=CommsChannel.DISCORD,
-            address="discord://guild/unknown/channel/12345",
+            address=f"discord://agent/{self.agent.id}/guild/unknown/channel/12345",
             display_name="#general",
         )
         outbound = PersistentAgentMessage.objects.create(
@@ -609,9 +682,18 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
         outbound.refresh_from_db()
         self.assertTrue(outbound.is_outbound)
-        self.assertEqual(outbound.conversation.address, "discord://guild/g1/channel/12345")
+        self.assertEqual(
+            outbound.conversation.address,
+            f"discord://agent/{self.agent.id}/guild/g1/channel/12345",
+        )
         self.assertEqual(outbound.raw_payload["discord_message_id"], "m-self")
         self.assertEqual(outbound.raw_payload["discord_author_name"], self.agent.name)
+        self.assertTrue(
+            outbound.conversation.participants.filter(
+                endpoint__address="discord://guild/g1/channel/12345",
+                role="external",
+            ).exists()
+        )
         mock_delay.assert_not_called()
 
 

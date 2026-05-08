@@ -454,7 +454,8 @@ def ingest_inbound_message(
     with traced("AGENT MSG Ingest", channel=channel_val) as span:
         from_ep = _get_or_create_endpoint(channel_val, parsed.sender)
         to_ep = _get_or_create_endpoint(channel_val, parsed.recipient)
-        conv = _get_or_create_conversation(channel_val, parsed.sender, owner_agent=to_ep.owner_agent)
+        conversation_address = parsed.conversation_address or parsed.sender
+        conv = _get_or_create_conversation(channel_val, conversation_address, owner_agent=to_ep.owner_agent)
 
         _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
         _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)

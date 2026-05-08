@@ -18,7 +18,6 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentStep,
-    PersistentAgentToolCall,
     UserQuota,
 )
 
@@ -135,47 +134,6 @@ class TestParallelToolCallsExecution(TestCase):
             self.assertEqual(step.completion_id, completion.id)
 
         self.assertEqual(result_usage["total_tokens"], 15)
-
-    @patch("api.agent.core.event_processing.is_pipedream_mcp_tool", return_value=True)
-    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
-    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "success", "auto_sleep_ok": True})
-    def test_pipedream_tool_params_decode_unicode_escapes_before_execution(
-        self,
-        mock_execute_enabled,
-        _mock_credit,
-        _mock_is_pipedream,
-    ):
-        escaped_message = (
-            "I sure can! That message was sent by **_the_juicer_**. "
-            "\\ud83d\\udd75\\ufe0f\\u200d\\u2642\\ufe0f\\u2728"
-        )
-
-        self._run_single_iteration(
-            [
-                _tool_call(
-                    "discord-send-message",
-                    json.dumps(
-                        {
-                            "channel": "1492138162066034751",
-                            "message": escaped_message,
-                            "username": "Fannie Yueh",
-                            "avatarURL": "https://gobii.ai/static/images/gobii_fish.png",
-                            "includeSentViaPipedream": False,
-                            "will_continue_work": False,
-                        }
-                    ),
-                )
-            ]
-        )
-
-        executed_params = mock_execute_enabled.call_args.args[2]
-        expected_message = (
-            "I sure can! That message was sent by **_the_juicer_**. "
-            "\U0001f575\ufe0f\u200d\u2642\ufe0f\u2728"
-        )
-        self.assertEqual(executed_params["message"], expected_message)
-        persisted_call = PersistentAgentToolCall.objects.get(tool_name="discord-send-message")
-        self.assertEqual(persisted_call.tool_params["message"], expected_message)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

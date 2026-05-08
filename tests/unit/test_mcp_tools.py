@@ -3587,6 +3587,44 @@ class MCPToolIntegrationTests(TestCase):
             ).exists()
         )
 
+    @tag("batch_agent_tools")
+    @patch('api.agent.tools.tool_manager._get_manager')
+    @patch('api.agent.tools.tool_manager.execute_mcp_tool')
+    def test_execute_enabled_tool_decodes_pipedream_unicode_escapes(self, mock_execute, mock_get_manager):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(
+                self.config_id,
+                "notion-create-page",
+                "pipedream",
+                "notion-create-page",
+                "Create Notion page",
+                {},
+            )
+        ]
+        mock_manager.is_tool_blacklisted.return_value = False
+        mock_get_manager.return_value = mock_manager
+        mock_execute.return_value = {"status": "success", "result": "ok"}
+
+        escaped_message = "Look \\ud83d\\udd75\\ufe0f\\u200d\\u2642\\ufe0f\\u2728"
+
+        result = execute_enabled_tool(
+            self.agent,
+            "notion-create-page",
+            {
+                "title": escaped_message,
+                "properties": {"body": escaped_message},
+                "items": [escaped_message],
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        executed_params = mock_execute.call_args.args[2]
+        expected_message = "Look \U0001f575\ufe0f\u200d\u2642\ufe0f\u2728"
+        self.assertEqual(executed_params["title"], expected_message)
+        self.assertEqual(executed_params["properties"]["body"], expected_message)
+        self.assertEqual(executed_params["items"], [expected_message])
+
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
     def test_builtin_execution_updates_usage(self, mock_init, mock_get_tools):
