@@ -52,6 +52,7 @@ from api.agent.comms.message_reads import (
     serialize_latest_agent_message_read_state,
 )
 from api.agent.core.processing_flags import (
+    bump_human_inbound_generation,
     clear_processing_stop_requested,
     clear_processing_work_state,
     set_processing_stop_requested,
@@ -3671,7 +3672,13 @@ class AgentPlanningSkipAPIView(LoginRequiredMixin, View):
         agent, _cancelled_count = skip_agent_planning(agent)
 
         if was_planning:
-            transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.id)))
+            inbound_generation = bump_human_inbound_generation(agent.id)
+            transaction.on_commit(
+                lambda: process_agent_events_task.delay(
+                    str(agent.id),
+                    inbound_generation=inbound_generation,
+                )
+            )
             from console.agent_chat.signals import emit_agent_planning_state_update
 
             emit_agent_planning_state_update(agent, include_pending_actions=True)

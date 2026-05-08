@@ -582,11 +582,7 @@ def ingest_inbound_message(
                 and isinstance(parsed.raw_payload, dict)
                 and str(parsed.raw_payload.get("source_kind", "")).strip().lower() == "webhook"
             )
-            is_interrupting_human_input = channel_val in {
-                CommsChannel.WEB,
-                CommsChannel.EMAIL,
-                CommsChannel.SMS,
-            }
+            is_interrupting_human_input = channel_val == CommsChannel.WEB
 
             try:
                 if agent_obj and (channel_val in {CommsChannel.EMAIL, CommsChannel.SMS} or is_inbound_webhook):

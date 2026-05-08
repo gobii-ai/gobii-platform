@@ -619,7 +619,8 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("## REQUIRED: Your very first action must be sending a welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
         self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
-        self.assertIn("do not do substantive task work before planning ends", system_message["content"])
+        self.assertIn("Read-only research is allowed and often useful during planning", system_message["content"])
+        self.assertIn("substantive execution or deliverable work before planning ends", system_message["content"])
         self.assertIn(
             "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",
             system_message["content"],
@@ -4165,9 +4166,23 @@ class HumanInboundGenerationTests(TestCase):
         )
         ingest_inbound_message(channel, parsed)
 
-    def test_human_web_email_and_sms_bump_generation_and_queue_with_generation(self):
+    def test_web_message_bumps_generation_and_queues_with_generation(self):
+        self._owned_endpoint(CommsChannel.WEB, self.web_agent_address)
+        before = get_human_inbound_generation(self.agent.id)
+        expected = before + 1
+
+        with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                self._ingest(CommsChannel.WEB, self.web_user_address, self.web_agent_address)
+
+        self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
+        mock_delay.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=expected,
+        )
+
+    def test_email_and_sms_messages_queue_without_bumping_generation(self):
         cases = [
-            (CommsChannel.WEB, self.web_user_address, self.web_agent_address),
             (CommsChannel.EMAIL, self.user.email, "human-generation-agent@example.com"),
             (CommsChannel.SMS, "+15555550100", "+15555550101"),
         ]
@@ -4176,17 +4191,13 @@ class HumanInboundGenerationTests(TestCase):
             with self.subTest(channel=channel):
                 self._owned_endpoint(channel, recipient)
                 before = get_human_inbound_generation(self.agent.id)
-                expected = before + 1
 
                 with patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay:
                     with self.captureOnCommitCallbacks(execute=True):
                         self._ingest(channel, sender, recipient)
 
-                self.assertEqual(get_human_inbound_generation(self.agent.id), expected)
-                mock_delay.assert_called_once_with(
-                    str(self.agent.id),
-                    inbound_generation=expected,
-                )
+                self.assertEqual(get_human_inbound_generation(self.agent.id), before)
+                mock_delay.assert_called_once_with(str(self.agent.id))
 
     def test_web_human_input_panel_response_bumps_generation_and_queues_with_generation(self):
         conversation = PersistentAgentConversation.objects.create(

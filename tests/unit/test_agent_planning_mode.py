@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
 
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
 from api.agent.tools.request_human_input import get_request_human_input_tool
@@ -107,6 +108,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("end_planning", names)
         self.assertIn("request_human_input", names)
         self.assertIn("search_tools", names)
+        self.assertNotIn("spawn_web_task", names)
         self.assertIn("send_chat_message", names)
         self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
 
@@ -217,10 +219,12 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
         self.assertIn("Stay in planning only until you call end_planning(full_plan=...)", prompt)
         self.assertIn("Only planning-safe tools are available", prompt)
-        self.assertIn("update_plan, spawn_web_task, spawn_agent, request_contact_permission", prompt)
+        self.assertIn("update_plan, spawn_agent, request_contact_permission", prompt)
         self.assertNotIn("Normal tools are available", prompt)
-        self.assertIn("do not do substantive task work before planning ends", prompt)
-        self.assertIn("no research for the deliverable", prompt)
+        self.assertIn("Read-only research is allowed and often useful during planning", prompt)
+        self.assertIn("search, web, file-reading, and other non-mutating tools", prompt)
+        self.assertIn("Do not do substantive task execution before planning ends", prompt)
+        self.assertNotIn("no research for the deliverable", prompt)
         self.assertIn("no implementation", prompt)
         self.assertIn("Do not update __agent_config.charter directly as a substitute", prompt)
         self.assertIn("Do not update the runtime plan or begin deliverable work", prompt)
@@ -262,7 +266,8 @@ class PersistentAgentPlanningModeTests(TestCase):
             prompt,
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
-        self.assertIn("do not do substantive task work before planning ends", prompt)
+        self.assertIn("Read-only research is allowed and often useful during planning", prompt)
+        self.assertIn("Use request_human_input for planning questions", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
         self.assertNotIn("REQUIRED: First-Run Welcome", prompt)
@@ -273,6 +278,28 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Do not update schedule or __agent_config.schedule while Planning Mode is active", prompt)
         self.assertIn("Only ask about timing or timezone if it changes the scope of the work itself", prompt)
         self.assertIn("Do not update the runtime plan or begin deliverable work until planning is completed", prompt)
+
+    def test_planning_prompt_context_surfaces_pending_human_input_requests(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        conversation = self._create_web_conversation()
+        PersistentAgentHumanInputRequest.objects.create(
+            agent=self.agent,
+            conversation=conversation,
+            question="What locations should I search?",
+            requested_via_channel=CommsChannel.WEB,
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent, is_first_run=False)
+
+        content = "\n".join(message["content"] for message in context)
+        self.assertIn("Pending human input requests", content)
+        self.assertIn("Treat these as open questions", content)
+        self.assertIn("What locations should I search?", content)
+        self.assertIn("Do not assume they are answered unless a newer inbound message directly answers them", content)
 
     def test_planning_prompt_context_avoids_schedule_setup_guidance(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -337,6 +364,8 @@ class PersistentAgentPlanningModeTests(TestCase):
             requested_via_channel=CommsChannel.WEB,
         )
         self.client.force_login(self.user)
+        before_generation = get_human_inbound_generation(self.agent.id)
+        expected_generation = before_generation + 1
 
         with patch("console.api_views.process_agent_events_task.delay") as delay_mock:
             with self.captureOnCommitCallbacks(execute=True):
@@ -348,7 +377,11 @@ class PersistentAgentPlanningModeTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
         self.assertEqual(payload["pending_action_requests"], [])
-        delay_mock.assert_called_once_with(str(self.agent.id))
+        self.assertEqual(get_human_inbound_generation(self.agent.id), expected_generation)
+        delay_mock.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=expected_generation,
+        )
 
         self.agent.refresh_from_db()
         pending_request.refresh_from_db()
