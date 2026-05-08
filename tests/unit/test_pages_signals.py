@@ -14,8 +14,10 @@ from django.contrib.sessions.middleware import SessionMiddleware
 from waffle.testutils import override_flag
 
 from api.models import (
+    BrowserUseAgent,
     DedicatedProxyAllocation,
     Organization,
+    PersistentAgent,
     ProxyServer,
     StripeCheckoutContext,
     UserAttribution,
@@ -53,8 +55,10 @@ from pages.signals import (
 from util.analytics import AnalyticsEvent, AnalyticsSource
 from util.subscription_helper import mark_user_billing_with_plan as real_mark_user_billing_with_plan
 from api.services.owner_execution_pause import (
+    EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
     EXECUTION_PAUSE_REASON_BILLING_DELINQUENCY,
     EXECUTION_PAUSE_REASON_CUSTOMER_ACCOUNT_PAUSE,
+    EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
     resume_owner_execution as real_resume_owner_execution,
 )
 from constants.stripe import (
@@ -1628,8 +1632,11 @@ class SubscriptionSignalTests(TestCase):
         self.assertFalse(identify_args[1]["is_trial"])
         self.assertEqual(identify_kwargs, {})
 
-        mock_track_event.assert_called_once()
-        track_kwargs = mock_track_event.call_args.kwargs
+        subscription_cancelled_call = next(
+            call for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.SUBSCRIPTION_CANCELLED
+        )
+        track_kwargs = subscription_cancelled_call.kwargs
         self.assertEqual(track_kwargs["properties"]["plan"], PlanNames.FREE)
 
         self.mock_capi.assert_called_once()
@@ -1645,6 +1652,49 @@ class SubscriptionSignalTests(TestCase):
         self.assertNotIn("value", props)
         self.assertNotIn("event_id", props)
         self.assertTrue(capi_kwargs["context"].get("consent"))
+
+    @tag("batch_pages_signals")
+    def test_subscription_cancellation_pauses_owner_execution(self):
+        self.mock_capi.reset_mock()
+        self.billing.subscription = PlanNames.STARTUP
+        self.billing.save(update_fields=["subscription"])
+
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Stripe Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Stripe Agent",
+            charter="charter",
+            browser_use_agent=browser_agent,
+        )
+
+        payload = _build_event_payload(status="canceled")
+        event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
+
+        sub = self._mock_subscription(current_period_day=10, subscriber=self.user)
+        sub.status = "canceled"
+        sub.stripe_data = payload
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.Subscription.sync_from_stripe_data", return_value=sub), \
+            patch("pages.signals.get_active_subscription", return_value=None), \
+            patch("pages.signals.get_plan_by_product_id", return_value={"id": PlanNamesChoices.STARTUP.value}), \
+            patch("pages.signals.DedicatedProxyService.release_for_owner"), \
+            patch("pages.signals.Analytics.identify"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("api.services.owner_execution_pause.AgentLifecycleService.shutdown") as mock_shutdown:
+
+            handle_subscription_event(event)
+
+        self.billing.refresh_from_db()
+        self.assertEqual(self.billing.subscription, PlanNames.FREE)
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(
+            self.billing.execution_pause_reason,
+            EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
+        )
+        mock_shutdown.assert_called_once()
+        self.assertEqual(mock_shutdown.call_args.args[:2], (str(agent.id), "PAUSE"))
 
     @tag("batch_pages_signals")
     def test_trial_cancel_scheduled_emits_lifecycle_event(self):
@@ -1950,6 +2000,12 @@ class SubscriptionSignalTests(TestCase):
 
         emitted_names = [call.args[0] for call in mock_emit.call_args_list]
         self.assertIn("trial_ended_non_renewal", emitted_names)
+        self.billing.refresh_from_db()
+        self.assertTrue(self.billing.execution_paused)
+        self.assertEqual(
+            self.billing.execution_pause_reason,
+            EXECUTION_PAUSE_REASON_TRIAL_ENDED_NON_RENEWAL,
+        )
 
     @tag("batch_pages_signals")
     def test_dedicated_ip_allocation_from_subscription(self):
@@ -2070,6 +2126,7 @@ class SubscriptionSignalTests(TestCase):
 class SubscriptionSignalOrganizationTests(TestCase):
     def setUp(self):
         owner = User.objects.create_user(username="org-owner", email="org@example.com", password="pw")
+        self.owner = owner
         self.org = Organization.objects.create(name="Org", slug="org", created_by=owner)
         billing = self.org.billing
         billing.stripe_customer_id = "cus_org"
@@ -2108,6 +2165,52 @@ class SubscriptionSignalOrganizationTests(TestCase):
         sub.stripe_data['cancel_at_period_end'] = False
 
         return sub, payload
+
+    @patch("pages.signals.Subscription.sync_from_stripe_data")
+    def test_subscription_cancellation_pauses_organization_execution(self, mock_sync):
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_subscription_id = "sub_org"
+        billing.cancel_at_period_end = True
+        billing.save(update_fields=["purchased_seats", "stripe_subscription_id", "cancel_at_period_end"])
+
+        with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
+            browser_agent = BrowserUseAgent.objects.create(user=self.owner, name="Org Browser")
+        agent = PersistentAgent.objects.create(
+            user=self.owner,
+            organization=self.org,
+            name="Org Agent",
+            charter="charter",
+            browser_use_agent=browser_agent,
+        )
+
+        sub, payload = self._mock_subscription(quantity=2, billing_reason=None)
+        sub.status = "canceled"
+        payload["status"] = "canceled"
+        sub.stripe_data = payload
+        mock_sync.return_value = sub
+        event = _build_djstripe_event(payload, event_type="customer.subscription.deleted")
+
+        with patch("pages.signals.PaymentsHelper.get_stripe_key"), \
+            patch("pages.signals.get_active_subscription", return_value=None), \
+            patch("pages.signals.DedicatedProxyService.release_for_owner"), \
+            patch("pages.signals.Analytics.track_event"), \
+            patch("api.services.owner_execution_pause.AgentLifecycleService.shutdown") as mock_shutdown:
+
+            handle_subscription_event(event)
+
+        billing.refresh_from_db()
+        self.assertEqual(billing.subscription, PlanNames.FREE)
+        self.assertEqual(billing.purchased_seats, 0)
+        self.assertIsNone(billing.stripe_subscription_id)
+        self.assertFalse(billing.cancel_at_period_end)
+        self.assertTrue(billing.execution_paused)
+        self.assertEqual(
+            billing.execution_pause_reason,
+            EXECUTION_PAUSE_REASON_ACCOUNT_CANCELLATION,
+        )
+        mock_shutdown.assert_called_once()
+        self.assertEqual(mock_shutdown.call_args.args[:2], (str(agent.id), "PAUSE"))
 
     @patch("pages.signals.stripe.SubscriptionItem.create")
     @patch("pages.signals.TaskCreditService.grant_subscription_credits_for_organization")
