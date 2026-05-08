@@ -507,6 +507,48 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_accepts_attachment_only_discord_message_event(self, mock_delay):
+        body = json.dumps(
+            {
+                "event": {
+                    "id": "m-attachment",
+                    "guildID": "g1",
+                    "channelID": "12345",
+                    "channelName": "general",
+                    "content": "",
+                    "author": {"id": "u1", "username": "matt"},
+                    "attachments": [
+                        {
+                            "id": "a1",
+                            "url": "https://cdn.example/photo.png",
+                            "filename": "photo.png",
+                        }
+                    ],
+                }
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        message = PersistentAgentMessage.objects.get(id=payload["messageId"])
+        self.assertEqual(message.body, "")
+        self.assertEqual(
+            message.raw_payload["discord_attachments"],
+            [{"id": "a1", "url": "https://cdn.example/photo.png", "filename": "photo.png"}],
+        )
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")

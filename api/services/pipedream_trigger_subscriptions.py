@@ -954,6 +954,11 @@ def _discord_message_body(event: Mapping[str, object]) -> str:
     return _event_value(event, "content", "message", "text", "body")
 
 
+def _event_list(event: Mapping[str, object], key: str) -> list[object]:
+    value = event.get(key)
+    return value if isinstance(value, list) else []
+
+
 def _normalize_discord_event(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     payload: Mapping[str, object],
@@ -964,8 +969,10 @@ def _normalize_discord_event(
     if channel_id != subscription.platform_channel:
         raise ValueError("Discord event channel does not match this subscription.")
     body = _discord_message_body(event)
-    if not message_id or not body:
-        raise ValueError("Discord message event is missing a message id or content.")
+    attachments = _event_list(event, "attachments")
+    embeds = _event_list(event, "embeds")
+    if not message_id or (not body and not attachments and not embeds):
+        raise ValueError("Discord message event is missing a message id, content, attachments, or embeds.")
 
     guild_id = _event_value(event, "guildID", "guildId", "guild_id")
     channel_name = _event_value(event, "channelName", "channel_name") or subscription.platform_channel_name
@@ -980,7 +987,6 @@ def _normalize_discord_event(
         source_label_parts.append(f"#{channel_name.lstrip('#')}")
     source_label = " in ".join(source_label_parts) if source_label_parts else channel_name or channel_id
 
-    attachments = event.get("attachments")
     normalized_payload = {
         "source": "pipedream_trigger",
         "source_kind": "discord",
@@ -996,7 +1002,8 @@ def _normalize_discord_event(
         "discord_guild_name": guild_name,
         "discord_author_id": author_id,
         "discord_author_name": author_name,
-        "discord_attachments": attachments if isinstance(attachments, list) else [],
+        "discord_attachments": attachments,
+        "discord_embeds": embeds,
         "discord_platform_channel_address": platform_channel_address,
         "discord_conversation_address": conversation_address,
         "pipedream_payload": dict(payload),
