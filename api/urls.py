@@ -17,6 +17,7 @@ from .webhooks import (
     email_webhook_mailgun,
     open_and_link_webhook,
     pipedream_connect_webhook,
+    pipedream_trigger_subscription_webhook,
 )
 
 app_name = "api"
@@ -84,6 +85,11 @@ urlpatterns = [
     path('webhooks/inbound/email/mg/', email_webhook_mailgun, name='email_webhook_mailgun'),
     # Pipedream Connect webhook (one-time)
     path('webhooks/pipedream/connect/<uuid:session_id>/', pipedream_connect_webhook, name='pipedream_connect_webhook'),
+    path(
+        'webhooks/pipedream/triggers/<uuid:subscription_id>/',
+        pipedream_trigger_subscription_webhook,
+        name='pipedream_trigger_subscription_webhook',
+    ),
 
     # Webhook for persistent agent email opens and link clicks business intelligence
     path("webhooks/bi/email/", open_and_link_webhook, name="open_and_link_webhook"),

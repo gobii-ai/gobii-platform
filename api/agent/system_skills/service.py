@@ -6,6 +6,7 @@ from django.db.models import F
 from django.utils import timezone
 
 from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
+from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
 from .registry import SystemSkillDefinition, get_system_skill_definition
 from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
@@ -114,6 +115,10 @@ def enable_system_skills(
     already_enabled: list[str] = []
     invalid: list[str] = []
     evicted: list[str] = []
+    pipedream_apps_enabled: list[str] = []
+    pipedream_apps_already_enabled: list[str] = []
+    pipedream_apps_invalid: list[str] = []
+    pipedream_effective_apps: list[str] = []
 
     for skill_key in requested:
         definition = catalog.get(skill_key)
@@ -122,6 +127,7 @@ def enable_system_skills(
             continue
 
         tool_names = list(definition.tool_names)
+        app_slugs = list(definition.pipedream_app_slugs)
         state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
             agent=agent,
             skill_key=skill_key,
@@ -130,6 +136,22 @@ def enable_system_skills(
         if not state.is_enabled:
             state.is_enabled = True
             state.save(update_fields=["is_enabled"])
+
+        app_enabled = False
+        if app_slugs:
+            app_result = enable_pipedream_apps_for_agent(
+                agent,
+                app_slugs,
+                available_app_slugs=app_slugs,
+            )
+            if app_result.get("status") != "success":
+                invalid.append(skill_key)
+                continue
+            pipedream_apps_enabled.extend(app_result.get("enabled", []))
+            pipedream_apps_already_enabled.extend(app_result.get("already_enabled", []))
+            pipedream_apps_invalid.extend(app_result.get("invalid", []))
+            pipedream_effective_apps = list(app_result.get("effective_apps", []))
+            app_enabled = bool(app_result.get("enabled"))
 
         if not tool_names:
             enabled.append(skill_key)
@@ -141,7 +163,10 @@ def enable_system_skills(
         ).values_list("tool_full_name", flat=True)
         enabled_tool_names = set(enabled_qs)
         if enabled_tool_names.issuperset(tool_names):
-            already_enabled.append(skill_key)
+            if app_enabled:
+                enabled.append(skill_key)
+            else:
+                already_enabled.append(skill_key)
             continue
 
         from api.agent.tools.tool_manager import enable_tools
@@ -161,4 +186,10 @@ def enable_system_skills(
         "already_enabled": already_enabled,
         "invalid": invalid,
         "evicted": list(dict.fromkeys(evicted)),
+        "pipedream_apps": {
+            "enabled": list(dict.fromkeys(pipedream_apps_enabled)),
+            "already_enabled": list(dict.fromkeys(pipedream_apps_already_enabled)),
+            "invalid": list(dict.fromkeys(pipedream_apps_invalid)),
+            "effective_apps": pipedream_effective_apps,
+        },
     }

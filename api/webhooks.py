@@ -22,6 +22,7 @@ from api.models import (
     OutboundMessageAttempt,
     DeliveryStatus,
     PipedreamConnectSession,
+    PersistentAgentPipedreamTriggerSubscription,
 )
 from api.agent.comms.message_reads import (
     READ_SOURCE_EMAIL_CLICK,
@@ -35,6 +36,11 @@ from config import settings
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from api.services.email_verification import has_verified_email
+from api.services.pipedream_trigger_subscriptions import (
+    PipedreamTriggerSignatureError,
+    ingest_trigger_delivery,
+    verify_pipedream_signature,
+)
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
@@ -416,6 +422,60 @@ def inbound_agent_webhook(request, webhook_id):
             "messageId": str(info.message.id),
             "queued": True,
             "receivedAt": info.message.timestamp.isoformat(),
+        },
+        status=202,
+    )
+
+
+@csrf_exempt
+@require_POST
+@tracer.start_as_current_span("COMM pipedream_trigger_subscription_webhook")
+def pipedream_trigger_subscription_webhook(request, subscription_id):
+    secret = request.GET.get("t", "").strip()
+    if not secret:
+        return JsonResponse({"accepted": False, "error": "Missing webhook secret."}, status=400)
+
+    subscription = (
+        PersistentAgentPipedreamTriggerSubscription.objects
+        .select_related("agent__user", "agent__organization")
+        .filter(id=subscription_id)
+        .first()
+    )
+    if subscription is None:
+        return JsonResponse({"accepted": False, "error": "Subscription not found."}, status=404)
+    if not subscription.matches_webhook_secret(secret):
+        return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)
+    if subscription.status != PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE:
+        return JsonResponse({"accepted": False, "error": "Subscription is inactive."}, status=409)
+    if not subscription.agent.is_active:
+        return JsonResponse({"accepted": False, "error": "Agent is inactive."}, status=409)
+
+    try:
+        verify_pipedream_signature(
+            subscription,
+            request.headers.get("x-pd-signature", ""),
+            request.body or b"",
+        )
+    except PipedreamTriggerSignatureError as exc:
+        return JsonResponse({"accepted": False, "error": str(exc)}, status=403)
+
+    try:
+        result = ingest_trigger_delivery(subscription, request.body or b"")
+    except ValueError as exc:
+        subscription.record_delivery_error(str(exc))
+        return JsonResponse({"accepted": False, "error": str(exc)}, status=400)
+    except Exception:
+        logger.exception("Error ingesting Pipedream trigger subscription %s", subscription_id)
+        subscription.record_delivery_error("Failed to ingest Pipedream trigger delivery.")
+        return JsonResponse({"accepted": False, "error": "Failed to ingest trigger delivery."}, status=500)
+
+    return JsonResponse(
+        {
+            "accepted": True,
+            "subscriptionId": str(subscription.id),
+            "messageId": result.get("message_id", ""),
+            "conversationId": result.get("conversation_id", ""),
+            "queued": True,
         },
         status=202,
     )

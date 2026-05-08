@@ -37,6 +37,7 @@ class SystemSkillDefinition:
     enables: tuple[str, ...] = ()
     use_when: tuple[str, ...] = ()
     query_aliases: tuple[str, ...] = ()
+    pipedream_app_slugs: tuple[str, ...] = ()
     prompt_instructions: str = ""
     default_enabled: bool = False
     required_profile_fields: tuple[SystemSkillField, ...] = ()

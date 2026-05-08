@@ -9144,6 +9144,134 @@ class PersistentAgentInboundWebhook(models.Model):
         return super().save(*args, **kwargs)
 
 
+class PersistentAgentPipedreamTriggerSubscription(models.Model):
+    """Pipedream Connect trigger deployed on behalf of an agent."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="pipedream_trigger_subscriptions",
+    )
+    app_slug = models.CharField(max_length=64)
+    event_type = models.CharField(max_length=64)
+    platform_channel = models.CharField(max_length=255)
+    platform_channel_name = models.CharField(max_length=255, blank=True)
+    trigger_key = models.CharField(max_length=128)
+    trigger_version = models.CharField(max_length=32, blank=True)
+    external_user_id = models.CharField(max_length=64)
+    deployed_trigger_id = models.CharField(max_length=128, blank=True)
+    configured_props = models.JSONField(default=dict, blank=True)
+    webhook_secret_encrypted = models.BinaryField(blank=True, null=True)
+    signing_key_encrypted = models.BinaryField(blank=True, null=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    last_error = models.TextField(blank=True)
+    last_event_at = models.DateTimeField(null=True, blank=True)
+    last_deployed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "app_slug", "event_type", "platform_channel"],
+                condition=Q(status="active"),
+                name="uniq_active_agent_pd_trigger_channel",
+            )
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status", "app_slug"], name="pa_pd_trig_agent_status_idx"),
+            models.Index(fields=["deployed_trigger_id"], name="pa_pd_trig_deployed_idx"),
+            models.Index(fields=["app_slug", "event_type"], name="pa_pd_trig_app_event_idx"),
+        ]
+        ordering = ["app_slug", "event_type", "platform_channel"]
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        try:
+            from .encryption import SecretsEncryption
+
+            return SecretsEncryption.decrypt_value(payload)
+        except Exception:  # pragma: no cover - defensive
+            logger.exception("Failed to decrypt Pipedream trigger subscription secret")
+            return ""
+
+    @staticmethod
+    def generate_webhook_secret() -> str:
+        return secrets.token_urlsafe(32)
+
+    @property
+    def webhook_secret(self) -> str:
+        return self._decrypt_text(self.webhook_secret_encrypted)
+
+    @webhook_secret.setter
+    def webhook_secret(self, value: Optional[str]) -> None:
+        self.webhook_secret_encrypted = self._encrypt_text(value)
+
+    @property
+    def signing_key(self) -> str:
+        return self._decrypt_text(self.signing_key_encrypted)
+
+    @signing_key.setter
+    def signing_key(self, value: Optional[str]) -> None:
+        self.signing_key_encrypted = self._encrypt_text(value)
+
+    def matches_webhook_secret(self, candidate: str | None) -> bool:
+        if not candidate:
+            return False
+        current_secret = self.webhook_secret
+        if not current_secret:
+            return False
+        return secrets.compare_digest(current_secret, candidate)
+
+    def record_event(self) -> None:
+        self.last_event_at = timezone.now()
+        self.last_error = ""
+        self.save(update_fields=["last_event_at", "last_error", "updated_at"])
+
+    def record_error(self, message: str) -> None:
+        self.last_error = (message or "")[:2000]
+        self.status = self.Status.ERROR
+        self.save(update_fields=["last_error", "status", "updated_at"])
+
+    def record_delivery_error(self, message: str) -> None:
+        self.last_error = (message or "")[:2000]
+        self.save(update_fields=["last_error", "updated_at"])
+
+    def clean(self):
+        super().clean()
+        for field_name in ("app_slug", "event_type", "platform_channel", "trigger_key", "trigger_version", "external_user_id"):
+            value = getattr(self, field_name, "")
+            if isinstance(value, str):
+                setattr(self, field_name, value.strip())
+        if self.app_slug:
+            self.app_slug = self.app_slug.lower()
+
+    def save(self, *args, **kwargs):
+        if not self.webhook_secret_encrypted:
+            self.webhook_secret = self.generate_webhook_secret()
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"PipedreamTrigger<{self.app_slug}:{self.event_type}:{self.platform_channel}>"
+
+
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 

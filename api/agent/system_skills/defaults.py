@@ -250,7 +250,53 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
+CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key="connected_app_channels",
+    name="Connected App Channels",
+    search_summary="Provision inbound message subscriptions for connected apps like Discord.",
+    tool_names=("pipedream_trigger_subscriptions",),
+    enables=(
+        "receive Discord channel messages through Pipedream Connect triggers",
+        "inspect active connected-app trigger subscriptions",
+        "disable connected-app trigger subscriptions",
+        "turn selected app channels into agent conversations",
+    ),
+    use_when=(
+        "the user wants the agent to receive Discord messages",
+        "the user asks to monitor or listen to a Discord channel",
+        "the user wants messages from a connected app to wake the agent",
+        "the user asks whether connected app channel subscriptions are active",
+    ),
+    query_aliases=(
+        "discord",
+        "connected app messages",
+        "pipedream triggers",
+        "slack receive",
+        "slack messages",
+    ),
+    pipedream_app_slugs=("discord",),
+    prompt_instructions=(
+        "Use normal Pipedream app tools for outbound actions such as sending Discord messages or discovering channel IDs.\n"
+        "When calling Discord send-message tools, use this parameter pattern: "
+        "`channel` = the selected Discord channel ID, `message` = the text to send, "
+        "`avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"`, `username` = this agent's name, "
+        "`includeSentViaPipedream=false`, and the correct `will_continue_work` value.\n"
+        "Use `pipedream_trigger_subscriptions` only to manage inbound app event subscriptions that wake this agent.\n"
+        "V1 supports Discord `message.created` subscriptions for selected channel IDs. Do not create all-channel or mention-only subscriptions.\n"
+        "Before asking the user for a Discord channel ID, call `pipedream_trigger_subscriptions` with `action=\"discover_targets\"` to list available channels. "
+        "If several channels are returned, ask the user to choose by channel name, then call `ensure` with the selected target value as `channel_ids`. "
+        "Only ask the user for a raw channel ID in normal conversation if target discovery fails or returns no useful choices. "
+        "Do not request Discord server IDs or channel IDs as secrets. Server ID is not required for v1 setup.\n"
+        "Include `channel_names` when you know human-readable names.\n"
+        "If the tool returns `action_required`, provide the connect URL to the user and stop until authorization completes.\n"
+        "Use `list` before creating duplicates when the current subscription state is unclear.\n"
+        "Use `disable` only when the user asks to stop receiving messages from a subscribed app channel."
+    ),
+)
+
+
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
+    CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
 }

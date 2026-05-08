@@ -5524,6 +5524,8 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
                 if is_webhook:
                     label = str(source_label).strip() if isinstance(source_label, str) and str(source_label).strip() else "unknown webhook"
                     header = f'[{m.timestamp.isoformat()}] Inbound webhook "{label}" triggered:'
+                elif source_label:
+                    header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {source_label}:"
                 else:
                     header = f"[{m.timestamp.isoformat()}] On {channel}, you received a message from {from_addr}:"
 

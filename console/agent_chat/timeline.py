@@ -634,7 +634,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         sender_name = (conversation.display_name or "").strip() if conversation else ""
         if not sender_name:
             sender_name = sender_address
-    if source_kind == "webhook" and source_label:
+    if source_label and not message.is_outbound:
         sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)

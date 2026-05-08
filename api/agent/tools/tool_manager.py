@@ -50,6 +50,10 @@ from .custom_tools import (
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
+from .pipedream_trigger_subscriptions import (
+    get_pipedream_trigger_subscriptions_tool,
+    execute_pipedream_trigger_subscriptions,
+)
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names
@@ -106,6 +110,7 @@ CREATE_VIDEO_TOOL_NAME = "create_video"
 PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
+PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -215,6 +220,12 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_meta_ads,
         "search_hidden": True,
         "system_skill_key": "meta_ads_platform",
+    },
+    PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME: {
+        "definition": get_pipedream_trigger_subscriptions_tool,
+        "executor": execute_pipedream_trigger_subscriptions,
+        "search_hidden": True,
+        "system_skill_key": "connected_app_channels",
     },
 }
 
