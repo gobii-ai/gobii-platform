@@ -2051,6 +2051,13 @@ def _render_prompt_context_once(
         weight=2,
         non_shrinkable=True,
     )
+    pending_human_input_block = _get_pending_human_input_requests_block(agent)
+    important_group.section_text(
+        "pending_human_input_requests",
+        pending_human_input_block,
+        weight=3,
+        non_shrinkable=True,
+    )
 
     if agent.charter:
         important_group.section_text(
@@ -3861,14 +3868,15 @@ def _get_planning_mode_prompt_block() -> str:
         "## Behavior Rules\n\n"
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only "
         "until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; "
-        "execution and setup tools such as update_plan, spawn_web_task, spawn_agent, request_contact_permission, "
-        "create_custom_tool, and file_str_replace are unavailable while Planning Mode is active. Do "
-        "not do substantive task work before planning ends: no research for the deliverable, no drafting the actual "
-        "output, no implementation, no outbound task execution, no third-party follow-through, and no results meant "
-        "to satisfy the task itself. Use this phase only to clarify scope, capture assumptions, ask planning "
-        "questions, and prepare the plan.\n"
+        "execution and setup tools such as update_plan, spawn_agent, request_contact_permission, create_custom_tool, "
+        "and file_str_replace are unavailable while Planning Mode is active. Read-only research is allowed and often "
+        "useful during planning: use search, web, file-reading, and other non-mutating tools when they help you "
+        "understand the domain, options, constraints, risks, or likely plan. Do not do substantive task execution "
+        "before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, "
+        "no third-party follow-through, and no results meant to satisfy the task itself. Use this phase to clarify "
+        "scope, gather context, capture assumptions, ask planning questions, and prepare the plan.\n"
         "- Do not update the runtime plan or begin deliverable work until planning is completed, and do not do "
-        "substantive task work before planning ends.\n"
+        "substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
         "- Do not begin deliverable work until planning is completed with end_planning or the user skips planning.\n"
@@ -4014,9 +4022,9 @@ def _get_planning_first_run_welcome_instruction(
         + "\n\n"
         "## Then Planning Mode: clarify before main work\n\n"
         "After the welcome, continue Planning Mode. Use request_human_input for the actual planning "
-        "questions. Stay in planning only until planning is completed or skipped. Do not update the charter directly, "
-        "research the deliverable, draft the actual output, or otherwise start doing "
-        "the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
+        "questions. Stay in planning only until planning is completed or skipped. You may do read-only research "
+        "to understand the task better, but do not update the charter directly, draft the actual output, or otherwise "
+        "start doing the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
         "that means move planning forward or call end_planning, not start the deliverable work.\n\n"
         "Do not ask which communication channel or delivery method to use for planning when this welcome target "
         "or other prompt context already gives you a current or preferred setup. Treat that setup as outside the "
@@ -5940,4 +5948,31 @@ def _get_recent_human_input_responses_block(agent: PersistentAgent) -> str:
             lines.append(f"  Original reply text: {response.raw_reply_text}")
         if response.resolution_source:
             lines.append(f"  Resolution source: {response.resolution_source}")
+    return "\n".join(lines)
+
+
+def _get_pending_human_input_requests_block(agent: PersistentAgent) -> str:
+    requests = list(
+        PersistentAgentHumanInputRequest.objects.filter(
+            agent=agent,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        )
+        .order_by("-created_at")[:8]
+    )
+    if not requests:
+        return "No pending human input requests."
+
+    lines = [
+        "Pending human input requests:",
+        (
+            "Treat these as open questions. Do not assume they are answered unless a newer "
+            "inbound message directly answers them."
+        ),
+    ]
+    for request in requests:
+        lines.append(f"- Pending question: {request.question}")
+        lines.append(f"  Requested via: {request.requested_via_channel}")
+        if request.recipient_channel and request.recipient_address:
+            lines.append(f"  Recipient: {request.recipient_channel} {request.recipient_address}")
+        lines.append(f"  Created at: {request.created_at.isoformat()}")
     return "\n".join(lines)

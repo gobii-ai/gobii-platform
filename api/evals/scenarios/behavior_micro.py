@@ -38,28 +38,14 @@ TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
 
 BEHAVIOR_MICRO_SCENARIO_SLUGS = PLANNING_MICRO_SCENARIO_SLUGS + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
 
-BROWSER_OR_SEARCH_TOOL_NAMES = {
-    "search_tools",
-    "spawn_web_task",
-    "mcp_brightdata_search_engine",
-    "scraping_browser_navigate",
-    "scraping_browser_snapshot",
-    "scraping_browser_click_ref",
-    "scraping_browser_type_ref",
-    "scraping_browser_scroll",
-    "scraping_browser_scroll_to_ref",
-    "scraping_browser_wait_for_ref",
-}
-
-SUBSTANTIVE_WORK_TOOL_NAMES = BROWSER_OR_SEARCH_TOOL_NAMES | {
-    "http_request",
-    "read_file",
+SUBSTANTIVE_WORK_TOOL_NAMES = {
     "create_file",
     "create_csv",
     "create_pdf",
     "create_chart",
     "create_image",
     "create_video",
+    "http_request",
     "python_exec",
     "run_command",
     "send_email",
@@ -67,6 +53,7 @@ SUBSTANTIVE_WORK_TOOL_NAMES = BROWSER_OR_SEARCH_TOOL_NAMES | {
     "send_webhook_event",
     "request_contact_permission",
     "secure_credentials_request",
+    "spawn_web_task",
 }
 
 PLANNING_MUTATION_TOOL_NAMES = {
@@ -169,9 +156,7 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 
     def _planning_guardrail_mocks(self):
         return {
-            "search_tools": {"status": "error", "message": "Search disabled during planning eval."},
             "spawn_web_task": {"status": "error", "message": "Browser work disabled during planning eval."},
-            "http_request": {"status": "error", "message": "HTTP work disabled during planning eval."},
             "send_email": {"status": "error", "message": "Outbound email disabled during planning eval."},
             "send_sms": {"status": "error", "message": "Outbound SMS disabled during planning eval."},
             "send_webhook_event": {"status": "error", "message": "Webhook delivery disabled during planning eval."},
@@ -452,7 +437,7 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
             run_id,
             inbound.timestamp,
             "verify_no_execution_before_planning_exit",
-            BROWSER_OR_SEARCH_TOOL_NAMES | {"http_request", "send_email", "send_sms"},
+            {"send_email", "send_sms"},
         )
 
 
