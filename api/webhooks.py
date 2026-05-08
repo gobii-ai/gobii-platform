@@ -478,6 +478,8 @@ def pipedream_trigger_subscription_webhook(request, subscription_id):
             "queued": not bool(result.get("ignored")),
             "ignored": bool(result.get("ignored")),
             "outboundEcho": bool(result.get("outbound_echo")),
+            "debounced": bool(result.get("debounced")),
+            "debounceSeconds": int(result.get("debounce_seconds") or 0),
         },
         status=202,
     )

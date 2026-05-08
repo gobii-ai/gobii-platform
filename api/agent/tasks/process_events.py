@@ -419,6 +419,17 @@ def process_pending_agent_events_task(
     )
 
 
+@shared_task(bind=True, name="api.agent.tasks.process_discord_inbound_debounce")
+def process_discord_inbound_debounce_task(
+    self,
+    persistent_agent_id: str,
+) -> None:  # noqa: D401, ANN001
+    """Wake an agent after Discord inbound messages have been quiet long enough."""
+    from api.services.pipedream_trigger_subscriptions import process_discord_inbound_debounce
+
+    process_discord_inbound_debounce(persistent_agent_id)
+
+
 def _remove_orphaned_celery_beat_task(agent_id: str) -> None:
     """Remove the associated Celery Beat schedule task for a non-existent agent."""
     from celery import current_app as celery_app

@@ -3,6 +3,8 @@
 import hashlib
 import hmac
 import json
+import logging
+import math
 import re
 import secrets
 import time
@@ -10,6 +12,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from typing import Iterable, Mapping
 
+import redis
 import requests
 from django.conf import settings
 from django.contrib.sites.models import Site
@@ -20,6 +23,7 @@ from django.utils import timezone
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
+from config.redis_client import get_redis_client
 from api.integrations.pipedream_connect import create_connect_session
 from api.models import (
     CommsChannel,
@@ -44,6 +48,10 @@ DISCORD_SEND_TOOL_NAMES = {
 }
 SIGNATURE_TOLERANCE_SECONDS = 300
 DISCORD_SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
+DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:discord-inbound-debounce:{agent_id}:deadline"
+DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:discord-inbound-debounce:{agent_id}:scheduled"
+
+logger = logging.getLogger(__name__)
 
 
 class PipedreamTriggerSubscriptionError(RuntimeError):
@@ -1122,6 +1130,134 @@ def _upsert_discord_outbound_echo(
     )
 
 
+def _discord_inbound_debounce_seconds() -> int:
+    return max(0, int(settings.PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS))
+
+
+def _discord_inbound_debounce_keys(agent_id: str) -> tuple[str, str]:
+    return (
+        DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=agent_id),
+        DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=agent_id),
+    )
+
+
+def _discord_inbound_debounce_ttl(delay_seconds: int) -> int:
+    return max(60, delay_seconds * 6)
+
+
+def _process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int = 0) -> None:
+    from api.agent.tasks import process_agent_events_task
+
+    if countdown > 0:
+        process_agent_events_task.apply_async(args=[agent_id], countdown=countdown)
+    else:
+        process_agent_events_task.delay(agent_id)
+
+
+def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
+    debounce_seconds = _discord_inbound_debounce_seconds()
+    if debounce_seconds <= 0:
+        _process_agent_events_after_discord_debounce(str(agent_id))
+        return {"debounced": False, "debounce_seconds": 0, "scheduled": True}
+
+    normalized_agent_id = str(agent_id)
+    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
+    deadline = time.time() + debounce_seconds
+    ttl = _discord_inbound_debounce_ttl(debounce_seconds)
+
+    try:
+        redis_client = get_redis_client()
+        redis_client.set(deadline_key, f"{deadline:.6f}", ex=ttl)
+        scheduled = bool(redis_client.set(scheduled_key, "1", ex=ttl, nx=True))
+    except redis.exceptions.RedisError:
+        logger.exception(
+            "Failed scheduling Discord inbound debounce for agent %s; falling back to delayed processing.",
+            normalized_agent_id,
+        )
+        _process_agent_events_after_discord_debounce(normalized_agent_id, countdown=debounce_seconds)
+        return {
+            "debounced": False,
+            "debounce_seconds": debounce_seconds,
+            "scheduled": True,
+            "fallback": True,
+        }
+
+    if scheduled:
+        if settings.CELERY_TASK_ALWAYS_EAGER:
+            redis_client.delete(deadline_key, scheduled_key)
+            _process_agent_events_after_discord_debounce(normalized_agent_id)
+            return {
+                "debounced": False,
+                "debounce_seconds": debounce_seconds,
+                "scheduled": True,
+                "eager": True,
+            }
+
+        from api.agent.tasks.process_events import process_discord_inbound_debounce_task
+        process_discord_inbound_debounce_task.apply_async(
+            args=[normalized_agent_id],
+            countdown=debounce_seconds,
+        )
+
+    return {
+        "debounced": True,
+        "debounce_seconds": debounce_seconds,
+        "scheduled": scheduled,
+    }
+
+
+def _coerce_redis_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8", "ignore")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def process_discord_inbound_debounce(agent_id: str) -> None:
+    debounce_seconds = _discord_inbound_debounce_seconds()
+    normalized_agent_id = str(agent_id)
+    if debounce_seconds <= 0:
+        _process_agent_events_after_discord_debounce(normalized_agent_id)
+        return
+
+    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
+    now = time.time()
+
+    try:
+        redis_client = get_redis_client()
+        deadline = _coerce_redis_float(redis_client.get(deadline_key))
+        if deadline is not None and deadline > now:
+            if settings.CELERY_TASK_ALWAYS_EAGER:
+                redis_client.delete(deadline_key, scheduled_key)
+                _process_agent_events_after_discord_debounce(normalized_agent_id)
+                return
+
+            countdown = max(1, math.ceil(deadline - now))
+            ttl = _discord_inbound_debounce_ttl(max(debounce_seconds, countdown))
+            redis_client.expire(deadline_key, ttl)
+            redis_client.expire(scheduled_key, ttl)
+            from api.agent.tasks.process_events import process_discord_inbound_debounce_task
+
+            process_discord_inbound_debounce_task.apply_async(
+                args=[normalized_agent_id],
+                countdown=countdown,
+            )
+            return
+
+        redis_client.delete(deadline_key, scheduled_key)
+    except redis.exceptions.RedisError:
+        logger.exception(
+            "Failed processing Discord inbound debounce for agent %s; falling back to immediate processing.",
+            normalized_agent_id,
+        )
+
+    _process_agent_events_after_discord_debounce(normalized_agent_id)
+
+
 def ingest_trigger_delivery(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     raw_body: bytes,
@@ -1142,11 +1278,19 @@ def ingest_trigger_delivery(
         }
 
     _ensure_discord_agent_endpoint(subscription.agent)
-    info = ingest_inbound_message(CommsChannel.DISCORD, parsed, filespace_import_mode="sync")
+    info = ingest_inbound_message(
+        CommsChannel.DISCORD,
+        parsed,
+        filespace_import_mode="sync",
+        trigger_processing=False,
+    )
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
+    debounce_result = schedule_discord_inbound_processing(str(subscription.agent_id))
     subscription.record_event()
     return {
         "message_id": str(info.message.id),
         "conversation_id": str(info.message.conversation_id) if info.message.conversation_id else "",
+        "debounced": bool(debounce_result.get("debounced")),
+        "debounce_seconds": debounce_result.get("debounce_seconds", 0),
     }
