@@ -1141,6 +1141,14 @@ def _search_with_llm(
                     evicted_label="Evicted (LRU)",
                     invalid_label="Invalid system skills",
                 )
+                if enabled_system_skills_result and enabled_system_skills_result.get("pipedream_apps"):
+                    _append_section_summary(
+                        message_lines,
+                        enabled_system_skills_result.get("pipedream_apps"),
+                        enabled_label="Enabled apps",
+                        already_enabled_label="Already enabled apps",
+                        invalid_label="Invalid apps",
+                    )
                 _append_section_summary(
                     message_lines,
                     enabled_result,
@@ -1246,6 +1254,10 @@ def _search_with_llm(
                         evicted=enabled_system_skills_result.get("evicted", []),
                         invalid=enabled_system_skills_result.get("invalid", []),
                     )
+                    if enabled_system_skills_result.get("pipedream_apps"):
+                        response_payload["system_skills"]["pipedream_apps"] = enabled_system_skills_result[
+                            "pipedream_apps"
+                        ]
                 if enabled_result and enabled_result.get("status") == "success":
                     response_payload["tools"] = _section_payload(
                         enabled=enabled_result.get("enabled", []),

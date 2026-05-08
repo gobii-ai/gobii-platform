@@ -197,7 +197,6 @@ from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVA
 from config import settings
 from config.redis_client import get_redis_client
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
-from util.text_sanitizer import decode_unicode_escapes
 from .gemini_cache import (
     GEMINI_CACHE_BLOCKLIST,
     GeminiCachedContentManager,
@@ -2263,17 +2262,6 @@ def _finalize_tool_batch(
         inferred_message_continue_this_iteration=inferred_message_continue_this_iteration,
         executed_non_message_action=executed_non_message_action,
     )
-
-
-def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
-    """Recursively decode unicode escape sequences inside tool parameters."""
-    if isinstance(params, str):
-        return decode_unicode_escapes(params)
-    if isinstance(params, dict):
-        return {k: _normalize_tool_params_unicode_escapes(v) for k, v in params.items()}
-    if isinstance(params, list):
-        return [_normalize_tool_params_unicode_escapes(item) for item in params]
-    return params
 
 
 def _gate_send_chat_tool_for_delivery(

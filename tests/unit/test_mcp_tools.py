@@ -3481,6 +3481,44 @@ class MCPToolIntegrationTests(TestCase):
         )
         self.config_id = str(self.server_config.id)
         self.server_name = self.server_config.name
+
+    def _discord_send_tool_info(self) -> MCPToolInfo:
+        return MCPToolInfo(
+            self.config_id,
+            "discord-send-message",
+            "pipedream",
+            "discord-send-message",
+            "Send Discord message",
+            {
+                "type": "object",
+                "properties": {
+                    "channel": {"type": "string"},
+                    "message": {"type": "string"},
+                    "avatarURL": {"type": "string"},
+                    "username": {"type": "string"},
+                    "includeSentViaPipedream": {"type": "boolean"},
+                },
+            },
+        )
+
+    def _pipedream_runtime(self, config: MCPServerConfig) -> MCPServerRuntime:
+        return MCPServerRuntime(
+            config_id=str(config.id),
+            name=config.name,
+            display_name=config.display_name,
+            description=config.description,
+            command=config.command or None,
+            args=list(config.command_args or []),
+            url=config.url or "",
+            auth_method=config.auth_method,
+            env=config.environment or {},
+            headers=config.headers or {},
+            prefetch_apps=list(config.prefetch_apps or []),
+            scope=config.scope,
+            organization_id=str(config.organization_id) if config.organization_id else None,
+            user_id=str(config.user_id) if config.user_id else None,
+            updated_at=config.updated_at,
+        )
         
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
@@ -3586,6 +3624,168 @@ class MCPToolIntegrationTests(TestCase):
                 agent=self.agent, tool_full_name="mcp_test_tool"
             ).exists()
         )
+
+    @tag("batch_agent_tools")
+    @patch('api.agent.tools.tool_manager._get_manager')
+    @patch('api.agent.tools.tool_manager.execute_mcp_tool')
+    def test_execute_enabled_tool_decodes_pipedream_unicode_escapes(self, mock_execute, mock_get_manager):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(
+                self.config_id,
+                "notion-create-page",
+                "pipedream",
+                "notion-create-page",
+                "Create Notion page",
+                {},
+            )
+        ]
+        mock_manager.is_tool_blacklisted.return_value = False
+        mock_get_manager.return_value = mock_manager
+        mock_execute.return_value = {"status": "success", "result": "ok"}
+
+        escaped_message = "Look \\ud83d\\udd75\\ufe0f\\u200d\\u2642\\ufe0f\\u2728"
+
+        result = execute_enabled_tool(
+            self.agent,
+            "notion-create-page",
+            {
+                "title": escaped_message,
+                "properties": {"body": escaped_message},
+                "items": [escaped_message],
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        executed_params = mock_execute.call_args.args[2]
+        expected_message = "Look \U0001f575\ufe0f\u200d\u2642\ufe0f\u2728"
+        self.assertEqual(executed_params["title"], expected_message)
+        self.assertEqual(executed_params["properties"]["body"], expected_message)
+        self.assertEqual(executed_params["items"], [expected_message])
+
+    @tag("batch_agent_tools")
+    @patch('api.agent.tools.tool_manager._get_manager')
+    @patch('api.agent.tools.tool_manager.execute_mcp_tool')
+    def test_execute_enabled_tool_applies_discord_send_defaults(self, mock_execute, mock_get_manager):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [self._discord_send_tool_info()]
+        mock_manager.is_tool_blacklisted.return_value = False
+        mock_get_manager.return_value = mock_manager
+        mock_execute.return_value = {"status": "complete", "result": "ok"}
+
+        result = execute_enabled_tool(
+            self.agent,
+            "discord-send-message",
+            {
+                "channel": "1492138162066034751",
+                "message": "hello",
+            },
+        )
+
+        self.assertEqual(result["status"], "complete")
+        executed_params = mock_execute.call_args.args[2]
+        self.assertEqual(executed_params["channel"], "1492138162066034751")
+        self.assertEqual(executed_params["message"], "hello")
+        self.assertEqual(executed_params["avatarURL"], "https://gobii.ai/static/images/gobii_fish.png")
+        self.assertEqual(executed_params["username"], self.agent.name)
+        self.assertIs(executed_params["includeSentViaPipedream"], False)
+
+    @tag("batch_agent_tools")
+    @patch('api.agent.tools.tool_manager._get_manager')
+    @patch('api.agent.tools.tool_manager.execute_mcp_tool')
+    def test_execute_enabled_tool_preserves_discord_send_overrides(self, mock_execute, mock_get_manager):
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [self._discord_send_tool_info()]
+        mock_manager.is_tool_blacklisted.return_value = False
+        mock_get_manager.return_value = mock_manager
+        mock_execute.return_value = {"status": "complete", "result": "ok"}
+
+        result = execute_enabled_tool(
+            self.agent,
+            "discord-send-message",
+            {
+                "channel": "1492138162066034751",
+                "message": "hello",
+                "avatarURL": "https://example.com/avatar.png",
+                "username": "Custom Bot",
+                "includeSentViaPipedream": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "complete")
+        executed_params = mock_execute.call_args.args[2]
+        self.assertEqual(executed_params["avatarURL"], "https://example.com/avatar.png")
+        self.assertEqual(executed_params["username"], "Custom Bot")
+        self.assertIs(executed_params["includeSentViaPipedream"], True)
+
+    @tag("batch_agent_tools")
+    def test_execute_mcp_tool_infers_pipedream_app_slug_from_component_key(self):
+        config, _created = MCPServerConfig.objects.update_or_create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            defaults={
+                "display_name": "Pipedream",
+                "description": "Pipedream remote MCP",
+                "command": "",
+                "command_args": [],
+                "url": "https://remote.mcp.pipedream.net",
+                "prefetch_apps": [],
+                "metadata": {},
+                "is_active": True,
+            },
+        )
+        runtime = self._pipedream_runtime(config)
+        manager = MCPToolManager()
+        manager._initialized = True
+        manager._server_cache = {runtime.config_id: runtime}
+        manager._tools_cache = {
+            runtime.config_id: [
+                MCPToolInfo(
+                    runtime.config_id,
+                    "retrieve_options",
+                    "pipedream",
+                    "retrieve_options",
+                    "Retrieve component options",
+                    {
+                        "type": "object",
+                        "properties": {
+                            "componentKey": {"type": "string"},
+                            "propName": {"type": "string"},
+                            "configuredProps": {"type": "object"},
+                        },
+                    },
+                )
+            ]
+        }
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="retrieve_options",
+            tool_server="pipedream",
+            tool_name="retrieve_options",
+            server_config=config,
+        )
+        client = MagicMock()
+
+        with (
+            patch.object(manager, "_ensure_runtime_registered", return_value=True),
+            patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)),
+            patch.object(manager, "_get_pipedream_agent_client", return_value=client) as mock_get_client,
+            patch.object(manager, "_execute_async", new=MagicMock(return_value={"result": {"ok": True}})) as mock_execute,
+            patch.object(manager, "_run_coroutine_sync", side_effect=lambda value: value),
+        ):
+            result = manager.execute_mcp_tool(
+                self.agent,
+                "retrieve_options",
+                {
+                    "componentKey": "discord-send-message",
+                    "propName": "channel",
+                },
+            )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["result"], {"ok": True})
+        self.assertEqual(mock_get_client.call_args.kwargs["app_slug"], "discord")
+        mock_execute.assert_called_once()
 
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

@@ -10,12 +10,12 @@ from django.utils import timezone
 from api.agent.core.event_processing import (
     _process_agent_events_locked,
     _parse_tool_call_params,
-    _normalize_tool_params_unicode_escapes,
     _should_imply_continue,
 )
 from django.urls import reverse
 
 from api.agent.core.prompt_context import build_prompt_context
+from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
 from util.urls import build_agent_detail_url, build_site_url
 

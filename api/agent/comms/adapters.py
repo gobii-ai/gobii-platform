@@ -181,6 +181,7 @@ class ParsedMessage:
     attachments: List[Any]
     raw_payload: MutableMapping[str, Any]
     msg_channel: CommsChannel
+    conversation_address: Optional[str] = None
 
 
 class SmsAdapter:

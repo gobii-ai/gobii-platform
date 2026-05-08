@@ -1,6 +1,7 @@
 """
 Tests for guarded parallel execution of safe tool batches.
 """
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -12,7 +13,13 @@ from django.test import TestCase, tag
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import enable_tools
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep, UserQuota
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentStep,
+    UserQuota,
+)
 
 
 def _tool_call(name: str, arguments: str) -> dict:

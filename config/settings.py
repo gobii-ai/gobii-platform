@@ -1523,6 +1523,11 @@ PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
 
+PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS = env.int(
+    "PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS",
+    default=15,
+)
+
 # Pipedream Connect GC (batch cleanup)
 PIPEDREAM_GC_ENABLED = env.bool(
     "PIPEDREAM_GC_ENABLED",

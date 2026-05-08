@@ -34,6 +34,7 @@ from api.agent.comms.source_metadata import get_message_source_metadata, get_web
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
+    CommsChannel,
     PersistentAgent,
     PersistentAgentKanbanEvent,
     PersistentAgentCompletion,
@@ -390,6 +391,23 @@ def _build_web_user_lookup(messages: Iterable[PersistentAgentMessage]) -> dict[i
     return {user.id: _build_user_display_name(user) for user in users}
 
 
+def _discord_outbound_channel_label(message: PersistentAgentMessage, conversation) -> str:
+    if not message.is_outbound:
+        return ""
+    payload = message.raw_payload if isinstance(message.raw_payload, Mapping) else {}
+    channel_name = payload.get("discord_channel_name")
+    if isinstance(channel_name, str) and channel_name.strip():
+        return f"#{channel_name.strip().lstrip('#')}"
+    if conversation:
+        display_name = (conversation.display_name or "").strip()
+        if display_name:
+            return display_name
+    channel_id = payload.get("discord_channel_id")
+    if isinstance(channel_id, str) and channel_id.strip():
+        return f"Discord {channel_id.strip()}"
+    return ""
+
+
 def _format_timestamp(dt: datetime | None) -> str | None:
     if dt is None:
         return None
@@ -591,6 +609,8 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
     attachments = [_serialize_attachment(att, message.owner_agent_id) for att in message.attachments.all()]
     conversation = message.conversation
     source_kind, source_label = get_message_source_metadata(message.raw_payload)
+    if channel.lower() == CommsChannel.DISCORD.value and message.is_outbound and not source_label:
+        source_label = _discord_outbound_channel_label(message, conversation)
     webhook_meta = get_webhook_timeline_metadata(message.raw_payload)
     peer_link_id: str | None = None
     is_peer_dm = False
@@ -634,7 +654,7 @@ def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | Non
         sender_name = (conversation.display_name or "").strip() if conversation else ""
         if not sender_name:
             sender_name = sender_address
-    if source_kind == "webhook" and source_label:
+    if source_label and not message.is_outbound:
         sender_name = source_label
 
     body_html = _message_body_html(message, channel, attachments)

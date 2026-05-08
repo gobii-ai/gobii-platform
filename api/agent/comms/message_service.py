@@ -446,6 +446,7 @@ def ingest_inbound_message(
     channel: CommsChannel | str,
     parsed: ParsedMessage,
     filespace_import_mode: str = "sync",
+    trigger_processing: bool = True,
 ) -> InboundMessageInfo:
     """Persist an inbound message and trigger event processing."""
 
@@ -454,7 +455,8 @@ def ingest_inbound_message(
     with traced("AGENT MSG Ingest", channel=channel_val) as span:
         from_ep = _get_or_create_endpoint(channel_val, parsed.sender)
         to_ep = _get_or_create_endpoint(channel_val, parsed.recipient)
-        conv = _get_or_create_conversation(channel_val, parsed.sender, owner_agent=to_ep.owner_agent)
+        conversation_address = parsed.conversation_address or parsed.sender
+        conv = _get_or_create_conversation(channel_val, conversation_address, owner_agent=to_ep.owner_agent)
 
         _ensure_participant(conv, from_ep, PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL)
         _ensure_participant(conv, to_ep, PersistentAgentConversationParticipant.ParticipantRole.AGENT)
@@ -779,6 +781,8 @@ def ingest_inbound_message(
                 logging.exception("Error during out-of-credits pre-processing check (WEB)")
 
             def _trigger_processing() -> None:
+                if not trigger_processing:
+                    return
                 inbound_generation = None
                 if is_interrupting_human_input:
                     inbound_generation = bump_human_inbound_generation(owner_id)

@@ -13,7 +13,11 @@ from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError
 from django.db.models import F
+
+from util.text_sanitizer import decode_unicode_escapes
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
 from ...services.sandbox_compute import (
@@ -50,12 +54,39 @@ from .custom_tools import (
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
+from .pipedream_trigger_subscriptions import (
+    get_pipedream_trigger_subscriptions_tool,
+    execute_pipedream_trigger_subscriptions,
+)
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names
 from config.plans import PLAN_CONFIG
 
 logger = logging.getLogger(__name__)
+
+SQLITE_TOOL_NAME = "sqlite_batch"
+HTTP_REQUEST_TOOL_NAME = "http_request"
+READ_FILE_TOOL_NAME = "read_file"
+CREATE_FILE_TOOL_NAME = "create_file"
+CREATE_CSV_TOOL_NAME = "create_csv"
+CREATE_PDF_TOOL_NAME = "create_pdf"
+CREATE_CHART_TOOL_NAME = "create_chart"
+CREATE_IMAGE_TOOL_NAME = "create_image"
+CREATE_VIDEO_TOOL_NAME = "create_video"
+PYTHON_EXEC_TOOL_NAME = "python_exec"
+RUN_COMMAND_TOOL_NAME = "run_command"
+META_ADS_TOOL_NAME = "meta_ads"
+PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
+PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
+PIPEDREAM_MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
+PIPEDREAM_DISCORD_SEND_TOOL_NAMES = {
+    "discord-send-message",
+    "discord-send-message-advanced",
+    "discord-send-message-with-file",
+}
+PIPEDREAM_DISCORD_DEFAULT_AVATAR_URL = "https://gobii.ai/static/images/gobii_fish.png"
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
 def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -94,20 +125,54 @@ def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> 
 
     return coerced
 
-SQLITE_TOOL_NAME = "sqlite_batch"
-HTTP_REQUEST_TOOL_NAME = "http_request"
-READ_FILE_TOOL_NAME = "read_file"
-CREATE_FILE_TOOL_NAME = "create_file"
-CREATE_CSV_TOOL_NAME = "create_csv"
-CREATE_PDF_TOOL_NAME = "create_pdf"
-CREATE_CHART_TOOL_NAME = "create_chart"
-CREATE_IMAGE_TOOL_NAME = "create_image"
-CREATE_VIDEO_TOOL_NAME = "create_video"
-PYTHON_EXEC_TOOL_NAME = "python_exec"
-RUN_COMMAND_TOOL_NAME = "run_command"
-META_ADS_TOOL_NAME = "meta_ads"
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
+def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
+    if isinstance(params, str):
+        return decode_unicode_escapes(params)
+    if isinstance(params, dict):
+        return {key: _normalize_tool_params_unicode_escapes(value) for key, value in params.items()}
+    if isinstance(params, list):
+        return [_normalize_tool_params_unicode_escapes(item) for item in params]
+    return params
+
+
+def _is_pipedream_entry(entry: "ToolCatalogEntry") -> bool:
+    return entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME
+
+
+def _tool_schema_allows_param(entry: "ToolCatalogEntry", param_name: str) -> bool:
+    parameters = entry.parameters if isinstance(entry.parameters, dict) else {}
+    properties = parameters.get("properties")
+    if isinstance(properties, dict):
+        return param_name in properties
+    return True
+
+
+def _apply_pipedream_tool_defaults(
+    agent: PersistentAgent,
+    entry: "ToolCatalogEntry",
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    if entry.full_name not in PIPEDREAM_DISCORD_SEND_TOOL_NAMES:
+        return params
+
+    next_params = dict(params)
+
+    if _tool_schema_allows_param(entry, "avatarURL"):
+        avatar_url = next_params.get("avatarURL")
+        if not isinstance(avatar_url, str) or not avatar_url.strip():
+            next_params["avatarURL"] = PIPEDREAM_DISCORD_DEFAULT_AVATAR_URL
+
+    if _tool_schema_allows_param(entry, "username"):
+        username = next_params.get("username")
+        if not isinstance(username, str) or not username.strip():
+            next_params["username"] = (agent.name or "").strip() or "Agent"
+
+    if _tool_schema_allows_param(entry, "includeSentViaPipedream"):
+        if next_params.get("includeSentViaPipedream") is None:
+            next_params["includeSentViaPipedream"] = False
+
+    return next_params
 
 def _sandbox_fallback_tools() -> Set[str]:
     tools = getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS", [])
@@ -215,6 +280,12 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_meta_ads,
         "search_hidden": True,
         "system_skill_key": "meta_ads_platform",
+    },
+    PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME: {
+        "definition": get_pipedream_trigger_subscriptions_tool,
+        "executor": execute_pipedream_trigger_subscriptions,
+        "search_hidden": True,
+        "system_skill_key": "connected_app_channels",
     },
 }
 
@@ -1025,6 +1096,45 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     return None
 
 
+def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
+    """Return True when the tool is provided by the Pipedream MCP server."""
+    row = (
+        PersistentAgentEnabledTool.objects
+        .filter(agent=agent, tool_full_name=tool_name)
+        .only("tool_server")
+        .first()
+    )
+    if row and row.tool_server:
+        return row.tool_server == PIPEDREAM_TOOL_SERVER_NAME
+
+    entry = resolve_tool_entry(agent, tool_name)
+    return bool(entry and _is_pipedream_entry(entry))
+
+
+def _record_pipedream_tool_side_effects(
+    agent: PersistentAgent,
+    entry: ToolCatalogEntry,
+    params: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    if not _is_pipedream_entry(entry):
+        return
+    status = str(result.get("status") or "").strip().lower()
+    if status not in PIPEDREAM_MESSAGE_SUCCESS_STATUSES:
+        return
+    try:
+        from api.services.pipedream_trigger_subscriptions import record_discord_outbound_send
+
+        record_discord_outbound_send(
+            agent,
+            tool_name=entry.full_name,
+            params=params,
+            result=result,
+        )
+    except (DatabaseError, ValidationError, ValueError):
+        logger.exception("Agent %s: failed to record Pipedream tool side effects for %s", agent.id, entry.full_name)
+
+
 def auto_enable_heuristic_tools(
     agent: PersistentAgent,
     text: str,
@@ -1161,10 +1271,18 @@ def execute_enabled_tool(
                 "message": auto_enable.get("message", f"Tool '{resolved_name}' is not enabled for this agent"),
             }
 
+    if _is_pipedream_entry(entry):
+        params = _normalize_tool_params_unicode_escapes(params)
+        params = _apply_pipedream_tool_defaults(agent, entry, params)
+
     if entry.provider == "mcp":
         if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):
-            return execute_mcp_tool_isolated(agent, resolved_name, params)
-        return execute_mcp_tool(agent, resolved_name, params)
+            result = execute_mcp_tool_isolated(agent, resolved_name, params)
+        else:
+            result = execute_mcp_tool(agent, resolved_name, params)
+        if isinstance(result, dict):
+            _record_pipedream_tool_side_effects(agent, entry, params, result)
+        return result
 
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)
