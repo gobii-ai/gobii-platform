@@ -3445,10 +3445,17 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["post"]
 
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        from allauth.account.models import EmailAddress
-        from allauth.account.utils import send_email_confirmation
+        from smtplib import SMTPException
 
-        email_address = EmailAddress.objects.filter(user=request.user, primary=True).first()
+        from allauth.core.exceptions import ImmediateHttpResponse
+        from anymail.exceptions import AnymailError
+
+        from api.services.email_verification import (
+            get_email_address_for_verification,
+            send_email_verification,
+        )
+
+        email_address = get_email_address_for_verification(request.user)
         if not email_address:
             return JsonResponse({"error": "No email address found."}, status=400)
 
@@ -3456,8 +3463,16 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"verified": True, "message": "Email already verified."})
 
         try:
-            send_email_confirmation(request, request.user, email=email_address.email)
-        except Exception as exc:
+            send_email_verification(request, email_address)
+        except ImmediateHttpResponse as exc:
+            response = exc.response
+            if response.status_code == 429:
+                return JsonResponse(
+                    {"error": "Too many verification email requests. Please try again later."},
+                    status=429,
+                )
+            raise
+        except (AnymailError, OSError, SMTPException) as exc:
             logger.exception("Failed to send email verification for user %s", request.user.id)
             return JsonResponse({"error": f"Failed to send verification email: {exc}"}, status=500)
 
