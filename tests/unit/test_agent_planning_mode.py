@@ -6,6 +6,7 @@ from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from waffle.testutils import override_flag
 
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.core.prompt_context import _get_system_instruction, build_prompt_context
 from api.agent.tools.planning import execute_end_planning, get_end_planning_tool
 from api.agent.tools.request_human_input import get_request_human_input_tool
@@ -337,6 +338,8 @@ class PersistentAgentPlanningModeTests(TestCase):
             requested_via_channel=CommsChannel.WEB,
         )
         self.client.force_login(self.user)
+        before_generation = get_human_inbound_generation(self.agent.id)
+        expected_generation = before_generation + 1
 
         with patch("console.api_views.process_agent_events_task.delay") as delay_mock:
             with self.captureOnCommitCallbacks(execute=True):
@@ -348,7 +351,11 @@ class PersistentAgentPlanningModeTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["planning_state"], PersistentAgent.PlanningState.SKIPPED)
         self.assertEqual(payload["pending_action_requests"], [])
-        delay_mock.assert_called_once_with(str(self.agent.id))
+        self.assertEqual(get_human_inbound_generation(self.agent.id), expected_generation)
+        delay_mock.assert_called_once_with(
+            str(self.agent.id),
+            inbound_generation=expected_generation,
+        )
 
         self.agent.refresh_from_db()
         pending_request.refresh_from_db()
