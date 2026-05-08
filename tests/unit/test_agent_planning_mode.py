@@ -108,7 +108,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("end_planning", names)
         self.assertIn("request_human_input", names)
         self.assertIn("search_tools", names)
-        self.assertIn("spawn_web_task", names)
+        self.assertNotIn("spawn_web_task", names)
         self.assertIn("send_chat_message", names)
         self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
 
