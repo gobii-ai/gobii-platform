@@ -26,12 +26,17 @@ from api.models import (
 )
 from api.services.pipedream_trigger_subscriptions import (
     DISCORD_MESSAGE_EVENT_TYPE,
+    MESSAGE_CREATED_EVENT_TYPE,
+    SLACK_APP_SLUG,
     PipedreamTriggerSubscriptionError,
     disable_subscription,
     discover_targets,
     ensure_subscriptions,
+    process_connected_app_inbound_debounce,
     process_discord_inbound_debounce,
     record_discord_outbound_send,
+    record_slack_outbound_send,
+    schedule_connected_app_inbound_processing,
     schedule_discord_inbound_processing,
 )
 
@@ -270,6 +275,162 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
     @patch("api.services.pipedream_trigger_subscriptions.requests.post")
     @patch("api.services.pipedream_trigger_subscriptions.requests.get")
     @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
+    def test_ensure_creates_and_reuses_slack_subscription(self, mock_get_manager, mock_get, mock_post):
+        self._patch_token(mock_get_manager)
+        mock_get.return_value = _response(
+            {
+                "data": [
+                    {
+                        "id": "apn_slack",
+                        "healthy": True,
+                        "dead": False,
+                        "app": {"name_slug": "slack"},
+                    }
+                ]
+            }
+        )
+        mock_post.return_value = _response(
+            {
+                "data": {
+                    "id": "slack_trigger_123",
+                    "webhook_signing_key": "slack-signing-secret",
+                }
+            }
+        )
+
+        results = ensure_subscriptions(
+            self.agent,
+            app_slug="slack_v2",
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+            channel_ids=["C123"],
+            channel_names={"C123": "support"},
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].created)
+        subscription = results[0].subscription
+        self.assertIsNotNone(subscription)
+        self.assertEqual(subscription.app_slug, SLACK_APP_SLUG)
+        self.assertEqual(subscription.platform_channel, "C123")
+        self.assertEqual(subscription.platform_channel_name, "support")
+        self.assertEqual(subscription.trigger_key, "slack_v2-new-message-in-channels")
+        self.assertEqual(subscription.trigger_version, "1.1.0")
+        self.assertEqual(subscription.deployed_trigger_id, "slack_trigger_123")
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"]["configured_props"],
+            {
+                "slack": {"authProvisionId": "apn_slack"},
+                "conversations": ["C123"],
+                "resolveNames": True,
+                "ignoreBot": True,
+                "ignoreThreads": True,
+            },
+        )
+
+        reused = ensure_subscriptions(
+            self.agent,
+            app_slug="slack",
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+            channel_ids=["C123"],
+        )
+        self.assertEqual(len(reused), 1)
+        self.assertTrue(reused[0].reused)
+        self.assertEqual(mock_post.call_count, 1)
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.pipedream_trigger_subscriptions.create_connect_session")
+    @patch("api.services.pipedream_trigger_subscriptions.requests.get")
+    @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
+    def test_ensure_returns_action_required_when_slack_not_connected(
+        self,
+        mock_get_manager,
+        mock_get,
+        mock_create_connect_session,
+    ):
+        self._patch_token(mock_get_manager)
+        mock_get.return_value = _response({"data": []})
+        mock_create_connect_session.return_value = (MagicMock(), "https://connect.example/slack")
+
+        result = execute_pipedream_trigger_subscriptions(
+            self.agent,
+            {
+                "action": "ensure",
+                "app_slug": "slack",
+                "event_type": MESSAGE_CREATED_EVENT_TYPE,
+                "channel_ids": ["C123"],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(result["connect_url"], "https://connect.example/slack")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.pipedream_trigger_subscriptions.requests.post")
+    @patch("api.services.pipedream_trigger_subscriptions.requests.get")
+    @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
+    def test_discover_targets_returns_slack_channel_options(self, mock_get_manager, mock_get, mock_post):
+        self._patch_token(mock_get_manager)
+        mock_get.side_effect = [
+            _response(
+                {
+                    "data": [
+                        {
+                            "id": "apn_slack",
+                            "healthy": True,
+                            "dead": False,
+                            "app": {"name_slug": "slack"},
+                        }
+                    ]
+                }
+            ),
+            _response(
+                {
+                    "data": {
+                        "key": "slack_v2-new-message-in-channels",
+                        "version": "1.1.0",
+                        "configurable_props": [
+                            {"name": "slack", "type": "app", "app": "slack"},
+                            {"name": "conversations", "type": "string[]", "remoteOptions": True},
+                        ],
+                    }
+                }
+            ),
+        ]
+        mock_post.return_value = _response(
+            {
+                "options": [
+                    {"label": "#support", "value": "C123"},
+                    {"label": "#alerts", "value": "C456"},
+                ],
+                "context": {},
+            }
+        )
+
+        result = discover_targets(
+            self.agent,
+            app_slug="slack_v2",
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+        )
+
+        self.assertFalse(result.action_required)
+        self.assertEqual(
+            [(target.label, target.value) for target in result.targets],
+            [
+                ("#support", "C123"),
+                ("#alerts", "C456"),
+            ],
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"]["configured_props"],
+            {"slack": {"authProvisionId": "apn_slack"}},
+        )
+        self.assertEqual(mock_post.call_args.kwargs["json"]["prop_name"], "conversations")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.pipedream_trigger_subscriptions.requests.post")
+    @patch("api.services.pipedream_trigger_subscriptions.requests.get")
+    @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
     def test_discover_targets_tool_action_returns_channel_choices(self, mock_get_manager, mock_get, mock_post):
         self._patch_token(mock_get_manager)
         mock_get.side_effect = [
@@ -428,6 +589,29 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.subscription.signing_key = "signing-secret"
         self.subscription.save()
 
+    def _create_slack_subscription(self):
+        subscription = PersistentAgentPipedreamTriggerSubscription.objects.create(
+            agent=self.agent,
+            app_slug="slack",
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+            platform_channel="C123",
+            platform_channel_name="support",
+            trigger_key="slack_v2-new-message-in-channels",
+            trigger_version="1.1.0",
+            external_user_id=str(self.agent.id),
+            deployed_trigger_id="slack_trigger_123",
+            configured_props={
+                "slack": {"authProvisionId": "apn_slack"},
+                "conversations": ["C123"],
+                "resolveNames": True,
+                "ignoreBot": True,
+                "ignoreThreads": True,
+            },
+        )
+        subscription.signing_key = "slack-signing-secret"
+        subscription.save()
+        return subscription
+
     @tag("batch_agent_webhooks")
     def test_webhook_rejects_missing_or_invalid_secret(self):
         url = reverse("api:pipedream_trigger_subscription_webhook", args=[self.subscription.id])
@@ -561,9 +745,188 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_accepts_slack_message_event(self, mock_delay):
+        subscription = self._create_slack_subscription()
+        body = json.dumps(
+            {
+                "event": {
+                    "ts": "1710000000.000100",
+                    "team": "T1",
+                    "team_name": "Gobii",
+                    "channel": "C123",
+                    "channel_name": "support",
+                    "text": "hello from slack",
+                    "user": "U1",
+                    "user_name": "matt",
+                    "files": [],
+                    "attachments": [],
+                    "blocks": [],
+                }
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[subscription.id])}?t={subscription.webhook_secret}"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("slack-signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        message = PersistentAgentMessage.objects.get(id=payload["messageId"])
+        self.assertEqual(message.owner_agent_id, self.agent.id)
+        self.assertEqual(message.conversation.channel, CommsChannel.SLACK)
+        self.assertEqual(
+            message.conversation.address,
+            f"slack://agent/{self.agent.id}/team/T1/channel/C123",
+        )
+        self.assertEqual(message.from_endpoint.address, "slack://team/t1/channel/c123")
+        self.assertEqual(message.conversation.display_name, "#support")
+        self.assertEqual(message.body, "hello from slack")
+        self.assertEqual(message.raw_payload["source_kind"], "slack")
+        self.assertEqual(message.raw_payload["source_label"], "matt in #support")
+        self.assertEqual(message.raw_payload["slack_user_id"], "U1")
+        self.assertEqual(message.raw_payload["slack_channel_name"], "support")
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_accepts_file_only_slack_message_event(self, mock_delay):
+        subscription = self._create_slack_subscription()
+        body = json.dumps(
+            {
+                "event": {
+                    "ts": "1710000000.000200",
+                    "team": "T1",
+                    "channel": "C123",
+                    "channel_name": "support",
+                    "text": "",
+                    "user": "U1",
+                    "user_name": "matt",
+                    "files": [{"id": "F1", "name": "report.pdf"}],
+                }
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[subscription.id])}?t={subscription.webhook_secret}"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("slack-signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        message = PersistentAgentMessage.objects.get(id=response.json()["messageId"])
+        self.assertEqual(message.body, "")
+        self.assertEqual(message.raw_payload["slack_files"], [{"id": "F1", "name": "report.pdf"}])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_ignores_slack_bot_and_thread_messages(self, mock_delay):
+        subscription = self._create_slack_subscription()
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[subscription.id])}?t={subscription.webhook_secret}"
+        bot_body = json.dumps(
+            {
+                "event": {
+                    "ts": "1710000000.000300",
+                    "team": "T1",
+                    "channel": "C123",
+                    "text": "bot echo",
+                    "subtype": "bot_message",
+                    "bot_id": "B1",
+                }
+            }
+        ).encode("utf-8")
+        thread_body = json.dumps(
+            {
+                "event": {
+                    "ts": "1710000000.000400",
+                    "thread_ts": "1710000000.000300",
+                    "team": "T1",
+                    "channel": "C123",
+                    "text": "thread reply",
+                    "user": "U1",
+                }
+            }
+        ).encode("utf-8")
+
+        bot_response = self.client.post(
+            url,
+            data=bot_body,
+            content_type="application/json",
+            HTTP_X_PD_SIGNATURE=_signature("slack-signing-secret", bot_body),
+        )
+        thread_response = self.client.post(
+            url,
+            data=thread_body,
+            content_type="application/json",
+            HTTP_X_PD_SIGNATURE=_signature("slack-signing-secret", thread_body),
+        )
+
+        self.assertEqual(bot_response.status_code, 202, bot_response.content)
+        self.assertEqual(thread_response.status_code, 202, thread_response.content)
+        self.assertTrue(bot_response.json()["ignored"])
+        self.assertTrue(thread_response.json()["ignored"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(conversation__channel=CommsChannel.SLACK).exists())
+        mock_delay.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_self_echo_updates_slack_outbound_message_without_reprocessing(self, mock_delay):
+        subscription = self._create_slack_subscription()
+        outbound = record_slack_outbound_send(
+            self.agent,
+            tool_name="slack-send-message",
+            params={"channel": "C123", "text": "hello from slack agent"},
+            result={"status": "success"},
+        )
+        body = json.dumps(
+            {
+                "event": {
+                    "ts": "1710000000.000500",
+                    "team": "T1",
+                    "channel": "C123",
+                    "channel_name": "support",
+                    "text": "hello from slack agent",
+                    "user": "U_AGENT",
+                    "user_name": self.agent.name,
+                    "is_self": True,
+                }
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[subscription.id])}?t={subscription.webhook_secret}"
+
+        response = self.client.post(
+            url,
+            data=body,
+            content_type="application/json",
+            HTTP_X_PD_SIGNATURE=_signature("slack-signing-secret", body),
+        )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertTrue(response.json()["ignored"])
+        self.assertTrue(response.json()["outboundEcho"])
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
+        outbound.refresh_from_db()
+        self.assertEqual(outbound.raw_payload["slack_message_id"], "1710000000.000500")
+        self.assertEqual(outbound.raw_payload["slack_team_id"], "T1")
+        self.assertEqual(
+            outbound.conversation.address,
+            f"slack://agent/{self.agent.id}/team/T1/channel/C123",
+        )
+        mock_delay.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
     @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
     def test_webhook_debounces_discord_message_processing_when_enabled(
         self,
@@ -601,11 +964,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(payload["debounceSeconds"], 15)
         self.assertTrue(PersistentAgentMessage.objects.filter(id=payload["messageId"]).exists())
         mock_process_delay.assert_not_called()
-        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id)], countdown=15)
+        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id), "discord"], countdown=15)
 
     @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
-    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
     @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
     def test_discord_inbound_debounce_scheduler_coalesces_burst(
         self,
@@ -623,7 +986,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertTrue(first["scheduled"])
         self.assertTrue(second["debounced"])
         self.assertFalse(second["scheduled"])
-        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id)], countdown=15)
+        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id), "discord"], countdown=15)
         deadline_values = [
             value
             for key, value in fake_redis.values.items()
@@ -633,8 +996,31 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
+    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    def test_slack_inbound_debounce_scheduler_coalesces_burst(
+        self,
+        mock_get_redis_client,
+        mock_debounce_apply_async,
+    ):
+        fake_redis = FakeRedis()
+        mock_get_redis_client.return_value = fake_redis
+
+        with patch("api.services.pipedream_trigger_subscriptions.time.time", side_effect=[100.0, 105.0]):
+            first = schedule_connected_app_inbound_processing(str(self.agent.id), app_slug="slack")
+            second = schedule_connected_app_inbound_processing(str(self.agent.id), app_slug="slack_v2")
+
+        self.assertTrue(first["debounced"])
+        self.assertTrue(first["scheduled"])
+        self.assertTrue(second["debounced"])
+        self.assertFalse(second["scheduled"])
+        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id), "slack"], countdown=15)
+        self.assertIn(f"agent:slack-inbound-debounce:{self.agent.id}:deadline", fake_redis.values)
+
+    @tag("batch_agent_webhooks")
+    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
     @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
     def test_discord_inbound_debounce_task_requeues_until_quiet(
         self,
@@ -652,13 +1038,13 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=110.0):
             process_discord_inbound_debounce(str(self.agent.id))
 
-        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id)], countdown=5)
+        mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id), "discord"], countdown=5)
         mock_process_delay.assert_not_called()
 
     @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
     @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
     def test_discord_inbound_debounce_task_wakes_agent_after_quiet_period(
         self,
@@ -675,6 +1061,31 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
         with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=116.0):
             process_discord_inbound_debounce(str(self.agent.id))
+
+        mock_debounce_apply_async.assert_not_called()
+        mock_process_delay.assert_called_once_with(str(self.agent.id))
+        self.assertEqual(fake_redis.values, {})
+
+    @tag("batch_agent_webhooks")
+    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.process_events.process_connected_app_inbound_debounce_task.apply_async")
+    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    def test_slack_inbound_debounce_task_wakes_agent_after_quiet_period(
+        self,
+        mock_get_redis_client,
+        mock_debounce_apply_async,
+        mock_process_delay,
+    ):
+        fake_redis = FakeRedis()
+        mock_get_redis_client.return_value = fake_redis
+
+        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=100.0):
+            schedule_connected_app_inbound_processing(str(self.agent.id), app_slug="slack")
+        mock_debounce_apply_async.reset_mock()
+
+        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=116.0):
+            process_connected_app_inbound_debounce(str(self.agent.id), "slack")
 
         mock_debounce_apply_async.assert_not_called()
         mock_process_delay.assert_called_once_with(str(self.agent.id))
@@ -859,6 +1270,79 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["pipedream_tool_name"], "discord-send-message")
 
     @tag("batch_agent_webhooks")
+    def test_record_slack_outbound_send_creates_visible_outbound_message(self):
+        PersistentAgentPipedreamTriggerSubscription.objects.create(
+            agent=self.agent,
+            app_slug="slack",
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+            platform_channel="C123",
+            platform_channel_name="support",
+            trigger_key="slack_v2-new-message-in-channels",
+            trigger_version="1.1.0",
+            external_user_id=str(self.agent.id),
+            deployed_trigger_id="slack_trigger_outbound",
+            configured_props={"conversations": ["C123"]},
+        )
+        message = record_slack_outbound_send(
+            self.agent,
+            tool_name="slack-send-message",
+            params={
+                "channel": "C123",
+                "text": "hello from the agent",
+            },
+            result={"status": "success"},
+        )
+
+        self.assertIsNotNone(message)
+        self.assertTrue(message.is_outbound)
+        self.assertEqual(message.body, "hello from the agent")
+        self.assertEqual(message.conversation.channel, CommsChannel.SLACK)
+        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
+        self.assertEqual(message.raw_payload["slack_channel_id"], "C123")
+        self.assertEqual(message.raw_payload["slack_channel_name"], "support")
+        self.assertEqual(message.raw_payload["source_label"], "#support")
+
+        serialized = _serialize_message(
+            MessageEnvelope(
+                sort_key=(1, "message", str(message.id)),
+                cursor=CursorPayload(1, "message", str(message.id)),
+                message=message,
+            )
+        )["message"]
+        self.assertEqual(serialized["channel"], "slack")
+        self.assertEqual(serialized["sourceLabel"], "#support")
+
+    @tag("batch_agent_webhooks")
+    def test_pipedream_mcp_success_hook_records_slack_outbound_message(self):
+        entry = ToolCatalogEntry(
+            provider="mcp",
+            full_name="slack-send-message",
+            description="Send Slack message",
+            parameters={},
+            tool_server="pipedream",
+            tool_name="slack-send-message",
+        )
+
+        _record_pipedream_tool_side_effects(
+            self.agent,
+            entry,
+            {
+                "channel": "C123",
+                "message": "hello from slack provider hook",
+            },
+            {"status": "success"},
+        )
+
+        message = PersistentAgentMessage.objects.get(
+            owner_agent=self.agent,
+            is_outbound=True,
+            conversation__channel=CommsChannel.SLACK,
+        )
+        self.assertEqual(message.body, "hello from slack provider hook")
+        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
+        self.assertEqual(message.raw_payload["pipedream_tool_name"], "slack-send-message")
+
+    @tag("batch_agent_webhooks")
     @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15)
     @patch("api.services.pipedream_trigger_subscriptions.schedule_discord_inbound_processing")
     @patch("api.agent.tasks.process_agent_events_task.delay")
@@ -959,10 +1443,15 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             available_tool_names={"pipedream_trigger_subscriptions"},
         )
         self.assertEqual([match.skill_key for match in integration_matches], ["connected_app_channels"])
+        slack_matches = shortlist_system_skills(
+            "monitor slack channel messages",
+            available_tool_names={"pipedream_trigger_subscriptions"},
+        )
+        self.assertEqual([match.skill_key for match in slack_matches], ["connected_app_channels"])
 
         result = enable_system_skills(agent, ["connected_app_channels"], available_skills=matches)
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["pipedream_apps"]["enabled"], ["discord"])
+        self.assertEqual(result["pipedream_apps"]["enabled"], ["discord", "slack"])
         self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=agent,
@@ -970,13 +1459,13 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
             ).exists()
         )
         selection = PipedreamAppSelection.objects.get(user=user)
-        self.assertEqual(selection.selected_app_slugs, ["discord"])
+        self.assertEqual(selection.selected_app_slugs, ["discord", "slack"])
         manager = mock_get_mcp_manager.return_value
         manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(user.id))
         manager.prewarm_pipedream_owner_cache.assert_called_once_with(
             "user",
             str(user.id),
-            app_slugs=["discord"],
+            app_slugs=["discord", "slack"],
         )
 
     @tag("batch_agent_tools")
@@ -989,14 +1478,16 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertNotIn("DISCORD_CHANNEL_ID", instructions)
         self.assertIn("action=\"discover_targets\"", instructions)
         self.assertIn("ask the user to choose by channel name", instructions)
-        self.assertIn("Do not treat Discord channel setup as complete after discovery or outbound sending", instructions)
+        self.assertIn("Do not treat connected-app channel setup as complete after discovery or outbound sending", instructions)
         self.assertIn("call `ensure` so future channel messages wake this agent", instructions)
-        self.assertIn("Skip `ensure` only when the user clearly asks for a one-time outbound-only Discord post", instructions)
+        self.assertIn("Skip `ensure` only when the user clearly asks for a one-time outbound-only post", instructions)
         self.assertIn("If outbound sending succeeds but `ensure` has not succeeded", instructions)
         self.assertIn("prefer this tool over Pipedream `retrieve_options` or `configure_component`", instructions)
-        self.assertIn("Do not request Discord server IDs or channel IDs as secrets.", instructions)
-        self.assertIn("Server ID is not required for v1 setup.", instructions)
+        self.assertIn("Do not request Discord server IDs, Slack workspace IDs, or channel IDs as secrets.", instructions)
+        self.assertIn("Server/workspace ID is not required for v1 setup.", instructions)
         self.assertIn("When calling Discord send-message tools, pass the selected Discord channel ID as `channel`", instructions)
+        self.assertIn("When calling Slack send-message tools, pass the selected Slack channel ID as `channel`", instructions)
+        self.assertIn("Slack v1 ignores bot messages and thread replies.", instructions)
         self.assertIn("the text as `message`", instructions)
         self.assertIn("backend supplies default Discord presentation fields", instructions)
         self.assertIn("explicitly override", instructions)

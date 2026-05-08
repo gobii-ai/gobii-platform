@@ -29,7 +29,7 @@ def get_pipedream_trigger_subscriptions_tool() -> Dict[str, Any]:
             "description": (
                 "Provision and inspect inbound Pipedream Connect app triggers for this agent. "
                 "Use this for receiving messages from connected apps and discovering subscribable targets. "
-                "V1 supports Discord new-message subscriptions for selected channel IDs only."
+                "V1 supports Discord and Slack new-message subscriptions for selected channel IDs only."
             ),
             "parameters": {
                 "type": "object",
@@ -41,7 +41,7 @@ def get_pipedream_trigger_subscriptions_tool() -> Dict[str, Any]:
                     },
                     "app_slug": {
                         "type": "string",
-                        "description": "Connected app slug. V1 supports discord.",
+                        "description": "Connected app slug. V1 supports discord and slack.",
                     },
                     "event_type": {
                         "type": "string",
@@ -50,7 +50,7 @@ def get_pipedream_trigger_subscriptions_tool() -> Dict[str, Any]:
                     "channel_ids": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Discord channel IDs to subscribe to when action is ensure.",
+                        "description": "Connected-app channel IDs to subscribe to when action is ensure.",
                     },
                     "channel_names": {
                         "type": "object",
@@ -59,7 +59,7 @@ def get_pipedream_trigger_subscriptions_tool() -> Dict[str, Any]:
                     },
                     "query": {
                         "type": "string",
-                        "description": "Optional search text when discovering remote targets like Discord channels.",
+                        "description": "Optional search text when discovering remote targets like Discord or Slack channels.",
                     },
                     "limit": {
                         "type": "integer",
@@ -107,7 +107,7 @@ def execute_pipedream_trigger_subscriptions(agent: PersistentAgent, params: Dict
             channel_ids = params.get("channel_ids") or []
             channel_names = params.get("channel_names") or {}
             if not isinstance(channel_ids, list):
-                return {"status": "error", "message": "channel_ids must be a list of Discord channel IDs."}
+                return {"status": "error", "message": "channel_ids must be a list of connected-app channel IDs."}
             if not isinstance(channel_names, dict):
                 channel_names = {}
             results = ensure_subscriptions(

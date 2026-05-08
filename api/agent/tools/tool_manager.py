@@ -1123,9 +1123,18 @@ def _record_pipedream_tool_side_effects(
     if status not in PIPEDREAM_MESSAGE_SUCCESS_STATUSES:
         return
     try:
-        from api.services.pipedream_trigger_subscriptions import record_discord_outbound_send
+        from api.services.pipedream_trigger_subscriptions import (
+            record_discord_outbound_send,
+            record_slack_outbound_send,
+        )
 
         record_discord_outbound_send(
+            agent,
+            tool_name=entry.full_name,
+            params=params,
+            result=result,
+        )
+        record_slack_outbound_send(
             agent,
             tool_name=entry.full_name,
             params=params,

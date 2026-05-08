@@ -37,18 +37,29 @@ from api.models import (
 
 PIPEDREAM_API_BASE = "https://api.pipedream.com/v1"
 DISCORD_APP_SLUG = "discord"
-DISCORD_MESSAGE_EVENT_TYPE = "message.created"
+SLACK_APP_SLUG = "slack"
+SLACK_APP_ALIASES = {"slack", "slack_v2"}
+MESSAGE_CREATED_EVENT_TYPE = "message.created"
+DISCORD_MESSAGE_EVENT_TYPE = MESSAGE_CREATED_EVENT_TYPE
 DISCORD_MESSAGE_TRIGGER_KEY = "discord-new-message"
 DISCORD_MESSAGE_TRIGGER_VERSION = "1.0.3"
+SLACK_MESSAGE_TRIGGER_KEY = "slack_v2-new-message-in-channels"
+SLACK_MESSAGE_TRIGGER_VERSION = "1.1.0"
 DISCORD_SEND_TOOL_NAMES = {
     "discord-send-message",
     "discord-send-message-advanced",
     "discord-send-message-with-file",
 }
+SLACK_SEND_TOOL_NAMES = {
+    "slack-send-message",
+    "slack-send-message-advanced",
+    "slack-send-message-to-channel",
+    "slack-post-message",
+}
 SIGNATURE_TOLERANCE_SECONDS = 300
 DISCORD_SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
-DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:discord-inbound-debounce:{agent_id}:deadline"
-DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:discord-inbound-debounce:{agent_id}:scheduled"
+CONNECTED_APP_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:{app_slug}-inbound-debounce:{agent_id}:deadline"
+CONNECTED_APP_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:{app_slug}-inbound-debounce:{agent_id}:scheduled"
 
 logger = logging.getLogger(__name__)
 
@@ -125,11 +136,26 @@ def _subscription_webhook_url(subscription: PersistentAgentPipedreamTriggerSubsc
     return f"{_public_base_url()}{path}?t={subscription.webhook_secret}"
 
 
-def _normalize_channel_id(raw: object) -> str:
+def _normalize_app_slug(app_slug: object) -> str:
+    app = str(app_slug or "").strip().lower()
+    if app in SLACK_APP_ALIASES:
+        return SLACK_APP_SLUG
+    return app
+
+
+def _app_label(app_slug: str) -> str:
+    if app_slug == DISCORD_APP_SLUG:
+        return "Discord"
+    if app_slug == SLACK_APP_SLUG:
+        return "Slack"
+    return app_slug or "app"
+
+
+def _normalize_channel_id(raw: object, *, app_slug: str) -> str:
     channel_id = str(raw or "").strip()
     if not channel_id:
         raise PipedreamTriggerSubscriptionError("At least one channel ID is required.")
-    if not DISCORD_SNOWFLAKE_RE.fullmatch(channel_id):
+    if app_slug == DISCORD_APP_SLUG and not DISCORD_SNOWFLAKE_RE.fullmatch(channel_id):
         raise PipedreamTriggerSubscriptionError(
             "Discord channel IDs must be numeric Discord snowflakes. "
             "Do not pass placeholders like <<<DISCORD_CHANNEL_ID>>>."
@@ -155,22 +181,48 @@ def _discord_configured_props(channel_id: str, account_id: str) -> dict[str, obj
     }
 
 
+def _slack_configured_props(channel_id: str, account_id: str) -> dict[str, object]:
+    return {
+        "slack": {
+            "authProvisionId": account_id,
+        },
+        "conversations": [channel_id],
+        "resolveNames": True,
+        "ignoreBot": True,
+        "ignoreThreads": True,
+    }
+
+
+def _configured_props_for_subscription(app_slug: str, channel_id: str, account_id: str) -> dict[str, object]:
+    if app_slug == DISCORD_APP_SLUG:
+        return _discord_configured_props(channel_id, account_id)
+    if app_slug == SLACK_APP_SLUG:
+        return _slack_configured_props(channel_id, account_id)
+    raise PipedreamTriggerSubscriptionError("Only Discord and Slack message subscriptions are supported in v1.")
+
+
 def _trigger_key_for(app_slug: str, event_type: str) -> str:
-    if app_slug == DISCORD_APP_SLUG and event_type == DISCORD_MESSAGE_EVENT_TYPE:
+    if app_slug == DISCORD_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
         return DISCORD_MESSAGE_TRIGGER_KEY
-    raise PipedreamTriggerSubscriptionError("Only Discord message subscriptions are supported in v1.")
+    if app_slug == SLACK_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
+        return SLACK_MESSAGE_TRIGGER_KEY
+    raise PipedreamTriggerSubscriptionError("Only Discord and Slack message subscriptions are supported in v1.")
 
 
 def _trigger_version_for(app_slug: str, event_type: str) -> str:
-    if app_slug == DISCORD_APP_SLUG and event_type == DISCORD_MESSAGE_EVENT_TYPE:
+    if app_slug == DISCORD_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
         return DISCORD_MESSAGE_TRIGGER_VERSION
-    raise PipedreamTriggerSubscriptionError("Only Discord message subscriptions are supported in v1.")
+    if app_slug == SLACK_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
+        return SLACK_MESSAGE_TRIGGER_VERSION
+    raise PipedreamTriggerSubscriptionError("Only Discord and Slack message subscriptions are supported in v1.")
 
 
 def _target_prop_name_for(app_slug: str, event_type: str) -> str:
-    if app_slug == DISCORD_APP_SLUG and event_type == DISCORD_MESSAGE_EVENT_TYPE:
+    if app_slug == DISCORD_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
         return "channels"
-    raise PipedreamTriggerSubscriptionError("Only Discord message subscriptions are supported in v1.")
+    if app_slug == SLACK_APP_SLUG and event_type == MESSAGE_CREATED_EVENT_TYPE:
+        return "conversations"
+    raise PipedreamTriggerSubscriptionError("Only Discord and Slack message subscriptions are supported in v1.")
 
 
 def _raise_for_status(response: requests.Response, *, action: str) -> None:
@@ -364,7 +416,7 @@ def discover_targets(
     query: str = "",
     limit: int = 100,
 ) -> DiscoverTargetsResult:
-    app = str(app_slug or "").strip().lower()
+    app = _normalize_app_slug(app_slug)
     event = str(event_type or "").strip().lower()
     component_id = _trigger_key_for(app, event)
     version = _trigger_version_for(app, event)
@@ -404,9 +456,9 @@ def discover_targets(
     return DiscoverTargetsResult(
         targets=targets,
         message=(
-            f"Found {len(targets)} Discord channel option(s)."
+            f"Found {len(targets)} {_app_label(app)} channel option(s)."
             if targets
-            else "No Discord channels were returned by Pipedream."
+            else f"No {_app_label(app)} channels were returned by Pipedream."
         ),
     )
 
@@ -462,7 +514,7 @@ def ensure_subscriptions(
     channel_ids: Iterable[object],
     channel_names: Mapping[str, object] | None = None,
 ) -> list[EnsureSubscriptionResult]:
-    app = str(app_slug or "").strip().lower()
+    app = _normalize_app_slug(app_slug)
     event = str(event_type or "").strip().lower()
     trigger_key = _trigger_key_for(app, event)
     trigger_version = _trigger_version_for(app, event)
@@ -470,13 +522,13 @@ def ensure_subscriptions(
     normalized_channels = []
     seen_channels = set()
     for raw_channel_id in channel_ids or []:
-        channel_id = _normalize_channel_id(raw_channel_id)
+        channel_id = _normalize_channel_id(raw_channel_id, app_slug=app)
         if channel_id in seen_channels:
             continue
         seen_channels.add(channel_id)
         normalized_channels.append(channel_id)
     if not normalized_channels:
-        raise PipedreamTriggerSubscriptionError("At least one Discord channel ID is required.")
+        raise PipedreamTriggerSubscriptionError(f"At least one {_app_label(app)} channel ID is required.")
 
     token = _get_pipedream_access_token()
     account_id = _active_account_id(agent, app, token)
@@ -503,7 +555,7 @@ def ensure_subscriptions(
                     EnsureSubscriptionResult(
                         subscription=existing,
                         reused=True,
-                        message=f"Already subscribed to Discord channel {channel_id}.",
+                        message=f"Already subscribed to {_app_label(app)} channel {channel_id}.",
                     )
                 )
                 continue
@@ -518,7 +570,7 @@ def ensure_subscriptions(
                 external_user_id=str(agent.id),
             )
             subscription.platform_channel_name = _channel_name_for(channel_id, channel_names)
-            subscription.configured_props = _discord_configured_props(channel_id, account_id)
+            subscription.configured_props = _configured_props_for_subscription(app, channel_id, account_id)
             subscription.status = PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE
             subscription.last_error = ""
             subscription.save()
@@ -529,7 +581,7 @@ def ensure_subscriptions(
                 EnsureSubscriptionResult(
                     subscription=subscription,
                     created=True,
-                    message=f"Subscribed to Discord channel {channel_id}.",
+                    message=f"Subscribed to {_app_label(app)} channel {channel_id}.",
                 )
             )
         except requests.RequestException as exc:
@@ -670,6 +722,14 @@ def _event_value(event: Mapping[str, object], *keys: str) -> str:
     return ""
 
 
+def _event_mapping(event: Mapping[str, object], *keys: str) -> Mapping[str, object] | None:
+    for key in keys:
+        value = event.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return None
+
+
 def _discord_author(event: Mapping[str, object]) -> tuple[str, str]:
     author_candidates = [
         event.get("author"),
@@ -730,10 +790,42 @@ def _discord_agent_address(agent_id: object) -> str:
     return f"discord://agent/{agent_id}"
 
 
+def _slack_channel_address(team_id: str, channel_id: str) -> str:
+    team_part = team_id or "unknown"
+    return f"slack://team/{team_part}/channel/{channel_id}"
+
+
+def _slack_conversation_address(agent_id: object, team_id: str, channel_id: str) -> str:
+    team_part = team_id or "unknown"
+    return f"slack://agent/{agent_id}/team/{team_part}/channel/{channel_id}"
+
+
+def _slack_agent_address(agent_id: object) -> str:
+    return f"slack://agent/{agent_id}"
+
+
 def _ensure_discord_agent_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
     endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=CommsChannel.DISCORD,
         address=_discord_agent_address(agent.id),
+        defaults={"owner_agent": agent, "is_primary": True},
+    )
+    updates = []
+    if endpoint.owner_agent_id != agent.id:
+        endpoint.owner_agent = agent
+        updates.append("owner_agent")
+    if not endpoint.is_primary:
+        endpoint.is_primary = True
+        updates.append("is_primary")
+    if updates:
+        endpoint.save(update_fields=updates)
+    return endpoint
+
+
+def _ensure_slack_agent_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
+    endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.SLACK,
+        address=_slack_agent_address(agent.id),
         defaults={"owner_agent": agent, "is_primary": True},
     )
     updates = []
@@ -768,6 +860,14 @@ def _discord_channel_source_label(channel_id: str, channel_name: str = "") -> st
     return _display_name_for_channel(channel_id, channel_name)
 
 
+def _slack_display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
+    return f"#{channel_name.lstrip('#')}" if channel_name else f"Slack {channel_id}"
+
+
+def _slack_channel_source_label(channel_id: str, channel_name: str = "") -> str:
+    return _slack_display_name_for_channel(channel_id, channel_name)
+
+
 def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
     existing = (
         PersistentAgentConversation.objects
@@ -783,6 +883,23 @@ def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id
     if existing:
         return existing.address
     return _discord_conversation_address(agent.id, "unknown", channel_id)
+
+
+def _slack_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
+    existing = (
+        PersistentAgentConversation.objects
+        .filter(
+            owner_agent=agent,
+            channel=CommsChannel.SLACK,
+            address__startswith=f"slack://agent/{agent.id}/",
+            address__endswith=f"/channel/{channel_id}",
+        )
+        .order_by("-id")
+        .first()
+    )
+    if existing:
+        return existing.address
+    return _slack_conversation_address(agent.id, "unknown", channel_id)
 
 
 def _get_or_create_discord_conversation(
@@ -810,9 +927,43 @@ def _get_or_create_discord_conversation(
     return conversation
 
 
+def _get_or_create_slack_conversation(
+    agent: PersistentAgent,
+    *,
+    address: str,
+    channel_id: str,
+    channel_name: str = "",
+) -> PersistentAgentConversation:
+    display_name = _slack_display_name_for_channel(channel_id, channel_name)
+    conversation, created = PersistentAgentConversation.objects.get_or_create(
+        channel=CommsChannel.SLACK,
+        address=address,
+        defaults={"owner_agent": agent, "display_name": display_name},
+    )
+    updates = []
+    if conversation.owner_agent_id is None:
+        conversation.owner_agent = agent
+        updates.append("owner_agent")
+    if display_name and conversation.display_name != display_name:
+        conversation.display_name = display_name
+        updates.append("display_name")
+    if updates and not created:
+        conversation.save(update_fields=updates)
+    return conversation
+
+
 def _discord_channel_endpoint(address: str) -> PersistentAgentCommsEndpoint:
     endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=CommsChannel.DISCORD,
+        address=address,
+        defaults={"owner_agent": None},
+    )
+    return endpoint
+
+
+def _slack_channel_endpoint(address: str) -> PersistentAgentCommsEndpoint:
+    endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.SLACK,
         address=address,
         defaults={"owner_agent": None},
     )
@@ -827,6 +978,27 @@ def _ensure_discord_conversation_participants(
 ) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
     from_endpoint = _ensure_discord_agent_endpoint(agent)
     channel_endpoint = _discord_channel_endpoint(platform_channel_address)
+    _ensure_conversation_participant(
+        conversation,
+        from_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+    )
+    _ensure_conversation_participant(
+        conversation,
+        channel_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+    )
+    return from_endpoint, channel_endpoint
+
+
+def _ensure_slack_conversation_participants(
+    agent: PersistentAgent,
+    conversation: PersistentAgentConversation,
+    *,
+    platform_channel_address: str,
+) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
+    from_endpoint = _ensure_slack_agent_endpoint(agent)
+    channel_endpoint = _slack_channel_endpoint(platform_channel_address)
     _ensure_conversation_participant(
         conversation,
         from_endpoint,
@@ -958,6 +1130,132 @@ def record_discord_outbound_send(
     )
 
 
+def _find_recent_slack_outbound(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    body: str,
+) -> PersistentAgentMessage | None:
+    cutoff = timezone.now() - timedelta(minutes=10)
+    return (
+        PersistentAgentMessage.objects
+        .select_related("conversation")
+        .filter(
+            owner_agent=agent,
+            is_outbound=True,
+            conversation__channel=CommsChannel.SLACK,
+            body=body,
+            timestamp__gte=cutoff,
+            raw_payload__slack_channel_id=channel_id,
+            raw_payload__source="pipedream_tool",
+        )
+        .order_by("-timestamp")
+        .first()
+    )
+
+
+def _create_slack_outbound_message(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    body: str,
+    conversation_address: str,
+    platform_channel_address: str = "",
+    channel_name: str = "",
+    raw_payload: Mapping[str, object] | None = None,
+) -> PersistentAgentMessage:
+    conversation = _get_or_create_slack_conversation(
+        agent,
+        address=conversation_address,
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+    from_endpoint, channel_endpoint = _ensure_slack_conversation_participants(
+        agent,
+        conversation,
+        platform_channel_address=platform_channel_address or _slack_channel_address("", channel_id),
+    )
+    now = timezone.now()
+    payload = dict(raw_payload or {})
+    payload.setdefault("source", "pipedream_tool")
+    payload.setdefault("source_kind", "slack")
+    payload.setdefault("app_slug", SLACK_APP_SLUG)
+    payload.setdefault("event_type", MESSAGE_CREATED_EVENT_TYPE)
+    payload.setdefault("slack_channel_id", channel_id)
+    payload.setdefault("slack_channel_name", channel_name)
+    payload.setdefault("slack_platform_channel_address", channel_endpoint.address)
+    payload.setdefault("slack_conversation_address", conversation.address)
+    payload.setdefault("source_label", _slack_channel_source_label(channel_id, channel_name))
+    return PersistentAgentMessage.objects.create(
+        owner_agent=agent,
+        from_endpoint=from_endpoint,
+        conversation=conversation,
+        is_outbound=True,
+        body=body,
+        raw_payload=payload,
+        latest_status=DeliveryStatus.SENT,
+        latest_sent_at=now,
+    )
+
+
+def record_slack_outbound_send(
+    agent: PersistentAgent,
+    *,
+    tool_name: str,
+    params: Mapping[str, object],
+    result: Mapping[str, object] | None = None,
+) -> PersistentAgentMessage | None:
+    if tool_name not in SLACK_SEND_TOOL_NAMES:
+        return None
+    channel_id = _event_value(
+        params,
+        "channel",
+        "channelId",
+        "channel_id",
+        "conversation",
+        "conversationId",
+        "conversation_id",
+    )
+    body = _event_value(params, "message", "text", "content", "body")
+    if not channel_id or not body:
+        return None
+    existing = _find_recent_slack_outbound(agent, channel_id=channel_id, body=body)
+    if existing:
+        return existing
+    subscription = (
+        agent.pipedream_trigger_subscriptions
+        .filter(
+            app_slug=SLACK_APP_SLUG,
+            event_type=MESSAGE_CREATED_EVENT_TYPE,
+            platform_channel=channel_id,
+            status=PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE,
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    channel_name = subscription.platform_channel_name if subscription else ""
+    raw_payload = {
+        "source": "pipedream_tool",
+        "source_kind": "slack",
+        "app_slug": SLACK_APP_SLUG,
+        "event_type": MESSAGE_CREATED_EVENT_TYPE,
+        "slack_channel_id": channel_id,
+        "slack_channel_name": channel_name,
+        "source_label": _slack_channel_source_label(channel_id, channel_name),
+        "pipedream_tool_name": tool_name,
+        "pipedream_tool_params": dict(params),
+        "pipedream_tool_result": dict(result or {}),
+    }
+    return _create_slack_outbound_message(
+        agent,
+        channel_id=channel_id,
+        body=body,
+        conversation_address=_slack_conversation_address_for_channel(agent, channel_id),
+        channel_name=channel_name,
+        raw_payload=raw_payload,
+    )
+
+
 def _discord_message_body(event: Mapping[str, object]) -> str:
     return _event_value(event, "content", "message", "text", "body")
 
@@ -965,6 +1263,103 @@ def _discord_message_body(event: Mapping[str, object]) -> str:
 def _event_list(event: Mapping[str, object], key: str) -> list[object]:
     value = event.get(key)
     return value if isinstance(value, list) else []
+
+
+def _slack_message_event(payload: Mapping[str, object]) -> Mapping[str, object]:
+    event = _pipedream_event_from_payload(payload)
+    for key in ("message", "payload", "data", "event"):
+        nested = event.get(key)
+        if nested is event:
+            continue
+        if isinstance(nested, Mapping) and (
+            _event_value(nested, "ts", "timestamp", "event_ts")
+            or _event_value(nested, "text", "message", "content", "body")
+            or _event_list(nested, "files")
+            or _event_list(nested, "attachments")
+            or _event_list(nested, "blocks")
+        ):
+            return nested
+    return event
+
+
+def _slack_channel_id(event: Mapping[str, object]) -> str:
+    channel = event.get("channel")
+    if isinstance(channel, Mapping):
+        return _event_value(channel, "id", "channel_id", "value")
+    return _event_value(event, "channel", "channel_id", "channelId", "conversation", "conversation_id")
+
+
+def _slack_channel_name(event: Mapping[str, object]) -> str:
+    channel = event.get("channel")
+    if isinstance(channel, Mapping):
+        return _event_value(channel, "name", "label")
+    return _event_value(event, "channel_name", "channelName", "conversation_name", "conversationName")
+
+
+def _slack_team_id(event: Mapping[str, object]) -> str:
+    team = event.get("team")
+    if isinstance(team, Mapping):
+        return _event_value(team, "id", "team_id", "value")
+    return _event_value(event, "team", "team_id", "teamId", "workspace", "workspace_id")
+
+
+def _slack_team_name(event: Mapping[str, object]) -> str:
+    team = event.get("team")
+    if isinstance(team, Mapping):
+        return _event_value(team, "name", "label")
+    return _event_value(event, "team_name", "teamName", "workspace_name", "workspaceName")
+
+
+def _slack_author(event: Mapping[str, object]) -> tuple[str, str]:
+    user = _event_mapping(event, "user", "author", "sender")
+    if user:
+        profile = user.get("profile")
+        username = _event_value(
+            user,
+            "real_name",
+            "realName",
+            "display_name",
+            "displayName",
+            "username",
+            "name",
+        )
+        if not username and isinstance(profile, Mapping):
+            username = _event_value(profile, "display_name", "displayName", "real_name", "realName", "name")
+        return _event_value(user, "id", "user_id", "userId"), username
+
+    return (
+        _event_value(event, "user", "user_id", "userId", "author_id", "authorId"),
+        _event_value(event, "user_name", "userName", "username", "real_name", "realName", "author_name", "authorName"),
+    )
+
+
+def _slack_event_is_bot_authored(event: Mapping[str, object]) -> bool:
+    subtype = _event_value(event, "subtype").lower()
+    if subtype == "bot_message":
+        return True
+    if _event_value(event, "bot_id", "botId", "bot_user_id", "botUserId"):
+        return True
+    if isinstance(event.get("bot_profile"), Mapping):
+        return True
+    return event.get("bot") is True
+
+
+def _slack_event_is_self_authored(event: Mapping[str, object]) -> bool:
+    if event.get("is_self") is True or event.get("isSelf") is True or event.get("self") is True:
+        return True
+    user_id = _event_value(event, "user", "user_id", "userId")
+    authed_user_id = _event_value(event, "authed_user", "authed_user_id", "authedUserId")
+    return bool(user_id and authed_user_id and user_id == authed_user_id)
+
+
+def _slack_event_is_thread_reply(event: Mapping[str, object]) -> bool:
+    thread_ts = _event_value(event, "thread_ts", "threadTs")
+    ts = _event_value(event, "ts", "timestamp", "event_ts")
+    return bool(thread_ts and thread_ts != ts)
+
+
+def _slack_message_body(event: Mapping[str, object]) -> str:
+    return _event_value(event, "text", "message", "content", "body")
 
 
 def _normalize_discord_event(
@@ -1028,6 +1423,84 @@ def _normalize_discord_event(
     )
     display_name = f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
     return parsed, display_name
+
+
+def _normalize_slack_event(
+    subscription: PersistentAgentPipedreamTriggerSubscription,
+    payload: Mapping[str, object],
+    *,
+    allow_ignored_author: bool = False,
+) -> tuple[ParsedMessage | None, str, str]:
+    event = _slack_message_event(payload)
+    if not allow_ignored_author and _slack_event_is_bot_authored(event):
+        return None, "", "bot_message"
+    if not allow_ignored_author and _slack_event_is_self_authored(event):
+        return None, "", "self_message"
+    if _slack_event_is_thread_reply(event):
+        return None, "", "thread_reply"
+
+    message_ts = _event_value(event, "ts", "timestamp", "event_ts")
+    channel_id = _slack_channel_id(event) or subscription.platform_channel
+    if channel_id != subscription.platform_channel:
+        raise ValueError("Slack event channel does not match this subscription.")
+
+    body = _slack_message_body(event)
+    files = _event_list(event, "files")
+    attachments = _event_list(event, "attachments")
+    blocks = _event_list(event, "blocks")
+    if not message_ts or (not body and not files and not attachments and not blocks):
+        raise ValueError("Slack message event is missing a timestamp, text, files, attachments, or blocks.")
+
+    team_id = _slack_team_id(event)
+    team_name = _slack_team_name(event)
+    channel_name = _slack_channel_name(event) or subscription.platform_channel_name
+    user_id, user_name = _slack_author(event)
+    thread_ts = _event_value(event, "thread_ts", "threadTs")
+    platform_channel_address = _slack_channel_address(team_id, channel_id)
+    conversation_address = _slack_conversation_address(subscription.agent_id, team_id, channel_id)
+    source_label_parts = []
+    if user_name:
+        source_label_parts.append(user_name)
+    if channel_name:
+        source_label_parts.append(f"#{channel_name.lstrip('#')}")
+    source_label = " in ".join(source_label_parts) if source_label_parts else channel_name or channel_id
+
+    normalized_payload = {
+        "source": "pipedream_trigger",
+        "source_kind": "slack",
+        "source_label": source_label,
+        "app_slug": SLACK_APP_SLUG,
+        "event_type": subscription.event_type,
+        "subscription_id": str(subscription.id),
+        "deployed_trigger_id": subscription.deployed_trigger_id,
+        "slack_message_id": message_ts,
+        "slack_ts": message_ts,
+        "slack_thread_ts": thread_ts,
+        "slack_channel_id": channel_id,
+        "slack_channel_name": channel_name,
+        "slack_team_id": team_id,
+        "slack_team_name": team_name,
+        "slack_user_id": user_id,
+        "slack_user_name": user_name,
+        "slack_files": files,
+        "slack_attachments": attachments,
+        "slack_blocks": blocks,
+        "slack_platform_channel_address": platform_channel_address,
+        "slack_conversation_address": conversation_address,
+        "pipedream_payload": dict(payload),
+    }
+    parsed = ParsedMessage(
+        sender=platform_channel_address,
+        recipient=_slack_agent_address(subscription.agent_id),
+        subject=None,
+        body=body,
+        attachments=[],
+        raw_payload=normalized_payload,
+        msg_channel=CommsChannel.SLACK.value,
+        conversation_address=conversation_address,
+    )
+    display_name = f"#{channel_name.lstrip('#')}" if channel_name else f"Slack {channel_id}"
+    return parsed, display_name, ""
 
 
 def _discord_event_is_bot_authored(raw_payload: Mapping[str, object]) -> bool:
@@ -1145,22 +1618,101 @@ def _upsert_discord_outbound_echo(
     )
 
 
-def _discord_inbound_debounce_seconds() -> int:
+def _merge_slack_echo_into_outbound(
+    message: PersistentAgentMessage,
+    *,
+    parsed: ParsedMessage,
+    display_name: str,
+) -> PersistentAgentMessage:
+    raw_payload = parsed.raw_payload if isinstance(parsed.raw_payload, Mapping) else {}
+    channel_id = str(raw_payload.get("slack_channel_id") or "").strip()
+    channel_name = str(raw_payload.get("slack_channel_name") or "").strip()
+    team_id = str(raw_payload.get("slack_team_id") or "").strip()
+    platform_channel_address = str(raw_payload.get("slack_platform_channel_address") or "").strip()
+    if team_id and channel_id:
+        address = _slack_conversation_address(message.owner_agent_id, team_id, channel_id)
+        if not platform_channel_address:
+            platform_channel_address = _slack_channel_address(team_id, channel_id)
+        conversation = _get_or_create_slack_conversation(
+            message.owner_agent,
+            address=address,
+            channel_id=channel_id,
+            channel_name=channel_name,
+        )
+        _ensure_slack_conversation_participants(
+            message.owner_agent,
+            conversation,
+            platform_channel_address=platform_channel_address,
+        )
+        if message.conversation_id != conversation.id:
+            message.conversation = conversation
+    next_payload = dict(message.raw_payload or {})
+    next_payload.update(
+        {
+            "slack_message_id": raw_payload.get("slack_message_id", ""),
+            "slack_ts": raw_payload.get("slack_ts", ""),
+            "slack_thread_ts": raw_payload.get("slack_thread_ts", ""),
+            "slack_channel_id": raw_payload.get("slack_channel_id", ""),
+            "slack_channel_name": raw_payload.get("slack_channel_name", ""),
+            "slack_team_id": raw_payload.get("slack_team_id", ""),
+            "slack_team_name": raw_payload.get("slack_team_name", ""),
+            "slack_user_id": raw_payload.get("slack_user_id", ""),
+            "slack_user_name": raw_payload.get("slack_user_name", ""),
+            "slack_files": raw_payload.get("slack_files", []),
+            "slack_attachments": raw_payload.get("slack_attachments", []),
+            "slack_blocks": raw_payload.get("slack_blocks", []),
+            "slack_platform_channel_address": platform_channel_address,
+            "slack_conversation_address": message.conversation.address if message.conversation_id else "",
+            "source_label": _slack_channel_source_label(channel_id, channel_name),
+            "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
+        }
+    )
+    message.raw_payload = next_payload
+    message.latest_status = DeliveryStatus.SENT
+    if message.latest_sent_at is None:
+        message.latest_sent_at = timezone.now()
+    message.save(update_fields=["conversation", "raw_payload", "latest_status", "latest_sent_at"])
+    if message.conversation_id and display_name:
+        PersistentAgentConversation.objects.filter(id=message.conversation_id).update(display_name=display_name)
+    return message
+
+
+def _upsert_slack_outbound_echo(
+    subscription: PersistentAgentPipedreamTriggerSubscription,
+    *,
+    parsed: ParsedMessage,
+    display_name: str,
+) -> PersistentAgentMessage | None:
+    raw_payload = parsed.raw_payload if isinstance(parsed.raw_payload, Mapping) else {}
+    channel_id = str(raw_payload.get("slack_channel_id") or "").strip()
+    body = parsed.body or ""
+    if not channel_id or not body:
+        return None
+    recent_outbound = _find_recent_slack_outbound(subscription.agent, channel_id=channel_id, body=body)
+    if not recent_outbound:
+        return None
+    return _merge_slack_echo_into_outbound(recent_outbound, parsed=parsed, display_name=display_name)
+
+
+def _connected_app_inbound_debounce_seconds(app_slug: str) -> int:
+    # Currently one shared setting controls connected-app message burst handling.
+    # Keep the original Discord setting name for backwards-compatible deploys.
     return max(0, int(settings.PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS))
 
 
-def _discord_inbound_debounce_keys(agent_id: str) -> tuple[str, str]:
+def _connected_app_inbound_debounce_keys(agent_id: str, app_slug: str) -> tuple[str, str]:
+    safe_app_slug = _normalize_app_slug(app_slug).replace(":", "_")
     return (
-        DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=agent_id),
-        DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=agent_id),
+        CONNECTED_APP_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=agent_id, app_slug=safe_app_slug),
+        CONNECTED_APP_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=agent_id, app_slug=safe_app_slug),
     )
 
 
-def _discord_inbound_debounce_ttl(delay_seconds: int) -> int:
+def _connected_app_inbound_debounce_ttl(delay_seconds: int) -> int:
     return max(60, delay_seconds * 6)
 
 
-def _process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int = 0) -> None:
+def _process_agent_events_after_connected_app_debounce(agent_id: str, *, countdown: int = 0) -> None:
     from api.agent.tasks import process_agent_events_task
 
     if countdown > 0:
@@ -1169,16 +1721,17 @@ def _process_agent_events_after_discord_debounce(agent_id: str, *, countdown: in
         process_agent_events_task.delay(agent_id)
 
 
-def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
-    debounce_seconds = _discord_inbound_debounce_seconds()
+def schedule_connected_app_inbound_processing(agent_id: str, *, app_slug: str) -> dict[str, object]:
+    app = _normalize_app_slug(app_slug)
+    debounce_seconds = _connected_app_inbound_debounce_seconds(app)
     if debounce_seconds <= 0:
-        _process_agent_events_after_discord_debounce(str(agent_id))
+        _process_agent_events_after_connected_app_debounce(str(agent_id))
         return {"debounced": False, "debounce_seconds": 0, "scheduled": True}
 
     normalized_agent_id = str(agent_id)
-    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
+    deadline_key, scheduled_key = _connected_app_inbound_debounce_keys(normalized_agent_id, app)
     deadline = time.time() + debounce_seconds
-    ttl = _discord_inbound_debounce_ttl(debounce_seconds)
+    ttl = _connected_app_inbound_debounce_ttl(debounce_seconds)
 
     try:
         redis_client = get_redis_client()
@@ -1186,10 +1739,11 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
         scheduled = bool(redis_client.set(scheduled_key, "1", ex=ttl, nx=True))
     except redis.exceptions.RedisError:
         logger.exception(
-            "Failed scheduling Discord inbound debounce for agent %s; falling back to delayed processing.",
+            "Failed scheduling %s inbound debounce for agent %s; falling back to delayed processing.",
+            app,
             normalized_agent_id,
         )
-        _process_agent_events_after_discord_debounce(normalized_agent_id, countdown=debounce_seconds)
+        _process_agent_events_after_connected_app_debounce(normalized_agent_id, countdown=debounce_seconds)
         return {
             "debounced": False,
             "debounce_seconds": debounce_seconds,
@@ -1200,7 +1754,7 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
     if scheduled:
         if settings.CELERY_TASK_ALWAYS_EAGER:
             redis_client.delete(deadline_key, scheduled_key)
-            _process_agent_events_after_discord_debounce(normalized_agent_id)
+            _process_agent_events_after_connected_app_debounce(normalized_agent_id)
             return {
                 "debounced": False,
                 "debounce_seconds": debounce_seconds,
@@ -1208,9 +1762,9 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
                 "eager": True,
             }
 
-        from api.agent.tasks.process_events import process_discord_inbound_debounce_task
-        process_discord_inbound_debounce_task.apply_async(
-            args=[normalized_agent_id],
+        from api.agent.tasks.process_events import process_connected_app_inbound_debounce_task
+        process_connected_app_inbound_debounce_task.apply_async(
+            args=[normalized_agent_id, app],
             countdown=debounce_seconds,
         )
 
@@ -1219,6 +1773,10 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
         "debounce_seconds": debounce_seconds,
         "scheduled": scheduled,
     }
+
+
+def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
+    return schedule_connected_app_inbound_processing(agent_id, app_slug=DISCORD_APP_SLUG)
 
 
 def _coerce_redis_float(value: object) -> float | None:
@@ -1232,14 +1790,15 @@ def _coerce_redis_float(value: object) -> float | None:
         return None
 
 
-def process_discord_inbound_debounce(agent_id: str) -> None:
-    debounce_seconds = _discord_inbound_debounce_seconds()
+def process_connected_app_inbound_debounce(agent_id: str, app_slug: str) -> None:
+    app = _normalize_app_slug(app_slug)
+    debounce_seconds = _connected_app_inbound_debounce_seconds(app)
     normalized_agent_id = str(agent_id)
     if debounce_seconds <= 0:
-        _process_agent_events_after_discord_debounce(normalized_agent_id)
+        _process_agent_events_after_connected_app_debounce(normalized_agent_id)
         return
 
-    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
+    deadline_key, scheduled_key = _connected_app_inbound_debounce_keys(normalized_agent_id, app)
     now = time.time()
 
     try:
@@ -1248,17 +1807,17 @@ def process_discord_inbound_debounce(agent_id: str) -> None:
         if deadline is not None and deadline > now:
             if settings.CELERY_TASK_ALWAYS_EAGER:
                 redis_client.delete(deadline_key, scheduled_key)
-                _process_agent_events_after_discord_debounce(normalized_agent_id)
+                _process_agent_events_after_connected_app_debounce(normalized_agent_id)
                 return
 
             countdown = max(1, math.ceil(deadline - now))
-            ttl = _discord_inbound_debounce_ttl(max(debounce_seconds, countdown))
+            ttl = _connected_app_inbound_debounce_ttl(max(debounce_seconds, countdown))
             redis_client.expire(deadline_key, ttl)
             redis_client.expire(scheduled_key, ttl)
-            from api.agent.tasks.process_events import process_discord_inbound_debounce_task
+            from api.agent.tasks.process_events import process_connected_app_inbound_debounce_task
 
-            process_discord_inbound_debounce_task.apply_async(
-                args=[normalized_agent_id],
+            process_connected_app_inbound_debounce_task.apply_async(
+                args=[normalized_agent_id, app],
                 countdown=countdown,
             )
             return
@@ -1266,42 +1825,83 @@ def process_discord_inbound_debounce(agent_id: str) -> None:
         redis_client.delete(deadline_key, scheduled_key)
     except redis.exceptions.RedisError:
         logger.exception(
-            "Failed processing Discord inbound debounce for agent %s; falling back to immediate processing.",
+            "Failed processing %s inbound debounce for agent %s; falling back to immediate processing.",
+            app,
             normalized_agent_id,
         )
 
-    _process_agent_events_after_discord_debounce(normalized_agent_id)
+    _process_agent_events_after_connected_app_debounce(normalized_agent_id)
+
+
+def process_discord_inbound_debounce(agent_id: str) -> None:
+    process_connected_app_inbound_debounce(agent_id, DISCORD_APP_SLUG)
 
 
 def ingest_trigger_delivery(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     raw_body: bytes,
 ) -> dict[str, object]:
-    if subscription.app_slug != DISCORD_APP_SLUG or subscription.event_type != DISCORD_MESSAGE_EVENT_TYPE:
+    app = _normalize_app_slug(subscription.app_slug)
+    if app not in {DISCORD_APP_SLUG, SLACK_APP_SLUG} or subscription.event_type != MESSAGE_CREATED_EVENT_TYPE:
         raise ValueError("Unsupported Pipedream trigger subscription.")
 
     payload = _coerce_json_body(raw_body)
-    parsed, display_name = _normalize_discord_event(subscription, payload)
-    outbound_echo = _upsert_discord_outbound_echo(subscription, parsed=parsed, display_name=display_name)
-    if outbound_echo:
-        subscription.record_event()
-        return {
-            "message_id": str(outbound_echo.id),
-            "conversation_id": str(outbound_echo.conversation_id) if outbound_echo.conversation_id else "",
-            "ignored": True,
-            "outbound_echo": True,
-        }
 
-    _ensure_discord_agent_endpoint(subscription.agent)
+    if app == DISCORD_APP_SLUG:
+        parsed, display_name = _normalize_discord_event(subscription, payload)
+        outbound_echo = _upsert_discord_outbound_echo(subscription, parsed=parsed, display_name=display_name)
+        if outbound_echo:
+            subscription.record_event()
+            return {
+                "message_id": str(outbound_echo.id),
+                "conversation_id": str(outbound_echo.conversation_id) if outbound_echo.conversation_id else "",
+                "ignored": True,
+                "outbound_echo": True,
+            }
+        _ensure_discord_agent_endpoint(subscription.agent)
+        channel = CommsChannel.DISCORD
+    else:
+        slack_event = _slack_message_event(payload)
+        parsed, display_name, ignored_reason = _normalize_slack_event(
+            subscription,
+            payload,
+            allow_ignored_author=True,
+        )
+        if parsed is None:
+            subscription.record_event()
+            return {
+                "ignored": True,
+                "ignored_reason": ignored_reason,
+                "outbound_echo": ignored_reason == "bot_message",
+            }
+        outbound_echo = _upsert_slack_outbound_echo(subscription, parsed=parsed, display_name=display_name)
+        if outbound_echo:
+            subscription.record_event()
+            return {
+                "message_id": str(outbound_echo.id),
+                "conversation_id": str(outbound_echo.conversation_id) if outbound_echo.conversation_id else "",
+                "ignored": True,
+                "outbound_echo": True,
+            }
+        if _slack_event_is_bot_authored(slack_event) or _slack_event_is_self_authored(slack_event):
+            subscription.record_event()
+            return {
+                "ignored": True,
+                "ignored_reason": "bot_message" if _slack_event_is_bot_authored(slack_event) else "self_message",
+                "outbound_echo": True,
+            }
+        _ensure_slack_agent_endpoint(subscription.agent)
+        channel = CommsChannel.SLACK
+
     info = ingest_inbound_message(
-        CommsChannel.DISCORD,
+        channel,
         parsed,
         filespace_import_mode="sync",
         trigger_processing=False,
     )
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(str(subscription.agent_id))
+    debounce_result = schedule_connected_app_inbound_processing(str(subscription.agent_id), app_slug=app)
     subscription.record_event()
     return {
         "message_id": str(info.message.id),

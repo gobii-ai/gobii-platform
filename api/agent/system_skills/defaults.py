@@ -253,46 +253,50 @@ META_ADS_SYSTEM_SKILL = SystemSkillDefinition(
 CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key="connected_app_channels",
     name="Connected App Channels",
-    search_summary="Provision inbound message subscriptions for connected apps like Discord.",
+    search_summary="Provision inbound message subscriptions for connected apps like Discord and Slack.",
     tool_names=("pipedream_trigger_subscriptions",),
     enables=(
-        "receive Discord channel messages through Pipedream Connect triggers",
+        "receive Discord and Slack channel messages through Pipedream Connect triggers",
         "inspect active connected-app trigger subscriptions",
         "disable connected-app trigger subscriptions",
         "turn selected app channels into agent conversations",
     ),
     use_when=(
-        "the user wants the agent to receive Discord messages",
-        "the user asks to monitor or listen to a Discord channel",
-        "the user wants the agent to interact with a Discord server or channel over time",
+        "the user wants the agent to receive Discord or Slack messages",
+        "the user asks to monitor or listen to a Discord or Slack channel",
+        "the user wants the agent to interact with a Discord server or Slack workspace channel over time",
         "the user wants messages from a connected app to wake the agent",
         "the user asks whether connected app channel subscriptions are active",
     ),
     query_aliases=(
         "discord",
+        "slack",
         "connected app messages",
         "pipedream triggers",
         "slack receive",
         "slack messages",
     ),
-    pipedream_app_slugs=("discord",),
+    pipedream_app_slugs=("discord", "slack"),
     prompt_instructions=(
-        "Use normal Pipedream app tools for outbound actions such as sending Discord messages.\n"
+        "Use normal Pipedream app tools for outbound actions such as sending Discord or Slack messages.\n"
         "When calling Discord send-message tools, pass the selected Discord channel ID as `channel`, the text as `message`, "
         "and the correct `will_continue_work` value. The backend supplies default Discord presentation fields unless you explicitly override them.\n"
+        "When calling Slack send-message tools, pass the selected Slack channel ID as `channel`, the text as `message` or `text`, "
+        "and the correct `will_continue_work` value.\n"
         "Use `pipedream_trigger_subscriptions` only to manage inbound app event subscriptions that wake this agent.\n"
-        "V1 supports Discord `message.created` subscriptions for selected channel IDs. Do not create all-channel or mention-only subscriptions.\n"
-        "Before asking the user for a Discord channel ID, call `pipedream_trigger_subscriptions` with `action=\"discover_targets\"` to list available channels. "
-        "For Discord channel discovery, prefer this tool over Pipedream `retrieve_options` or `configure_component`.\n"
+        "V1 supports Discord and Slack `message.created` subscriptions for selected channel IDs. Do not create all-channel, mention-only, DM, reaction, or thread-monitoring subscriptions. "
+        "Slack v1 ignores bot messages and thread replies.\n"
+        "Before asking the user for a Discord or Slack channel ID, call `pipedream_trigger_subscriptions` with `action=\"discover_targets\"` and the relevant `app_slug` to list available channels. "
+        "For Discord and Slack channel discovery, prefer this tool over Pipedream `retrieve_options` or `configure_component`.\n"
         "If several channels are returned, ask the user to choose by channel name, then call `ensure` with the selected target value as `channel_ids`. "
         "Include `channel_names` when you know human-readable names. "
-        "Do not treat Discord channel setup as complete after discovery or outbound sending; after the channel is selected, call `ensure` so future channel messages wake this agent. "
-        "Skip `ensure` only when the user clearly asks for a one-time outbound-only Discord post and does not expect replies, monitoring, or ongoing interaction.\n"
+        "Do not treat connected-app channel setup as complete after discovery or outbound sending; after the channel is selected, call `ensure` so future channel messages wake this agent. "
+        "Skip `ensure` only when the user clearly asks for a one-time outbound-only post and does not expect replies, monitoring, or ongoing interaction.\n"
         "Only ask the user for a raw channel ID in normal conversation if target discovery fails or returns no useful choices. "
-        "Do not request Discord server IDs or channel IDs as secrets. Server ID is not required for v1 setup.\n"
+        "Do not request Discord server IDs, Slack workspace IDs, or channel IDs as secrets. Server/workspace ID is not required for v1 setup.\n"
         "If the tool returns `action_required`, provide the connect URL to the user and stop until authorization completes.\n"
-        "If `ensure` succeeds, then use the normal Discord send-message tool for any outbound message the user requested. "
-        "If outbound sending succeeds but `ensure` has not succeeded, the agent will not receive Discord replies.\n"
+        "If `ensure` succeeds, then use the normal Discord or Slack send-message tool for any outbound message the user requested. "
+        "If outbound sending succeeds but `ensure` has not succeeded, the agent will not receive replies from that app channel.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear.\n"
         "Use `disable` only when the user asks to stop receiving messages from a subscribed app channel."
     ),
