@@ -1,6 +1,7 @@
 """
 Tests for guarded parallel execution of safe tool batches.
 """
+import json
 import threading
 import time
 from types import SimpleNamespace
@@ -12,7 +13,14 @@ from django.test import TestCase, tag
 from api.agent.tools.agent_variables import clear_variables, get_agent_variable, set_agent_variable
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import enable_tools
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentCompletion, PersistentAgentStep, UserQuota
+from api.models import (
+    BrowserUseAgent,
+    PersistentAgent,
+    PersistentAgentCompletion,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
+    UserQuota,
+)
 
 
 def _tool_call(name: str, arguments: str) -> dict:
@@ -127,6 +135,47 @@ class TestParallelToolCallsExecution(TestCase):
             self.assertEqual(step.completion_id, completion.id)
 
         self.assertEqual(result_usage["total_tokens"], 15)
+
+    @patch("api.agent.core.event_processing.is_pipedream_mcp_tool", return_value=True)
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_enabled_tool", return_value={"status": "success", "auto_sleep_ok": True})
+    def test_pipedream_tool_params_decode_unicode_escapes_before_execution(
+        self,
+        mock_execute_enabled,
+        _mock_credit,
+        _mock_is_pipedream,
+    ):
+        escaped_message = (
+            "I sure can! That message was sent by **_the_juicer_**. "
+            "\\ud83d\\udd75\\ufe0f\\u200d\\u2642\\ufe0f\\u2728"
+        )
+
+        self._run_single_iteration(
+            [
+                _tool_call(
+                    "discord-send-message",
+                    json.dumps(
+                        {
+                            "channel": "1492138162066034751",
+                            "message": escaped_message,
+                            "username": "Fannie Yueh",
+                            "avatarURL": "https://gobii.ai/static/images/gobii_fish.png",
+                            "includeSentViaPipedream": False,
+                            "will_continue_work": False,
+                        }
+                    ),
+                )
+            ]
+        )
+
+        executed_params = mock_execute_enabled.call_args.args[2]
+        expected_message = (
+            "I sure can! That message was sent by **_the_juicer_**. "
+            "\U0001f575\ufe0f\u200d\u2642\ufe0f\u2728"
+        )
+        self.assertEqual(executed_params["message"], expected_message)
+        persisted_call = PersistentAgentToolCall.objects.get(tool_name="discord-send-message")
+        self.assertEqual(persisted_call.tool_params["message"], expected_message)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_enabled_tool")

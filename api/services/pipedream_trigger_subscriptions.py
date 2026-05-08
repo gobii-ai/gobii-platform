@@ -613,6 +613,27 @@ def _pipedream_event_from_payload(payload: Mapping[str, object]) -> Mapping[str,
     return payload
 
 
+def _nested_mapping(root: Mapping[str, object], *keys: str) -> Mapping[str, object] | None:
+    current: object = root
+    for key in keys:
+        if not isinstance(current, Mapping):
+            return None
+        current = current.get(key)
+    return current if isinstance(current, Mapping) else None
+
+
+def _discord_message_event(payload: Mapping[str, object]) -> Mapping[str, object]:
+    event = _pipedream_event_from_payload(payload)
+    for key in ("message", "payload", "data"):
+        nested = event.get(key)
+        if isinstance(nested, Mapping) and (
+            _event_value(nested, "content", "message", "text", "body")
+            or _event_value(nested, "id", "messageId", "message_id")
+        ):
+            return nested
+    return event
+
+
 def _event_value(event: Mapping[str, object], *keys: str) -> str:
     for key in keys:
         value = event.get(key)
@@ -625,18 +646,49 @@ def _event_value(event: Mapping[str, object], *keys: str) -> str:
 
 
 def _discord_author(event: Mapping[str, object]) -> tuple[str, str]:
-    author = event.get("author")
-    if isinstance(author, Mapping):
+    author_candidates = [
+        event.get("author"),
+        event.get("user"),
+        _nested_mapping(event, "member", "user"),
+        _nested_mapping(event, "message", "author"),
+        _nested_mapping(event, "payload", "author"),
+        _nested_mapping(event, "data", "author"),
+    ]
+    for author in author_candidates:
+        if not isinstance(author, Mapping):
+            continue
         author_id = _event_value(author, "id", "userId", "user_id")
-        username = _event_value(author, "global_name", "username", "displayName", "name")
+        username = _event_value(
+            author,
+            "global_name",
+            "globalName",
+            "display_name",
+            "displayName",
+            "nick",
+            "username",
+            "name",
+        )
         if author_id or username:
             return author_id, username
-    return _event_value(event, "authorId", "author_id", "userId", "user_id"), _event_value(
+
+    member = event.get("member")
+    if isinstance(member, Mapping):
+        member_name = _event_value(member, "nick", "display_name", "displayName")
+        user = member.get("user")
+        if member_name and isinstance(user, Mapping):
+            return _event_value(user, "id", "userId", "user_id"), member_name
+
+    author_name = _event_value(
         event,
+        "author",
+        "global_name",
+        "globalName",
         "username",
+        "display_name",
         "displayName",
         "user",
     )
+    return _event_value(event, "authorID", "authorId", "author_id", "userID", "userId", "user_id"), author_name
 
 
 def _discord_channel_address(guild_id: str, channel_id: str) -> str:
@@ -673,7 +725,7 @@ def _normalize_discord_event(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     payload: Mapping[str, object],
 ) -> tuple[ParsedMessage, str]:
-    event = _pipedream_event_from_payload(payload)
+    event = _discord_message_event(payload)
     message_id = _event_value(event, "id", "messageId", "message_id")
     channel_id = _event_value(event, "channelID", "channelId", "channel_id") or subscription.platform_channel
     if channel_id != subscription.platform_channel:

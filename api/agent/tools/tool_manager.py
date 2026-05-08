@@ -111,6 +111,7 @@ PYTHON_EXEC_TOOL_NAME = "python_exec"
 RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
 PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
+PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -1034,6 +1035,21 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
             )
 
     return None
+
+
+def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
+    """Return True when the tool is provided by the Pipedream MCP server."""
+    row = (
+        PersistentAgentEnabledTool.objects
+        .filter(agent=agent, tool_full_name=tool_name)
+        .only("tool_server")
+        .first()
+    )
+    if row and row.tool_server:
+        return row.tool_server == PIPEDREAM_TOOL_SERVER_NAME
+
+    entry = resolve_tool_entry(agent, tool_name)
+    return bool(entry and entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME)
 
 
 def auto_enable_heuristic_tools(

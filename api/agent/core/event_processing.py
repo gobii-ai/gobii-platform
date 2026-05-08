@@ -141,6 +141,7 @@ from ..tools.tool_manager import (
     execute_enabled_tool,
     auto_enable_heuristic_tools,
     get_parallel_safe_tool_rejection_reason,
+    is_pipedream_mcp_tool,
     should_skip_auto_substitution,
 )
 from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
@@ -1912,6 +1913,9 @@ def _prepare_tool_batch(
                     logger.debug("Failed to persist correction step", exc_info=True)
                 followup_required = True
                 break
+
+            if "-" in tool_name and is_pipedream_mcp_tool(agent, tool_name):
+                tool_params = _normalize_tool_params_unicode_escapes(tool_params)
 
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
