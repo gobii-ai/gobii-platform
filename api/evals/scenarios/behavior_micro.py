@@ -437,7 +437,7 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
             run_id,
             inbound.timestamp,
             "verify_no_execution_before_planning_exit",
-            {"send_email", "send_sms"},
+            SUBSTANTIVE_WORK_TOOL_NAMES,
         )
 
 
