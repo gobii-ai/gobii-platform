@@ -3279,25 +3279,14 @@ export function AgentChatPage({
       setCreateAgentTrialOnboarding(null)
       try {
         const preferredContactMethod = spawnFlow ? 'email' : 'web'
-        let result: Awaited<ReturnType<typeof createAgent>>
-        if (attachments.length > 0) {
-          result = await createAgent(
-            body,
-            tier,
-            charterOverride,
-            selectedPipedreamAppSlugs,
-            preferredContactMethod,
-            attachments,
-          )
-        } else {
-          result = await createAgent(
-            body,
-            tier,
-            charterOverride,
-            selectedPipedreamAppSlugs,
-            preferredContactMethod,
-          )
-        }
+        const result = await createAgent(
+          body,
+          tier,
+          charterOverride,
+          selectedPipedreamAppSlugs,
+          preferredContactMethod,
+          attachments,
+        )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
         const createdPlanningState = normalizePlanningState(result.planning_state)

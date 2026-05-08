@@ -258,6 +258,51 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(attachment_row.filespace_node.name, "screenshot.png")
         mock_delay.assert_called_once_with(str(created_agent.id))
 
+    @tag("batch_agent_chat")
+    def test_quick_create_ignores_files_not_named_attachments(self):
+        message_text = "Create an agent and ignore unrelated upload fields"
+        unrelated_file = SimpleUploadedFile("avatar.png", b"fake-image-bytes", content_type="image/png")
+
+        response = self.client.post(
+            "/console/api/agents/create/",
+            data={
+                "message": message_text,
+                "preferred_llm_tier": "standard",
+                "avatar": unrelated_file,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
+        self.assertEqual(seeded_message.attachments.count(), 0)
+
+    @tag("batch_agent_chat")
+    def test_quick_create_still_processes_when_initial_attachment_import_fails(self):
+        message_text = "Create an agent even if filespace import fails"
+        attachment = SimpleUploadedFile("screenshot.png", b"fake-image-bytes", content_type="image/png")
+
+        with patch(
+            "console.agent_creation.import_message_attachments_to_filespace",
+            side_effect=RuntimeError("storage offline"),
+        ) as mock_import, patch("console.agent_creation.process_agent_events_task.delay") as mock_delay:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(
+                    "/console/api/agents/create/",
+                    data={
+                        "message": message_text,
+                        "preferred_llm_tier": "standard",
+                        "attachments": attachment,
+                    },
+                )
+
+        self.assertEqual(response.status_code, 200)
+        created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
+        seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
+        self.assertEqual(seeded_message.attachments.count(), 1)
+        mock_import.assert_called_once_with(str(seeded_message.id))
+        mock_delay.assert_called_once_with(str(created_agent.id))
+
     @override_settings(MAX_FILE_SIZE=5)
     @tag("batch_agent_chat")
     def test_quick_create_rejects_over_limit_initial_attachment(self):

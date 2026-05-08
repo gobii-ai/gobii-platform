@@ -3009,7 +3009,7 @@ class AgentQuickCreateAPIView(LoginRequiredMixin, View):
         if request.content_type and request.content_type.startswith("multipart/form-data"):
             try:
                 body = request.POST
-                attachments = list(request.FILES.getlist("attachments") or request.FILES.values())
+                attachments = list(request.FILES.getlist("attachments"))
             except (MultiPartParserError, RequestDataTooBig):
                 max_size_label = filesizeformat(get_max_file_size() or 0).replace("\xa0", " ")
                 return JsonResponse(

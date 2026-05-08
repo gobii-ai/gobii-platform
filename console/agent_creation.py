@@ -442,12 +442,14 @@ def create_persistent_agent_from_charter(
         def _import_initial_attachments_then_process() -> None:
             try:
                 import_message_attachments_to_filespace(initial_message_id)
-            except (PersistentAgentMessage.DoesNotExist, OSError, ValueError):
+            except Exception:
+                # Attachment import is best-effort; the initial message should still reach the agent.
                 logger.exception(
                     "Failed synchronous filespace import for initial agent message %s",
                     initial_message_id,
                 )
-            process_agent_events_task.delay(str(persistent_agent.id))
+            finally:
+                process_agent_events_task.delay(str(persistent_agent.id))
 
         if has_initial_attachments:
             transaction.on_commit(_import_initial_attachments_then_process)
