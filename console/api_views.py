@@ -3463,7 +3463,7 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"verified": True, "message": "Email already verified."})
 
         try:
-            send_email_verification(request, email_address)
+            sent = send_email_verification(request, email_address)
         except ImmediateHttpResponse as exc:
             response = exc.response
             if response.status_code == 429:
@@ -3472,9 +3472,20 @@ class UserEmailResendVerificationAPIView(ApiLoginRequiredMixin, View):
                     status=429,
                 )
             raise
-        except (AnymailError, OSError, SMTPException) as exc:
+        except (AnymailError, OSError, SMTPException):
             logger.exception("Failed to send email verification for user %s", request.user.id)
-            return JsonResponse({"error": f"Failed to send verification email: {exc}"}, status=500)
+            return JsonResponse(
+                {"error": "Failed to send verification email. Please try again later."},
+                status=500,
+            )
+
+        if not sent:
+            return JsonResponse(
+                {
+                    "verified": False,
+                    "message": "A verification email was already sent recently. Please check your inbox or try again later.",
+                }
+            )
 
         return JsonResponse({"verified": False, "message": "Verification email sent."})
 

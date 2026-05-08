@@ -1,4 +1,5 @@
 import json
+from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
@@ -148,6 +149,48 @@ class ConsoleUserEmailResendVerificationApiTests(TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, [self.user.email])
         self.assertIn("/accounts/confirm-email/", mail.outbox[0].body)
+
+    @patch("api.services.email_verification.send_email_verification", return_value=False)
+    def test_resend_reports_when_email_was_recently_sent(self, mock_send_email_verification):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+
+        response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.json(),
+            {
+                "verified": False,
+                "message": "A verification email was already sent recently. Please check your inbox or try again later.",
+            },
+        )
+        mock_send_email_verification.assert_called_once()
+
+    @patch("api.services.email_verification.send_email_verification", side_effect=OSError("smtp.internal.local"))
+    def test_resend_returns_generic_error_when_email_send_fails(self, mock_send_email_verification):
+        EmailAddress.objects.create(
+            user=self.user,
+            email=self.user.email,
+            verified=False,
+            primary=True,
+        )
+
+        with patch("console.api_views.logger.exception") as mock_logger_exception:
+            response = self.client.post(self.url)
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"error": "Failed to send verification email. Please try again later."},
+        )
+        self.assertNotIn("smtp.internal.local", response.content.decode("utf-8"))
+        mock_send_email_verification.assert_called_once()
+        mock_logger_exception.assert_called_once()
 
     def test_resend_does_not_send_when_email_is_already_verified(self):
         EmailAddress.objects.create(
