@@ -79,7 +79,11 @@ class FakeRedis:
         return deleted
 
 
-@override_settings(PIPEDREAM_PROJECT_ID="proj_test", PIPEDREAM_ENVIRONMENT="development")
+@override_settings(
+    PIPEDREAM_PROJECT_ID="proj_test",
+    PIPEDREAM_ENVIRONMENT="development",
+    PUBLIC_SITE_URL="https://app.example.test",
+)
 class PipedreamTriggerSubscriptionServiceTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -152,6 +156,14 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
                 "discord": {"authProvisionId": "apn_123"},
                 "channels": ["1492138162066034751"],
             },
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"]["webhook_url"],
+            (
+                f"https://app.example.test"
+                f"{reverse('api:pipedream_trigger_subscription_webhook', args=[subscription.id])}"
+                f"?t={subscription.webhook_secret}"
+            ),
         )
 
         reused = ensure_subscriptions(

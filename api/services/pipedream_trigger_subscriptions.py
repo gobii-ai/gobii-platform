@@ -15,7 +15,6 @@ from typing import Iterable, Mapping
 import redis
 import requests
 from django.conf import settings
-from django.contrib.sites.models import Site
 from django.db import transaction
 from django.urls import reverse
 from django.utils import timezone
@@ -87,10 +86,19 @@ class DiscoverTargetsResult:
     message: str = ""
 
 
-def _https_base_url() -> str:
+def _public_base_url() -> str:
+    configured = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
+    if configured:
+        return configured
+
+    from django.contrib.sites.models import Site
+
     current_site = Site.objects.get_current()
     domain = current_site.domain.strip().rstrip("/")
-    return f"https://{domain}"
+    if domain.startswith("http://") or domain.startswith("https://"):
+        return domain
+    scheme = "http" if domain.startswith("localhost") or domain.startswith("127.") else "https"
+    return f"{scheme}://{domain}"
 
 
 def _pipedream_headers(token: str) -> dict[str, str]:
@@ -114,7 +122,7 @@ def _get_pipedream_access_token() -> str:
 
 def _subscription_webhook_url(subscription: PersistentAgentPipedreamTriggerSubscription) -> str:
     path = reverse("api:pipedream_trigger_subscription_webhook", args=[subscription.id])
-    return f"{_https_base_url()}{path}?t={subscription.webhook_secret}"
+    return f"{_public_base_url()}{path}?t={subscription.webhook_secret}"
 
 
 def _normalize_channel_id(raw: object) -> str:
