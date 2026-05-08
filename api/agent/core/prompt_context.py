@@ -5970,7 +5970,7 @@ def _get_pending_human_input_requests_block(agent: PersistentAgent) -> str:
         ),
     ]
     for request in requests:
-        lines.append(f"- Pending question: {request.question}")
+        lines.append(f"- Pending question: {str(request.question).replace('\n', ' ')}")
         lines.append(f"  Requested via: {request.requested_via_channel}")
         if request.recipient_channel and request.recipient_address:
             lines.append(f"  Recipient: {request.recipient_channel} {request.recipient_address}")
