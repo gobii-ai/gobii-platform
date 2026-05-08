@@ -3273,6 +3273,7 @@ export function AgentChatPage({
       tier: IntelligenceTierKey,
       charterOverride?: string | null,
       selectedPipedreamAppSlugs?: string[],
+      attachments: File[] = [],
     ) => {
       setCreateAgentError(null)
       setCreateAgentTrialOnboarding(null)
@@ -3284,6 +3285,7 @@ export function AgentChatPage({
           charterOverride,
           selectedPipedreamAppSlugs,
           preferredContactMethod,
+          attachments,
         )
         const createdAgentName = result.agent_name?.trim() || 'Agent'
         const createdAgentEmail = result.agent_email?.trim() || null
@@ -3988,6 +3990,7 @@ export function AgentChatPage({
       tierToUse,
       pending.charterOverride,
       pending.selectedPipedreamAppSlugs,
+      pending.attachments,
     )
   }, [buildGateAnalytics, closeGate, createNewAgent, intelligenceGate])
 
@@ -4004,7 +4007,7 @@ export function AgentChatPage({
     if (sendMessageDisabledReason) {
       return
     }
-    const hasMessageContent = body.trim().length > 0 || attachments.length > 0
+    const hasMessageContent = isNewAgent ? body.trim().length > 0 : body.trim().length > 0 || attachments.length > 0
     if (!hasMessageContent) {
       return
     }
@@ -4075,6 +4078,7 @@ export function AgentChatPage({
         selectedTier,
         charterOverride,
         selectedPipedreamAppSlugs,
+        attachments,
       )
       return
     }
