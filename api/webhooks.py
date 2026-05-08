@@ -475,7 +475,9 @@ def pipedream_trigger_subscription_webhook(request, subscription_id):
             "subscriptionId": str(subscription.id),
             "messageId": result.get("message_id", ""),
             "conversationId": result.get("conversation_id", ""),
-            "queued": True,
+            "queued": not bool(result.get("ignored")),
+            "ignored": bool(result.get("ignored")),
+            "outboundEcho": bool(result.get("outbound_echo")),
         },
         status=202,
     )

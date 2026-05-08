@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Iterable, Mapping
 
 import requests
@@ -22,9 +23,12 @@ from api.agent.tools.mcp_manager import get_mcp_manager
 from api.integrations.pipedream_connect import create_connect_session
 from api.models import (
     CommsChannel,
+    DeliveryStatus,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentConversationParticipant,
+    PersistentAgentMessage,
     PersistentAgentPipedreamTriggerSubscription,
 )
 
@@ -33,6 +37,11 @@ DISCORD_APP_SLUG = "discord"
 DISCORD_MESSAGE_EVENT_TYPE = "message.created"
 DISCORD_MESSAGE_TRIGGER_KEY = "discord-new-message"
 DISCORD_MESSAGE_TRIGGER_VERSION = "1.0.3"
+DISCORD_SEND_TOOL_NAMES = {
+    "discord-send-message",
+    "discord-send-message-advanced",
+    "discord-send-message-with-file",
+}
 SIGNATURE_TOLERANCE_SECONDS = 300
 DISCORD_SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
 
@@ -700,7 +709,7 @@ def _discord_agent_address(agent_id: object) -> str:
     return f"discord://agent/{agent_id}"
 
 
-def _ensure_discord_agent_endpoint(agent: PersistentAgent) -> None:
+def _ensure_discord_agent_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
     endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=CommsChannel.DISCORD,
         address=_discord_agent_address(agent.id),
@@ -715,6 +724,193 @@ def _ensure_discord_agent_endpoint(agent: PersistentAgent) -> None:
         updates.append("is_primary")
     if updates:
         endpoint.save(update_fields=updates)
+    return endpoint
+
+
+def _ensure_conversation_participant(
+    conversation: PersistentAgentConversation,
+    endpoint: PersistentAgentCommsEndpoint,
+    role: str,
+) -> None:
+    PersistentAgentConversationParticipant.objects.get_or_create(
+        conversation=conversation,
+        endpoint=endpoint,
+        defaults={"role": role},
+    )
+
+
+def _display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
+    return f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
+
+
+def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
+    existing = (
+        PersistentAgentConversation.objects
+        .filter(
+            owner_agent=agent,
+            channel=CommsChannel.DISCORD,
+            address__endswith=f"/channel/{channel_id}",
+        )
+        .order_by("-id")
+        .first()
+    )
+    if existing:
+        return existing.address
+    return _discord_channel_address("unknown", channel_id)
+
+
+def _get_or_create_discord_conversation(
+    agent: PersistentAgent,
+    *,
+    address: str,
+    channel_id: str,
+    channel_name: str = "",
+) -> PersistentAgentConversation:
+    display_name = _display_name_for_channel(channel_id, channel_name)
+    conversation, created = PersistentAgentConversation.objects.get_or_create(
+        channel=CommsChannel.DISCORD,
+        address=address,
+        defaults={"owner_agent": agent, "display_name": display_name},
+    )
+    updates = []
+    if conversation.owner_agent_id is None:
+        conversation.owner_agent = agent
+        updates.append("owner_agent")
+    if display_name and conversation.display_name != display_name:
+        conversation.display_name = display_name
+        updates.append("display_name")
+    if updates and not created:
+        conversation.save(update_fields=updates)
+    return conversation
+
+
+def _discord_channel_endpoint(address: str) -> PersistentAgentCommsEndpoint:
+    endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=CommsChannel.DISCORD,
+        address=address,
+        defaults={"owner_agent": None},
+    )
+    return endpoint
+
+
+def _find_recent_discord_outbound(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    body: str,
+) -> PersistentAgentMessage | None:
+    cutoff = timezone.now() - timedelta(minutes=10)
+    return (
+        PersistentAgentMessage.objects
+        .select_related("conversation")
+        .filter(
+            owner_agent=agent,
+            is_outbound=True,
+            conversation__channel=CommsChannel.DISCORD,
+            body=body,
+            timestamp__gte=cutoff,
+            raw_payload__discord_channel_id=channel_id,
+            raw_payload__source="pipedream_tool",
+        )
+        .order_by("-timestamp")
+        .first()
+    )
+
+
+def _create_discord_outbound_message(
+    agent: PersistentAgent,
+    *,
+    channel_id: str,
+    body: str,
+    conversation_address: str,
+    channel_name: str = "",
+    raw_payload: Mapping[str, object] | None = None,
+) -> PersistentAgentMessage:
+    from_endpoint = _ensure_discord_agent_endpoint(agent)
+    channel_endpoint = _discord_channel_endpoint(conversation_address)
+    conversation = _get_or_create_discord_conversation(
+        agent,
+        address=conversation_address,
+        channel_id=channel_id,
+        channel_name=channel_name,
+    )
+    _ensure_conversation_participant(
+        conversation,
+        from_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
+    )
+    _ensure_conversation_participant(
+        conversation,
+        channel_endpoint,
+        PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
+    )
+    now = timezone.now()
+    payload = dict(raw_payload or {})
+    payload.setdefault("source", "pipedream_tool")
+    payload.setdefault("source_kind", "discord")
+    payload.setdefault("app_slug", DISCORD_APP_SLUG)
+    payload.setdefault("event_type", DISCORD_MESSAGE_EVENT_TYPE)
+    payload.setdefault("discord_channel_id", channel_id)
+    payload.setdefault("discord_channel_name", channel_name)
+    return PersistentAgentMessage.objects.create(
+        owner_agent=agent,
+        from_endpoint=from_endpoint,
+        conversation=conversation,
+        is_outbound=True,
+        body=body,
+        raw_payload=payload,
+        latest_status=DeliveryStatus.SENT,
+        latest_sent_at=now,
+    )
+
+
+def record_discord_outbound_send(
+    agent: PersistentAgent,
+    *,
+    tool_name: str,
+    params: Mapping[str, object],
+    result: Mapping[str, object] | None = None,
+) -> PersistentAgentMessage | None:
+    if tool_name not in DISCORD_SEND_TOOL_NAMES:
+        return None
+    channel_id = _event_value(params, "channel", "channelId", "channel_id")
+    body = _event_value(params, "message", "content", "text", "body")
+    if not channel_id or not DISCORD_SNOWFLAKE_RE.fullmatch(channel_id) or not body:
+        return None
+    existing = _find_recent_discord_outbound(agent, channel_id=channel_id, body=body)
+    if existing:
+        return existing
+    subscription = (
+        agent.pipedream_trigger_subscriptions
+        .filter(
+            app_slug=DISCORD_APP_SLUG,
+            event_type=DISCORD_MESSAGE_EVENT_TYPE,
+            platform_channel=channel_id,
+            status=PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE,
+        )
+        .order_by("-updated_at")
+        .first()
+    )
+    channel_name = subscription.platform_channel_name if subscription else ""
+    raw_payload = {
+        "source": "pipedream_tool",
+        "source_kind": "discord",
+        "app_slug": DISCORD_APP_SLUG,
+        "event_type": DISCORD_MESSAGE_EVENT_TYPE,
+        "discord_channel_id": channel_id,
+        "discord_channel_name": channel_name,
+        "pipedream_tool_name": tool_name,
+        "pipedream_tool_params": dict(params),
+        "pipedream_tool_result": dict(result or {}),
+    }
+    return _create_discord_outbound_message(
+        agent,
+        channel_id=channel_id,
+        body=body,
+        conversation_address=_discord_conversation_address_for_channel(agent, channel_id),
+        channel_name=channel_name,
+        raw_payload=raw_payload,
+    )
 
 
 def _discord_message_body(event: Mapping[str, object]) -> str:
@@ -777,6 +973,106 @@ def _normalize_discord_event(
     return parsed, display_name
 
 
+def _discord_event_is_bot_authored(raw_payload: Mapping[str, object]) -> bool:
+    pipedream_payload = raw_payload.get("pipedream_payload")
+    if not isinstance(pipedream_payload, Mapping):
+        return False
+    metadata = pipedream_payload.get("author_metadata")
+    if isinstance(metadata, Mapping) and metadata.get("bot") is True:
+        return True
+    return bool(_event_value(pipedream_payload, "webhookId", "webhookID", "webhook_id"))
+
+
+def _merge_discord_echo_into_outbound(
+    message: PersistentAgentMessage,
+    *,
+    parsed: ParsedMessage,
+    display_name: str,
+) -> PersistentAgentMessage:
+    raw_payload = parsed.raw_payload if isinstance(parsed.raw_payload, Mapping) else {}
+    channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
+    channel_name = str(raw_payload.get("discord_channel_name") or "").strip()
+    guild_id = str(raw_payload.get("discord_guild_id") or "").strip()
+    if guild_id and channel_id:
+        address = _discord_channel_address(guild_id, channel_id)
+        conversation = _get_or_create_discord_conversation(
+            message.owner_agent,
+            address=address,
+            channel_id=channel_id,
+            channel_name=channel_name,
+        )
+        if message.conversation_id != conversation.id:
+            message.conversation = conversation
+    next_payload = dict(message.raw_payload or {})
+    next_payload.update(
+        {
+            "discord_message_id": raw_payload.get("discord_message_id", ""),
+            "discord_channel_id": raw_payload.get("discord_channel_id", ""),
+            "discord_channel_name": raw_payload.get("discord_channel_name", ""),
+            "discord_guild_id": raw_payload.get("discord_guild_id", ""),
+            "discord_guild_name": raw_payload.get("discord_guild_name", ""),
+            "discord_author_id": raw_payload.get("discord_author_id", ""),
+            "discord_author_name": raw_payload.get("discord_author_name", ""),
+            "discord_attachments": raw_payload.get("discord_attachments", []),
+            "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
+        }
+    )
+    message.raw_payload = next_payload
+    message.latest_status = DeliveryStatus.SENT
+    if message.latest_sent_at is None:
+        message.latest_sent_at = timezone.now()
+    message.save(update_fields=["conversation", "raw_payload", "latest_status", "latest_sent_at"])
+    if message.conversation_id and display_name:
+        PersistentAgentConversation.objects.filter(id=message.conversation_id).update(display_name=display_name)
+    return message
+
+
+def _upsert_discord_outbound_echo(
+    subscription: PersistentAgentPipedreamTriggerSubscription,
+    *,
+    parsed: ParsedMessage,
+    display_name: str,
+) -> PersistentAgentMessage | None:
+    raw_payload = parsed.raw_payload if isinstance(parsed.raw_payload, Mapping) else {}
+    channel_id = str(raw_payload.get("discord_channel_id") or "").strip()
+    body = parsed.body or ""
+    if not channel_id or not body:
+        return None
+    recent_outbound = _find_recent_discord_outbound(subscription.agent, channel_id=channel_id, body=body)
+    bot_authored = _discord_event_is_bot_authored(raw_payload)
+    author_name = str(raw_payload.get("discord_author_name") or "").strip()
+    is_named_agent = bool(author_name and author_name == subscription.agent.name)
+    if not recent_outbound and not (bot_authored and is_named_agent):
+        return None
+    if recent_outbound:
+        return _merge_discord_echo_into_outbound(recent_outbound, parsed=parsed, display_name=display_name)
+
+    channel_name = str(raw_payload.get("discord_channel_name") or "").strip()
+    outbound_payload = {
+        "source": "pipedream_tool",
+        "source_kind": "discord",
+        "app_slug": subscription.app_slug,
+        "event_type": subscription.event_type,
+        "discord_channel_id": channel_id,
+        "discord_channel_name": channel_name,
+        "discord_message_id": raw_payload.get("discord_message_id", ""),
+        "discord_guild_id": raw_payload.get("discord_guild_id", ""),
+        "discord_guild_name": raw_payload.get("discord_guild_name", ""),
+        "discord_author_id": raw_payload.get("discord_author_id", ""),
+        "discord_author_name": raw_payload.get("discord_author_name", ""),
+        "discord_attachments": raw_payload.get("discord_attachments", []),
+        "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
+    }
+    return _create_discord_outbound_message(
+        subscription.agent,
+        channel_id=channel_id,
+        body=body,
+        conversation_address=parsed.sender,
+        channel_name=channel_name,
+        raw_payload=outbound_payload,
+    )
+
+
 def ingest_trigger_delivery(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     raw_body: bytes,
@@ -786,6 +1082,16 @@ def ingest_trigger_delivery(
 
     payload = _coerce_json_body(raw_body)
     parsed, display_name = _normalize_discord_event(subscription, payload)
+    outbound_echo = _upsert_discord_outbound_echo(subscription, parsed=parsed, display_name=display_name)
+    if outbound_echo:
+        subscription.record_event()
+        return {
+            "message_id": str(outbound_echo.id),
+            "conversation_id": str(outbound_echo.conversation_id) if outbound_echo.conversation_id else "",
+            "ignored": True,
+            "outbound_echo": True,
+        }
+
     _ensure_discord_agent_endpoint(subscription.agent)
     info = ingest_inbound_message(CommsChannel.DISCORD, parsed, filespace_import_mode="sync")
     if info.message.conversation_id and display_name:

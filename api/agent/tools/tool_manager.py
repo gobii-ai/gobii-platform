@@ -13,6 +13,8 @@ from datetime import datetime, UTC
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
+from django.db import DatabaseError
 from django.db.models import F
 
 from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
@@ -112,6 +114,7 @@ RUN_COMMAND_TOOL_NAME = "run_command"
 META_ADS_TOOL_NAME = "meta_ads"
 PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
 PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
+PIPEDREAM_MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
 DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
 
@@ -1052,6 +1055,30 @@ def is_pipedream_mcp_tool(agent: PersistentAgent, tool_name: str) -> bool:
     return bool(entry and entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME)
 
 
+def _record_pipedream_tool_side_effects(
+    agent: PersistentAgent,
+    entry: ToolCatalogEntry,
+    params: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    if entry.provider != "mcp" or entry.tool_server != PIPEDREAM_TOOL_SERVER_NAME:
+        return
+    status = str(result.get("status") or "").strip().lower()
+    if status not in PIPEDREAM_MESSAGE_SUCCESS_STATUSES:
+        return
+    try:
+        from api.services.pipedream_trigger_subscriptions import record_discord_outbound_send
+
+        record_discord_outbound_send(
+            agent,
+            tool_name=entry.full_name,
+            params=params,
+            result=result,
+        )
+    except (DatabaseError, ValidationError, ValueError):
+        logger.exception("Agent %s: failed to record Pipedream tool side effects for %s", agent.id, entry.full_name)
+
+
 def auto_enable_heuristic_tools(
     agent: PersistentAgent,
     text: str,
@@ -1190,8 +1217,12 @@ def execute_enabled_tool(
 
     if entry.provider == "mcp":
         if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):
-            return execute_mcp_tool_isolated(agent, resolved_name, params)
-        return execute_mcp_tool(agent, resolved_name, params)
+            result = execute_mcp_tool_isolated(agent, resolved_name, params)
+        else:
+            result = execute_mcp_tool(agent, resolved_name, params)
+        if isinstance(result, dict):
+            _record_pipedream_tool_side_effects(agent, entry, params, result)
+        return result
 
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)

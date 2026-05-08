@@ -11,10 +11,13 @@ from django.urls import reverse
 from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.pipedream_trigger_subscriptions import execute_pipedream_trigger_subscriptions
+from api.agent.tools.tool_manager import ToolCatalogEntry, _record_pipedream_tool_side_effects
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
     PersistentAgentPipedreamTriggerSubscription,
@@ -26,6 +29,7 @@ from api.services.pipedream_trigger_subscriptions import (
     disable_subscription,
     discover_targets,
     ensure_subscriptions,
+    record_discord_outbound_send,
 )
 
 
@@ -499,6 +503,116 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["discord_author_id"], "177593384389705729")
         self.assertEqual(message.raw_payload["discord_author_name"], "_the_juicer_")
         mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    def test_record_discord_outbound_send_creates_visible_outbound_message(self):
+        message = record_discord_outbound_send(
+            self.agent,
+            tool_name="discord-send-message",
+            params={
+                "channel": "1492138162066034751",
+                "message": "hello from the agent",
+                "username": self.agent.name,
+            },
+            result={"status": "success"},
+        )
+
+        self.assertIsNotNone(message)
+        self.assertTrue(message.is_outbound)
+        self.assertEqual(message.body, "hello from the agent")
+        self.assertEqual(message.conversation.channel, CommsChannel.DISCORD)
+        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
+        self.assertEqual(message.raw_payload["discord_channel_id"], "1492138162066034751")
+
+    @tag("batch_agent_webhooks")
+    def test_pipedream_mcp_success_hook_records_discord_outbound_message(self):
+        entry = ToolCatalogEntry(
+            provider="mcp",
+            full_name="discord-send-message",
+            description="Send Discord message",
+            parameters={},
+            tool_server="pipedream",
+            tool_name="discord-send-message",
+        )
+
+        _record_pipedream_tool_side_effects(
+            self.agent,
+            entry,
+            {
+                "channel": "1492138162066034751",
+                "message": "hello from the provider hook",
+                "username": self.agent.name,
+            },
+            {"status": "success"},
+        )
+
+        message = PersistentAgentMessage.objects.get(
+            owner_agent=self.agent,
+            is_outbound=True,
+            conversation__channel=CommsChannel.DISCORD,
+        )
+        self.assertEqual(message.body, "hello from the provider hook")
+        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
+        self.assertEqual(message.raw_payload["pipedream_tool_name"], "discord-send-message")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_self_echo_updates_outbound_message_without_reprocessing(self, mock_delay):
+        from_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.DISCORD,
+            address=f"discord://agent/{self.agent.id}",
+            is_primary=True,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.DISCORD,
+            address="discord://guild/unknown/channel/12345",
+            display_name="#general",
+        )
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=from_endpoint,
+            conversation=conversation,
+            is_outbound=True,
+            body="hello from the agent",
+            raw_payload={
+                "source": "pipedream_tool",
+                "source_kind": "discord",
+                "discord_channel_id": "12345",
+            },
+        )
+        body = json.dumps(
+            {
+                "id": "m-self",
+                "guildID": "g1",
+                "channelID": "12345",
+                "channel": "general",
+                "content": "hello from the agent",
+                "author": self.agent.name,
+                "authorID": "bot-user",
+                "webhookId": "bot-user",
+                "author_metadata": {"bot": True},
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
+        outbound.refresh_from_db()
+        self.assertTrue(outbound.is_outbound)
+        self.assertEqual(outbound.conversation.address, "discord://guild/g1/channel/12345")
+        self.assertEqual(outbound.raw_payload["discord_message_id"], "m-self")
+        self.assertEqual(outbound.raw_payload["discord_author_name"], self.agent.name)
+        mock_delay.assert_not_called()
 
 
 class ConnectedAppChannelsSystemSkillTests(TestCase):
