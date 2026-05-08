@@ -8,6 +8,7 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
+from console.agent_chat.timeline import CursorPayload, MessageEnvelope, _serialize_message
 from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.pipedream_trigger_subscriptions import execute_pipedream_trigger_subscriptions
@@ -579,6 +580,18 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
     @tag("batch_agent_webhooks")
     def test_record_discord_outbound_send_creates_visible_outbound_message(self):
+        PersistentAgentPipedreamTriggerSubscription.objects.create(
+            agent=self.agent,
+            app_slug="discord",
+            event_type=DISCORD_MESSAGE_EVENT_TYPE,
+            platform_channel="1492138162066034751",
+            platform_channel_name="general",
+            trigger_key="discord-new-message",
+            trigger_version="1.0.3",
+            external_user_id=str(self.agent.id),
+            deployed_trigger_id="dc_trigger_outbound",
+            configured_props={"channels": ["1492138162066034751"]},
+        )
         message = record_discord_outbound_send(
             self.agent,
             tool_name="discord-send-message",
@@ -596,6 +609,18 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.conversation.channel, CommsChannel.DISCORD)
         self.assertEqual(message.raw_payload["source"], "pipedream_tool")
         self.assertEqual(message.raw_payload["discord_channel_id"], "1492138162066034751")
+        self.assertEqual(message.raw_payload["discord_channel_name"], "general")
+        self.assertEqual(message.raw_payload["source_label"], "#general")
+
+        serialized = _serialize_message(
+            MessageEnvelope(
+                sort_key=(1, "message", str(message.id)),
+                cursor=CursorPayload(1, "message", str(message.id)),
+                message=message,
+            )
+        )["message"]
+        self.assertEqual(serialized["channel"], "discord")
+        self.assertEqual(serialized["sourceLabel"], "#general")
 
     @tag("batch_agent_webhooks")
     def test_pipedream_mcp_success_hook_records_discord_outbound_message(self):
@@ -758,10 +783,11 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertIn("ask the user to choose by channel name", instructions)
         self.assertIn("Do not request Discord server IDs or channel IDs as secrets.", instructions)
         self.assertIn("Server ID is not required for v1 setup.", instructions)
-        self.assertIn("When calling Discord send-message tools, use this parameter pattern", instructions)
-        self.assertIn("`channel` = the selected Discord channel ID", instructions)
-        self.assertIn("`message` = the text to send", instructions)
-        self.assertIn("avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"", instructions)
-        self.assertIn("`username` = this agent's name", instructions)
-        self.assertIn("includeSentViaPipedream=false", instructions)
+        self.assertIn("When calling Discord send-message tools, pass the selected Discord channel ID as `channel`", instructions)
+        self.assertIn("the text as `message`", instructions)
+        self.assertIn("backend supplies default Discord presentation fields", instructions)
+        self.assertIn("explicitly override", instructions)
+        self.assertNotIn("avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"", instructions)
+        self.assertNotIn("`username` = this agent's name", instructions)
+        self.assertNotIn("includeSentViaPipedream=false", instructions)
         self.assertIn("will_continue_work", instructions)

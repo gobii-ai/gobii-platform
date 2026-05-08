@@ -65,6 +65,29 @@ from config.plans import PLAN_CONFIG
 
 logger = logging.getLogger(__name__)
 
+SQLITE_TOOL_NAME = "sqlite_batch"
+HTTP_REQUEST_TOOL_NAME = "http_request"
+READ_FILE_TOOL_NAME = "read_file"
+CREATE_FILE_TOOL_NAME = "create_file"
+CREATE_CSV_TOOL_NAME = "create_csv"
+CREATE_PDF_TOOL_NAME = "create_pdf"
+CREATE_CHART_TOOL_NAME = "create_chart"
+CREATE_IMAGE_TOOL_NAME = "create_image"
+CREATE_VIDEO_TOOL_NAME = "create_video"
+PYTHON_EXEC_TOOL_NAME = "python_exec"
+RUN_COMMAND_TOOL_NAME = "run_command"
+META_ADS_TOOL_NAME = "meta_ads"
+PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
+PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
+PIPEDREAM_MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
+PIPEDREAM_DISCORD_SEND_TOOL_NAMES = {
+    "discord-send-message",
+    "discord-send-message-advanced",
+    "discord-send-message-with-file",
+}
+PIPEDREAM_DISCORD_DEFAULT_AVATAR_URL = "https://gobii.ai/static/images/gobii_fish.png"
+DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
+
 
 def _coerce_params_to_schema(params: Dict[str, Any], schema: Dict[str, Any]) -> Dict[str, Any]:
     """Coerce parameter values to match expected types from JSON schema.
@@ -116,23 +139,40 @@ def _normalize_tool_params_unicode_escapes(params: Any) -> Any:
 def _is_pipedream_entry(entry: "ToolCatalogEntry") -> bool:
     return entry.provider == "mcp" and entry.tool_server == PIPEDREAM_TOOL_SERVER_NAME
 
-SQLITE_TOOL_NAME = "sqlite_batch"
-HTTP_REQUEST_TOOL_NAME = "http_request"
-READ_FILE_TOOL_NAME = "read_file"
-CREATE_FILE_TOOL_NAME = "create_file"
-CREATE_CSV_TOOL_NAME = "create_csv"
-CREATE_PDF_TOOL_NAME = "create_pdf"
-CREATE_CHART_TOOL_NAME = "create_chart"
-CREATE_IMAGE_TOOL_NAME = "create_image"
-CREATE_VIDEO_TOOL_NAME = "create_video"
-PYTHON_EXEC_TOOL_NAME = "python_exec"
-RUN_COMMAND_TOOL_NAME = "run_command"
-META_ADS_TOOL_NAME = "meta_ads"
-PIPEDREAM_TRIGGER_SUBSCRIPTIONS_TOOL_NAME = "pipedream_trigger_subscriptions"
-PIPEDREAM_TOOL_SERVER_NAME = "pipedream"
-PIPEDREAM_MESSAGE_SUCCESS_STATUSES = {"ok", "queued", "sent", "success"}
-DEFAULT_BUILTIN_TOOLS = {READ_FILE_TOOL_NAME, SQLITE_TOOL_NAME, CREATE_CHART_TOOL_NAME}
 
+def _tool_schema_allows_param(entry: "ToolCatalogEntry", param_name: str) -> bool:
+    parameters = entry.parameters if isinstance(entry.parameters, dict) else {}
+    properties = parameters.get("properties")
+    if isinstance(properties, dict):
+        return param_name in properties
+    return True
+
+
+def _apply_pipedream_tool_defaults(
+    agent: PersistentAgent,
+    entry: "ToolCatalogEntry",
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    if entry.full_name not in PIPEDREAM_DISCORD_SEND_TOOL_NAMES:
+        return params
+
+    next_params = dict(params)
+
+    if _tool_schema_allows_param(entry, "avatarURL"):
+        avatar_url = next_params.get("avatarURL")
+        if not isinstance(avatar_url, str) or not avatar_url.strip():
+            next_params["avatarURL"] = PIPEDREAM_DISCORD_DEFAULT_AVATAR_URL
+
+    if _tool_schema_allows_param(entry, "username"):
+        username = next_params.get("username")
+        if not isinstance(username, str) or not username.strip():
+            next_params["username"] = (agent.name or "").strip() or "Agent"
+
+    if _tool_schema_allows_param(entry, "includeSentViaPipedream"):
+        if next_params.get("includeSentViaPipedream") is None:
+            next_params["includeSentViaPipedream"] = False
+
+    return next_params
 
 def _sandbox_fallback_tools() -> Set[str]:
     tools = getattr(settings, "SANDBOX_COMPUTE_LOCAL_FALLBACK_TOOLS", [])
@@ -1233,6 +1273,7 @@ def execute_enabled_tool(
 
     if _is_pipedream_entry(entry):
         params = _normalize_tool_params_unicode_escapes(params)
+        params = _apply_pipedream_tool_defaults(agent, entry, params)
 
     if entry.provider == "mcp":
         if isolated_mcp and resolved_name.startswith("mcp_brightdata_"):

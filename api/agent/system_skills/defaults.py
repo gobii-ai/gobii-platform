@@ -277,10 +277,8 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     pipedream_app_slugs=("discord",),
     prompt_instructions=(
         "Use normal Pipedream app tools for outbound actions such as sending Discord messages or discovering channel IDs.\n"
-        "When calling Discord send-message tools, use this parameter pattern: "
-        "`channel` = the selected Discord channel ID, `message` = the text to send, "
-        "`avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"`, `username` = this agent's name, "
-        "`includeSentViaPipedream=false`, and the correct `will_continue_work` value.\n"
+        "When calling Discord send-message tools, pass the selected Discord channel ID as `channel`, the text as `message`, "
+        "and the correct `will_continue_work` value. The backend supplies default Discord presentation fields unless you explicitly override them.\n"
         "Use `pipedream_trigger_subscriptions` only to manage inbound app event subscriptions that wake this agent.\n"
         "V1 supports Discord `message.created` subscriptions for selected channel IDs. Do not create all-channel or mention-only subscriptions.\n"
         "Before asking the user for a Discord channel ID, call `pipedream_trigger_subscriptions` with `action=\"discover_targets\"` to list available channels. "

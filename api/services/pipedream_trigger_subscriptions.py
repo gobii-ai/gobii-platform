@@ -748,6 +748,10 @@ def _display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
     return f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
 
 
+def _discord_channel_source_label(channel_id: str, channel_name: str = "") -> str:
+    return _display_name_for_channel(channel_id, channel_name)
+
+
 def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
     existing = (
         PersistentAgentConversation.objects
@@ -875,6 +879,7 @@ def _create_discord_outbound_message(
     payload.setdefault("discord_channel_name", channel_name)
     payload.setdefault("discord_platform_channel_address", channel_endpoint.address)
     payload.setdefault("discord_conversation_address", conversation.address)
+    payload.setdefault("source_label", _discord_channel_source_label(channel_id, channel_name))
     return PersistentAgentMessage.objects.create(
         owner_agent=agent,
         from_endpoint=from_endpoint,
@@ -922,6 +927,7 @@ def record_discord_outbound_send(
         "event_type": DISCORD_MESSAGE_EVENT_TYPE,
         "discord_channel_id": channel_id,
         "discord_channel_name": channel_name,
+        "source_label": _discord_channel_source_label(channel_id, channel_name),
         "pipedream_tool_name": tool_name,
         "pipedream_tool_params": dict(params),
         "pipedream_tool_result": dict(result or {}),
@@ -1052,6 +1058,7 @@ def _merge_discord_echo_into_outbound(
             "discord_attachments": raw_payload.get("discord_attachments", []),
             "discord_platform_channel_address": platform_channel_address,
             "discord_conversation_address": message.conversation.address if message.conversation_id else "",
+            "source_label": _discord_channel_source_label(channel_id, channel_name),
             "pipedream_trigger_echo_payload": raw_payload.get("pipedream_payload", {}),
         }
     )
@@ -1093,6 +1100,7 @@ def _upsert_discord_outbound_echo(
         "event_type": subscription.event_type,
         "discord_channel_id": channel_id,
         "discord_channel_name": channel_name,
+        "source_label": _discord_channel_source_label(channel_id, channel_name),
         "discord_message_id": raw_payload.get("discord_message_id", ""),
         "discord_guild_id": raw_payload.get("discord_guild_id", ""),
         "discord_guild_name": raw_payload.get("discord_guild_name", ""),

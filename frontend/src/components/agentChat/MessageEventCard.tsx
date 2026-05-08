@@ -97,6 +97,10 @@ export const MessageEventCard = memo(function MessageEventCard({
   }
 
   let channelLabel = getChannelLabel(channel)
+  const discordOutboundChannelLabel = channel === 'discord' && isAgent ? message.sourceLabel?.trim() : ''
+  if (discordOutboundChannelLabel) {
+    channelLabel = discordOutboundChannelLabel
+  }
   let showChannelTag = channel !== 'web'
   if (isWebhook) {
     channelLabel = 'Webhook'
