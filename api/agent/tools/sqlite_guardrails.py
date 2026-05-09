@@ -6,7 +6,7 @@ import math
 import re
 import sqlite3
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from ..core.csv_utils import (
     build_csv_sample,
@@ -1251,6 +1251,7 @@ def open_guarded_sqlite_connection(
     *,
     timeout_seconds: float = 30.0,
     allow_attach: bool = False,
+    read_table_is_blocked: Optional[Callable[[str], bool]] = None,
 ) -> sqlite3.Connection:
     """Open a SQLite connection with guardrails against host file access.
 
@@ -1282,7 +1283,13 @@ def open_guarded_sqlite_connection(
     ) -> int:
         if allow_attach and action_code in {sqlite3.SQLITE_ATTACH, sqlite3.SQLITE_DETACH}:
             return sqlite3.SQLITE_OK
-        return _sqlite_authorizer(action_code, param1, param2, db_name, trigger_name)
+        decision = _sqlite_authorizer(action_code, param1, param2, db_name, trigger_name)
+        if decision != sqlite3.SQLITE_OK:
+            return decision
+        if action_code == sqlite3.SQLITE_READ and param1 and read_table_is_blocked:
+            if read_table_is_blocked(param1):
+                return _deny_action(action_code, param1, param2)
+        return sqlite3.SQLITE_OK
 
     try:
         conn.set_authorizer(authorizer)

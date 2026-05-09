@@ -8,13 +8,16 @@ from django.urls import NoReverseMatch, reverse
 
 from api.agent.tools.sqlite_state import (
     SQLiteSnapshotPublishError,
+    cleaned_sqlite_db_snapshot,
     get_sqlite_db_path,
-    publish_sqlite_db_snapshot,
+    publish_prepared_sqlite_db_snapshot,
 )
 from api.models import PersistentAgent
 from api.services.agent_dashboards import (
     DashboardValidationError,
     create_or_update_dashboard,
+    normalize_dashboard_definition,
+    save_dashboard_definition,
 )
 from constants.feature_flags import AGENT_DASHBOARDS
 from util.urls import append_context_query
@@ -56,16 +59,31 @@ def execute_create_or_update_dashboard(agent: PersistentAgent, params: Dict[str,
 
     db_path = get_sqlite_db_path()
     try:
-        dashboard = create_or_update_dashboard(
-            agent,
-            title=params.get("title"),
-            description=params.get("description", ""),
-            widgets=params.get("widgets"),
-            db_path=db_path,
-            created_by_agent=True,
-        )
         if db_path:
-            publish_sqlite_db_snapshot(str(agent.id), db_path)
+            with cleaned_sqlite_db_snapshot(str(agent.id), db_path) as snapshot_db_path:
+                normalized_title, normalized_description, normalized_widgets = normalize_dashboard_definition(
+                    agent,
+                    title=params.get("title"),
+                    description=params.get("description", ""),
+                    widgets=params.get("widgets"),
+                    db_path=snapshot_db_path,
+                )
+                publish_prepared_sqlite_db_snapshot(str(agent.id), snapshot_db_path)
+            dashboard = save_dashboard_definition(
+                agent,
+                title=normalized_title,
+                description=normalized_description,
+                widgets=normalized_widgets,
+                created_by_agent=True,
+            )
+        else:
+            dashboard = create_or_update_dashboard(
+                agent,
+                title=params.get("title"),
+                description=params.get("description", ""),
+                widgets=params.get("widgets"),
+                created_by_agent=True,
+            )
     except DashboardValidationError as exc:
         return {
             "status": "error",
@@ -80,7 +98,7 @@ def execute_create_or_update_dashboard(agent: PersistentAgent, params: Dict[str,
     except SQLiteSnapshotPublishError as exc:
         return {
             "status": "error",
-            "message": f"Dashboard was saved, but its SQLite snapshot could not be published: {exc}",
+            "message": f"Dashboard SQLite snapshot could not be published: {exc}",
             "hint": (
                 "The dashboard URL is only returned after the SQLite snapshot is available. "
                 "Retry after reducing or repairing the agent SQLite database."
