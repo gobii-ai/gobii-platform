@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -82,6 +83,7 @@ JSON_DETECTION_THRESHOLD = 0.6
 JSON_HINT_THRESHOLD = 0.2
 CSV_DETECTION_THRESHOLD = 0.4
 SQLITE_RESTORE_SUBPROCESS_TIMEOUT_SECONDS = 120
+SQLITE_MAX_PERSISTED_DB_MB = 100
 
 _JSON_START_RE = re.compile(r"^\s*[\[{]")
 _CSV_DELIMS = [",", "\t", "|", ";"]
@@ -1019,6 +1021,109 @@ def _restore_sqlite_db_from_storage(storage_key: str, db_path: str, agent_uuid: 
             logger.debug("Failed to clean up restore archive for agent %s", agent_uuid, exc_info=True)
 
 
+class SQLiteSnapshotPublishError(RuntimeError):
+    """Raised when an immediate SQLite snapshot cannot be published."""
+
+
+def _maintain_sqlite_db_for_persistence(db_path: str, agent_uuid: str) -> None:
+    conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
+    try:
+        _drop_ephemeral_tables(conn)
+        conn.execute("VACUUM;")
+        try:
+            conn.execute("PRAGMA optimize;")
+        except sqlite3.Error:
+            logger.debug("Failed to optimize SQLite DB for agent %s", agent_uuid, exc_info=True)
+        conn.commit()
+    finally:
+        try:
+            clear_guarded_connection(conn)
+            conn.close()
+        except sqlite3.Error:
+            logger.debug("Failed to close SQLite maintenance connection for agent %s", agent_uuid, exc_info=True)
+
+
+def _persist_sqlite_archive(
+    agent_uuid: str,
+    db_path: str,
+    *,
+    fail_on_size_limit: bool = False,
+) -> bool:
+    storage_key = sqlite_storage_key(agent_uuid)
+    db_size_bytes = os.path.getsize(db_path)
+    db_size_mb = db_size_bytes / (1024 * 1024)
+
+    if db_size_mb > SQLITE_MAX_PERSISTED_DB_MB:
+        message = (
+            f"SQLite DB for agent {agent_uuid} exceeds {SQLITE_MAX_PERSISTED_DB_MB}MB "
+            f"({db_size_mb:.2f} MB) - wiping database instead of persisting"
+        )
+        logger.info(message)
+        if default_storage.exists(storage_key):
+            default_storage.delete(storage_key)
+        if fail_on_size_limit:
+            raise SQLiteSnapshotPublishError(message)
+        return False
+
+    tmp_zst_path = db_path + ".zst"
+    try:
+        cctx = zstd.ZstdCompressor(level=3)
+        with open(db_path, "rb") as f_in, open(tmp_zst_path, "wb") as f_out:
+            cctx.copy_stream(f_in, f_out)
+
+        if default_storage.exists(storage_key):
+            default_storage.delete(storage_key)
+
+        with open(tmp_zst_path, "rb") as f_in:
+            default_storage.save(storage_key, File(f_in))
+        return True
+    finally:
+        try:
+            if os.path.exists(tmp_zst_path):
+                os.remove(tmp_zst_path)
+        except OSError:
+            logger.debug("Failed to remove SQLite archive temp file for agent %s", agent_uuid, exc_info=True)
+
+
+def _copy_sqlite_db(source_db_path: str, snapshot_db_path: str) -> None:
+    source_conn: Optional[sqlite3.Connection] = None
+    snapshot_conn: Optional[sqlite3.Connection] = None
+    try:
+        source_conn = sqlite3.connect(source_db_path)
+        snapshot_conn = sqlite3.connect(snapshot_db_path)
+        source_conn.backup(snapshot_conn)
+        snapshot_conn.commit()
+    except sqlite3.Error as exc:
+        raise SQLiteSnapshotPublishError(f"Failed to copy SQLite database: {exc}") from exc
+    finally:
+        if snapshot_conn is not None:
+            snapshot_conn.close()
+        if source_conn is not None:
+            source_conn.close()
+
+
+def publish_sqlite_db_snapshot(agent_uuid: str, source_db_path: str) -> None:
+    """Publish a durable snapshot of the current SQLite DB without mutating it.
+
+    Dashboard creation needs the storage archive to exist before returning a URL.
+    We clean a temporary backup instead of the live DB so the rest of the agent
+    turn can still use ephemeral runtime tables.
+    """
+    if not source_db_path or not os.path.exists(source_db_path):
+        raise SQLiteSnapshotPublishError("SQLite database path does not exist.")
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            snapshot_db_path = os.path.join(tmp_dir, "state.db")
+            _copy_sqlite_db(source_db_path, snapshot_db_path)
+            _maintain_sqlite_db_for_persistence(snapshot_db_path, agent_uuid)
+            _persist_sqlite_archive(agent_uuid, snapshot_db_path, fail_on_size_limit=True)
+    except SQLiteSnapshotPublishError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise SQLiteSnapshotPublishError(str(exc)) from exc
+
+
 @contextlib.contextmanager
 def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context mgr
     """Context manager that restores/persists the per-agent SQLite DB.
@@ -1045,21 +1150,7 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
         finally:
             if os.path.exists(db_path):
                 try:
-                    conn = open_guarded_sqlite_connection(db_path, allow_attach=True)
-                    try:
-                        _drop_ephemeral_tables(conn)
-                        conn.execute("VACUUM;")
-                        try:
-                            conn.execute("PRAGMA optimize;")
-                        except Exception:
-                            pass
-                        conn.commit()
-                    finally:
-                        try:
-                            clear_guarded_connection(conn)
-                            conn.close()
-                        except Exception:
-                            pass
+                    _maintain_sqlite_db_for_persistence(db_path, agent_uuid)
                 except Exception:  # noqa: BLE001
                     logger.warning(
                         "SQLite maintenance (VACUUM/optimize) failed for agent %s",
@@ -1067,38 +1158,12 @@ def agent_sqlite_db(agent_uuid: str):  # noqa: D401 – simple generator context
                         exc_info=True,
                     )
 
-                db_size_bytes = os.path.getsize(db_path)
-                db_size_mb = db_size_bytes / (1024 * 1024)
-
-                if db_size_mb > 100:
-                    logger.info(
-                        "SQLite DB for agent %s exceeds 100MB (%.2f MB) - wiping database instead of persisting",
-                        agent_uuid,
-                        db_size_mb,
+                try:
+                    _persist_sqlite_archive(agent_uuid, db_path)
+                except Exception:  # noqa: BLE001
+                    logger.exception(
+                        "Failed to persist SQLite DB for agent %s", agent_uuid
                     )
-                    if default_storage.exists(storage_key):
-                        default_storage.delete(storage_key)
-                else:
-                    tmp_zst_path = db_path + ".zst"
-                    try:
-                        cctx = zstd.ZstdCompressor(level=3)
-                        with open(db_path, "rb") as f_in, open(tmp_zst_path, "wb") as f_out:
-                            cctx.copy_stream(f_in, f_out)
-
-                        if default_storage.exists(storage_key):
-                            default_storage.delete(storage_key)
-
-                        with open(tmp_zst_path, "rb") as f_in:
-                            default_storage.save(storage_key, File(f_in))
-                    except Exception:  # noqa: BLE001
-                        logger.exception(
-                            "Failed to persist SQLite DB for agent %s", agent_uuid
-                        )
-                    finally:
-                        try:
-                            os.remove(tmp_zst_path)
-                        except Exception:
-                            pass
 
             reset_sqlite_db_path(token)
 
