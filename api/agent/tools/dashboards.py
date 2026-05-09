@@ -6,7 +6,11 @@ from django.core.exceptions import ValidationError
 from django.db import DatabaseError
 from django.urls import NoReverseMatch, reverse
 
-from api.agent.tools.sqlite_state import get_sqlite_db_path
+from api.agent.tools.sqlite_state import (
+    SQLiteSnapshotPublishError,
+    get_sqlite_db_path,
+    publish_sqlite_db_snapshot,
+)
 from api.models import PersistentAgent
 from api.services.agent_dashboards import (
     DashboardValidationError,
@@ -50,15 +54,18 @@ def execute_create_or_update_dashboard(agent: PersistentAgent, params: Dict[str,
     if not agent:
         return {"status": "error", "message": "Dashboard creation requires an agent."}
 
+    db_path = get_sqlite_db_path()
     try:
         dashboard = create_or_update_dashboard(
             agent,
             title=params.get("title"),
             description=params.get("description", ""),
             widgets=params.get("widgets"),
-            db_path=get_sqlite_db_path(),
+            db_path=db_path,
             created_by_agent=True,
         )
+        if db_path:
+            publish_sqlite_db_snapshot(str(agent.id), db_path)
     except DashboardValidationError as exc:
         return {
             "status": "error",
@@ -70,6 +77,15 @@ def execute_create_or_update_dashboard(agent: PersistentAgent, params: Dict[str,
         }
     except ValidationError as exc:
         return {"status": "error", "message": "; ".join(exc.messages)}
+    except SQLiteSnapshotPublishError as exc:
+        return {
+            "status": "error",
+            "message": f"Dashboard was saved, but its SQLite snapshot could not be published: {exc}",
+            "hint": (
+                "The dashboard URL is only returned after the SQLite snapshot is available. "
+                "Retry after reducing or repairing the agent SQLite database."
+            ),
+        }
     except DatabaseError as exc:
         logger.exception("Failed to save dashboard for agent %s", agent.id)
         return {"status": "error", "message": f"Failed to save dashboard: {exc}"}

@@ -9,7 +9,12 @@ from waffle.testutils import override_flag
 
 from api.agent.tools.dashboards import DASHBOARD_TOOL_NAME, execute_create_or_update_dashboard
 from api.agent.tools.tool_manager import get_available_builtin_tool_entries
-from api.agent.tools.sqlite_state import agent_sqlite_db, sqlite_storage_key
+from api.agent.tools.sqlite_state import (
+    SQLiteSnapshotPublishError,
+    agent_sqlite_db,
+    agent_sqlite_db_snapshot,
+    sqlite_storage_key,
+)
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
@@ -121,6 +126,92 @@ class AgentDashboardTests(TestCase):
                 PersistentAgentDashboardWidget.WidgetType.TABLE,
             ],
         )
+
+    def test_dashboard_tool_publishes_snapshot_before_agent_cycle_exits(self):
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            self._seed_store_table(db_path)
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute('CREATE TABLE "__messages" (body TEXT NOT NULL)')
+                conn.execute('INSERT INTO "__messages"(body) VALUES (?)', ("runtime only",))
+                conn.commit()
+            finally:
+                conn.close()
+
+            result = execute_create_or_update_dashboard(
+                self.agent,
+                {
+                    "title": "Immediate Stores",
+                    "widgets": [
+                        {
+                            "type": "metric",
+                            "title": "Stores Found",
+                            "sql": "select count(*) as value from stores",
+                        },
+                    ],
+                },
+            )
+
+            self.assertEqual(result["status"], "ok")
+            self.assertTrue(default_storage.exists(sqlite_storage_key(str(self.agent.id))))
+
+            self.client.force_login(self.user)
+            with override_flag(AGENT_DASHBOARDS, active=True):
+                response = self.client.get(reverse("console_agent_dashboards_api", kwargs={"agent_id": self.agent.id}))
+
+            self.assertEqual(response.status_code, 200)
+            widget = response.json()["dashboard"]["widgets"][0]
+            self.assertEqual(widget["result"]["status"], "ok")
+            self.assertEqual(widget["result"]["value"], 3)
+
+            conn = sqlite3.connect(db_path)
+            try:
+                live_tables = {
+                    row[0]
+                    for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                }
+            finally:
+                conn.close()
+            self.assertIn("__messages", live_tables)
+
+            with agent_sqlite_db_snapshot(str(self.agent.id)) as snapshot_path:
+                self.assertIsNotNone(snapshot_path)
+                conn = sqlite3.connect(snapshot_path)
+                try:
+                    snapshot_tables = {
+                        row[0]
+                        for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    }
+                finally:
+                    conn.close()
+            self.assertIn("stores", snapshot_tables)
+            self.assertNotIn("__messages", snapshot_tables)
+
+    def test_dashboard_tool_does_not_return_ok_when_snapshot_publish_fails(self):
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            self._seed_store_table(db_path)
+
+            with patch(
+                "api.agent.tools.dashboards.publish_sqlite_db_snapshot",
+                side_effect=SQLiteSnapshotPublishError("storage unavailable"),
+            ):
+                result = execute_create_or_update_dashboard(
+                    self.agent,
+                    {
+                        "title": "Local Store Research",
+                        "widgets": [
+                            {
+                                "type": "metric",
+                                "title": "Stores Found",
+                                "sql": "select count(*) as value from stores",
+                            },
+                        ],
+                    },
+                )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("could not be published", result["message"])
+        self.assertNotIn("dashboard_url", result)
 
     def test_dashboard_tool_rejects_mutating_sql_and_internal_tables(self):
         with agent_sqlite_db(str(self.agent.id)) as db_path:
