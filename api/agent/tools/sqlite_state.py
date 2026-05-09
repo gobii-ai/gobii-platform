@@ -1102,8 +1102,9 @@ def _copy_sqlite_db(source_db_path: str, snapshot_db_path: str) -> None:
             source_conn.close()
 
 
-def publish_sqlite_db_snapshot(agent_uuid: str, source_db_path: str) -> None:
-    """Publish a durable snapshot of the current SQLite DB without mutating it.
+@contextlib.contextmanager
+def cleaned_sqlite_db_snapshot(agent_uuid: str, source_db_path: str):
+    """Yield a cleaned snapshot of the current SQLite DB without mutating it.
 
     Dashboard creation needs the storage archive to exist before returning a URL.
     We clean a temporary backup instead of the live DB so the rest of the agent
@@ -1112,16 +1113,32 @@ def publish_sqlite_db_snapshot(agent_uuid: str, source_db_path: str) -> None:
     if not source_db_path or not os.path.exists(source_db_path):
         raise SQLiteSnapshotPublishError("SQLite database path does not exist.")
 
-    try:
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            snapshot_db_path = os.path.join(tmp_dir, "state.db")
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        snapshot_db_path = os.path.join(tmp_dir, "state.db")
+        try:
             _copy_sqlite_db(source_db_path, snapshot_db_path)
             _maintain_sqlite_db_for_persistence(snapshot_db_path, agent_uuid)
-            _persist_sqlite_archive(agent_uuid, snapshot_db_path, fail_on_size_limit=True)
+        except SQLiteSnapshotPublishError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise SQLiteSnapshotPublishError(str(exc)) from exc
+        yield snapshot_db_path
+
+
+def publish_prepared_sqlite_db_snapshot(agent_uuid: str, snapshot_db_path: str) -> None:
+    if not snapshot_db_path or not os.path.exists(snapshot_db_path):
+        raise SQLiteSnapshotPublishError("SQLite snapshot path does not exist.")
+    try:
+        _persist_sqlite_archive(agent_uuid, snapshot_db_path, fail_on_size_limit=True)
     except SQLiteSnapshotPublishError:
         raise
     except Exception as exc:  # noqa: BLE001
         raise SQLiteSnapshotPublishError(str(exc)) from exc
+
+
+def publish_sqlite_db_snapshot(agent_uuid: str, source_db_path: str) -> None:
+    with cleaned_sqlite_db_snapshot(agent_uuid, source_db_path) as snapshot_db_path:
+        publish_prepared_sqlite_db_snapshot(agent_uuid, snapshot_db_path)
 
 
 @contextlib.contextmanager

@@ -187,12 +187,48 @@ class AgentDashboardTests(TestCase):
             self.assertIn("stores", snapshot_tables)
             self.assertNotIn("__messages", snapshot_tables)
 
+    def test_dashboard_tool_rejects_view_that_breaks_after_snapshot_cleanup(self):
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute('CREATE TABLE "__messages" (body TEXT NOT NULL)')
+                conn.execute('INSERT INTO "__messages"(body) VALUES (?)', ("runtime only",))
+                conn.execute(
+                    """
+                    CREATE VIEW runtime_message_count AS
+                    SELECT COUNT(*) AS value FROM "__messages"
+                    """
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            result = execute_create_or_update_dashboard(
+                self.agent,
+                {
+                    "title": "Runtime View",
+                    "widgets": [
+                        {
+                            "type": "metric",
+                            "title": "Runtime Messages",
+                            "sql": "select value from runtime_message_count",
+                        },
+                    ],
+                },
+            )
+
+            self.assertEqual(result["status"], "error")
+            self.assertIn("Runtime Messages", result["message"])
+            self.assertFalse(default_storage.exists(sqlite_storage_key(str(self.agent.id))))
+
+        self.assertFalse(PersistentAgentDashboard.objects.filter(agent=self.agent).exists())
+
     def test_dashboard_tool_does_not_return_ok_when_snapshot_publish_fails(self):
         with agent_sqlite_db(str(self.agent.id)) as db_path:
             self._seed_store_table(db_path)
 
             with patch(
-                "api.agent.tools.dashboards.publish_sqlite_db_snapshot",
+                "api.agent.tools.dashboards.publish_prepared_sqlite_db_snapshot",
                 side_effect=SQLiteSnapshotPublishError("storage unavailable"),
             ):
                 result = execute_create_or_update_dashboard(
@@ -212,6 +248,7 @@ class AgentDashboardTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("could not be published", result["message"])
         self.assertNotIn("dashboard_url", result)
+        self.assertFalse(PersistentAgentDashboard.objects.filter(agent=self.agent).exists())
 
     def test_dashboard_tool_rejects_mutating_sql_and_internal_tables(self):
         with agent_sqlite_db(str(self.agent.id)) as db_path:
@@ -248,6 +285,50 @@ class AgentDashboardTests(TestCase):
         self.assertIn("SELECT or WITH", mutation_result["message"])
         self.assertEqual(internal_result["status"], "error")
         self.assertIn("internal or ephemeral", internal_result["message"])
+        self.assertFalse(PersistentAgentDashboard.objects.filter(agent=self.agent).exists())
+
+    def test_dashboard_tool_rejects_sqlite_internal_namespace_direct_and_via_view(self):
+        with agent_sqlite_db(str(self.agent.id)) as db_path:
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE sequence_items (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)")
+                conn.execute("INSERT INTO sequence_items(name) VALUES (?)", ("alpha",))
+                conn.execute("CREATE VIEW sequence_view AS SELECT name FROM sqlite_sequence")
+                conn.commit()
+            finally:
+                conn.close()
+
+            direct_result = execute_create_or_update_dashboard(
+                self.agent,
+                {
+                    "title": "Bad Dashboard",
+                    "widgets": [
+                        {
+                            "type": "table",
+                            "title": "SQLite Sequence",
+                            "sql": "select * from sqlite_sequence",
+                        }
+                    ],
+                },
+            )
+            view_result = execute_create_or_update_dashboard(
+                self.agent,
+                {
+                    "title": "Bad Dashboard",
+                    "widgets": [
+                        {
+                            "type": "table",
+                            "title": "SQLite Sequence View",
+                            "sql": "select * from sequence_view",
+                        }
+                    ],
+                },
+            )
+
+        self.assertEqual(direct_result["status"], "error")
+        self.assertIn("internal or ephemeral", direct_result["message"])
+        self.assertEqual(view_result["status"], "error")
+        self.assertIn("SQLite Sequence View", view_result["message"])
         self.assertFalse(PersistentAgentDashboard.objects.filter(agent=self.agent).exists())
 
     def test_dashboard_api_renders_from_persisted_sqlite_snapshot(self):

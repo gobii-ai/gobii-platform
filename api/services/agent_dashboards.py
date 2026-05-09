@@ -31,8 +31,9 @@ MAX_WIDGET_SQL_BYTES = 12_000
 DASHBOARD_QUERY_TIMEOUT_SECONDS = 5.0
 
 EPHEMERAL_OR_INTERNAL_TABLE_RE = re.compile(
-    r'(?i)(?:^|[^A-Za-z0-9_])["`]?(__[A-Za-z0-9_]+|sqlite_master|sqlite_schema)["`]?'
+    r'(?i)(?:^|[^A-Za-z0-9_])["`]?(__[A-Za-z0-9_]+|sqlite_[A-Za-z0-9_]*)["`]?'
 )
+EPHEMERAL_OR_INTERNAL_TABLE_NAME_RE = re.compile(r"(?i)^(?:__[A-Za-z0-9_]+|sqlite_[A-Za-z0-9_]*)$")
 
 
 class DashboardValidationError(ValueError):
@@ -112,12 +113,17 @@ def _is_numericish(value: Any) -> bool:
     return False
 
 
+def _is_dashboard_blocked_table_read(table_name: str) -> bool:
+    return bool(EPHEMERAL_OR_INTERNAL_TABLE_NAME_RE.match(table_name or ""))
+
+
 def execute_dashboard_select(db_path: str, sql: str) -> dict[str, Any]:
     conn: Optional[sqlite3.Connection] = None
     try:
         conn = open_guarded_sqlite_connection(
             db_path,
             timeout_seconds=DASHBOARD_QUERY_TIMEOUT_SECONDS,
+            read_table_is_blocked=_is_dashboard_blocked_table_read,
         )
         conn.execute("PRAGMA query_only = ON;")
         cursor = conn.cursor()
@@ -277,15 +283,14 @@ def validate_dashboard_widgets(
         return validate_against_path(snapshot_path)
 
 
-def create_or_update_dashboard(
+def normalize_dashboard_definition(
     agent: PersistentAgent,
     *,
     title: Any,
     description: Any = "",
     widgets: Any,
     db_path: Optional[str] = None,
-    created_by_agent: bool = True,
-) -> PersistentAgentDashboard:
+) -> tuple[str, str, list[dict[str, Any]]]:
     normalized_title = _clean_text(title, max_length=160, field_name="Dashboard title")
     normalized_description = _clean_optional_text(
         description,
@@ -293,18 +298,28 @@ def create_or_update_dashboard(
         field_name="Dashboard description",
     )
     normalized_widgets = validate_dashboard_widgets(agent, widgets, db_path=db_path)
+    return normalized_title, normalized_description, normalized_widgets
 
+
+def save_dashboard_definition(
+    agent: PersistentAgent,
+    *,
+    title: str,
+    description: str,
+    widgets: list[dict[str, Any]],
+    created_by_agent: bool = True,
+) -> PersistentAgentDashboard:
     with transaction.atomic():
         dashboard, _created = PersistentAgentDashboard.objects.update_or_create(
             agent=agent,
             defaults={
-                "title": normalized_title,
-                "description": normalized_description,
+                "title": title,
+                "description": description,
                 "created_by_agent": created_by_agent,
             },
         )
         dashboard.widgets.all().delete()
-        for widget in normalized_widgets:
+        for widget in widgets:
             PersistentAgentDashboardWidget.objects.create(
                 dashboard=dashboard,
                 title=widget["title"],
@@ -314,6 +329,31 @@ def create_or_update_dashboard(
                 position=widget["position"],
             )
     return dashboard
+
+
+def create_or_update_dashboard(
+    agent: PersistentAgent,
+    *,
+    title: Any,
+    description: Any = "",
+    widgets: Any,
+    db_path: Optional[str] = None,
+    created_by_agent: bool = True,
+) -> PersistentAgentDashboard:
+    normalized_title, normalized_description, normalized_widgets = normalize_dashboard_definition(
+        agent,
+        title=title,
+        description=description,
+        widgets=widgets,
+        db_path=db_path,
+    )
+    return save_dashboard_definition(
+        agent,
+        title=normalized_title,
+        description=normalized_description,
+        widgets=normalized_widgets,
+        created_by_agent=created_by_agent,
+    )
 
 
 def _serialize_widget_result(widget: PersistentAgentDashboardWidget, result: dict[str, Any]) -> dict[str, Any]:
