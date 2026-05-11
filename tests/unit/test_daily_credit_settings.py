@@ -45,6 +45,7 @@ class DailyCreditSettingsTests(TestCase):
             "burn_rate_threshold_per_hour": Decimal("3"),
             "offpeak_burn_rate_threshold_per_hour": Decimal("3"),
             "burn_rate_window_minutes": 60,
+            "burn_rate_threshold_24h": Decimal("0"),
             "hard_limit_multiplier": Decimal("2"),
         }
         defaults.update(overrides)
@@ -61,6 +62,21 @@ class DailyCreditSettingsTests(TestCase):
 
         settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
         self.assertEqual(settings.burn_rate_threshold_per_hour, Decimal("0"))
+
+    def test_burn_rate_threshold_24h_defaults_disabled(self):
+        self.upsert_daily_credit_config(PlanNames.FREE)
+
+        settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
+        self.assertEqual(settings.burn_rate_threshold_24h, Decimal("0"))
+
+    def test_burn_rate_threshold_24h_can_be_configured(self):
+        self.upsert_daily_credit_config(
+            PlanNames.FREE,
+            burn_rate_threshold_24h=Decimal("72"),
+        )
+
+        settings = get_daily_credit_settings_for_plan(PlanNames.FREE)
+        self.assertEqual(settings.burn_rate_threshold_24h, Decimal("72"))
 
     def test_slider_values_must_be_whole_numbers(self):
         config = DailyCreditConfig(
@@ -133,6 +149,7 @@ class DailyCreditSettingsTests(TestCase):
 
         self.assertEqual(settings.burn_rate_threshold_per_hour, Decimal("7.5"))
         self.assertEqual(settings.offpeak_burn_rate_threshold_per_hour, Decimal("7.5"))
+        self.assertEqual(settings.burn_rate_threshold_24h, Decimal("0"))
 
     def test_default_daily_credit_limit_scales_with_intelligence_tier(self):
         self.upsert_daily_credit_config(

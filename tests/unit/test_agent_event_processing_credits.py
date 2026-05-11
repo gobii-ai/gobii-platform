@@ -874,6 +874,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 burn_rate_window_minutes=60,
                 burn_rate_threshold_per_hour=Decimal("4"),
                 offpeak_burn_rate_threshold_per_hour=Decimal("4"),
+                burn_rate_threshold_24h=Decimal("0"),
             ),
         ), patch(
             "api.agent.core.prompt_context.compute_burn_rate",
@@ -912,6 +913,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 burn_rate_window_minutes=60,
                 burn_rate_threshold_per_hour=standard_threshold,
                 offpeak_burn_rate_threshold_per_hour=offpeak_threshold,
+                burn_rate_threshold_24h=Decimal("0"),
             ),
         ), patch(
             "api.agent.core.prompt_context.compute_burn_rate",
@@ -1121,6 +1123,18 @@ class PersistentAgentToolCreditTests(TestCase):
         budget_group = MagicMock()
         critical_group.group.return_value = budget_group
 
+        config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
+        config.max_browser_tasks = 2
+        config.save()
+        TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("2"),
+            credits_used=Decimal("0"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timezone.timedelta(days=30),
+            grant_type=GrantTypeChoices.COMPENSATION,
+        )
+
         BrowserUseAgentTask.objects.create(
             agent=self.browser_agent,
             user=self.user,
@@ -1133,10 +1147,6 @@ class PersistentAgentToolCreditTests(TestCase):
             status=BrowserUseAgentTask.StatusChoices.FAILED,
             prompt="Two",
         )
-
-        config, _ = BrowserConfig.objects.get_or_create(plan_name=PlanNames.FREE)
-        config.max_browser_tasks = 2
-        config.save()
 
         result = add_budget_awareness_sections(
             critical_group,
@@ -1356,6 +1366,7 @@ class PersistentAgentToolCreditTests(TestCase):
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
              patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[{}]), \
              patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
+             patch("tasks.services.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None}), \
              patch(
                  "api.agent.core.event_processing.process_agent_events_task",
                  create=True,
@@ -1427,6 +1438,98 @@ class PersistentAgentToolCreditTests(TestCase):
         finally:
             clear_runtime_tier_override(self.agent)
 
+    def test_burn_rate_pause_preserves_hourly_only_when_24h_threshold_disabled(self):
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_24h_total": Decimal("1"),
+            "burn_rate_threshold_24h": Decimal("0"),
+        }
+
+        with patch("api.agent.core.burn_control.has_recent_user_message", return_value=False), \
+             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
+            action = bc.handle_burn_rate_limit(
+                self.agent,
+                budget_ctx=None,
+                daily_state=burn_state,
+                redis_client=MagicMock(get=MagicMock(return_value=None)),
+            )
+
+        self.assertEqual(action, bc.BurnRateAction.PAUSED)
+        pause_mock.assert_called_once()
+
+    def test_burn_rate_gate_skips_action_when_24h_total_below_threshold(self):
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_24h_total": Decimal("50"),
+            "burn_rate_threshold_24h": Decimal("100"),
+        }
+
+        with patch("api.agent.core.burn_control.has_recent_user_message") as recent_mock, \
+             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
+            action = bc.handle_burn_rate_limit(
+                self.agent,
+                budget_ctx=None,
+                daily_state=burn_state,
+                redis_client=MagicMock(get=MagicMock(return_value=None)),
+            )
+
+        self.assertEqual(action, bc.BurnRateAction.NONE)
+        recent_mock.assert_not_called()
+        pause_mock.assert_not_called()
+
+    def test_burn_rate_pause_requires_24h_total_above_configured_threshold(self):
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_24h_total": Decimal("101"),
+            "burn_rate_threshold_24h": Decimal("100"),
+        }
+
+        with patch("api.agent.core.burn_control.has_recent_user_message", return_value=False), \
+             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
+            action = bc.handle_burn_rate_limit(
+                self.agent,
+                budget_ctx=None,
+                daily_state=burn_state,
+                redis_client=MagicMock(get=MagicMock(return_value=None)),
+            )
+
+        self.assertEqual(action, bc.BurnRateAction.PAUSED)
+        pause_mock.assert_called_once()
+        self.assertEqual(pause_mock.call_args.kwargs["burn_24h_total"], Decimal("101"))
+        self.assertEqual(pause_mock.call_args.kwargs["burn_24h_threshold"], Decimal("100"))
+
+    def test_runtime_tier_step_down_requires_24h_total_above_configured_threshold(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        burn_state = {
+            "burn_rate_per_hour": Decimal("5"),
+            "burn_rate_threshold_per_hour": Decimal("3"),
+            "burn_rate_window_minutes": 60,
+            "burn_rate_24h_total": Decimal("101"),
+            "burn_rate_threshold_24h": Decimal("100"),
+        }
+
+        try:
+            with override_settings(GOBII_PROPRIETARY_MODE=True), \
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
+                 patch("api.agent.core.burn_control.has_recent_user_message", return_value=True):
+                action = bc.handle_burn_rate_limit(
+                    self.agent,
+                    budget_ctx=None,
+                    daily_state=burn_state,
+                )
+
+            self.assertEqual(action, bc.BurnRateAction.STEPPED_DOWN)
+            self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.ULTRA)
+        finally:
+            clear_runtime_tier_override(self.agent)
+
     def test_runtime_tier_override_does_not_change_daily_burn_threshold(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
         self.agent.save(update_fields=["preferred_llm_tier"])
@@ -1440,6 +1543,7 @@ class PersistentAgentToolCreditTests(TestCase):
                          burn_rate_window_minutes=60,
                          burn_rate_threshold_per_hour=Decimal("4"),
                          offpeak_burn_rate_threshold_per_hour=Decimal("4"),
+                         burn_rate_threshold_24h=Decimal("40"),
                      ),
                  ), \
                  patch(
@@ -1447,6 +1551,7 @@ class PersistentAgentToolCreditTests(TestCase):
                      return_value={
                          "burn_rate_per_hour": Decimal("1"),
                          "window_minutes": 60,
+                         "window_total": Decimal("1"),
                      },
                  ):
                 set_runtime_tier = get_next_lower_configured_tier(get_agent_baseline_llm_tier(self.agent))
@@ -1463,6 +1568,14 @@ class PersistentAgentToolCreditTests(TestCase):
 
                 self.assertEqual(state["burn_rate_threshold_per_hour"], baseline_threshold)
                 self.assertNotEqual(runtime_threshold, baseline_threshold)
+                self.assertEqual(
+                    state["burn_rate_threshold_24h"],
+                    apply_tier_credit_multiplier(
+                        self.agent,
+                        Decimal("40"),
+                        use_runtime_override=False,
+                    ),
+                )
         finally:
             clear_runtime_tier_override(self.agent)
 
@@ -1498,6 +1611,7 @@ class PersistentAgentToolCreditTests(TestCase):
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
              patch("api.agent.core.event_processing.get_llm_config_with_failover", side_effect=capture_failover), \
+             patch("tasks.services.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None}), \
              patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)):
             usage = ep._run_agent_loop(
                 self.agent,

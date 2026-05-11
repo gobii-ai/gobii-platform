@@ -16,6 +16,7 @@ DEFAULT_SLIDER_STEP = Decimal("1")
 DEFAULT_BURN_RATE_THRESHOLD = Decimal("3")
 DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD = DEFAULT_BURN_RATE_THRESHOLD
 DEFAULT_BURN_RATE_WINDOW_MINUTES = 60
+DEFAULT_BURN_RATE_THRESHOLD_24H = Decimal("0")
 DEFAULT_HARD_LIMIT_MULTIPLIER = Decimal("2")
 DEFAULT_DEFAULT_DAILY_CREDIT_TARGET = 5
 DEFAULT_DAILY_CREDIT_TARGET_BY_PLAN = {
@@ -44,6 +45,7 @@ class DailyCreditSettings:
     burn_rate_threshold_per_hour: Decimal
     offpeak_burn_rate_threshold_per_hour: Decimal
     burn_rate_window_minutes: int
+    burn_rate_threshold_24h: Decimal
     hard_limit_multiplier: Decimal
 
 
@@ -111,6 +113,10 @@ def serialize_daily_credit_configs(configs) -> dict[str, dict[str, dict]]:
                 config.burn_rate_window_minutes,
                 DEFAULT_BURN_RATE_WINDOW_MINUTES,
             ),
+            "burn_rate_threshold_24h": _coalesce_decimal(
+                getattr(config, "burn_rate_threshold_24h", None),
+                DEFAULT_BURN_RATE_THRESHOLD_24H,
+            ),
             "hard_limit_multiplier": _coalesce_decimal(
                 config.hard_limit_multiplier,
                 DEFAULT_HARD_LIMIT_MULTIPLIER,
@@ -149,6 +155,10 @@ def daily_credit_settings_from_payload(
             payload.get("burn_rate_window_minutes"),
             DEFAULT_BURN_RATE_WINDOW_MINUTES,
         ),
+        burn_rate_threshold_24h=_coalesce_decimal(
+            payload.get("burn_rate_threshold_24h"),
+            DEFAULT_BURN_RATE_THRESHOLD_24H,
+        ),
         hard_limit_multiplier=_coalesce_decimal(
             payload.get("hard_limit_multiplier"),
             DEFAULT_HARD_LIMIT_MULTIPLIER,
@@ -168,6 +178,7 @@ def _ensure_defaults_exist() -> None:
                 "burn_rate_threshold_per_hour": DEFAULT_BURN_RATE_THRESHOLD,
                 "offpeak_burn_rate_threshold_per_hour": DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD,
                 "burn_rate_window_minutes": DEFAULT_BURN_RATE_WINDOW_MINUTES,
+                "burn_rate_threshold_24h": DEFAULT_BURN_RATE_THRESHOLD_24H,
                 "hard_limit_multiplier": DEFAULT_HARD_LIMIT_MULTIPLIER,
             },
         )
@@ -188,6 +199,7 @@ def _ensure_defaults_exist() -> None:
                 "burn_rate_threshold_per_hour": DEFAULT_BURN_RATE_THRESHOLD,
                 "offpeak_burn_rate_threshold_per_hour": DEFAULT_OFFPEAK_BURN_RATE_THRESHOLD,
                 "burn_rate_window_minutes": DEFAULT_BURN_RATE_WINDOW_MINUTES,
+                "burn_rate_threshold_24h": DEFAULT_BURN_RATE_THRESHOLD_24H,
                 "hard_limit_multiplier": DEFAULT_HARD_LIMIT_MULTIPLIER,
             },
         )
