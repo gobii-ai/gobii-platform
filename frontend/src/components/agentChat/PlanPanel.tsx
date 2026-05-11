@@ -1,11 +1,12 @@
 import { memo, type MouseEvent } from 'react'
-import { CheckCircle2, Circle, Download, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
+import { CheckCircle2, Circle, CirclePause, Download, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
 import type { PlanSnapshot } from '../../types/agentChat'
 
 type PlanPanelProps = {
   plan?: PlanSnapshot | null
   onMessageClick?: (messageId: string) => void
   compact?: boolean
+  isAgentWorking?: boolean
 }
 
 type PlanRow = {
@@ -13,7 +14,12 @@ type PlanRow = {
   status: 'done' | 'doing' | 'todo'
 }
 
-export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact = false }: PlanPanelProps) {
+export const PlanPanel = memo(function PlanPanel({
+  plan,
+  onMessageClick,
+  compact = false,
+  isAgentWorking = true,
+}: PlanPanelProps) {
   const snapshot = plan ?? {
     todoCount: 0,
     doingCount: 0,
@@ -47,20 +53,30 @@ export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact
       </div>
       {rows.length > 0 ? (
         <ul className="plan-panel-task-list">
-          {rows.map((row, index) => (
-            <li key={`${row.status}:${index}:${row.title}`} className="plan-panel-task" data-status={row.status}>
-              <span className="plan-panel-task-icon" aria-hidden="true">
-                {row.status === 'done' ? (
-                  <CheckCircle2 size={14} strokeWidth={2.4} />
-                ) : row.status === 'doing' ? (
-                  <LoaderCircle size={14} strokeWidth={2.4} />
-                ) : (
-                  <Circle size={14} strokeWidth={2.2} />
-                )}
-              </span>
-              <span className="plan-panel-task-title">{row.title}</span>
-            </li>
-          ))}
+          {rows.map((row, index) => {
+            const isPausedDoing = row.status === 'doing' && !isAgentWorking
+            return (
+              <li
+                key={`${row.status}:${index}:${row.title}`}
+                className="plan-panel-task"
+                data-status={row.status}
+                data-work-state={row.status === 'doing' ? (isPausedDoing ? 'paused' : 'active') : undefined}
+              >
+                <span className="plan-panel-task-icon" aria-hidden="true">
+                  {row.status === 'done' ? (
+                    <CheckCircle2 size={14} strokeWidth={2.4} />
+                  ) : isPausedDoing ? (
+                    <CirclePause size={14} strokeWidth={2.4} />
+                  ) : row.status === 'doing' ? (
+                    <LoaderCircle size={14} strokeWidth={2.4} />
+                  ) : (
+                    <Circle size={14} strokeWidth={2.2} />
+                  )}
+                </span>
+                <span className="plan-panel-task-title">{row.title}</span>
+              </li>
+            )
+          })}
         </ul>
       ) : (
         <p className="plan-panel-empty">No plan steps</p>

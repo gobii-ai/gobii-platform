@@ -1614,7 +1614,11 @@ export function AgentChatLayout({
               onMouseLeave={isHoverPlanPreview ? () => handlePlanHoverChange(false) : undefined}
             >
               {showDesktopPlanPanel ? (
-                <PlanPanel plan={renderedPlanSnapshot} onMessageClick={handlePlanMessageClick} />
+                <PlanPanel
+                  plan={renderedPlanSnapshot}
+                  onMessageClick={handlePlanMessageClick}
+                  isAgentWorking={isWorkingNow}
+                />
               ) : null}
             </div>
           ) : null}
@@ -1629,7 +1633,12 @@ export function AgentChatLayout({
         bodyPadding={false}
         tone="plan"
       >
-        <PlanPanel plan={displayPlanSnapshot} onMessageClick={handlePlanMessageClick} compact />
+        <PlanPanel
+          plan={displayPlanSnapshot}
+          onMessageClick={handlePlanMessageClick}
+          compact
+          isAgentWorking={isWorkingNow}
+        />
       </AgentChatMobileSheet>
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (

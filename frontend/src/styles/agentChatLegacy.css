@@ -1513,7 +1513,14 @@
 
 .plan-panel-task[data-status='doing'] .plan-panel-task-icon {
   color: rgba(255, 255, 255, 0.68);
+}
+
+.plan-panel-task[data-status='doing'][data-work-state='active'] .plan-panel-task-icon {
   animation: plan-panel-spin 1s linear infinite;
+}
+
+.plan-panel-task[data-status='doing'][data-work-state='paused'] .plan-panel-task-icon {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 .plan-panel-task[data-status='todo'] .plan-panel-task-icon {
