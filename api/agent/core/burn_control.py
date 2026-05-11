@@ -3,7 +3,7 @@
 from enum import Enum
 import logging
 from datetime import timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional, Union
 from uuid import UUID, uuid4
 
@@ -49,33 +49,88 @@ class BurnRateAction(str, Enum):
     STEPPED_DOWN = "stepped_down"
 
 
-def _resolve_burn_rate_metrics(daily_state: Optional[dict]) -> tuple[Decimal, Decimal, Optional[int]] | None:
+def _decimal_metric(value) -> Optional[Decimal]:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+
+
+def _resolve_burn_rate_metrics(
+    daily_state: Optional[dict],
+) -> tuple[Decimal, Decimal, Optional[int], Optional[Decimal], Optional[Decimal]] | None:
     """Normalize burn-rate metrics from daily state when threshold is exceeded."""
 
     if daily_state is None:
         return None
 
-    burn_rate = daily_state.get("burn_rate_per_hour")
-    burn_threshold = daily_state.get("burn_rate_threshold_per_hour")
+    burn_rate = _decimal_metric(daily_state.get("burn_rate_per_hour"))
+    burn_threshold = _decimal_metric(daily_state.get("burn_rate_threshold_per_hour"))
     burn_window = daily_state.get("burn_rate_window_minutes")
+    burn_24h_total = _decimal_metric(daily_state.get("burn_rate_24h_total"))
+    burn_24h_threshold = _decimal_metric(daily_state.get("burn_rate_threshold_24h"))
 
-    try:
-        if (
-            burn_rate is None
-            or burn_threshold is None
-            or burn_threshold <= Decimal("0")
-            or burn_rate <= burn_threshold
-        ):
-            return None
-    except Exception:
-        logger.warning(
-            "Error while evaluating burn-rate metrics from daily state: %s",
-            daily_state,
-            exc_info=True,
-        )
+    if (
+        burn_rate is None
+        or burn_threshold is None
+        or burn_threshold <= Decimal("0")
+        or burn_rate <= burn_threshold
+    ):
         return None
 
-    return burn_rate, burn_threshold, burn_window
+    if burn_24h_threshold is not None and burn_24h_threshold > Decimal("0"):
+        if burn_24h_total is None or burn_24h_total <= burn_24h_threshold:
+            logger.debug(
+                "Burn-rate hourly threshold exceeded but 24h burn gate not met: total=%s threshold=%s.",
+                burn_24h_total,
+                burn_24h_threshold,
+            )
+            return None
+
+    try:
+        burn_window = int(burn_window) if burn_window is not None else None
+    except (TypeError, ValueError):
+        logger.debug("Invalid burn-rate window from daily state: %s", burn_window)
+        burn_window = None
+
+    return burn_rate, burn_threshold, burn_window, burn_24h_total, burn_24h_threshold
+
+
+def _burn_24h_analytics_props(
+    *,
+    burn_24h_total: Optional[Decimal],
+    burn_24h_threshold: Optional[Decimal],
+) -> dict[str, str]:
+    if burn_24h_total is None and burn_24h_threshold is None:
+        return {}
+    props: dict[str, str] = {}
+    if burn_24h_total is not None:
+        props["burn_rate_24h_total"] = str(burn_24h_total)
+    if burn_24h_threshold is not None:
+        props["burn_rate_threshold_24h"] = str(burn_24h_threshold)
+    return props
+
+
+def _set_burn_24h_span_attributes(
+    span,
+    *,
+    burn_24h_total: Optional[Decimal],
+    burn_24h_threshold: Optional[Decimal],
+) -> None:
+    if span is None:
+        return
+    try:
+        if burn_24h_total is not None:
+            span.set_attribute("burn_rate.24h_total", float(burn_24h_total))
+        if burn_24h_threshold is not None:
+            span.set_attribute("burn_rate.24h_threshold", float(burn_24h_threshold))
+    except (TypeError, ValueError, OverflowError):
+        logger.debug("Failed to set burn-rate 24h span attributes.", exc_info=True)
+        return None
 
 
 def burn_cooldown_key(agent_id: Union[str, UUID]) -> str:
@@ -238,6 +293,8 @@ def pause_for_burn_rate(
     burn_threshold: Decimal,
     burn_window: Optional[int],
     budget_ctx: Optional[BudgetContext],
+    burn_24h_total: Optional[Decimal] = None,
+    burn_24h_threshold: Optional[Decimal] = None,
     span=None,
     redis_client=None,
     follow_up_task=None,
@@ -273,6 +330,11 @@ def pause_for_burn_rate(
         f"threshold: {burn_threshold} credits/hour. "
         f"Will resume after cooldown (~{cooldown_minutes} minutes) or when triggered by new input."
     )
+    if burn_24h_threshold is not None and burn_24h_threshold > Decimal("0"):
+        description += (
+            f" Rolling 24-hour burn: {burn_24h_total or Decimal('0')} credits; "
+            f"24-hour threshold: {burn_24h_threshold} credits."
+        )
     step = PersistentAgentStep.objects.create(
         agent=agent,
         description=description,
@@ -289,6 +351,12 @@ def pause_for_burn_rate(
             "burn_rate_per_hour": str(burn_rate),
             "burn_rate_threshold_per_hour": str(burn_threshold),
         }
+        analytics_props.update(
+            _burn_24h_analytics_props(
+                burn_24h_total=burn_24h_total,
+                burn_24h_threshold=burn_24h_threshold,
+            )
+        )
         if burn_window is not None:
             analytics_props["burn_rate_window_minutes"] = str(burn_window)
         props_with_org = Analytics.with_org_properties(
@@ -313,6 +381,11 @@ def pause_for_burn_rate(
             span.set_attribute("burn_rate.value", float(burn_rate))
             span.set_attribute("burn_rate.threshold", float(burn_threshold))
             span.set_attribute("burn_rate.follow_up_token_present", bool(follow_up_token))
+            _set_burn_24h_span_attributes(
+                span,
+                burn_24h_total=burn_24h_total,
+                burn_24h_threshold=burn_24h_threshold,
+            )
         except Exception:
             logger.debug("Failed to set burn-rate span attributes for agent %s", agent.id, exc_info=True)
 
@@ -340,6 +413,8 @@ def _step_down_runtime_tier(
     burn_rate: Decimal,
     burn_threshold: Decimal,
     burn_window: Optional[int],
+    burn_24h_total: Optional[Decimal] = None,
+    burn_24h_threshold: Optional[Decimal] = None,
     span=None,
 ) -> bool:
     """Apply a runtime tier downgrade when recent user activity makes pausing undesirable."""
@@ -367,6 +442,12 @@ def _step_down_runtime_tier(
             "burn_rate_per_hour": str(burn_rate),
             "burn_rate_threshold_per_hour": str(burn_threshold),
         }
+        analytics_props.update(
+            _burn_24h_analytics_props(
+                burn_24h_total=burn_24h_total,
+                burn_24h_threshold=burn_24h_threshold,
+            )
+        )
         if burn_window is not None:
             analytics_props["burn_rate_window_minutes"] = str(burn_window)
         props_with_org = Analytics.with_org_properties(
@@ -394,6 +475,11 @@ def _step_down_runtime_tier(
             span.set_attribute("burn_rate.runtime_tier_to", runtime_tier.value)
             span.set_attribute("burn_rate.value", float(burn_rate))
             span.set_attribute("burn_rate.threshold", float(burn_threshold))
+            _set_burn_24h_span_attributes(
+                span,
+                burn_24h_total=burn_24h_total,
+                burn_24h_threshold=burn_24h_threshold,
+            )
         except Exception:
             logger.debug(
                 "Failed to set runtime tier step-down span attributes for agent %s",
@@ -443,7 +529,7 @@ def handle_burn_rate_limit(
     metrics = _resolve_burn_rate_metrics(daily_state)
     if metrics is None:
         return BurnRateAction.NONE
-    burn_rate, burn_threshold, burn_window = metrics
+    burn_rate, burn_threshold, burn_window, burn_24h_total, burn_24h_threshold = metrics
 
     if has_recent_user_message(agent.id, window_minutes=BURN_RATE_USER_INACTIVITY_MINUTES):
         if _step_down_runtime_tier(
@@ -451,6 +537,8 @@ def handle_burn_rate_limit(
             burn_rate=burn_rate,
             burn_threshold=burn_threshold,
             burn_window=burn_window,
+            burn_24h_total=burn_24h_total,
+            burn_24h_threshold=burn_24h_threshold,
             span=span,
         ):
             return BurnRateAction.STEPPED_DOWN
@@ -476,6 +564,8 @@ def handle_burn_rate_limit(
         burn_rate=burn_rate,
         burn_threshold=burn_threshold,
         burn_window=burn_window,
+        burn_24h_total=burn_24h_total,
+        burn_24h_threshold=burn_24h_threshold,
         budget_ctx=budget_ctx,
         span=span,
         redis_client=redis_client,
