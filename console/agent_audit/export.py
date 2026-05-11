@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone as dt_timezone
 from typing import Any, BinaryIO, Iterable, Sequence
 
+from botocore.exceptions import ClientError
+from google.cloud.exceptions import NotFound as GoogleCloudNotFound
 import zstandard as zstd
 from django.core.files.storage import default_storage
 from django.utils import timezone
@@ -29,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_CHUNK_SIZE = 200
 PROMPT_ARCHIVE_LOAD_WORKERS = 8
+S3_MISSING_OBJECT_CODES = {"404", "NoSuchKey", "NotFound"}
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:
@@ -51,6 +54,14 @@ def _load_prompt_archive_payload(archive) -> dict[str, Any] | None:
             payload_bytes = dctx.decompress(stored.read())
     except FileNotFoundError:
         return {"error": "missing_payload"}
+    except GoogleCloudNotFound:
+        return {"error": "missing_payload"}
+    except ClientError as exc:
+        error_code = str((exc.response.get("Error") or {}).get("Code") or "")
+        if error_code in S3_MISSING_OBJECT_CODES:
+            return {"error": "missing_payload"}
+        logger.warning("Failed to read prompt archive payload for %s", getattr(archive, "id", None), exc_info=True)
+        return {"error": "read_failed"}
     except (OSError, zstd.ZstdError):
         logger.warning("Failed to read prompt archive payload for %s", getattr(archive, "id", None), exc_info=True)
         return {"error": "read_failed"}
