@@ -1,6 +1,7 @@
 import { memo, type MouseEvent } from 'react'
-import { CheckCircle2, Circle, CirclePause, Download, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
+import { Download, FileText, MessageSquareText } from 'lucide-react'
 import type { PlanSnapshot } from '../../types/agentChat'
+import { PlanTaskItem, type PlanTaskStatus } from './PlanTaskItem'
 
 type PlanPanelProps = {
   plan?: PlanSnapshot | null
@@ -11,7 +12,7 @@ type PlanPanelProps = {
 
 type PlanRow = {
   title: string
-  status: 'done' | 'doing' | 'todo'
+  status: PlanTaskStatus
 }
 
 export const PlanPanel = memo(function PlanPanel({
@@ -53,30 +54,14 @@ export const PlanPanel = memo(function PlanPanel({
       </div>
       {rows.length > 0 ? (
         <ul className="plan-panel-task-list">
-          {rows.map((row, index) => {
-            const isPausedDoing = row.status === 'doing' && !isAgentWorking
-            return (
-              <li
-                key={`${row.status}:${index}:${row.title}`}
-                className="plan-panel-task"
-                data-status={row.status}
-                data-work-state={row.status === 'doing' ? (isPausedDoing ? 'paused' : 'active') : undefined}
-              >
-                <span className="plan-panel-task-icon" aria-hidden="true">
-                  {row.status === 'done' ? (
-                    <CheckCircle2 size={14} strokeWidth={2.4} />
-                  ) : isPausedDoing ? (
-                    <CirclePause size={14} strokeWidth={2.4} />
-                  ) : row.status === 'doing' ? (
-                    <LoaderCircle size={14} strokeWidth={2.4} />
-                  ) : (
-                    <Circle size={14} strokeWidth={2.2} />
-                  )}
-                </span>
-                <span className="plan-panel-task-title">{row.title}</span>
-              </li>
-            )
-          })}
+          {rows.map((row, index) => (
+            <PlanTaskItem
+              key={`${row.status}:${index}:${row.title}`}
+              title={row.title}
+              status={row.status}
+              isAgentWorking={isAgentWorking}
+            />
+          ))}
         </ul>
       ) : (
         <p className="plan-panel-empty">No plan steps</p>
