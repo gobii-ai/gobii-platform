@@ -4,6 +4,7 @@ import zipfile
 from uuid import uuid4
 from unittest.mock import MagicMock, patch
 
+from botocore.exceptions import ClientError
 import zstandard as zstd
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
@@ -309,6 +310,47 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIsNotNone(exported_message.get("timestamp"))
         self.assertEqual(exported_message.get("body_text"), "Hello from the agent.")
         self.assertEqual(exported_message.get("body_html"), "<p><strong>Hello</strong> from the agent.</p>")
+
+    def test_audit_export_handles_missing_s3_prompt_archive_payload(self):
+        completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            llm_model="openrouter/test-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+        prompt_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=completion,
+            description="Prompt attached step",
+        )
+        storage_key = f"test/audit_export/missing-{uuid4().hex}.json.zst"
+        PersistentAgentPromptArchive.objects.create(
+            agent=self.agent,
+            rendered_at=prompt_step.created_at,
+            storage_key=storage_key,
+            raw_bytes=100,
+            compressed_bytes=50,
+            tokens_before=10,
+            tokens_after=8,
+            tokens_saved=2,
+            step=prompt_step,
+        )
+        missing_object_error = ClientError(
+            {"Error": {"Code": "NoSuchKey", "Message": "object does not exist"}},
+            "GetObject",
+        )
+
+        with patch("console.agent_audit.export.default_storage.open", side_effect=missing_object_error):
+            response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/")
+
+        self.assertEqual(response.status_code, 200)
+        archive_bytes = b"".join(response.streaming_content)
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+        export_payload = json.loads(archive.read("audit-data.json").decode("utf-8"))
+        exported_completion = export_payload["completions"][0]
+        prompt_payload = exported_completion["prompt_archive"]["payload"]
+        self.assertEqual(prompt_payload, {"error": "missing_payload"})
 
     def test_audit_export_requires_staff(self):
         self.client.force_login(self.nonstaff)

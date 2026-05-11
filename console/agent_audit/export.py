@@ -1,9 +1,12 @@
 import json
 import logging
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone as dt_timezone
 from typing import Any, BinaryIO, Iterable, Sequence
 
+from botocore.exceptions import ClientError
+from google.cloud.exceptions import NotFound as GoogleCloudNotFound
 import zstandard as zstd
 from django.core.files.storage import default_storage
 from django.utils import timezone
@@ -27,6 +30,8 @@ from console.agent_audit.serializers import (
 logger = logging.getLogger(__name__)
 
 DEFAULT_CHUNK_SIZE = 200
+PROMPT_ARCHIVE_LOAD_WORKERS = 8
+S3_MISSING_OBJECT_CODES = {"404", "NoSuchKey", "NotFound"}
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:
@@ -42,14 +47,22 @@ def _load_prompt_archive_payload(archive) -> dict[str, Any] | None:
     storage_key = getattr(archive, "storage_key", "")
     if not storage_key:
         return None
-    if not default_storage.exists(storage_key):
-        return {"error": "missing_payload"}
 
     try:
         with default_storage.open(storage_key, "rb") as stored:
             dctx = zstd.ZstdDecompressor()
             payload_bytes = dctx.decompress(stored.read())
-    except (FileNotFoundError, OSError, zstd.ZstdError):
+    except FileNotFoundError:
+        return {"error": "missing_payload"}
+    except GoogleCloudNotFound:
+        return {"error": "missing_payload"}
+    except ClientError as exc:
+        error_code = str((exc.response.get("Error") or {}).get("Code") or "")
+        if error_code in S3_MISSING_OBJECT_CODES:
+            return {"error": "missing_payload"}
+        logger.warning("Failed to read prompt archive payload for %s", getattr(archive, "id", None), exc_info=True)
+        return {"error": "read_failed"}
+    except (OSError, zstd.ZstdError):
         logger.warning("Failed to read prompt archive payload for %s", getattr(archive, "id", None), exc_info=True)
         return {"error": "read_failed"}
 
@@ -60,6 +73,31 @@ def _load_prompt_archive_payload(archive) -> dict[str, Any] | None:
         return {"error": "decode_failed"}
 
     return payload if isinstance(payload, dict) else {"raw_payload": payload}
+
+
+def _prime_prompt_payload_cache(
+    archives: Iterable[Any],
+    prompt_payload_cache: dict[str, dict[str, Any] | None],
+) -> None:
+    missing_archives = []
+    for archive in archives:
+        archive_id = str(archive.id)
+        if archive_id not in prompt_payload_cache:
+            missing_archives.append(archive)
+
+    if not missing_archives:
+        return
+
+    if len(missing_archives) == 1:
+        archive = missing_archives[0]
+        prompt_payload_cache[str(archive.id)] = _load_prompt_archive_payload(archive)
+        return
+
+    worker_count = min(PROMPT_ARCHIVE_LOAD_WORKERS, len(missing_archives))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        payloads = executor.map(_load_prompt_archive_payload, missing_archives)
+        for archive, payload in zip(missing_archives, payloads):
+            prompt_payload_cache[str(archive.id)] = payload
 
 
 def _iter_completion_chunks(agent: PersistentAgent, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterable[Sequence[PersistentAgentCompletion]]:
@@ -79,43 +117,37 @@ def _serialize_completion_chunk(
     completions: Sequence[PersistentAgentCompletion],
     *,
     prompt_payload_cache: dict[str, dict[str, Any] | None],
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> list[dict[str, Any]]:
     completion_ids = [completion.id for completion in completions]
     if not completion_ids:
         return []
 
     prompt_archive_by_completion_id: dict[str, Any] = {}
-    prompt_steps = (
-        PersistentAgentStep.objects.filter(
-            agent=agent,
-            completion_id__in=completion_ids,
-            llm_prompt_archive__isnull=False,
-        )
-        .select_related("llm_prompt_archive")
-        .order_by("completion_id", "-created_at", "-id")
-        .iterator(chunk_size=DEFAULT_CHUNK_SIZE)
-    )
-    for step in prompt_steps:
-        completion_id = str(step.completion_id) if step.completion_id else None
-        if completion_id and completion_id not in prompt_archive_by_completion_id:
-            prompt_archive_by_completion_id[completion_id] = step.llm_prompt_archive
-
     tool_calls_by_completion_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    tool_steps = (
+    steps = (
         PersistentAgentStep.objects.filter(
             agent=agent,
             completion_id__in=completion_ids,
-            tool_call__isnull=False,
         )
         .select_related("tool_call", "llm_prompt_archive")
         .order_by("completion_id", "-created_at", "-id")
-        .iterator(chunk_size=DEFAULT_CHUNK_SIZE)
+        .iterator(chunk_size=chunk_size)
     )
-    for step in tool_steps:
+    for step in steps:
         completion_id = str(step.completion_id) if step.completion_id else None
         if completion_id is None:
             continue
-        tool_calls_by_completion_id[completion_id].append(serialize_tool_call(step))
+
+        archive = getattr(step, "llm_prompt_archive", None)
+        if archive is not None and completion_id not in prompt_archive_by_completion_id:
+            prompt_archive_by_completion_id[completion_id] = archive
+
+        tool_call = getattr(step, "tool_call", None)
+        if tool_call is not None:
+            tool_calls_by_completion_id[completion_id].append(serialize_tool_call(step))
+
+    _prime_prompt_payload_cache(prompt_archive_by_completion_id.values(), prompt_payload_cache)
 
     serialized: list[dict[str, Any]] = []
     for completion in completions:
@@ -125,8 +157,6 @@ def _serialize_completion_chunk(
         prompt_payload: dict[str, Any] | None = None
         if archive is not None:
             archive_id = str(archive.id)
-            if archive_id not in prompt_payload_cache:
-                prompt_payload_cache[archive_id] = _load_prompt_archive_payload(archive)
             prompt_payload = prompt_payload_cache[archive_id]
 
         completion_payload = serialize_completion(
@@ -207,6 +237,7 @@ def write_agent_audit_export_json(
             agent,
             completion_chunk,
             prompt_payload_cache=prompt_payload_cache,
+            chunk_size=chunk_size,
         )
         for payload in serialized_chunk:
             if not first_completion:

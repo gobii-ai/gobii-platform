@@ -2477,12 +2477,6 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
         audit_summary = write_agent_audit_export_json(agent, audit_json_file)
         audit_json_file.seek(0)
 
-        audit_js_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=2 * 1024 * 1024)
-        audit_js_file.write(b"window.__AUDIT_DATA__=")
-        shutil.copyfileobj(audit_json_file, audit_js_file, length=64 * 1024)
-        audit_js_file.write(b";")
-        audit_js_file.seek(0)
-
         html = render_to_string(
             "console/staff_agent_audit_export.html",
             {
@@ -2500,8 +2494,10 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
                 audit_json_file.seek(0)
                 shutil.copyfileobj(audit_json_file, zipped_json, length=64 * 1024)
             with archive.open("audit-data.js", "w") as zipped_js:
-                audit_js_file.seek(0)
-                shutil.copyfileobj(audit_js_file, zipped_js, length=64 * 1024)
+                zipped_js.write(b"window.__AUDIT_DATA__=")
+                audit_json_file.seek(0)
+                shutil.copyfileobj(audit_json_file, zipped_js, length=64 * 1024)
+                zipped_js.write(b";")
         archive_file.seek(0)
 
         timestamp_label = timezone.now().strftime("%Y%m%dT%H%M%SZ")
