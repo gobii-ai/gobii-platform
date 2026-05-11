@@ -444,7 +444,7 @@ export const AgentComposer = memo(function AgentComposer({
 
   const showIntelligenceSelector = Boolean(intelligenceConfig && intelligenceTier && onIntelligenceChange)
   const showPipedreamAppsControl = Boolean(
-    canManageAgent && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
+    canManageAgent && agentId && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
   )
   const isPlanningMode = planningState === 'planning'
   const isStopping = Boolean(isProcessing && stopProcessingRequested)
@@ -1522,8 +1522,7 @@ export const AgentComposer = memo(function AgentComposer({
               </div>
               {showPipedreamAppsControl ? (
                 <ComposerPipedreamAppsControl
-                  settingsUrl={pipedreamAppsSettingsUrl as string}
-                  searchUrl={pipedreamAppSearchUrl as string}
+                  agentId={agentId as string}
                   disabled={composerActionsDisabled}
                 >
                   {(appsAction) => renderComposerUtilityRow(appsAction)}

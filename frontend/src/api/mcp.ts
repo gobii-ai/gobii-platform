@@ -104,6 +104,51 @@ type PipedreamAppSearchResponseDTO = {
   results: PipedreamAppSummaryDTO[]
 }
 
+type AgentPipedreamAppRowDTO = PipedreamAppSummaryDTO & {
+  source: 'built_in' | 'added' | 'available'
+  connected: boolean
+  account_ids: string[]
+}
+
+type AgentPipedreamAppsResponseDTO = {
+  agent_id: string
+  owner_scope: string
+  owner_label: string
+  query: string
+  apps: AgentPipedreamAppRowDTO[]
+}
+
+type AgentPipedreamConnectResponseDTO = {
+  app: PipedreamAppSummaryDTO
+  connect_url: string
+  selected_app_slugs: string[]
+}
+
+type AgentPipedreamDisconnectResponseDTO = {
+  app_slug: string
+  connected: boolean
+  deleted_count: number
+}
+
+type AgentPipedreamRemoveResponseDTO = {
+  app_slug: string
+  removed: boolean
+  selected_app_slugs: string[]
+}
+
+type PipedreamAppAgentConnectionDTO = {
+  agent_id: string
+  name: string
+  avatar_url: string
+  connected: boolean
+  account_ids: string[]
+}
+
+type PipedreamAppAgentConnectionsResponseDTO = {
+  app_slug: string
+  agents: PipedreamAppAgentConnectionDTO[]
+}
+
 export type McpServer = {
   id: string
   name: string
@@ -213,6 +258,53 @@ export type PipedreamAppSettings = {
   message?: string
 }
 
+export type AgentPipedreamAppSource = 'built_in' | 'added' | 'available'
+
+export type AgentPipedreamAppRow = PipedreamAppSummary & {
+  source: AgentPipedreamAppSource
+  connected: boolean
+  accountIds: string[]
+}
+
+export type AgentPipedreamAppsResponse = {
+  agentId: string
+  ownerScope: string
+  ownerLabel: string
+  query: string
+  apps: AgentPipedreamAppRow[]
+}
+
+export type AgentPipedreamConnectResponse = {
+  app: PipedreamAppSummary
+  connectUrl: string
+  selectedAppSlugs: string[]
+}
+
+export type AgentPipedreamDisconnectResponse = {
+  appSlug: string
+  connected: boolean
+  deletedCount: number
+}
+
+export type AgentPipedreamRemoveResponse = {
+  appSlug: string
+  removed: boolean
+  selectedAppSlugs: string[]
+}
+
+export type PipedreamAppAgentConnection = {
+  agentId: string
+  name: string
+  avatarUrl: string
+  connected: boolean
+  accountIds: string[]
+}
+
+export type PipedreamAppAgentConnectionsResponse = {
+  appSlug: string
+  agents: PipedreamAppAgentConnection[]
+}
+
 const mapServer = (server: McpServerDTO): McpServer => ({
   id: server.id,
   name: server.name,
@@ -288,6 +380,23 @@ export const mapPipedreamApp = (app: PipedreamAppSummaryDTO): PipedreamAppSummar
   name: app.name ?? app.slug ?? '',
   description: app.description ?? '',
   iconUrl: app.icon_url ?? '',
+})
+
+const mapAgentPipedreamAppRow = (app: AgentPipedreamAppRowDTO): AgentPipedreamAppRow => ({
+  ...mapPipedreamApp(app),
+  source: app.source,
+  connected: Boolean(app.connected),
+  accountIds: Array.isArray(app.account_ids) ? app.account_ids.map((id) => String(id)) : [],
+})
+
+const mapPipedreamAppAgentConnection = (
+  agent: PipedreamAppAgentConnectionDTO,
+): PipedreamAppAgentConnection => ({
+  agentId: agent.agent_id,
+  name: agent.name ?? '',
+  avatarUrl: agent.avatar_url ?? '',
+  connected: Boolean(agent.connected),
+  accountIds: Array.isArray(agent.account_ids) ? agent.account_ids.map((id) => String(id)) : [],
 })
 
 const mapPipedreamSettings = (payload: PipedreamAppSettingsDTO): PipedreamAppSettings => ({
@@ -388,4 +497,98 @@ export async function searchPipedreamApps(searchUrl: string, query: string): Pro
   url.searchParams.set('q', normalizedQuery)
   const payload = await jsonFetch<PipedreamAppSearchResponseDTO>(url.toString())
   return (payload.results ?? []).map(mapPipedreamApp)
+}
+
+function agentPipedreamAppsUrl(agentId: string): string {
+  return `/console/api/agents/${agentId}/pipedream/apps/`
+}
+
+export async function fetchAgentPipedreamApps(
+  agentId: string,
+  query: string,
+): Promise<AgentPipedreamAppsResponse> {
+  const url = new URL(agentPipedreamAppsUrl(agentId), window.location.origin)
+  const normalizedQuery = query.trim()
+  if (normalizedQuery) {
+    url.searchParams.set('q', normalizedQuery)
+  }
+  const payload = await jsonFetch<AgentPipedreamAppsResponseDTO>(url.toString())
+  return {
+    agentId: payload.agent_id,
+    ownerScope: payload.owner_scope,
+    ownerLabel: payload.owner_label,
+    query: payload.query ?? '',
+    apps: (payload.apps ?? []).map(mapAgentPipedreamAppRow),
+  }
+}
+
+export async function startAgentPipedreamAppConnect(
+  agentId: string,
+  appSlug: string,
+): Promise<AgentPipedreamConnectResponse> {
+  const payload = await jsonRequest<AgentPipedreamConnectResponseDTO>(
+    `${agentPipedreamAppsUrl(agentId)}${encodeURIComponent(appSlug)}/connect/`,
+    {
+      method: 'POST',
+      includeCsrf: true,
+      json: {},
+    },
+  )
+  return {
+    app: mapPipedreamApp(payload.app),
+    connectUrl: payload.connect_url,
+    selectedAppSlugs: Array.isArray(payload.selected_app_slugs)
+      ? payload.selected_app_slugs.map((slug) => String(slug))
+      : [],
+  }
+}
+
+export async function disconnectAgentPipedreamApp(
+  agentId: string,
+  appSlug: string,
+): Promise<AgentPipedreamDisconnectResponse> {
+  const payload = await jsonRequest<AgentPipedreamDisconnectResponseDTO>(
+    `${agentPipedreamAppsUrl(agentId)}${encodeURIComponent(appSlug)}/connection/`,
+    {
+      method: 'DELETE',
+      includeCsrf: true,
+    },
+  )
+  return {
+    appSlug: payload.app_slug,
+    connected: Boolean(payload.connected),
+    deletedCount: payload.deleted_count ?? 0,
+  }
+}
+
+export async function removeAgentPipedreamApp(
+  agentId: string,
+  appSlug: string,
+): Promise<AgentPipedreamRemoveResponse> {
+  const payload = await jsonRequest<AgentPipedreamRemoveResponseDTO>(
+    `${agentPipedreamAppsUrl(agentId)}${encodeURIComponent(appSlug)}/`,
+    {
+      method: 'DELETE',
+      includeCsrf: true,
+    },
+  )
+  return {
+    appSlug: payload.app_slug,
+    removed: Boolean(payload.removed),
+    selectedAppSlugs: Array.isArray(payload.selected_app_slugs)
+      ? payload.selected_app_slugs.map((slug) => String(slug))
+      : [],
+  }
+}
+
+export async function fetchPipedreamAppAgentConnections(
+  appSlug: string,
+): Promise<PipedreamAppAgentConnectionsResponse> {
+  const payload = await jsonFetch<PipedreamAppAgentConnectionsResponseDTO>(
+    `/console/api/mcp/pipedream/apps/${encodeURIComponent(appSlug)}/agents/`,
+  )
+  return {
+    appSlug: payload.app_slug,
+    agents: (payload.agents ?? []).map(mapPipedreamAppAgentConnection),
+  }
 }

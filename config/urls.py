@@ -138,8 +138,6 @@ from console.api_views import (
     PlatformMCPServerDetailAPIView,
     PlatformMCPServerTestAPIView,
     MCPServerAssignmentsAPIView,
-    PipedreamAppsAPIView,
-    PipedreamAppSearchAPIView,
     MCPOAuthCallbackView,
     MCPOAuthMetadataProxyView,
     MCPOAuthRevokeView,
@@ -169,6 +167,15 @@ from console.api_views import (
     EvalRunDetailAPIView,
     EvalRunCompareAPIView,
     EvalSuiteRunCompareAPIView,
+)
+from console.pipedream_apps_api import (
+    AgentPipedreamAppAPIView,
+    AgentPipedreamAppsAPIView,
+    AgentPipedreamAppConnectAPIView,
+    AgentPipedreamAppConnectionAPIView,
+    PipedreamAppAgentConnectionsAPIView,
+    PipedreamAppsAPIView,
+    PipedreamAppSearchAPIView,
 )
 from console.secrets_api_views import (
     GlobalSecretListAPIView,
@@ -544,6 +551,10 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/start/", AgentWebSessionStartAPIView.as_view(), name="console_agent_web_session_start"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/heartbeat/", AgentWebSessionHeartbeatAPIView.as_view(), name="console_agent_web_session_heartbeat"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
+    path("console/api/agents/<uuid:agent_id>/pipedream/apps/", AgentPipedreamAppsAPIView.as_view(), name="console-agent-pipedream-apps"),
+    path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/", AgentPipedreamAppAPIView.as_view(), name="console-agent-pipedream-app"),
+    path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/connect/", AgentPipedreamAppConnectAPIView.as_view(), name="console-agent-pipedream-app-connect"),
+    path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/connection/", AgentPipedreamAppConnectionAPIView.as_view(), name="console-agent-pipedream-app-connection"),
     path("console/api/session/", ConsoleSessionAPIView.as_view(), name="console_session"),
     path("console/api/billing/initial/", BillingInitialDataAPIView.as_view(), name="console_billing_initial_data"),
     path("console/api/usage/summary/", UsageSummaryAPIView.as_view(), name="console_usage_summary"),
@@ -569,6 +580,7 @@ urlpatterns = [
     path("console/api/staff/mcp/servers/<uuid:server_id>/", PlatformMCPServerDetailAPIView.as_view(), name="staff-platform-mcp-server-detail"),
     path("console/api/staff/mcp/servers/<uuid:server_id>/test/", PlatformMCPServerTestAPIView.as_view(), name="staff-platform-mcp-server-test"),
     path("console/api/mcp/pipedream/apps/", PipedreamAppsAPIView.as_view(), name="console-pipedream-apps"),
+    path("console/api/mcp/pipedream/apps/<slug:app_slug>/agents/", PipedreamAppAgentConnectionsAPIView.as_view(), name="console-pipedream-app-agent-connections"),
     path("console/api/mcp/pipedream/apps/search/", PipedreamAppSearchAPIView.as_view(), name="console-pipedream-app-search"),
     path("console/api/mcp/oauth/start/", MCPOAuthStartView.as_view(), name="console-mcp-oauth-start"),
     path("console/api/mcp/oauth/metadata/", MCPOAuthMetadataProxyView.as_view(), name="console-mcp-oauth-metadata"),

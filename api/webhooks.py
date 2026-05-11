@@ -860,6 +860,8 @@ def pipedream_connect_webhook(request, session_id):
             session.status = PipedreamConnectSession.Status.SUCCESS
             session.account_id = account_id or ""
             session.save(update_fields=["status", "account_id", "updated_at"])
+            from api.services.pipedream_connections import invalidate_pipedream_connected_accounts_cache
+            invalidate_pipedream_connected_accounts_cache(session.agent, app_slug=session.app_slug)
             logger.info(
                 "PD Connect: connection SUCCESS session=%s app=%s account=%s",
                 str(session.id), session.app_slug, account_id or ""
@@ -873,6 +875,7 @@ def pipedream_connect_webhook(request, session_id):
                     description=(
                         f"Pipedream connection SUCCESS for app '{session.app_slug}'"
                         + (f"; account={account_id}" if account_id else "")
+                        + f". Call search_tools for Pipedream app '{session.app_slug}' to discover and enable its tools."
                     ),
                 )
                 PersistentAgentSystemStep.objects.create(
