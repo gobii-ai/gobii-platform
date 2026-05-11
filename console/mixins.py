@@ -9,6 +9,7 @@ from api.models import OrganizationMembership
 
 from .agent_context import resolve_context_override_for_agent
 from .context_helpers import build_console_context, resolve_console_context
+from .solution_partner_helpers import user_has_solution_partner_portal_access
 from config import settings
 from util.integrations import stripe_status
 from util.subscription_helper import reconcile_user_plan_from_stripe
@@ -73,6 +74,9 @@ class ConsoleContextMixin:
                 context['current_membership'] = resolved.current_membership
 
             context['can_manage_org_agents'] = resolved.can_manage_org_agents
+            context['has_solution_partner_portal_access'] = user_has_solution_partner_portal_access(
+                self.request.user,
+            )
 
             # Add user's subscription plan for frontend
             # Normalize plan IDs to frontend-friendly values: free, startup, scale

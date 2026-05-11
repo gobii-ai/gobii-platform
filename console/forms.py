@@ -10,6 +10,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     OrganizationInvite,
+    SolutionPartner,
     UserPreference,
 )
 from api.models import UserPhoneNumber
@@ -1354,6 +1355,43 @@ class OrganizationForm(forms.ModelForm):
                 }
             )
         }
+
+
+class SolutionPartnerClientOrganizationForm(forms.Form):
+    name = forms.CharField(
+        max_length=200,
+        widget=forms.TextInput(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+                "placeholder": "Client organization name",
+            }
+        ),
+    )
+    solution_partner = forms.ModelChoiceField(
+        queryset=SolutionPartner.objects.none(),
+        empty_label=None,
+        widget=forms.Select(
+            attrs={
+                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
+            }
+        ),
+    )
+
+    def __init__(self, *args, partner_memberships=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        partners = [
+            membership.solution_partner
+            for membership in partner_memberships or []
+            if membership.solution_partner.is_approved
+        ]
+        partner_ids = [partner.id for partner in partners]
+        self.fields["solution_partner"].queryset = SolutionPartner.objects.filter(
+            id__in=partner_ids,
+            is_approved=True,
+        ).order_by("name")
+        if len(partners) == 1:
+            self.fields["solution_partner"].initial = partners[0].id
+            self.fields["solution_partner"].widget = forms.HiddenInput()
 
 
 class OrganizationInviteForm(forms.Form):

@@ -259,6 +259,8 @@ from console.views import (
     OrganizationListView,
     OrganizationCreateView,
     OrganizationDetailView,
+    SolutionPartnerPortalView,
+    SolutionPartnerClientSwitchView,
     OrganizationInviteModalView,
     OrganizationInviteAcceptView,
     OrganizationInviteRejectView,
@@ -651,6 +653,12 @@ urlpatterns = [
     path("console/organizations/", OrganizationListView.as_view(), name="organizations"),
     path("console/organizations/add/", OrganizationCreateView.as_view(), name="organization_add"),
     path("console/organizations/<uuid:org_id>/", OrganizationDetailView.as_view(), name="organization_detail"),
+    path("console/solutions-partner/", SolutionPartnerPortalView.as_view(), name="solution_partner_portal"),
+    path(
+        "console/solutions-partner/clients/<uuid:org_id>/switch/",
+        SolutionPartnerClientSwitchView.as_view(),
+        name="solution_partner_client_switch",
+    ),
     path(
         "console/organizations/<uuid:org_id>/invite-modal/",
         OrganizationInviteModalView.as_view(),

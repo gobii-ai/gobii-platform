@@ -64,7 +64,8 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     GlobalAgentSkill, GlobalAgentSkillCustomTool,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
-    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
+    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, SolutionPartner,
+    SolutionPartnerMember, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
@@ -1615,9 +1616,37 @@ class MeteringBatchAdmin(admin.ModelAdmin):
 # Minimal admin for Organization to enable autocomplete/search
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
+    search_fields = ("name", "slug", "managed_by_solution_partner__name")
+    autocomplete_fields = ("managed_by_solution_partner",)
+    list_display = ("name", "slug", "managed_by_solution_partner", "is_active", "created_at")
+    list_filter = ("is_active", "plan", "managed_by_solution_partner")
+
+
+class SolutionPartnerMemberInline(admin.TabularInline):
+    model = SolutionPartnerMember
+    extra = 0
+    autocomplete_fields = ("user",)
+    fields = ("user", "role", "is_active", "created_at")
+    readonly_fields = ("created_at",)
+
+
+@admin.register(SolutionPartner)
+class SolutionPartnerAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
-    list_display = ("name", "slug", "is_active", "created_at")
-    list_filter = ("is_active", "plan")
+    list_display = ("name", "slug", "is_approved", "created_at")
+    list_filter = ("is_approved",)
+    readonly_fields = ("id", "created_at", "updated_at")
+    autocomplete_fields = ("created_by",)
+    inlines = (SolutionPartnerMemberInline,)
+
+
+@admin.register(SolutionPartnerMember)
+class SolutionPartnerMemberAdmin(admin.ModelAdmin):
+    search_fields = ("solution_partner__name", "user__email", "user__username")
+    list_display = ("solution_partner", "user", "role", "is_active", "created_at")
+    list_filter = ("is_active", "role", "solution_partner")
+    autocomplete_fields = ("solution_partner", "user")
+    readonly_fields = ("id", "created_at", "updated_at")
 
 # --- TASKS INSIDE AGENT (BrowserUseAgent) ---
 class BrowserUseAgentTaskInline(admin.TabularInline):

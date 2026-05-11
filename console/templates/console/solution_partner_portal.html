@@ -1,0 +1,92 @@
+{% extends "console_page.html" %}
+
+{% block console_content %}
+<div class="max-w-5xl space-y-6">
+  <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+    <div>
+      <h1 class="text-2xl font-semibold text-gray-800">Solutions Partner</h1>
+      <p class="text-sm text-gray-600">
+        Manage client organizations for
+        {% for membership in partner_memberships %}
+          <span class="font-medium text-gray-900">{{ membership.solution_partner.name }}</span>{% if not forloop.last %}, {% endif %}
+        {% endfor %}
+      </p>
+    </div>
+  </div>
+
+  <section class="gobii-card-base p-5">
+    <div class="flex items-center gap-2">
+      <i data-lucide="building-2" class="size-5 text-blue-600" aria-hidden="true"></i>
+      <h2 class="text-lg font-semibold text-gray-900">Create Client Organization</h2>
+    </div>
+
+    <form method="post" class="mt-4 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(220px,280px)_auto] lg:items-end">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <div>
+        <label for="{{ form.name.id_for_label }}" class="block text-sm font-medium text-gray-700">Client name</label>
+        <div class="mt-1">{{ form.name }}</div>
+        {{ form.name.errors }}
+      </div>
+      {% if form.solution_partner.is_hidden %}
+        {{ form.solution_partner }}
+      {% else %}
+        <div>
+          <label for="{{ form.solution_partner.id_for_label }}" class="block text-sm font-medium text-gray-700">Partner</label>
+          <div class="mt-1">{{ form.solution_partner }}</div>
+          {{ form.solution_partner.errors }}
+        </div>
+      {% endif %}
+      <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-3 text-sm font-medium text-white hover:bg-blue-700">
+        <i data-lucide="plus" class="size-4" aria-hidden="true"></i>
+        Create
+      </button>
+    </form>
+  </section>
+
+  <section class="gobii-card-base p-5">
+    <div class="flex items-center justify-between gap-3">
+      <div class="flex items-center gap-2">
+        <i data-lucide="briefcase-business" class="size-5 text-blue-600" aria-hidden="true"></i>
+        <h2 class="text-lg font-semibold text-gray-900">Client Organizations</h2>
+      </div>
+      <span class="text-sm text-gray-600">{{ client_organizations|length }} total</span>
+    </div>
+
+    {% if client_organizations %}
+      <div class="mt-4 overflow-x-auto">
+        <table class="min-w-full text-left text-sm">
+          <thead>
+            <tr class="text-xs uppercase tracking-wide text-gray-500">
+              <th scope="col" class="px-3 py-2 font-semibold">Organization</th>
+              <th scope="col" class="px-3 py-2 font-semibold">Partner</th>
+              <th scope="col" class="px-3 py-2 font-semibold">Created</th>
+              <th scope="col" class="px-3 py-2 text-right font-semibold">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for org in client_organizations %}
+              <tr class="border-t border-slate-200">
+                <td class="px-3 py-3 font-medium text-gray-900">{{ org.name }}</td>
+                <td class="px-3 py-3 text-gray-700">{{ org.managed_by_solution_partner.name }}</td>
+                <td class="px-3 py-3 text-gray-600">{{ org.created_at|date:"M j, Y" }}</td>
+                <td class="px-3 py-3 text-right">
+                  <form method="post" action="{% url 'solution_partner_client_switch' org.id %}">
+                    {% csrf_token %}
+                    <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-lg border border-blue-200 px-3 py-2 text-sm font-medium text-blue-700 hover:border-blue-300 hover:text-blue-800">
+                      <i data-lucide="log-in" class="size-4" aria-hidden="true"></i>
+                      Manage
+                    </button>
+                  </form>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="mt-4 text-sm text-gray-600">No client organizations yet.</p>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

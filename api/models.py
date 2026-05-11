@@ -15,7 +15,7 @@ from django.db.models.functions import Lower
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
 from django.core.exceptions import ValidationError
-from django.utils.text import get_valid_filename
+from django.utils.text import get_valid_filename, slugify
 from django.db.utils import InternalError, OperationalError, ProgrammingError
 
 from django.contrib.auth import get_user_model
@@ -12850,6 +12850,61 @@ def cleanup_redis_budget_data(sender, instance: PersistentAgent, **kwargs):
         # Non-fatal; data will expire via TTL
 
 
+class SolutionPartner(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=200)
+    slug = models.SlugField(unique=True, blank=True)
+    is_approved = models.BooleanField(
+        default=False,
+        db_index=True,
+        help_text="Approved partners can access the Solutions Partner portal.",
+    )
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self) -> str:
+        return self.name
+
+    def _assign_unique_slug(self) -> None:
+        base = slugify(self.name)[:50] or "solution-partner"
+        candidate = base
+        suffix = 2
+        queryset = type(self).objects.all()
+        if self.pk:
+            queryset = queryset.exclude(pk=self.pk)
+        while queryset.filter(slug=candidate).exists():
+            trimmed_base = base[: max(1, 50 - len(str(suffix)) - 1)]
+            candidate = f"{trimmed_base}-{suffix}"
+            suffix += 1
+        self.slug = candidate
+
+    def deactivate_client_memberships(self) -> None:
+        OrganizationMembership.objects.filter(
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            source_solution_partner=self,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).update(status=OrganizationMembership.OrgStatus.REMOVED)
+
+    def save(self, *args, **kwargs):
+        was_approved = None
+        if self.pk:
+            was_approved = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values_list("is_approved", flat=True)
+                .first()
+            )
+        if not self.slug:
+            self._assign_unique_slug()
+        super().save(*args, **kwargs)
+        if was_approved and not self.is_approved:
+            self.deactivate_client_memberships()
+
+
 class Organization(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=200)
@@ -12858,8 +12913,34 @@ class Organization(models.Model):
     is_active = models.BooleanField(default=True)
     org_settings = models.JSONField(default=dict, blank=True)   # retention, redaction, SSO, etc.
     created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    managed_by_solution_partner = models.ForeignKey(
+        SolutionPartner,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="client_organizations",
+        help_text="Solutions Partner that manages this client organization.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+
+    def deactivate_stale_solution_partner_memberships(self) -> None:
+        stale_memberships = OrganizationMembership.objects.filter(
+            org=self,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            source_solution_partner__isnull=False,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        if self.managed_by_solution_partner_id:
+            stale_memberships = stale_memberships.exclude(
+                source_solution_partner_id=self.managed_by_solution_partner_id,
+            )
+        stale_memberships.update(status=OrganizationMembership.OrgStatus.REMOVED)
+
+    def save(self, *args, **kwargs):
+        result = super().save(*args, **kwargs)
+        self.deactivate_stale_solution_partner_memberships()
+        return result
 
     def __str__(self) -> str:
         # Show human-friendly label in admin selects/lists
@@ -12891,9 +12972,92 @@ class OrganizationMembership(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     role = models.CharField(max_length=20, choices=OrgRole.choices)
     status = models.CharField(max_length=20, choices=OrgStatus.choices, default=OrgStatus.ACTIVE)  # active|removed
+    source_solution_partner = models.ForeignKey(
+        SolutionPartner,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="organization_memberships",
+        help_text="Set when this org access was granted through a Solutions Partner relationship.",
+    )
 
     class Meta:
         unique_together = ("org", "user")
+
+
+class SolutionPartnerMember(models.Model):
+    class PartnerRole(models.TextChoices):
+        ADMIN = "admin", "Admin"
+        MEMBER = "member", "Member"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    solution_partner = models.ForeignKey(
+        SolutionPartner,
+        on_delete=models.CASCADE,
+        related_name="members",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="solution_partner_memberships",
+    )
+    role = models.CharField(
+        max_length=20,
+        choices=PartnerRole.choices,
+        default=PartnerRole.ADMIN,
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ("solution_partner", "user")
+        ordering = ["solution_partner__name", "user__email"]
+
+    def __str__(self) -> str:
+        return f"{self.user} @ {self.solution_partner}"
+
+    @property
+    def has_portal_access(self) -> bool:
+        return self.is_active and self.solution_partner.is_approved
+
+    @staticmethod
+    def _deactivate_source_memberships(solution_partner_id, user_id) -> None:
+        OrganizationMembership.objects.filter(
+            user_id=user_id,
+            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            source_solution_partner_id=solution_partner_id,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        ).update(status=OrganizationMembership.OrgStatus.REMOVED)
+
+    def save(self, *args, **kwargs):
+        previous = None
+        if self.pk:
+            previous = (
+                type(self)
+                .objects.filter(pk=self.pk)
+                .values("solution_partner_id", "user_id", "is_active")
+                .first()
+            )
+        super().save(*args, **kwargs)
+        if previous and previous["is_active"]:
+            identity_changed = (
+                previous["solution_partner_id"] != self.solution_partner_id
+                or previous["user_id"] != self.user_id
+            )
+            if identity_changed or not self.is_active:
+                self._deactivate_source_memberships(
+                    previous["solution_partner_id"],
+                    previous["user_id"],
+                )
+
+    def delete(self, *args, **kwargs):
+        solution_partner_id = self.solution_partner_id
+        user_id = self.user_id
+        result = super().delete(*args, **kwargs)
+        self._deactivate_source_memberships(solution_partner_id, user_id)
+        return result
+
 
 class OrganizationInvite(models.Model):
     org = models.ForeignKey(Organization, on_delete=models.CASCADE)
