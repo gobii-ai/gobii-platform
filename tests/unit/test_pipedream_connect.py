@@ -200,7 +200,12 @@ class PipedreamConnectWebhookTests(TestCase):
         mock_task.delay.assert_called_once()
 
         # system step recorded
-        self.assertTrue(PersistentAgentSystemStep.objects.filter(step__agent=agent, code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED).exists())
+        system_step = PersistentAgentSystemStep.objects.get(
+            step__agent=agent,
+            code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
+        )
+        self.assertIn("Call search_tools", system_step.step.description)
+        self.assertIn("google_sheets", system_step.step.description)
 
 
 @tag("pipedream_connect")

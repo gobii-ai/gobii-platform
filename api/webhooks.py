@@ -873,6 +873,7 @@ def pipedream_connect_webhook(request, session_id):
                     description=(
                         f"Pipedream connection SUCCESS for app '{session.app_slug}'"
                         + (f"; account={account_id}" if account_id else "")
+                        + f". Call search_tools for Pipedream app '{session.app_slug}' to discover and enable its tools."
                     ),
                 )
                 PersistentAgentSystemStep.objects.create(
