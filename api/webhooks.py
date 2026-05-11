@@ -860,6 +860,8 @@ def pipedream_connect_webhook(request, session_id):
             session.status = PipedreamConnectSession.Status.SUCCESS
             session.account_id = account_id or ""
             session.save(update_fields=["status", "account_id", "updated_at"])
+            from api.services.pipedream_connections import invalidate_pipedream_connected_accounts_cache
+            invalidate_pipedream_connected_accounts_cache(session.agent, app_slug=session.app_slug)
             logger.info(
                 "PD Connect: connection SUCCESS session=%s app=%s account=%s",
                 str(session.id), session.app_slug, account_id or ""

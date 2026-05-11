@@ -1,6 +1,5 @@
 import asyncio
 import json
-import uuid
 from contextlib import ExitStack
 from datetime import timedelta
 from types import SimpleNamespace
@@ -21,10 +20,14 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentMCPServer,
-    PipedreamConnectSession,
 )
 from console.forms import MCPServerConfigForm
 from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
+from api.services.pipedream_connections import (
+    PipedreamConnectedAccount,
+    invalidate_pipedream_connected_accounts_cache,
+    list_pipedream_connected_accounts,
+)
 from api.services.mcp_servers import update_agent_personal_servers
 from api.agent.tools.mcp_manager import MCPToolManager
 from util.analytics import AnalyticsEvent, AnalyticsSource
@@ -1004,6 +1007,24 @@ class PipedreamAppsAPITests(TestCase):
             "icon_url": f"https://example.com/{slug}.png",
         }
 
+    @patch("api.services.pipedream_connections._list_pipedream_connected_accounts")
+    def test_connected_account_lookup_uses_agent_app_cache(self, mock_lookup):
+        agent = _create_console_test_agent(user=self.user, name="Cached Connection Agent")
+        mock_lookup.side_effect = [
+            [PipedreamConnectedAccount(id="apn_trello", app_slug="trello")],
+            [],
+        ]
+
+        first_result = list_pipedream_connected_accounts(agent, app_slug="trello")
+        cached_result = list_pipedream_connected_accounts(agent, app_slug="trello")
+        invalidate_pipedream_connected_accounts_cache(agent, app_slug="trello")
+        refreshed_result = list_pipedream_connected_accounts(agent, app_slug="trello")
+
+        self.assertEqual([account.id for account in first_result], ["apn_trello"])
+        self.assertEqual([account.id for account in cached_result], ["apn_trello"])
+        self.assertEqual(refreshed_result, [])
+        self.assertEqual(mock_lookup.call_count, 2)
+
     @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_returns_user_scope_apps(self, mock_get_apps):
         PipedreamAppSelection.objects.create(
@@ -1247,48 +1268,42 @@ class PipedreamAppsAPITests(TestCase):
 
         self.assertEqual(response.status_code, 502)
 
-    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts_for_app")
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
     def test_app_agent_connections_returns_owner_agents_connected_first(self, mock_connected_accounts):
         disconnected_agent = _create_console_test_agent(user=self.user, name="Alpha Disconnected")
         connected_agent = _create_console_test_agent(user=self.user, name="Beta Connected")
-        fallback_connected_agent = _create_console_test_agent(user=self.user, name="Gamma Fallback Connected")
+        second_connected_agent = _create_console_test_agent(user=self.user, name="Gamma Connected")
         other_user = get_user_model().objects.create_user(
             username="other-pipedream-owner",
             email="other-pipedream-owner@example.com",
             password="test-pass-123",
         )
         _create_console_test_agent(user=other_user, name="Other Owner")
-        PipedreamConnectSession.objects.create(
-            agent=fallback_connected_agent,
-            external_user_id=str(fallback_connected_agent.id),
-            conversation_id=str(uuid.uuid4()),
-            app_slug="trello",
-            connect_token="fallback-token",
-            webhook_secret="fallback-secret",
-            status=PipedreamConnectSession.Status.SUCCESS,
-            account_id="apn_missing_external_user",
-        )
-        mock_connected_accounts.return_value = [
-            SimpleNamespace(id="apn_trello", app_slug="trello", external_user_id=str(connected_agent.id)),
-            SimpleNamespace(id="apn_missing_external_user", app_slug="trello", external_user_id=""),
-            SimpleNamespace(id="apn_other", app_slug="trello", external_user_id=str(uuid.uuid4())),
-        ]
+
+        def connected_accounts_for_agent(agent, *, app_slug=None):
+            self.assertEqual(app_slug, "trello")
+            if agent.id == connected_agent.id:
+                return [SimpleNamespace(id="apn_trello", app_slug="trello")]
+            if agent.id == second_connected_agent.id:
+                return [SimpleNamespace(id="apn_second_trello", app_slug="trello")]
+            return []
+
+        mock_connected_accounts.side_effect = connected_accounts_for_agent
 
         response = self.client.get(reverse("console-pipedream-app-agent-connections", args=["trello"]))
 
         self.assertEqual(response.status_code, 200)
-        mock_connected_accounts.assert_called_once_with("trello")
         payload = response.json()
         self.assertEqual(payload["app_slug"], "trello")
         self.assertEqual([agent["agent_id"] for agent in payload["agents"]], [
             str(connected_agent.id),
-            str(fallback_connected_agent.id),
+            str(second_connected_agent.id),
             str(disconnected_agent.id),
         ])
         self.assertTrue(payload["agents"][0]["connected"])
         self.assertEqual(payload["agents"][0]["account_ids"], ["apn_trello"])
         self.assertTrue(payload["agents"][1]["connected"])
-        self.assertEqual(payload["agents"][1]["account_ids"], ["apn_missing_external_user"])
+        self.assertEqual(payload["agents"][1]["account_ids"], ["apn_second_trello"])
         self.assertFalse(payload["agents"][2]["connected"])
 
     @override_settings(

@@ -79,6 +79,11 @@ export function PipedreamAppsModal({
     setSettings(initialSettings)
   }, [initialSettings])
 
+  useEffect(() => {
+    setActiveApp(null)
+    setStatusMessage(null)
+  }, [settingsUrl])
+
   const searchQuery = useQuery({
     queryKey: ['pipedream-app-search', searchUrl, debouncedSearchTerm],
     queryFn: () => searchPipedreamApps(searchUrl, debouncedSearchTerm),
@@ -86,8 +91,12 @@ export function PipedreamAppsModal({
   })
 
   const activeAppSlug = activeApp?.slug ?? ''
+  const connectionsQueryKey = useMemo(
+    () => ['pipedream-app-agent-connections', settingsUrl, activeAppSlug] as const,
+    [activeAppSlug, settingsUrl],
+  )
   const connectionsQuery = useQuery({
-    queryKey: ['pipedream-app-agent-connections', activeAppSlug],
+    queryKey: connectionsQueryKey,
     queryFn: () => fetchPipedreamAppAgentConnections(activeAppSlug),
     enabled: activeAppSlug.length > 0,
   })
@@ -162,7 +171,7 @@ export function PipedreamAppsModal({
       })
       setStatusMessage({ text: `Connect ${app.name} for ${agent.name} in the new tab, then return here.`, tone: 'info' })
       void queryClient.invalidateQueries({ queryKey: ['pipedream-app-settings'], exact: false })
-      void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', app.slug] })
+      void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', settingsUrl, app.slug] })
     },
     onError: (error) => {
       const message = resolvePipedreamAppsErrorMessage(error, 'Unable to start connection.')
@@ -181,7 +190,7 @@ export function PipedreamAppsModal({
     },
     onSuccess: (_result, { app, agent }) => {
       setStatusMessage({ text: `${app.name} disconnected from ${agent.name}.`, tone: 'info' })
-      void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', app.slug] })
+      void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', settingsUrl, app.slug] })
     },
     onError: (error) => {
       const message = resolvePipedreamAppsErrorMessage(error, 'Unable to disconnect app.')
@@ -200,7 +209,7 @@ export function PipedreamAppsModal({
       isFetching={connectionsQuery.isFetching}
       isError={connectionsQuery.isError}
       error={connectionsQuery.error}
-      isBusy={isBusy}
+      isBusy={isBusy || connectionsQuery.isFetching}
       pendingAgentAction={pendingAgentAction}
       statusMessage={statusMessage}
       onBack={() => {

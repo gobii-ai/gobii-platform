@@ -6,7 +6,7 @@ from typing import Any
 from django.http import Http404
 
 from api.agent.tools.mcp_manager import get_mcp_manager
-from api.models import MCPServerConfig, PersistentAgent, PipedreamConnectSession
+from api.models import MCPServerConfig, PersistentAgent
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.services.pipedream_apps import (
     PipedreamCatalogService,
@@ -18,8 +18,8 @@ from api.services.pipedream_apps import (
 from api.services.pipedream_connections import (
     delete_pipedream_connected_accounts,
     group_pipedream_connected_accounts_by_app,
+    invalidate_pipedream_connected_accounts_cache,
     list_pipedream_connected_accounts,
-    list_pipedream_connected_accounts_for_app,
 )
 
 
@@ -203,6 +203,7 @@ def disconnect_agent_pipedream_app(agent: PersistentAgent, app_slug: str) -> dic
 
     accounts = list_pipedream_connected_accounts(agent, app_slug=normalized_slug)
     deleted_count = delete_pipedream_connected_accounts(account.id for account in accounts)
+    invalidate_pipedream_connected_accounts_cache(agent, app_slug=normalized_slug)
     return {
         "app_slug": normalized_slug,
         "connected": False,
@@ -226,29 +227,11 @@ def list_pipedream_app_agent_connections(
         .only("id", "name", "avatar", "updated_at")
         .order_by("name", "id")
     )
-    agent_ids = {str(agent.id) for agent in agents}
     connected_by_agent: dict[str, list[str]] = {}
-    unmapped_account_ids = []
-
-    for account in list_pipedream_connected_accounts_for_app(normalized_slug):
-        if account.external_user_id in agent_ids:
-            connected_by_agent.setdefault(account.external_user_id, []).append(account.id)
-        else:
-            unmapped_account_ids.append(account.id)
-
-    if unmapped_account_ids:
-        session_rows = (
-            PipedreamConnectSession.objects
-            .filter(
-                agent_id__in=agent_ids,
-                app_slug=normalized_slug,
-                status=PipedreamConnectSession.Status.SUCCESS,
-                account_id__in=unmapped_account_ids,
-            )
-            .values_list("agent_id", "account_id")
-        )
-        for agent_id, account_id in session_rows:
-            connected_by_agent.setdefault(str(agent_id), []).append(str(account_id))
+    for agent in agents:
+        accounts = list_pipedream_connected_accounts(agent, app_slug=normalized_slug)
+        if accounts:
+            connected_by_agent[str(agent.id)] = [account.id for account in accounts]
 
     rows = []
     for agent in agents:
