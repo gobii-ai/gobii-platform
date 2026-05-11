@@ -40,6 +40,7 @@ from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
 from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
+    BRIGHTDATA_SEARCH_MAX_RETRIES,
     BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS,
     MCPToolManager,
     MCPToolInfo,
@@ -4155,11 +4156,11 @@ class MCPIsolatedExecutionTests(TestCase):
             )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn("after 4 attempts", result["message"])
-        self.assertEqual(run_once.call_count, 4)
+        self.assertIn(f"after {BRIGHTDATA_SEARCH_MAX_RETRIES + 1} attempts", result["message"])
+        self.assertEqual(run_once.call_count, BRIGHTDATA_SEARCH_MAX_RETRIES + 1)
         self.assertEqual(
             [call.args[0] for call in mock_sleep.call_args_list],
-            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * 3,
+            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * BRIGHTDATA_SEARCH_MAX_RETRIES,
         )
         params_used = [call.args[0] for call in run_once.call_args_list]
         self.assertTrue(all(params == {"query": "openai"} for params in params_used))

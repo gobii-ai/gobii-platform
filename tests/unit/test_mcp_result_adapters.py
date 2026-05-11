@@ -7,6 +7,8 @@ from django.test import SimpleTestCase, TestCase, tag
 from fastmcp.exceptions import ToolError
 
 from api.agent.tools.mcp_manager import (
+    BRIGHTDATA_SEARCH_MAX_RETRIES,
+    BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS,
     MCP_TOOL_SUCCESS_SENTINEL,
     MCPServerRuntime,
     MCPToolInfo,
@@ -326,7 +328,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(cleaned["items"][0]["t"], "Example")
         self.assertNotIn("image", cleaned["items"][0])
 
-    def test_search_engine_retries_google_non_json_exception_once(self):
+    def test_search_engine_retries_google_non_json_exception(self):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
@@ -353,11 +355,11 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(calls), 2)
         self.assertNotIn("engine", calls[0])
         self.assertNotIn("engine", calls[1])
-        mock_sleep.assert_called_once_with(3)
+        mock_sleep.assert_called_once_with(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
         cleaned = json.loads(response.get("result"))
         self.assertEqual(cleaned["items"][0]["t"], "Example")
 
-    def test_search_engine_falls_back_to_bing_after_two_non_json_google_results(self):
+    def test_search_engine_returns_error_after_google_non_json_retries_without_bing(self):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
@@ -365,9 +367,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
 
         async def fake_execute(_client, _tool_name, params, timeout_seconds):
             calls.append(dict(params))
-            if len(calls) < 3:
-                return DummyResult("<html>blocked</html>")
-            return DummyResult("# Bing Search\n\n[Example](https://example.com)")
+            return DummyResult("<html>blocked</html>")
 
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
@@ -379,13 +379,14 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
                 {"query": "test"},
             )
 
-        self.assertEqual(response.get("status"), "success")
-        self.assertEqual(len(calls), 3)
-        self.assertNotIn("engine", calls[0])
-        self.assertNotIn("engine", calls[1])
-        self.assertEqual(calls[2]["engine"], "bing")
-        mock_sleep.assert_called_once_with(3)
-        self.assertIn("Bing Search", response.get("result"))
+        self.assertEqual(response.get("status"), "error")
+        self.assertIn(f"after {BRIGHTDATA_SEARCH_MAX_RETRIES + 1} attempts", response.get("message"))
+        self.assertEqual(len(calls), BRIGHTDATA_SEARCH_MAX_RETRIES + 1)
+        self.assertTrue(all("engine" not in call for call in calls))
+        self.assertEqual(
+            [call.args[0] for call in mock_sleep.call_args_list],
+            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * BRIGHTDATA_SEARCH_MAX_RETRIES,
+        )
 
     def test_search_engine_accepts_bing_markdown_without_json_retry(self):
         tool_info = self.search_tool_info
