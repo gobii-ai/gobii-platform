@@ -1175,6 +1175,7 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
         "burn_rate_threshold_per_hour",
         "offpeak_burn_rate_threshold_per_hour",
         "burn_rate_window_minutes",
+        "burn_rate_threshold_24h",
         "hard_limit_multiplier",
         "updated_at",
     )
@@ -1201,6 +1202,7 @@ class DailyCreditConfigAdmin(admin.ModelAdmin):
                     "burn_rate_threshold_per_hour",
                     "offpeak_burn_rate_threshold_per_hour",
                     "burn_rate_window_minutes",
+                    "burn_rate_threshold_24h",
                 )
             },
         ),

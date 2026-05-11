@@ -1681,6 +1681,13 @@ class DailyCreditConfig(models.Model):
         validators=[MinValueValidator(1), MaxValueValidator(1440)],
         help_text="Window (in minutes) used to compute the rolling burn rate.",
     )
+    burn_rate_threshold_24h = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        default=Decimal("0"),
+        validators=[MinValueValidator(Decimal("0"))],
+        help_text="Preferred maximum rolling 24-hour credit burn before burn-rate controls apply. Set to 0 to disable.",
+    )
     hard_limit_multiplier = models.DecimalField(
         max_digits=6,
         decimal_places=2,

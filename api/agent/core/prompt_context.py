@@ -1427,6 +1427,7 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         agent,
         window_minutes=credit_settings.burn_rate_window_minutes,
     )
+    burn_24h_details = compute_burn_rate(agent, window_minutes=24 * 60)
     local_now_for_owner, owner_timezone = resolve_user_local_time(agent.user, now)
     is_offpeak = is_offpeak_hour(local_now_for_owner.hour)
     burn_threshold = (
@@ -1446,6 +1447,23 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     else:
         if result is not None:
             scaled_threshold = result
+    scaled_24h_threshold = credit_settings.burn_rate_threshold_24h
+    if scaled_24h_threshold > Decimal("0"):
+        try:
+            result_24h = apply_tier_credit_multiplier(
+                agent,
+                credit_settings.burn_rate_threshold_24h,
+                use_runtime_override=False,
+            )
+        except InvalidOperation:
+            logger.debug(
+                "Failed to apply tier multiplier to 24h burn-rate threshold for agent %s",
+                agent.id,
+                exc_info=True,
+            )
+        else:
+            if result_24h is not None:
+                scaled_24h_threshold = result_24h
     interaction_anchor = agent.last_interaction_at or agent.created_at
     inactive_weeks = _get_inactive_weeks(interaction_anchor, now)
     effective_threshold = _get_effective_burn_threshold(
@@ -1469,6 +1487,8 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         "burn_rate_per_hour": burn_details.get("burn_rate_per_hour"),
         "burn_rate_window_minutes": burn_details.get("window_minutes"),
         "burn_rate_threshold_per_hour": effective_threshold,
+        "burn_rate_24h_total": burn_24h_details.get("window_total"),
+        "burn_rate_threshold_24h": scaled_24h_threshold,
         "burn_rate_base_threshold_per_hour": scaled_threshold,
         "burn_rate_inactive_weeks": inactive_weeks,
         "burn_rate_offpeak_active": is_offpeak,
