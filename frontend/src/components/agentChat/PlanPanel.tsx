@@ -1,19 +1,26 @@
 import { memo, type MouseEvent } from 'react'
-import { CheckCircle2, Circle, Download, FileText, LoaderCircle, MessageSquareText } from 'lucide-react'
+import { Download, FileText, MessageSquareText } from 'lucide-react'
 import type { PlanSnapshot } from '../../types/agentChat'
+import { PlanTaskItem, type PlanTaskStatus } from './PlanTaskItem'
 
 type PlanPanelProps = {
   plan?: PlanSnapshot | null
   onMessageClick?: (messageId: string) => void
   compact?: boolean
+  isAgentWorking?: boolean
 }
 
 type PlanRow = {
   title: string
-  status: 'done' | 'doing' | 'todo'
+  status: PlanTaskStatus
 }
 
-export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact = false }: PlanPanelProps) {
+export const PlanPanel = memo(function PlanPanel({
+  plan,
+  onMessageClick,
+  compact = false,
+  isAgentWorking = true,
+}: PlanPanelProps) {
   const snapshot = plan ?? {
     todoCount: 0,
     doingCount: 0,
@@ -48,18 +55,12 @@ export const PlanPanel = memo(function PlanPanel({ plan, onMessageClick, compact
       {rows.length > 0 ? (
         <ul className="plan-panel-task-list">
           {rows.map((row, index) => (
-            <li key={`${row.status}:${index}:${row.title}`} className="plan-panel-task" data-status={row.status}>
-              <span className="plan-panel-task-icon" aria-hidden="true">
-                {row.status === 'done' ? (
-                  <CheckCircle2 size={14} strokeWidth={2.4} />
-                ) : row.status === 'doing' ? (
-                  <LoaderCircle size={14} strokeWidth={2.4} />
-                ) : (
-                  <Circle size={14} strokeWidth={2.2} />
-                )}
-              </span>
-              <span className="plan-panel-task-title">{row.title}</span>
-            </li>
+            <PlanTaskItem
+              key={`${row.status}:${index}:${row.title}`}
+              title={row.title}
+              status={row.status}
+              isAgentWorking={isAgentWorking}
+            />
           ))}
         </ul>
       ) : (

@@ -102,6 +102,7 @@ from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
     append_query_params,
+    build_immersive_agents_url,
     build_immersive_chat_url,
     normalize_return_to,
 )
@@ -1130,6 +1131,10 @@ class HomePage(TemplateView):
             recent_agents_qs = PersistentAgent.objects.non_eval().alive().filter(user_id=self.request.user.id)
             total_agents = recent_agents_qs.count()
             recent_agents = list(recent_agents_qs.order_by('-updated_at')[:3])
+            context['recent_agents_all_url'] = build_immersive_agents_url(
+                self.request,
+                return_to=self.request.get_full_path(),
+            )
 
             for agent in recent_agents:
                 schedule_text = None
