@@ -226,6 +226,43 @@ class HomePageTests(TestCase):
         self.assertNotIn("Eval Agent", names)
 
     @tag("batch_pages")
+    def test_home_page_recent_agents_view_all_opens_immersive_app(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="home-view-all@example.com",
+            email="home-view-all@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Homepage Browser")
+        PersistentAgent.objects.create(
+            user=user,
+            name="Homepage Agent",
+            charter="Visible charter",
+            browser_use_agent=browser_agent,
+        )
+
+        response = self.client.get("/")
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        view_all_link = next(
+            (
+                anchor
+                for anchor in soup.find_all("a")
+                if "View all" in " ".join(anchor.stripped_strings)
+            ),
+            None,
+        )
+
+        self.assertIsNotNone(view_all_link)
+        self.assertEqual(view_all_link.get("data-immersive-link"), "")
+
+        parsed = urlparse(view_all_link["href"])
+        self.assertEqual(parsed.path, "/app/agents")
+        self.assertEqual(parse_qs(parsed.query).get("return_to"), ["/"])
+
+    @tag("batch_pages")
     def test_home_page_exposes_all_pretrained_workers(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         response = self.client.get("/")

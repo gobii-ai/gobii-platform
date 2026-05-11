@@ -159,3 +159,21 @@ def build_immersive_chat_url(
     if params:
         return f"{path}?{urlencode(params)}"
     return path
+
+
+def build_immersive_agents_url(
+    request,
+    *,
+    return_to: str | None = None,
+    embed: bool = False,
+) -> str:
+    path = f"{IMMERSIVE_APP_BASE_PATH}/agents"
+    params: dict[str, str] = {}
+    resolved_return_to = normalize_return_to(request, return_to)
+    if resolved_return_to:
+        params["return_to"] = resolved_return_to
+    if embed:
+        params["embed"] = "1"
+    if params:
+        return f"{path}?{urlencode(params)}"
+    return path
