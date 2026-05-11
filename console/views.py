@@ -152,6 +152,12 @@ from observability import traced
 from pages.mixins import PhoneNumberMixin
 from pages.account_info_cache import invalidate_account_info_cache
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
+from console.solution_partner_helpers import (
+    approved_solution_partner_memberships_for_user,
+    client_organizations_for_partner_memberships,
+    ensure_solution_partner_client_membership,
+    user_can_access_client_organization_through_partner,
+)
 
 from .agent_context import resolve_context_override_for_agent
 from .agent_addons import build_account_pause_payload
@@ -388,6 +394,7 @@ from .forms import (
     PhoneVerifyForm,
     PhoneAddForm,
     OrganizationForm,
+    SolutionPartnerClientOrganizationForm,
     OrganizationInviteForm,
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
@@ -8194,6 +8201,131 @@ def handle_confirm_code(request, phone_number, verification_code):
     return JsonResponse({'success': False, 'error': "Failed to confirm verification code. Please try again."})
 
 
+def _unique_organization_slug(name: str) -> str:
+    base = slugify(name)[:50] or "organization"
+    candidate = base
+    suffix = 2
+    while Organization.objects.filter(slug=candidate).exists():
+        trimmed_base = base[: max(1, 50 - len(str(suffix)) - 1)]
+        candidate = f"{trimmed_base}-{suffix}"
+        suffix += 1
+    return candidate
+
+
+class SolutionPartnerPortalView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
+    """Dashboard for approved Solutions Partner members."""
+
+    waffle_flag = ORGANIZATIONS
+    template_name = "console/solution_partner_portal.html"
+
+    def dispatch(self, request, *args, **kwargs):
+        self.partner_memberships = list(
+            approved_solution_partner_memberships_for_user(request.user)
+        )
+        if not self.partner_memberships:
+            return HttpResponseForbidden()
+        return super().dispatch(request, *args, **kwargs)
+
+    @tracer.start_as_current_span("CONSOLE Solution Partner Portal")
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        form = kwargs.get("form") or SolutionPartnerClientOrganizationForm(
+            partner_memberships=self.partner_memberships,
+        )
+        context.update(
+            {
+                "partner_memberships": self.partner_memberships,
+                "client_organizations": client_organizations_for_partner_memberships(self.partner_memberships),
+                "form": form,
+            }
+        )
+        return context
+
+    @tracer.start_as_current_span("CONSOLE Solution Partner Client Organization Create")
+    @transaction.atomic
+    def post(self, request, *args, **kwargs):
+        form = SolutionPartnerClientOrganizationForm(
+            request.POST,
+            partner_memberships=self.partner_memberships,
+        )
+        if not form.is_valid():
+            return render(
+                request,
+                self.template_name,
+                self.get_context_data(form=form),
+                status=422,
+            )
+
+        partner = form.cleaned_data["solution_partner"]
+        org = Organization.objects.create(
+            name=form.cleaned_data["name"],
+            slug=_unique_organization_slug(form.cleaned_data["name"]),
+            created_by=request.user,
+            managed_by_solution_partner=partner,
+        )
+        membership = ensure_solution_partner_client_membership(request.user, org)
+
+        request.session["context_type"] = "organization"
+        request.session["context_id"] = str(org.id)
+        request.session["context_name"] = org.name
+        request.session.modified = True
+
+        created_props = Analytics.with_org_properties(
+            {
+                "organization_slug": org.slug,
+                "solution_partner_id": str(partner.id),
+                "solution_partner_slug": partner.slug,
+            },
+            organization=org,
+        )
+        member_props = Analytics.with_org_properties(
+            {
+                "member_id": str(request.user.id),
+                "member_role": membership.role,
+                "actor_id": str(request.user.id),
+                "solution_partner_id": str(partner.id),
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_CREATED,
+            source=AnalyticsSource.WEB,
+            properties=created_props.copy(),
+        ))
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_ADDED,
+            source=AnalyticsSource.WEB,
+            properties=member_props.copy(),
+        ))
+        messages.success(request, "Client organization created.")
+        return redirect("organization_detail", org_id=org.id)
+
+
+class SolutionPartnerClientSwitchView(WaffleFlagMixin, LoginRequiredMixin, View):
+    """Switch an approved partner member into one of their managed client orgs."""
+
+    waffle_flag = ORGANIZATIONS
+
+    @tracer.start_as_current_span("CONSOLE Solution Partner Client Switch")
+    def post(self, request, org_id: str):
+        org = get_object_or_404(
+            Organization.objects.select_related("managed_by_solution_partner"),
+            id=org_id,
+            is_active=True,
+        )
+        if not user_can_access_client_organization_through_partner(request.user, org):
+            return HttpResponseForbidden()
+
+        membership = ensure_solution_partner_client_membership(request.user, org)
+        request.session["context_type"] = "organization"
+        request.session["context_id"] = str(membership.org.id)
+        request.session["context_name"] = membership.org.name
+        request.session.modified = True
+        return redirect("organization_detail", org_id=membership.org.id)
+
+
 class OrganizationListView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
     """List organizations the user belongs to."""
 
@@ -8245,7 +8377,7 @@ class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
         form = OrganizationForm(request.POST)
         if form.is_valid():
             org = form.save(commit=False)
-            org.slug = slugify(org.name)
+            org.slug = _unique_organization_slug(org.name)
             org.created_by = request.user
             org.save()
             owner_membership = OrganizationMembership.objects.create(
