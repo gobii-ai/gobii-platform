@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Loader2, Plug, Search, Sparkles, Trash2, Unplug, Users } from 'lucide-react'
+import { ArrowLeft, Users } from 'lucide-react'
 
 import {
   disconnectAgentPipedreamApp,
@@ -13,9 +13,25 @@ import {
   type PipedreamAppSettings,
   type PipedreamAppSummary,
 } from '../../api/mcp'
-import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
-import { Modal } from '../common/Modal'
-import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
+import {
+  AgentConnectionAvatar,
+  PipedreamAppIcon,
+  PipedreamAppSummaryCell,
+  PipedreamConnectionButton,
+  PipedreamEmptyState,
+  PipedreamErrorState,
+  PipedreamListFrame,
+  PipedreamLoadingState,
+  PipedreamModalShell,
+  PipedreamRemoveButton,
+  PipedreamSearchInput,
+  PipedreamStatusBanner,
+  resolvePipedreamAppsErrorMessage,
+  useDebouncedValue,
+  useIsMobile,
+  useWindowFocusRefetch,
+  type PipedreamStatusMessage,
+} from './PipedreamAppsShared'
 
 type PipedreamAppsModalProps = {
   settingsUrl: string
@@ -40,11 +56,6 @@ type PendingAgentAction = {
   kind: 'connect' | 'disconnect'
 } | null
 
-type StatusMessage = {
-  text: string
-  tone: 'info' | 'error'
-} | null
-
 export function PipedreamAppsModal({
   settingsUrl,
   searchUrl,
@@ -55,30 +66,18 @@ export function PipedreamAppsModal({
 }: PipedreamAppsModalProps) {
   const queryClient = useQueryClient()
   const settingsQueryKey = useMemo(() => ['pipedream-app-settings', settingsUrl] as const, [settingsUrl])
-  const [isMobile, setIsMobile] = useState(false)
+  const isMobile = useIsMobile()
   const [searchTerm, setSearchTerm] = useState('')
-  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('')
+  const debouncedSearchTerm = useDebouncedValue(searchTerm)
   const [settings, setSettings] = useState(initialSettings)
   const [activeApp, setActiveApp] = useState<WorkspacePipedreamAppRow | null>(null)
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
-  const [statusMessage, setStatusMessage] = useState<StatusMessage>(null)
+  const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
 
   useEffect(() => {
     setSettings(initialSettings)
   }, [initialSettings])
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => setDebouncedSearchTerm(searchTerm.trim()), 250)
-    return () => window.clearTimeout(timeoutId)
-  }, [searchTerm])
 
   const searchQuery = useQuery({
     queryKey: ['pipedream-app-search', searchUrl, debouncedSearchTerm],
@@ -92,16 +91,7 @@ export function PipedreamAppsModal({
     queryFn: () => fetchPipedreamAppAgentConnections(activeAppSlug),
     enabled: activeAppSlug.length > 0,
   })
-
-  useEffect(() => {
-    const handleFocus = () => {
-      if (activeAppSlug) {
-        void connectionsQuery.refetch()
-      }
-    }
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [activeAppSlug, connectionsQuery])
+  useWindowFocusRefetch(connectionsQuery.refetch, activeAppSlug.length > 0)
 
   const platformSlugSet = useMemo(
     () => new Set(settings.platformApps.map((app) => app.slug)),
@@ -162,14 +152,13 @@ export function PipedreamAppsModal({
         if (current.selectedApps.some((selectedApp) => selectedApp.slug === result.app.slug)) {
           return current
         }
-        const nextSettings = {
+        return {
           ...current,
           selectedApps: [...current.selectedApps, result.app],
           effectiveApps: current.effectiveApps.some((effectiveApp) => effectiveApp.slug === result.app.slug)
             ? current.effectiveApps
             : [...current.effectiveApps, result.app],
         }
-        return nextSettings
       })
       setStatusMessage({ text: `Connect ${app.name} for ${agent.name} in the new tab, then return here.`, tone: 'info' })
       void queryClient.invalidateQueries({ queryKey: ['pipedream-app-settings'], exact: false })
@@ -203,7 +192,6 @@ export function PipedreamAppsModal({
   })
 
   const isBusy = removeMutation.isPending || connectMutation.isPending || disconnectMutation.isPending
-
   const body = activeApp ? (
     <AppConnectionsScreen
       app={activeApp}
@@ -243,41 +231,15 @@ export function PipedreamAppsModal({
     />
   )
 
-  const title = activeApp ? 'Manage connections' : 'Manage integrations'
-  const subtitle = activeApp
-    ? `${activeApp.name} connections across agents.`
-    : 'Search apps and manage agent connections.'
-
-  if (isMobile) {
-    return (
-      <AgentChatMobileSheet
-        open
-        onClose={onClose}
-        title={title}
-        subtitle={subtitle}
-        icon={Sparkles}
-        ariaLabel={title}
-        bodyPadding={false}
-      >
-        <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-4 pb-6 pt-4">
-          {body}
-        </div>
-      </AgentChatMobileSheet>
-    )
-  }
-
   return (
-    <Modal
-      title={title}
-      subtitle={subtitle}
+    <PipedreamModalShell
+      isMobile={isMobile}
+      title={activeApp ? 'Manage connections' : 'Manage integrations'}
+      subtitle={activeApp ? `${activeApp.name} connections across agents.` : 'Search apps and manage agent connections.'}
       onClose={onClose}
-      widthClass="sm:max-w-5xl"
-      icon={Sparkles}
-      iconBgClass="bg-blue-100"
-      iconColorClass="text-blue-700"
     >
       {body}
-    </Modal>
+    </PipedreamModalShell>
   )
 }
 
@@ -305,57 +267,40 @@ function AppListScreen({
   isBusy: boolean
   isMobile: boolean
   pendingAppAction: PendingAppAction
-  statusMessage: StatusMessage
+  statusMessage: PipedreamStatusMessage
   onSearchTermChange: (term: string) => void
   onManageConnections: (app: WorkspacePipedreamAppRow) => void
   onRemove: (app: WorkspacePipedreamAppRow) => void
 }) {
   return (
     <div className="space-y-4 p-1">
-      <StatusBanner statusMessage={statusMessage} />
-
-      <label className="relative block text-sm text-slate-500">
-        <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center">
-          {isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" aria-hidden="true" />}
-        </span>
-        <input
-          type="search"
-          className="w-full rounded-lg border border-slate-300 bg-white py-3 pl-10 pr-3 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-blue-500"
-          placeholder="Search apps"
-          value={searchTerm}
-          onChange={(event) => onSearchTermChange(event.target.value)}
-          disabled={isBusy}
-        />
-      </label>
+      <PipedreamStatusBanner statusMessage={statusMessage} />
+      <PipedreamSearchInput
+        value={searchTerm}
+        onChange={onSearchTermChange}
+        isFetching={isFetching}
+        disabled={isBusy}
+      />
 
       {isError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {resolvePipedreamAppsErrorMessage(error, 'Unable to load apps.')}
-        </div>
+        <PipedreamErrorState error={error} fallback="Unable to load apps." />
       ) : isLoading ? (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading apps…
-        </div>
+        <PipedreamLoadingState label="Loading apps…" />
       ) : apps.length === 0 ? (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-          No apps matched your search.
-        </div>
+        <PipedreamEmptyState label="No apps matched your search." />
       ) : (
-        <div className={`overflow-hidden rounded-lg border border-slate-200 bg-white ${isMobile ? '' : 'max-h-[28rem] overflow-y-auto'}`}>
-          <div className="divide-y divide-slate-200">
-            {apps.map((app) => (
-              <PipedreamAppRowItem
-                key={app.slug}
-                app={app}
-                pendingAppAction={pendingAppAction}
-                disabled={isBusy}
-                onManageConnections={() => onManageConnections(app)}
-                onRemove={() => onRemove(app)}
-              />
-            ))}
-          </div>
-        </div>
+        <PipedreamListFrame isMobile={isMobile}>
+          {apps.map((app) => (
+            <PipedreamAppRowItem
+              key={app.slug}
+              app={app}
+              pendingAppAction={pendingAppAction}
+              disabled={isBusy}
+              onManageConnections={() => onManageConnections(app)}
+              onRemove={() => onRemove(app)}
+            />
+          ))}
+        </PipedreamListFrame>
       )}
     </div>
   )
@@ -384,13 +329,7 @@ function PipedreamAppRowItem({
 
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_12rem_7rem] md:items-center">
-      <div className="flex min-w-0 items-center gap-3">
-        <PipedreamAppIcon app={app} />
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-slate-900">{app.name}</p>
-          {app.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{app.description}</p> : null}
-        </div>
-      </div>
+      <PipedreamAppSummaryCell app={app} />
       <div className="flex justify-start md:justify-end">
         <button
           type="button"
@@ -403,20 +342,12 @@ function PipedreamAppRowItem({
         </button>
       </div>
       <div className="flex justify-start md:justify-end">
-        <button
-          type="button"
-          className="inline-flex min-w-24 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-45"
-          onClick={onRemove}
+        <PipedreamRemoveButton
+          isPending={isPendingRemove}
           disabled={removeDisabled}
           title={removeTitle}
-        >
-          {isPendingRemove ? (
-            <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          ) : (
-            <Trash2 className="h-4 w-4" aria-hidden="true" />
-          )}
-          Remove
-        </button>
+          onClick={onRemove}
+        />
       </div>
     </div>
   )
@@ -444,7 +375,7 @@ function AppConnectionsScreen({
   error: unknown
   isBusy: boolean
   pendingAgentAction: PendingAgentAction
-  statusMessage: StatusMessage
+  statusMessage: PipedreamStatusMessage
   onBack: () => void
   onConnect: (agent: PipedreamAppAgentConnection) => void
   onDisconnect: (agent: PipedreamAppAgentConnection) => void
@@ -465,29 +396,18 @@ function AppConnectionsScreen({
         <PipedreamAppIcon app={app} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-900">{app.name}</p>
-          {isFetching ? (
-            <p className="text-sm text-slate-600">Refreshing connections…</p>
-          ) : (
-            <p className="text-sm text-slate-600">Connected agents are shown first.</p>
-          )}
+          <p className="text-sm text-slate-600">{isFetching ? 'Refreshing connections…' : 'Connected agents are shown first.'}</p>
         </div>
       </div>
 
-      <StatusBanner statusMessage={statusMessage} />
+      <PipedreamStatusBanner statusMessage={statusMessage} />
 
       {isError ? (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {resolvePipedreamAppsErrorMessage(error, 'Unable to load agent connections.')}
-        </div>
+        <PipedreamErrorState error={error} fallback="Unable to load agent connections." />
       ) : isLoading ? (
-        <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading agents…
-        </div>
+        <PipedreamLoadingState label="Loading agents…" />
       ) : agents.length === 0 ? (
-        <div className="rounded-lg border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600">
-          No agents found.
-        </div>
+        <PipedreamEmptyState label="No agents found." />
       ) : (
         <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
           <div className="divide-y divide-slate-200">
@@ -527,75 +447,20 @@ function AgentConnectionRow({
   return (
     <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_8rem] md:items-center">
       <div className="flex min-w-0 items-center gap-3">
-        <AgentAvatar agent={agent} />
+        <AgentConnectionAvatar agent={agent} />
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-slate-900">{agent.name}</p>
         </div>
       </div>
       <div className="flex justify-start md:justify-end">
-        {agent.connected ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-            onClick={onDisconnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'disconnect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-            onClick={onConnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'connect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Plug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Connect
-          </button>
-        )}
+        <PipedreamConnectionButton
+          connected={agent.connected}
+          pendingKind={pendingKind}
+          disabled={disabled}
+          onConnect={onConnect}
+          onDisconnect={onDisconnect}
+        />
       </div>
-    </div>
-  )
-}
-
-function AgentAvatar({ agent }: { agent: PipedreamAppAgentConnection }) {
-  if (agent.avatarUrl) {
-    return (
-      <img
-        src={agent.avatarUrl}
-        alt=""
-        className="h-9 w-9 rounded-full border border-slate-200 bg-white object-cover"
-        loading="lazy"
-      />
-    )
-  }
-
-  return (
-    <span className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-xs font-semibold uppercase text-slate-700">
-      {agent.name.slice(0, 2)}
-    </span>
-  )
-}
-
-function StatusBanner({ statusMessage }: { statusMessage: StatusMessage }) {
-  if (!statusMessage) {
-    return null
-  }
-  const classes = statusMessage.tone === 'error'
-    ? 'border-red-200 bg-red-50 text-red-700'
-    : 'border-blue-200 bg-blue-50 text-blue-800'
-  return (
-    <div className={`rounded-lg border px-4 py-3 text-sm ${classes}`}>
-      {statusMessage.text}
     </div>
   )
 }

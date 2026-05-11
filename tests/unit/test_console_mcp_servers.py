@@ -1004,7 +1004,7 @@ class PipedreamAppsAPITests(TestCase):
             "icon_url": f"https://example.com/{slug}.png",
         }
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_returns_user_scope_apps(self, mock_get_apps):
         PipedreamAppSelection.objects.create(
             user=self.user,
@@ -1024,8 +1024,8 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
         self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_sheets", "google_docs", "trello"])
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_updates_user_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
         mock_get_apps.side_effect = lambda slugs: [
             type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
@@ -1058,8 +1058,8 @@ class PipedreamAppsAPITests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_filters_platform_defaults_from_selected_apps(self, mock_get_mcp_manager, mock_get_apps):
         mock_get_apps.side_effect = lambda slugs: [
             type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
@@ -1088,8 +1088,8 @@ class PipedreamAppsAPITests(TestCase):
             app_slugs=["trello"],
         )
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_removes_disabled_enabled_tools(self, mock_get_mcp_manager, mock_get_apps):
         mock_get_apps.side_effect = lambda slugs: [
             type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
@@ -1128,7 +1128,7 @@ class PipedreamAppsAPITests(TestCase):
         )
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_returns_org_scope_apps(self, mock_get_apps):
         org = Organization.objects.create(name="Acme", slug="acme", created_by=self.user)
         OrganizationMembership.objects.create(
@@ -1158,7 +1158,7 @@ class PipedreamAppsAPITests(TestCase):
         PIPEDREAM_CLIENT_SECRET="",
         PIPEDREAM_PROJECT_ID="",
     )
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_get_apps):
         response = self.client.get(self.settings_url)
 
@@ -1166,8 +1166,8 @@ class PipedreamAppsAPITests(TestCase):
         self.assertIn("Pipedream integration is not configured", response.json()["error"])
         mock_get_apps.assert_not_called()
 
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
+    @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_updates_org_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
         org = Organization.objects.create(name="Acme Patch", slug="acme-patch", created_by=self.user)
         OrganizationMembership.objects.create(
@@ -1216,7 +1216,7 @@ class PipedreamAppsAPITests(TestCase):
         PIPEDREAM_CLIENT_SECRET="",
         PIPEDREAM_PROJECT_ID="",
     )
-    @patch("console.api_views.get_mcp_manager")
+    @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_get_mcp_manager):
         response = self.client.patch(
             self.settings_url,
@@ -1228,7 +1228,7 @@ class PipedreamAppsAPITests(TestCase):
         self.assertIn("Pipedream integration is not configured", response.json()["error"])
         mock_get_mcp_manager.assert_not_called()
 
-    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_returns_results(self, mock_search_apps):
         mock_search_apps.return_value = [
             type("App", (), {"to_dict": lambda self: PipedreamAppsAPITests._app("trello")})()
@@ -1239,7 +1239,7 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0]["slug"], "trello")
 
-    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_returns_upstream_error(self, mock_search_apps):
         mock_search_apps.side_effect = PipedreamCatalogError("boom")
 
@@ -1247,7 +1247,7 @@ class PipedreamAppsAPITests(TestCase):
 
         self.assertEqual(response.status_code, 502)
 
-    @patch("console.api_views.list_pipedream_connected_accounts_for_app")
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts_for_app")
     def test_app_agent_connections_returns_owner_agents_connected_first(self, mock_connected_accounts):
         disconnected_agent = _create_console_test_agent(user=self.user, name="Alpha Disconnected")
         connected_agent = _create_console_test_agent(user=self.user, name="Beta Connected")
@@ -1296,7 +1296,7 @@ class PipedreamAppsAPITests(TestCase):
         PIPEDREAM_CLIENT_SECRET="",
         PIPEDREAM_PROJECT_ID="",
     )
-    @patch("console.api_views.PipedreamCatalogService.search_apps")
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_returns_disabled_error_when_pipedream_is_unconfigured(self, mock_search_apps):
         response = self.client.get(self.search_url, {"q": "trello"})
 
@@ -1304,9 +1304,9 @@ class PipedreamAppsAPITests(TestCase):
         self.assertIn("Pipedream integration is not configured", response.json()["error"])
         mock_search_apps.assert_not_called()
 
-    @patch("console.api_views.list_pipedream_connected_accounts")
-    @patch("console.api_views.PipedreamCatalogService.search_apps")
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.search_apps")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_apps")
     def test_agent_app_list_merges_sources_and_connection_state_without_search(
         self,
         mock_get_apps,
@@ -1344,9 +1344,9 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(trello["account_ids"], ["apn_trello"])
         mock_search_apps.assert_not_called()
 
-    @patch("console.api_views.list_pipedream_connected_accounts")
-    @patch("console.api_views.PipedreamCatalogService.search_apps")
-    @patch("console.api_views.PipedreamCatalogService.get_apps")
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.search_apps")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_apps")
     def test_agent_app_search_returns_only_search_matches(
         self,
         mock_get_apps,
@@ -1375,8 +1375,8 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(apps[0]["source"], "available")
         mock_get_apps.assert_not_called()
 
-    @patch("console.api_views.PipedreamCatalogService.get_app")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_app")
+    @patch("api.services.pipedream_agent_apps.get_mcp_manager")
     def test_agent_app_connect_adds_non_built_in_app_and_returns_jit_url(self, mock_get_mcp_manager, mock_get_app):
         agent = _create_console_test_agent(user=self.user, name="Connect Trello")
         mock_get_app.return_value = type(
@@ -1400,8 +1400,8 @@ class PipedreamAppsAPITests(TestCase):
             app_slugs=["trello"],
         )
 
-    @patch("console.api_views.PipedreamCatalogService.get_app")
-    @patch("console.api_views.get_mcp_manager")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_app")
+    @patch("api.services.pipedream_agent_apps.get_mcp_manager")
     def test_agent_app_connect_leaves_built_in_app_selection_unchanged(self, mock_get_mcp_manager, mock_get_app):
         agent = _create_console_test_agent(user=self.user, name="Connect Built In")
         mock_get_app.return_value = type(
@@ -1416,8 +1416,8 @@ class PipedreamAppsAPITests(TestCase):
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
         mock_get_mcp_manager.assert_not_called()
 
-    @patch("console.api_views.delete_pipedream_connected_accounts")
-    @patch("console.api_views.list_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.delete_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
     def test_agent_app_disconnect_deletes_accounts_without_disabling_app_or_tools(
         self,
         mock_connected_accounts,
@@ -1449,7 +1449,7 @@ class PipedreamAppsAPITests(TestCase):
             PersistentAgentEnabledTool.objects.filter(agent=agent, tool_full_name="trello-create-card").exists()
         )
 
-    @patch("console.api_views.get_mcp_manager")
+    @patch("api.services.pipedream_agent_apps.get_mcp_manager")
     def test_agent_app_remove_removes_added_app_without_deleting_connection(self, mock_get_mcp_manager):
         agent = _create_console_test_agent(user=self.user, name="Remove Trello")
         PipedreamAppSelection.objects.create(user=self.user, selected_app_slugs=["trello"])
@@ -1467,7 +1467,7 @@ class PipedreamAppsAPITests(TestCase):
             app_slugs=[],
         )
 
-    @patch("console.api_views.get_mcp_manager")
+    @patch("api.services.pipedream_agent_apps.get_mcp_manager")
     def test_agent_app_remove_rejects_built_in_app(self, mock_get_mcp_manager):
         agent = _create_console_test_agent(user=self.user, name="Remove Built In")
 

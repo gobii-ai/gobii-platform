@@ -138,13 +138,6 @@ from console.api_views import (
     PlatformMCPServerDetailAPIView,
     PlatformMCPServerTestAPIView,
     MCPServerAssignmentsAPIView,
-    AgentPipedreamAppAPIView,
-    AgentPipedreamAppsAPIView,
-    AgentPipedreamAppConnectAPIView,
-    AgentPipedreamAppConnectionAPIView,
-    PipedreamAppAgentConnectionsAPIView,
-    PipedreamAppsAPIView,
-    PipedreamAppSearchAPIView,
     MCPOAuthCallbackView,
     MCPOAuthMetadataProxyView,
     MCPOAuthRevokeView,
@@ -174,6 +167,15 @@ from console.api_views import (
     EvalRunDetailAPIView,
     EvalRunCompareAPIView,
     EvalSuiteRunCompareAPIView,
+)
+from console.pipedream_apps_api import (
+    AgentPipedreamAppAPIView,
+    AgentPipedreamAppsAPIView,
+    AgentPipedreamAppConnectAPIView,
+    AgentPipedreamAppConnectionAPIView,
+    PipedreamAppAgentConnectionsAPIView,
+    PipedreamAppsAPIView,
+    PipedreamAppSearchAPIView,
 )
 from console.secrets_api_views import (
     GlobalSecretListAPIView,
