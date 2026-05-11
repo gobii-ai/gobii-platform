@@ -40,6 +40,8 @@ from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
 from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
+    BRIGHTDATA_SEARCH_MAX_RETRIES,
+    BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS,
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
@@ -4139,6 +4141,53 @@ class MCPIsolatedExecutionTests(TestCase):
             tool_name=self.tool_info.tool_name,
             server_config=self.server_config,
         )
+
+    def test_brightdata_google_search_retries_three_times_without_bing_fallback(self):
+        run_once = MagicMock(
+            return_value={"status": "success", "result": "<html>rate limited</html>"}
+        )
+
+        with patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+            result = self.manager._execute_with_brightdata_search_retries(
+                run_once,
+                "brightdata",
+                "search_engine",
+                {"query": "openai"},
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn(f"after {BRIGHTDATA_SEARCH_MAX_RETRIES + 1} attempts", result["message"])
+        self.assertEqual(run_once.call_count, BRIGHTDATA_SEARCH_MAX_RETRIES + 1)
+        self.assertEqual(
+            [call.args[0] for call in mock_sleep.call_args_list],
+            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * BRIGHTDATA_SEARCH_MAX_RETRIES,
+        )
+        params_used = [call.args[0] for call in run_once.call_args_list]
+        self.assertTrue(all(params == {"query": "openai"} for params in params_used))
+        self.assertFalse(any(params.get("engine") == "bing" for params in params_used))
+
+    def test_brightdata_google_search_returns_successful_retry(self):
+        run_once = MagicMock(
+            side_effect=[
+                {"status": "success", "result": "<html>rate limited</html>"},
+                {"status": "success", "result": json.dumps({"organic": []})},
+            ]
+        )
+
+        with patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+            result = self.manager._execute_with_brightdata_search_retries(
+                run_once,
+                "brightdata",
+                "search_engine",
+                {"query": "openai"},
+            )
+
+        self.assertEqual(
+            result,
+            {"status": "success", "result": json.dumps({"organic": []})},
+        )
+        self.assertEqual(run_once.call_count, 2)
+        mock_sleep.assert_called_once_with(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
 
     def test_execute_mcp_tool_isolated_does_not_reuse_shared_loop_or_client_cache(self):
         shared_client = MagicMock(name="shared-client")

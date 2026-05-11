@@ -113,7 +113,8 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
 # Bright Data MCP's search_utils.parse_google_search_response raises this
 # message when Google returns HTML or other non-JSON content despite brd_json=1.
 BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
-BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 3
+BRIGHTDATA_SEARCH_MAX_RETRIES = 3
+BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 5
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
 
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -1971,9 +1972,10 @@ class MCPToolManager:
             return run_once(params)
 
         original_params = dict(params)
+        total_attempts = BRIGHTDATA_SEARCH_MAX_RETRIES + 1
         last_failure: Optional[str] = None
-        for attempt in range(2):
-            if attempt == 1:
+        for attempt in range(total_attempts):
+            if attempt > 0:
                 time.sleep(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
             try:
                 result = run_once(dict(original_params))
@@ -1982,8 +1984,9 @@ class MCPToolManager:
                     raise
                 last_failure = str(exc)
                 logger.warning(
-                    "Bright Data Google search returned non-JSON response on attempt %d.",
+                    "Bright Data Google search returned non-JSON response on attempt %d of %d.",
                     attempt + 1,
+                    total_attempts,
                 )
                 continue
 
@@ -1992,18 +1995,23 @@ class MCPToolManager:
 
             last_failure = self._tool_result_error_message(result) or "Non-JSON search response"
             logger.warning(
-                "Bright Data Google search returned non-JSON content on attempt %d.",
+                "Bright Data Google search returned non-JSON content on attempt %d of %d.",
                 attempt + 1,
+                total_attempts,
             )
 
-        fallback_params = dict(original_params)
-        fallback_params["engine"] = "bing"
-        fallback_params.setdefault("geo_location", "us")
         logger.warning(
-            "Bright Data Google search failed with non-JSON response twice; retrying with Bing. Last failure: %s",
+            "Bright Data Google search failed with non-JSON response after %d attempts. Last failure: %s",
+            total_attempts,
             last_failure or "unknown",
         )
-        return run_once(fallback_params)
+        return {
+            "status": "error",
+            "message": (
+                "Bright Data Google search failed with non-JSON response after "
+                f"{total_attempts} attempts. Last failure: {last_failure or 'unknown'}"
+            ),
+        }
 
     def execute_platform_tool(self, server_name: str, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
         """Execute a platform-scoped MCP tool without an agent context."""
