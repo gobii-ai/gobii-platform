@@ -68,8 +68,34 @@ def invalidate_tool_blacklist_cache() -> None:
 def get_agent_tool_blacklist(agent: Any | None) -> set[str]:
     if agent is None:
         return set()
+    _refresh_agent_preferred_tier_id(agent)
     tier = get_agent_llm_tier(agent)
     return get_tier_tool_blacklist(tier.value)
+
+
+def _refresh_agent_preferred_tier_id(agent: Any) -> None:
+    agent_id = getattr(agent, "id", None)
+    if not agent_id:
+        return
+
+    try:
+        PersistentAgent = apps.get_model("api", "PersistentAgent")
+        current_tier_id = (
+            PersistentAgent.objects.filter(id=agent_id)
+            .values_list("preferred_llm_tier_id", flat=True)
+            .first()
+        )
+    except (AppRegistryNotReady, DatabaseError, LookupError):
+        logger.debug("Failed to refresh preferred tier for agent %s", agent_id, exc_info=True)
+        return
+
+    if current_tier_id is None or current_tier_id == getattr(agent, "preferred_llm_tier_id", None):
+        return
+
+    agent.preferred_llm_tier_id = current_tier_id
+    fields_cache = getattr(getattr(agent, "_state", None), "fields_cache", None)
+    if isinstance(fields_cache, dict):
+        fields_cache.pop("preferred_llm_tier", None)
 
 
 def is_tool_blacklisted_for_agent(agent: Any | None, tool_name: str | None) -> bool:
