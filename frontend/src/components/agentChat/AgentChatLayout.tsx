@@ -22,7 +22,6 @@ import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
-import { PlanningModeStrip } from './PlanningModeStrip'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -883,6 +882,9 @@ export function AgentChatLayout({
     ? 'Finish signup to manage settings and collaborate.'
     : null
   const effectiveShowSignupPreviewPanel = showSignupPreviewPanel && planningState !== 'planning'
+  const composerUnavailable = spawnIntentLoading || effectiveShowSignupPreviewPanel
+  const showComposerUnavailableSkipPlanning = composerUnavailable && planningState === 'planning'
+  const skipPlanningDisabled = !canManageAgent || !onSkipPlanning || skipPlanningBusy
   const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
 
   const handleMessageLinkClick = useCallback((href: string) => {
@@ -1520,14 +1522,6 @@ export function AgentChatLayout({
           </button>
 
           {/* Composer at bottom of flex layout */}
-          {planningState === 'planning' && (spawnIntentLoading || effectiveShowSignupPreviewPanel) ? (
-            <PlanningModeStrip
-              canManageAgent={canManageAgent}
-              onSkipPlanning={onSkipPlanning}
-              skipPlanningBusy={skipPlanningBusy}
-              className="mx-4 mb-3 rounded-lg border border-sky-100 sm:mx-6 lg:mx-10"
-            />
-          ) : null}
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">
@@ -1535,16 +1529,42 @@ export function AgentChatLayout({
                 <div>
                   <p className="text-sm font-semibold text-slate-700">Preparing your agent…</p>
                 </div>
+                {showComposerUnavailableSkipPlanning ? (
+                  <button
+                    type="button"
+                    className="composer-skip-planning-button"
+                    onClick={() => void onSkipPlanning?.()}
+                    disabled={skipPlanningDisabled}
+                    title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
+                  >
+                    {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
+                  </button>
+                ) : null}
               </div>
             </div>
           ) : effectiveShowSignupPreviewPanel ? (
-            <AgentSignupPreviewPanel
-              status={signupPreviewState}
-              agentId={agentId}
-              agentName={agentName}
-              currentPlan={subscriptionPlan}
-              onUpgrade={onUpgrade}
-            />
+            <>
+              <AgentSignupPreviewPanel
+                status={signupPreviewState}
+                agentId={agentId}
+                agentName={agentName}
+                currentPlan={subscriptionPlan}
+                onUpgrade={onUpgrade}
+              />
+              {showComposerUnavailableSkipPlanning ? (
+                <div className="agent-chat-skip-planning-fallback">
+                  <button
+                    type="button"
+                    className="composer-skip-planning-button"
+                    onClick={() => void onSkipPlanning?.()}
+                    disabled={skipPlanningDisabled}
+                    title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
+                  >
+                    {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
+                  </button>
+                </div>
+              ) : null}
+            </>
           ) : (
             <AgentComposer
               agentId={activeAgentId ?? agentId ?? null}
