@@ -348,6 +348,18 @@ def _build_agent_skill_lines(agent_skills: Iterable[PersistentAgentSkill]) -> li
     return lines
 
 
+def _filter_agent_skills_for_tool_blacklist(
+    agent_skills: Iterable[PersistentAgentSkill],
+    blacklisted_tools: set[str],
+) -> list[PersistentAgentSkill]:
+    if not blacklisted_tools:
+        return list(agent_skills)
+    return [
+        skill for skill in agent_skills
+        if not (set(normalize_skill_tool_ids(skill.tools)) & blacklisted_tools)
+    ]
+
+
 def _build_system_skill_lines(system_skills: Iterable[Any]) -> list[str]:
     lines: list[str] = []
     for skill in system_skills:
@@ -1327,7 +1339,10 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         for entry in get_available_custom_tool_entries(agent).values()
     ]
     global_skill_catalog = get_compatible_global_skills(agent)
-    agent_skill_catalog = get_latest_skill_versions(agent)
+    agent_skill_catalog = _filter_agent_skills_for_tool_blacklist(
+        get_latest_skill_versions(agent),
+        blacklisted_tools,
+    )
     system_skill_catalog = shortlist_system_skills(
         query,
         available_tool_names=hidden_builtin_names,

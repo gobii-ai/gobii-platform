@@ -1902,6 +1902,64 @@ class MCPToolFunctionsTests(TestCase):
         )
         mock_enable_tools.assert_not_called()
 
+    @tag("batch_mcp_tools")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_omits_agent_skills_requiring_tier_blacklisted_tools(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["sqlite_batch"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="customer-research",
+            description="Research customer accounts",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Review local account data before summarizing.",
+        )
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="web-review",
+            description="Review web content",
+            version=1,
+            tools=["read_file"],
+            instructions="Review saved files before summarizing.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "customer research")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("customer-research", user_message)
+        self.assertNotIn("sqlite_batch", user_message)
+        self.assertIn("web-review", user_message)
+        mock_enable_tools.assert_not_called()
+
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')

@@ -225,11 +225,13 @@ def _apply_tier_multiplier(agent, amount):
 
 def _invalidate_intelligence_tier_caches() -> None:
     from api.agent.core import llm_config
+    from api.services.tool_blacklist import invalidate_tool_blacklist_cache
 
     _get_intelligence_tier_schema.cache_clear()
     llm_config.invalidate_llm_tier_multiplier_cache()
     llm_config.invalidate_llm_tier_rank_cache()
     llm_config.invalidate_llm_tier_default_cache()
+    invalidate_tool_blacklist_cache()
 
 
 class AgentColor(models.Model):

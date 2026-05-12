@@ -2,12 +2,14 @@ import logging
 from typing import Any, Iterable
 
 from django.apps import apps
+from django.core.cache import cache
 from django.core.exceptions import AppRegistryNotReady
 from django.db.utils import DatabaseError
 
 from api.agent.core.llm_config import get_agent_llm_tier
 
 logger = logging.getLogger(__name__)
+_TIER_TOOL_BLACKLISTS_CACHE_KEY = "intelligence_tier_tool_blacklists:v1"
 
 
 def normalize_tool_blacklist(value: Any) -> list[str]:
@@ -37,18 +39,30 @@ def get_tier_tool_blacklist(tier_key: str | None) -> set[str]:
     if not tier_key:
         return set()
 
+    blacklists = cache.get(_TIER_TOOL_BLACKLISTS_CACHE_KEY)
+    if blacklists is None:
+        blacklists = _load_tier_tool_blacklists()
+        cache.set(_TIER_TOOL_BLACKLISTS_CACHE_KEY, blacklists, timeout=300)
+
+    return set(blacklists.get(str(tier_key), []))
+
+
+def _load_tier_tool_blacklists() -> dict[str, list[str]]:
     try:
         IntelligenceTier = apps.get_model("api", "IntelligenceTier")
-        raw_value = (
-            IntelligenceTier.objects.filter(key=tier_key)
-            .values_list("blacklisted_tools", flat=True)
-            .first()
-        )
+        rows = IntelligenceTier.objects.all().values_list("key", "blacklisted_tools")
     except (AppRegistryNotReady, DatabaseError, LookupError):
-        logger.debug("Failed to load tool blacklist for intelligence tier %s", tier_key, exc_info=True)
-        return set()
+        logger.debug("Failed to load intelligence tier tool blacklists", exc_info=True)
+        return {}
 
-    return set(normalize_tool_blacklist(raw_value))
+    return {
+        str(key): normalize_tool_blacklist(raw_value)
+        for key, raw_value in rows
+    }
+
+
+def invalidate_tool_blacklist_cache() -> None:
+    cache.delete(_TIER_TOOL_BLACKLISTS_CACHE_KEY)
 
 
 def get_agent_tool_blacklist(agent: Any | None) -> set[str]:
