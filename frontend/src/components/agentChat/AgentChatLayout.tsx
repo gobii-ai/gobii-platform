@@ -22,7 +22,6 @@ import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
-import { PlanningModeStrip } from './PlanningModeStrip'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
@@ -1520,14 +1519,6 @@ export function AgentChatLayout({
           </button>
 
           {/* Composer at bottom of flex layout */}
-          {planningState === 'planning' && (spawnIntentLoading || effectiveShowSignupPreviewPanel) ? (
-            <PlanningModeStrip
-              canManageAgent={canManageAgent}
-              onSkipPlanning={onSkipPlanning}
-              skipPlanningBusy={skipPlanningBusy}
-              className="mx-4 mb-3 rounded-lg border border-sky-100 sm:mx-6 lg:mx-10"
-            />
-          ) : null}
           {spawnIntentLoading ? (
             <div className="flex items-center justify-center py-10" aria-live="polite" aria-busy="true">
               <div className="flex flex-col items-center gap-3 text-center">

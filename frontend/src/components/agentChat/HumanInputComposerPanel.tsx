@@ -67,10 +67,9 @@ export function HumanInputComposerPanel({
   const activeDraft = activeRequest ? draftResponses[activeRequest.id] : undefined
   const isBusy = Boolean(activeRequest && busyRequestId === activeRequest.id)
   const otherInputRef = useRef<HTMLInputElement | null>(null)
-  const standaloneTextareaRef = useRef<HTMLTextAreaElement | null>(null)
 
   const otherOptionTitle = `Other - tell ${agentName?.trim() || 'the agent'} what to do`
-  const showStandaloneTextInput = Boolean(
+  const usesStandaloneTextInput = Boolean(
     activeRequest
     && (
       activeRequest.inputMode === 'free_text_only'
@@ -84,15 +83,11 @@ export function HumanInputComposerPanel({
     : ''
 
   useEffect(() => {
-    if ((!showStandaloneTextInput && !isOtherSelected) || disabled) {
-      return
-    }
-    if (showStandaloneTextInput) {
-      standaloneTextareaRef.current?.focus()
+    if (!isOtherSelected || disabled) {
       return
     }
     otherInputRef.current?.focus()
-  }, [activeRequest?.id, disabled, isOtherSelected, showStandaloneTextInput])
+  }, [activeRequest?.id, disabled, isOtherSelected])
 
   if (!activeRequest) {
     return null
@@ -105,18 +100,6 @@ export function HumanInputComposerPanel({
     onSelectOption(activeRequest.id, HUMAN_INPUT_OTHER_OPTION_KEY)
   }
 
-  const handleTextKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
-      return
-    }
-    const shouldSubmit = (event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey
-    if (!shouldSubmit || !canSubmit || disabled || isBusy) {
-      return
-    }
-    event.preventDefault()
-    void onSubmitRequest()
-  }
-
   const handleOtherInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Enter' || event.nativeEvent.isComposing) {
       return
@@ -126,6 +109,10 @@ export function HumanInputComposerPanel({
     }
     event.preventDefault()
     void onSubmitRequest()
+  }
+
+  if (usesStandaloneTextInput) {
+    return null
   }
 
   return (
@@ -202,20 +189,6 @@ export function HumanInputComposerPanel({
           </>
         ) : null}
 
-        {showStandaloneTextInput ? (
-          <div className="bg-white px-3 py-3">
-            <textarea
-              ref={standaloneTextareaRef}
-              rows={3}
-              value={activeDraft?.freeText ?? ''}
-              onChange={(event) => onDraftFreeTextChange(activeRequest.id, event.target.value)}
-              onKeyDown={handleTextKeyDown}
-              disabled={disabled || isBusy}
-              placeholder="Type your answer"
-              className="block min-h-[6rem] w-full resize-none rounded-2xl border border-slate-200/80 bg-white px-3.5 py-3 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:border-sky-300 focus:outline-none focus:ring-2 focus:ring-sky-100 disabled:cursor-wait disabled:opacity-60"
-            />
-          </div>
-        ) : null}
       </div>
 
       <div className="mt-3 flex items-center justify-between gap-3">

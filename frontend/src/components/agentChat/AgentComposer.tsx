@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronUp, Loader2, Paperclip, Plus, Sparkles, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, MessageSquareQuote, Paperclip, Plus, Sparkles, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -9,7 +9,6 @@ import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
-import { PlanningModeStrip } from './PlanningModeStrip'
 import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
@@ -98,6 +97,24 @@ function getInsightBackground(insight: InsightEvent): string {
   }
   return 'transparent'
 }
+
+function getPendingActionRequestCount(action: PendingActionRequest): number {
+  switch (action.kind) {
+    case 'human_input':
+    case 'contact_requests':
+      return Math.max(1, action.count || action.requests.length)
+    case 'requested_secrets':
+      return Math.max(1, action.count || action.secrets.length)
+    case 'spawn_request':
+      return 1
+    default:
+      return 1
+  }
+}
+
+type PendingActionNavigationItem =
+  | { actionId: string; kind: 'human_input'; requestId: string }
+  | { actionId: string; kind: 'action' }
 
 type HumanInputComposerResponse = {
   requestId: string
@@ -389,7 +406,7 @@ export const AgentComposer = memo(function AgentComposer({
   const [draftHumanInputResponses, setDraftHumanInputResponses] = useState<Record<string, HumanInputComposerResponse>>({})
   const draftHumanInputResponsesRef = useRef<Record<string, HumanInputComposerResponse>>({})
   const [autoWorkingExpanded, setAutoWorkingExpanded] = useState(true)
-  const [pendingActionsCollapsedInsights, setPendingActionsCollapsedInsights] = useState(false)
+  const [pendingActionsForceExpanded, setPendingActionsForceExpanded] = useState(() => pendingActionRequests.length > 0)
   const { isProprietaryMode, openUpgradeModal, ensureAuthenticated } = useSubscriptionStore()
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
@@ -410,7 +427,8 @@ export const AgentComposer = memo(function AgentComposer({
   const isProcessingRef = useRef(isProcessing)
   const hadPendingActionsRef = useRef(false)
   const baseWorkingExpanded = insightsPanelExpandedPreference ?? autoWorkingExpanded
-  const resolvedWorkingExpanded = pendingActionsCollapsedInsights ? false : baseWorkingExpanded
+  const hasPendingActions = pendingActionRequests.length > 0
+  const resolvedWorkingExpanded = pendingActionsForceExpanded || baseWorkingExpanded
 
   useEffect(() => {
     isProcessingRef.current = isProcessing
@@ -431,14 +449,13 @@ export const AgentComposer = memo(function AgentComposer({
   }, [insightsPanelExpandedPreference, isProcessing])
 
   useEffect(() => {
-    const hasPendingActions = pendingActionRequests.length > 0
     if (hasPendingActions && !hadPendingActionsRef.current) {
-      setPendingActionsCollapsedInsights(true)
+      setPendingActionsForceExpanded(true)
     } else if (!hasPendingActions && hadPendingActionsRef.current) {
-      setPendingActionsCollapsedInsights(false)
+      setPendingActionsForceExpanded(false)
     }
     hadPendingActionsRef.current = hasPendingActions
-  }, [pendingActionRequests.length])
+  }, [hasPendingActions])
 
   const MAX_COMPOSER_HEIGHT = 320
 
@@ -538,8 +555,8 @@ export const AgentComposer = memo(function AgentComposer({
   // Handle panel expand/collapse toggle
   const handlePanelToggle = useCallback(() => {
     const newExpanded = !resolvedWorkingExpanded
-    if (pendingActionsCollapsedInsights && newExpanded) {
-      setPendingActionsCollapsedInsights(false)
+    if (!newExpanded) {
+      setPendingActionsForceExpanded(false)
     }
     if (onInsightsPanelExpandedPreferenceChange) {
       onInsightsPanelExpandedPreferenceChange(newExpanded)
@@ -555,7 +572,6 @@ export const AgentComposer = memo(function AgentComposer({
     currentInsight?.insightType,
     hasInsights,
     onInsightsPanelExpandedPreferenceChange,
-    pendingActionsCollapsedInsights,
     resolvedWorkingExpanded,
   ])
 
@@ -779,11 +795,21 @@ export const AgentComposer = memo(function AgentComposer({
         ?? null
       )
       : null
+  const activeHumanInputUsesMainComposer = Boolean(
+    activeHumanInputRequest
+    && (
+      activeHumanInputRequest.inputMode === 'free_text_only'
+      || activeHumanInputRequest.options.length === 0
+    ),
+  )
 
   const submitShortcutHint = shouldShowSubmitShortcutHint()
-    ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to send`
+    ? `${isMacOS() ? '⌘↵' : 'Ctrl+↵'} to ${activeHumanInputUsesMainComposer ? 'submit' : 'send'}`
     : ''
-  const composerPlaceholder = disabledReason || ['Message', submitShortcutHint].filter(Boolean).join(' · ')
+  const composerPlaceholder = disabledReason || [
+    activeHumanInputUsesMainComposer ? 'Type your answer' : 'Message',
+    submitShortcutHint,
+  ].filter(Boolean).join(' · ')
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -801,22 +827,6 @@ export const AgentComposer = memo(function AgentComposer({
     pendingHumanInputRequests.length,
     resolvedWorkingExpanded,
   ])
-
-  const handleActiveHumanInputRequestChange = useCallback((nextRequestId: string) => {
-    setActiveHumanInputRequestId(nextRequestId)
-  }, [])
-
-  const handleActivePendingActionChange = useCallback((nextActionId: string) => {
-    const nextAction = pendingActionRequests.find((request) => request.id === nextActionId) ?? null
-
-    setActivePendingActionId(nextActionId)
-    if (nextAction?.kind === 'human_input') {
-      const nextRequest = nextAction.requests.find((request) => request.id === activeHumanInputRequestId)
-        ?? nextAction.requests[0]
-        ?? null
-      setActiveHumanInputRequestId(nextRequest?.id ?? null)
-    }
-  }, [activeHumanInputRequestId, pendingActionRequests])
 
   const syncDraftHumanInputResponses = useCallback((nextDrafts: Record<string, HumanInputComposerResponse>) => {
     draftHumanInputResponsesRef.current = nextDrafts
@@ -1041,7 +1051,75 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [busyHumanInputRequestId, disabled, isSending, onDismissHumanInput, syncDraftHumanInputResponses])
 
+  useEffect(() => {
+    if (!activeHumanInputUsesMainComposer || !activeHumanInputRequest) {
+      return
+    }
+    setBody(draftHumanInputResponsesRef.current[activeHumanInputRequest.id]?.freeText ?? '')
+    requestAnimationFrame(() => adjustTextareaHeight(true))
+  }, [activeHumanInputRequest?.id, activeHumanInputUsesMainComposer, adjustTextareaHeight])
+
+  const submitFreeTextHumanInputFromComposer = useCallback(async () => {
+    if (!activeHumanInputUsesMainComposer || !activeHumanInputRequest || !onRespondHumanInput) {
+      return false
+    }
+    const trimmed = body.trim()
+    if (!trimmed || disabled || isSending || busyHumanInputRequestId) {
+      return true
+    }
+
+    const request = activeHumanInputRequest
+    const currentDrafts = draftHumanInputResponsesRef.current
+    const nextDrafts = {
+      ...currentDrafts,
+      [request.id]: {
+        ...currentDrafts[request.id],
+        requestId: request.id,
+        freeText: trimmed,
+      },
+    }
+    const batchRequests = getHumanInputBatchRequests(request.batchId)
+    if (batchRequests.length > 1) {
+      const nextUnanswered = batchRequests.find((candidate) => !hasHumanInputComposerResponse(candidate, nextDrafts[candidate.id]))
+      if (nextUnanswered) {
+        syncDraftHumanInputResponses(nextDrafts)
+        const nextPendingAction = pendingActionRequests.find((candidate) => (
+          candidate.kind === 'human_input'
+          && candidate.requests.some((pendingRequest) => pendingRequest.id === nextUnanswered.id)
+        ))
+        if (nextPendingAction) {
+          setActivePendingActionId(nextPendingAction.id)
+        }
+        setActiveHumanInputRequestId(nextUnanswered.id)
+        setBody('')
+        requestAnimationFrame(() => adjustTextareaHeight(true))
+        return true
+      }
+    }
+
+    await submitHumanInputDrafts(request, nextDrafts)
+    setBody('')
+    requestAnimationFrame(() => adjustTextareaHeight(true))
+    return true
+  }, [
+    activeHumanInputRequest,
+    activeHumanInputUsesMainComposer,
+    adjustTextareaHeight,
+    body,
+    busyHumanInputRequestId,
+    disabled,
+    getHumanInputBatchRequests,
+    isSending,
+    onRespondHumanInput,
+    pendingActionRequests,
+    submitHumanInputDrafts,
+    syncDraftHumanInputResponses,
+  ])
+
   const submitMessage = useCallback(async () => {
+    if (await submitFreeTextHumanInputFromComposer()) {
+      return
+    }
     const trimmed = body.trim()
     const lacksRequiredContent = requiresMessageBody ? !trimmed : !trimmed && attachments.length === 0
     if (lacksRequiredContent || disabled || isSending) {
@@ -1081,6 +1159,7 @@ export const AgentComposer = memo(function AgentComposer({
     isSending,
     onSubmit,
     requiresMessageBody,
+    submitFreeTextHumanInputFromComposer,
   ])
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -1214,34 +1293,93 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [addAttachments, disabled, isSending])
 
-  // Show the panel when processing OR when there are insights to display
-  const showWorkingPanel = !hideInsightsPanel && (isProcessing || hasInsights || insightsLoading)
+  const pendingActionCount = pendingActionRequests.reduce((total, action) => total + getPendingActionRequestCount(action), 0)
+  const pendingActionNavigationItems = useMemo<PendingActionNavigationItem[]>(() => (
+    pendingActionRequests.reduce<PendingActionNavigationItem[]>((items, action) => {
+      if (action.kind !== 'human_input') {
+        items.push({ actionId: action.id, kind: 'action' })
+        return items
+      }
+      orderHumanInputRequests(action.requests).forEach((request) => items.push({
+        actionId: action.id,
+        kind: 'human_input',
+        requestId: request.id,
+      }))
+      return items
+    }, [])
+  ), [pendingActionRequests])
+  const activePendingActionItemIndex = Math.max(0, pendingActionNavigationItems.findIndex((item) => (
+    activePendingAction?.kind === 'human_input'
+      ? item.kind === 'human_input'
+        && item.actionId === activePendingAction.id
+        && item.requestId === activeHumanInputRequest?.id
+      : item.actionId === activePendingAction?.id
+  )))
+  // Show the panel when processing, when requests need attention, or when there are insights to display.
+  const showWorkingPanel = !hideInsightsPanel && (isProcessing || isPlanningMode || hasPendingActions || hasInsights || insightsLoading)
   const taskCount = processingTasks.length
-  const showPlanningStrip = isPlanningMode
-  const showHumanInputActionPanel = activePendingAction?.kind === 'human_input'
+  const skipPlanningDisabled = !canManageAgent || !onSkipPlanning || skipPlanningBusy
+  const showHumanInputActionPanel = activePendingAction?.kind === 'human_input' && resolvedWorkingExpanded && !activeHumanInputUsesMainComposer
   const composerSurfaceClassName = `composer-surface${
     showHumanInputActionPanel
-      ? showWorkingPanel || showPlanningStrip
+      ? showWorkingPanel
         ? ' overflow-hidden rounded-b-[1.25rem]'
         : ' overflow-hidden rounded-[1.25rem]'
       : ''
   }`
   const composerActionsDisabled = disabled || isSending
+  const isSubmittingMainComposerHumanInput = activeHumanInputUsesMainComposer && Boolean(busyHumanInputRequestId)
+  const sendButtonBusy = isSending || isSubmittingMainComposerHumanInput
   const sendDisabled = composerActionsDisabled
     || stopProcessingBusy
-    || (requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
+    || (activeHumanInputUsesMainComposer ? !body.trim() || Boolean(busyHumanInputRequestId) : requiresMessageBody ? !body.trim() : !body.trim() && attachments.length === 0)
   const sendTitle = stopProcessingBusy
     ? 'Stopping'
-    : disabledReason || (isSending ? 'Sending' : `Send (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+    : disabledReason || (sendButtonBusy ? activeHumanInputUsesMainComposer ? 'Submitting' : 'Sending' : `${activeHumanInputUsesMainComposer ? 'Submit' : 'Send'} (${isMacOS() ? '⌘↵' : 'Ctrl+Enter'})`)
+  const renderSkipPlanningButton = (className = 'composer-skip-planning-button') => (
+    <button
+      type="button"
+      className={className}
+      onClick={(event) => {
+        event.preventDefault()
+        event.stopPropagation()
+        void onSkipPlanning?.()
+      }}
+      disabled={skipPlanningDisabled}
+      title={canManageAgent ? 'Skip Planning' : 'Only managers can skip planning'}
+    >
+      {skipPlanningBusy ? 'Skipping...' : 'Skip Planning'}
+    </button>
+  )
+  const handlePendingActionNavigationItemChange = (item: PendingActionNavigationItem | undefined) => {
+    if (!item) {
+      return
+    }
+    setActivePendingActionId(item.actionId)
+    if (item.kind === 'human_input') {
+      setActiveHumanInputRequestId(item.requestId)
+    }
+  }
 
   const renderComposerUtilityRow = (appsAction: ComposerAppsAction | null = null) => (
     <div className="composer-utility-row">
       <div className="composer-utility-row__leading">
-        <ComposerActionMenu
-          disabled={composerActionsDisabled}
-          onUploadFiles={handleOpenFilePicker}
-          appsAction={appsAction}
-        />
+        {activeHumanInputUsesMainComposer && activeHumanInputRequest ? (
+          <button
+            type="button"
+            onClick={() => void handleDismissHumanInputRequest(activeHumanInputRequest.id)}
+            disabled={disabled || isSending || Boolean(busyHumanInputRequestId)}
+            className="text-sm font-medium text-slate-500 transition hover:text-slate-900 disabled:cursor-wait disabled:opacity-50"
+          >
+            Dismiss
+          </button>
+        ) : (
+          <ComposerActionMenu
+            disabled={composerActionsDisabled}
+            onUploadFiles={handleOpenFilePicker}
+            appsAction={appsAction}
+          />
+        )}
       </div>
       <div className="composer-utility-row__actions">
         {showIntelligenceSelector ? (
@@ -1278,15 +1416,21 @@ export const AgentComposer = memo(function AgentComposer({
             className="composer-send-button"
             disabled={sendDisabled}
             title={sendTitle}
-            aria-label={stopProcessingBusy ? 'Stopping agent' : isSending ? 'Sending message' : 'Send message'}
+            aria-label={
+              stopProcessingBusy
+                ? 'Stopping agent'
+                : sendButtonBusy
+                  ? activeHumanInputUsesMainComposer ? 'Submitting response' : 'Sending message'
+                  : activeHumanInputUsesMainComposer ? 'Submit response' : 'Send message'
+            }
           >
-            {isSending ? (
+            {sendButtonBusy ? (
               <span className="inline-flex items-center justify-center">
                 <span
                   className="h-4 w-4 animate-spin rounded-full border-2 border-white/60 border-t-white"
                   aria-hidden="true"
                 />
-                <span className="sr-only">Sending</span>
+                <span className="sr-only">{activeHumanInputUsesMainComposer ? 'Submitting' : 'Sending'}</span>
               </span>
             ) : (
               <>
@@ -1315,8 +1459,9 @@ export const AgentComposer = memo(function AgentComposer({
           <div
             className="composer-working-panel"
             data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
+            data-has-pending-actions={hasPendingActions ? 'true' : 'false'}
             style={
-              currentInsight || insightsLoading
+              !hasPendingActions && (currentInsight || insightsLoading)
                 ? { background: currentInsight ? getInsightBackground(currentInsight) : DEFAULT_INSIGHT_BACKGROUND }
                 : undefined
             }
@@ -1335,7 +1480,65 @@ export const AgentComposer = memo(function AgentComposer({
                 }
               }}
             >
-              {isProcessing ? (
+              {hasPendingActions ? (
+                <>
+                  {isProcessing ? (
+                    <span
+                      className="composer-working-indicator composer-working-indicator--dots"
+                      aria-label={isStopping ? 'stopping' : isPlanningMode ? 'planning' : 'working'}
+                    >
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                      <span className="composer-working-dot" />
+                    </span>
+                  ) : (
+                    <MessageSquareQuote className="composer-working-indicator" aria-hidden="true" />
+                  )}
+                  <span className="composer-working-status">
+                    <strong>Needs your input</strong>
+                  </span>
+                  <span className="composer-working-tasks-badge">
+                    {pendingActionCount} {pendingActionCount === 1 ? 'request' : 'requests'}
+                  </span>
+                  {isPlanningMode ? renderSkipPlanningButton() : null}
+                  {pendingActionNavigationItems.length > 1 ? (
+                    <div
+                      className="composer-pending-action-nav"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        className="composer-pending-action-nav__button"
+                        onClick={() => handlePendingActionNavigationItemChange(
+                          pendingActionNavigationItems[Math.max(0, activePendingActionItemIndex - 1)],
+                        )}
+                        disabled={disabled || activePendingActionItemIndex === 0}
+                        aria-label="Previous pending request"
+                      >
+                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <span className="composer-pending-action-nav__count">
+                        {activePendingActionItemIndex + 1} of {pendingActionNavigationItems.length}
+                      </span>
+                      <button
+                        type="button"
+                        className="composer-pending-action-nav__button"
+                        onClick={() => handlePendingActionNavigationItemChange(
+                          pendingActionNavigationItems[Math.min(
+                            pendingActionNavigationItems.length - 1,
+                            activePendingActionItemIndex + 1,
+                          )],
+                        )}
+                        disabled={disabled || activePendingActionItemIndex >= pendingActionNavigationItems.length - 1}
+                        aria-label="Next pending request"
+                      >
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              ) : isProcessing || isPlanningMode ? (
                 <>
                   <Sparkles className="composer-working-indicator" aria-hidden="true" />
                   <span className="composer-working-status">
@@ -1346,6 +1549,7 @@ export const AgentComposer = memo(function AgentComposer({
                       <span className="composer-working-dot" />
                     </span>
                   </span>
+                  {isPlanningMode ? renderSkipPlanningButton() : null}
                   {taskCount > 0 ? (
                     <span className="composer-working-tasks-badge">
                       {taskCount} {taskCount === 1 ? 'task' : 'tasks'}
@@ -1359,7 +1563,7 @@ export const AgentComposer = memo(function AgentComposer({
               )}
 
               {/* Colored pill tabs in header */}
-              {hasMultipleInsights ? (
+              {!hasPendingActions && hasMultipleInsights ? (
                 <div
                   className="composer-insight-tabs"
                   onClick={(e) => e.stopPropagation()}
@@ -1393,7 +1597,7 @@ export const AgentComposer = memo(function AgentComposer({
                     })}
                   </div>
                 </div>
-              ) : insightsLoading ? (
+              ) : !hasPendingActions && insightsLoading ? (
                 <div className="composer-insight-tabs composer-insight-tabs--loading" aria-hidden="true">
                   <div className="composer-insight-tabs-scroll">
                     <span className="composer-insight-tab-placeholder composer-insight-tab-placeholder--active" />
@@ -1413,70 +1617,59 @@ export const AgentComposer = memo(function AgentComposer({
             </div>
 
             {/* Expanded content */}
-            {resolvedWorkingExpanded && (hasInsights || insightsLoading) ? (
+            {resolvedWorkingExpanded && (hasPendingActions || hasInsights || insightsLoading) ? (
               <div
                 className="composer-working-content"
                 onMouseEnter={handleInsightMouseEnter}
                 onMouseLeave={handleInsightMouseLeave}
               >
-                <div
-                  className="composer-working-insight"
-                  data-loading={!currentInsight && insightsLoading ? 'true' : 'false'}
-                  key={currentInsight?.insightId ?? 'insights-loading'}
-                >
-                  {currentInsight ? (
-                    <InsightEventCard
-                      insight={currentInsight}
-                      onDismiss={handleDismissInsight}
-                      onCollaborate={onCollaborate}
-                      collaborateDisabled={collaborateDisabled}
-                      collaborateDisabledReason={collaborateDisabledReason}
-                      onBlockedCollaborate={onBlockedCollaborate}
+                {hasPendingActions ? (
+                  <div className="composer-working-pending-actions">
+                    <PendingActionComposerPanel
+                      actions={pendingActionRequests}
+                      agentName={agentName ?? agentFirstName}
+                      activeActionId={activePendingActionId}
+                      disabled={disabled || isSending}
+                      activeHumanInputRequestId={activeHumanInputRequestId}
+                      draftHumanInputResponses={draftHumanInputResponses}
+                      busyHumanInputRequestId={busyHumanInputRequestId}
+                      onSelectHumanInputOption={handleSelectHumanInputOption}
+                      onDraftHumanInputFreeTextChange={handleDraftHumanInputFreeTextChange}
+                      onSubmitHumanInputRequest={handleSubmitHumanInputRequest}
+                      onDismissHumanInputRequest={handleDismissHumanInputRequest}
+                      onResolveSpawnRequest={onResolveSpawnRequest}
+                      onFulfillRequestedSecrets={onFulfillRequestedSecrets}
+                      onRemoveRequestedSecrets={onRemoveRequestedSecrets}
+                      onResolveContactRequests={onResolveContactRequests}
                     />
-                  ) : (
-                    <div className="composer-working-insight-skeleton" aria-hidden="true">
-                      <span className="composer-working-insight-skeleton__eyebrow" />
-                      <span className="composer-working-insight-skeleton__title" />
-                      <span className="composer-working-insight-skeleton__line" />
-                      <span className="composer-working-insight-skeleton__line composer-working-insight-skeleton__line--short" />
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div
+                    className="composer-working-insight"
+                    data-loading={!currentInsight && insightsLoading ? 'true' : 'false'}
+                    key={currentInsight?.insightId ?? 'insights-loading'}
+                  >
+                    {currentInsight ? (
+                      <InsightEventCard
+                        insight={currentInsight}
+                        onDismiss={handleDismissInsight}
+                        onCollaborate={onCollaborate}
+                        collaborateDisabled={collaborateDisabled}
+                        collaborateDisabledReason={collaborateDisabledReason}
+                        onBlockedCollaborate={onBlockedCollaborate}
+                      />
+                    ) : (
+                      <div className="composer-working-insight-skeleton" aria-hidden="true">
+                        <span className="composer-working-insight-skeleton__eyebrow" />
+                        <span className="composer-working-insight-skeleton__title" />
+                        <span className="composer-working-insight-skeleton__line" />
+                        <span className="composer-working-insight-skeleton__line composer-working-insight-skeleton__line--short" />
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : null}
-          </div>
-        ) : null}
-
-        {showPlanningStrip ? (
-          <PlanningModeStrip
-            canManageAgent={canManageAgent}
-            onSkipPlanning={onSkipPlanning}
-            skipPlanningBusy={skipPlanningBusy}
-            className="border-t border-sky-100"
-          />
-        ) : null}
-
-        {pendingActionRequests.length > 0 ? (
-          <div>
-            <PendingActionComposerPanel
-              actions={pendingActionRequests}
-              agentName={agentName ?? agentFirstName}
-              activeActionId={activePendingActionId}
-              onActiveActionChange={handleActivePendingActionChange}
-              disabled={disabled || isSending}
-              activeHumanInputRequestId={activeHumanInputRequestId}
-              draftHumanInputResponses={draftHumanInputResponses}
-              busyHumanInputRequestId={busyHumanInputRequestId}
-              onActiveHumanInputRequestChange={handleActiveHumanInputRequestChange}
-              onSelectHumanInputOption={handleSelectHumanInputOption}
-              onDraftHumanInputFreeTextChange={handleDraftHumanInputFreeTextChange}
-              onSubmitHumanInputRequest={handleSubmitHumanInputRequest}
-              onDismissHumanInputRequest={handleDismissHumanInputRequest}
-              onResolveSpawnRequest={onResolveSpawnRequest}
-              onFulfillRequestedSecrets={onFulfillRequestedSecrets}
-              onRemoveRequestedSecrets={onRemoveRequestedSecrets}
-              onResolveContactRequests={onResolveContactRequests}
-            />
           </div>
         ) : null}
 
@@ -1505,7 +1698,13 @@ export const AgentComposer = memo(function AgentComposer({
                   className="block min-h-[1.8rem] w-full flex-1 resize-none border-0 bg-transparent px-0 py-1 text-[0.9375rem] leading-relaxed tracking-[-0.01em] text-slate-800 placeholder:text-slate-400/80 focus:outline-none focus:ring-0"
                   placeholder={composerPlaceholder}
                   value={body}
-                  onChange={(event) => setBody(event.target.value)}
+                  onChange={(event) => {
+                    const nextValue = event.target.value
+                    setBody(nextValue)
+                    if (activeHumanInputUsesMainComposer && activeHumanInputRequest) {
+                      handleDraftHumanInputFreeTextChange(activeHumanInputRequest.id, nextValue)
+                    }
+                  }}
                   onKeyDown={handleKeyDown}
                   onPaste={handlePaste}
                   onFocus={() => {

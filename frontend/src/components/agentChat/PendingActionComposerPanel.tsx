@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { ChevronLeft, ChevronRight, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
+import { KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PendingActionRequest } from '../../types/agentChat'
@@ -20,12 +20,10 @@ type PendingActionComposerPanelProps = {
   actions: PendingActionRequest[]
   agentName?: string | null
   activeActionId: string | null
-  onActiveActionChange: (actionId: string) => void
   disabled?: boolean
   activeHumanInputRequestId: string | null
   draftHumanInputResponses?: Record<string, HumanInputDraft>
   busyHumanInputRequestId?: string | null
-  onActiveHumanInputRequestChange: (requestId: string) => void
   onSelectHumanInputOption: (requestId: string, optionKey: string) => void
   onDraftHumanInputFreeTextChange: (requestId: string, value: string) => void
   onSubmitHumanInputRequest: () => Promise<void> | void
@@ -115,12 +113,10 @@ export function PendingActionComposerPanel({
   actions,
   agentName = null,
   activeActionId,
-  onActiveActionChange,
   disabled = false,
   activeHumanInputRequestId,
   draftHumanInputResponses = {},
   busyHumanInputRequestId = null,
-  onActiveHumanInputRequestChange,
   onSelectHumanInputOption,
   onDraftHumanInputFreeTextChange,
   onSubmitHumanInputRequest,
@@ -147,10 +143,6 @@ export function PendingActionComposerPanel({
   const activeHumanInputRequest = activeAction?.kind === 'human_input'
     ? (orderedHumanInputRequests.find((request) => request.id === activeHumanInputRequestId) ?? orderedHumanInputRequests[0] ?? null)
     : null
-  const activeIndex = Math.max(0, actions.findIndex((action) => action.id === activeAction?.id))
-  const activeHumanInputIndex = activeHumanInputRequest
-    ? Math.max(0, orderedHumanInputRequests.findIndex((request) => request.id === activeHumanInputRequest.id))
-    : 0
   const ActiveIcon = activeAction ? actionIcon(activeAction) : MessageSquareQuote
   const activeActionHeading = activeAction?.kind === 'human_input'
     ? (activeHumanInputRequest?.question ?? 'Needs your reply')
@@ -158,6 +150,12 @@ export function PendingActionComposerPanel({
   const activeActionMeta = activeAction?.kind === 'human_input'
     ? null
     : (activeAction ? actionMeta(activeAction) : null)
+  const showHumanInputComposer = Boolean(
+    activeAction?.kind === 'human_input'
+    && activeHumanInputRequest
+    && activeHumanInputRequest.inputMode !== 'free_text_only'
+    && activeHumanInputRequest.options.length > 0,
+  )
 
   useEffect(() => {
     if (activeAction?.kind !== 'requested_secrets') {
@@ -285,6 +283,11 @@ export function PendingActionComposerPanel({
     }
   }
 
+  const hasActionBody = showHumanInputComposer
+    || activeAction.kind === 'spawn_request'
+    || activeAction.kind === 'requested_secrets'
+    || activeAction.kind === 'contact_requests'
+
   return (
     <section className="bg-white px-3 py-3 text-slate-800" aria-label="Pending action request">
       <div className="flex items-start justify-between gap-3">
@@ -303,114 +306,67 @@ export function PendingActionComposerPanel({
             ) : null}
           </div>
         </div>
-        {activeAction.kind === 'human_input' && orderedHumanInputRequests.length > 1 ? (
-          <div className="flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveHumanInputRequestChange(orderedHumanInputRequests[Math.max(0, activeHumanInputIndex - 1)].id)}
-              disabled={disabled || activeHumanInputIndex === 0}
-              aria-label="Previous question"
-            >
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <span className="min-w-[3.25rem] text-center text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
-              {activeHumanInputIndex + 1} of {orderedHumanInputRequests.length}
-            </span>
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveHumanInputRequestChange(orderedHumanInputRequests[Math.min(orderedHumanInputRequests.length - 1, activeHumanInputIndex + 1)].id)}
-              disabled={disabled || activeHumanInputIndex >= orderedHumanInputRequests.length - 1}
-              aria-label="Next question"
-            >
-              <ChevronRight className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
-        ) : actions.length > 1 ? (
-          <div className="flex shrink-0 items-center gap-1.5 text-sm text-slate-500">
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveActionChange(actions[Math.max(0, activeIndex - 1)].id)}
-              disabled={disabled || activeIndex === 0}
-              aria-label="Previous pending action"
-            >
-              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <span className="min-w-[3.25rem] text-center text-[10px] font-medium uppercase tracking-[0.14em] text-slate-400">
-              {activeIndex + 1} of {actions.length}
-            </span>
-            <button
-              type="button"
-              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-35"
-              onClick={() => onActiveActionChange(actions[Math.min(actions.length - 1, activeIndex + 1)].id)}
-              disabled={disabled || activeIndex >= actions.length - 1}
-              aria-label="Next pending action"
-            >
-              <ChevronRight className="h-4 w-4" aria-hidden="true" />
-            </button>
-          </div>
-        ) : null}
       </div>
 
-      <div className="mt-3">
-        {activeAction.kind === 'human_input' ? (
-          <HumanInputComposerPanel
-            requests={activeAction.requests}
-            agentName={agentName}
-            activeRequestId={activeHumanInputRequestId}
-            draftResponses={draftHumanInputResponses}
-            disabled={disabled}
-            busyRequestId={busyHumanInputRequestId}
-            onSelectOption={onSelectHumanInputOption}
-            onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
-            onSubmitRequest={onSubmitHumanInputRequest}
-            onDismissRequest={onDismissHumanInputRequest}
-          />
-        ) : null}
+      {hasActionBody ? (
+        <div className="mt-3">
+          {showHumanInputComposer && activeAction.kind === 'human_input' ? (
+            <HumanInputComposerPanel
+              requests={activeAction.requests}
+              agentName={agentName}
+              activeRequestId={activeHumanInputRequestId}
+              draftResponses={draftHumanInputResponses}
+              disabled={disabled}
+              busyRequestId={busyHumanInputRequestId}
+              onSelectOption={onSelectHumanInputOption}
+              onDraftFreeTextChange={onDraftHumanInputFreeTextChange}
+              onSubmitRequest={onSubmitHumanInputRequest}
+              onDismissRequest={onDismissHumanInputRequest}
+            />
+          ) : null}
 
-        {activeAction.kind === 'spawn_request' ? (
-          <PendingSpawnRequestPanel
-            action={activeAction}
-            disabled={disabled || !onResolveSpawnRequest}
-            busyDecision={busySpawnDecision}
-            error={spawnError}
-            onResolve={handleResolveSpawn}
-          />
-        ) : null}
+          {activeAction.kind === 'spawn_request' ? (
+            <PendingSpawnRequestPanel
+              action={activeAction}
+              disabled={disabled || !onResolveSpawnRequest}
+              busyDecision={busySpawnDecision}
+              error={spawnError}
+              onResolve={handleResolveSpawn}
+            />
+          ) : null}
 
-        {activeAction.kind === 'requested_secrets' ? (
-          <PendingRequestedSecretsPanel
-            action={activeAction}
-            disabled={disabled || (!onFulfillRequestedSecrets && !onRemoveRequestedSecrets)}
-            busyAction={busySecretsAction}
-            error={secretError}
-            secretValues={secretValues}
-            makeGlobal={makeGlobal}
-            onSecretValueChange={(secretId, value) => {
-              setSecretValues((current) => ({ ...current, [secretId]: value }))
-            }}
-            onMakeGlobalChange={setMakeGlobal}
-            onSave={handleSaveSecrets}
-            onRemove={handleRemoveSecrets}
-          />
-        ) : null}
+          {activeAction.kind === 'requested_secrets' ? (
+            <PendingRequestedSecretsPanel
+              action={activeAction}
+              disabled={disabled || (!onFulfillRequestedSecrets && !onRemoveRequestedSecrets)}
+              busyAction={busySecretsAction}
+              error={secretError}
+              secretValues={secretValues}
+              makeGlobal={makeGlobal}
+              onSecretValueChange={(secretId, value) => {
+                setSecretValues((current) => ({ ...current, [secretId]: value }))
+              }}
+              onMakeGlobalChange={setMakeGlobal}
+              onSave={handleSaveSecrets}
+              onRemove={handleRemoveSecrets}
+            />
+          ) : null}
 
-        {activeAction.kind === 'contact_requests' ? (
-          <PendingContactRequestsPanel
-            action={activeAction}
-            disabled={disabled || !onResolveContactRequests}
-            busy={busyContacts}
-            error={contactError}
-            contactDrafts={contactDrafts}
-            onContactDraftChange={(requestId, nextDraft) => {
-              setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
-            }}
-            onSubmit={handleResolveContacts}
-          />
-        ) : null}
-      </div>
+          {activeAction.kind === 'contact_requests' ? (
+            <PendingContactRequestsPanel
+              action={activeAction}
+              disabled={disabled || !onResolveContactRequests}
+              busy={busyContacts}
+              error={contactError}
+              contactDrafts={contactDrafts}
+              onContactDraftChange={(requestId, nextDraft) => {
+                setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
+              }}
+              onSubmit={handleResolveContacts}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   )
 }
