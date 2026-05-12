@@ -3,6 +3,7 @@
 import asyncio
 import atexit
 import json
+import os
 import time
 import uuid
 from datetime import datetime, timedelta, UTC
@@ -40,8 +41,7 @@ from api.agent.core.llm_config import AgentLLMTier
 from tests.utils.llm_seed import get_intelligence_tier
 from constants.plans import PlanNames
 from api.agent.tools.mcp_manager import (
-    BRIGHTDATA_SEARCH_MAX_RETRIES,
-    BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS,
+    BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY,
     MCPToolManager,
     MCPToolInfo,
     MCPServerRuntime,
@@ -4142,52 +4142,123 @@ class MCPIsolatedExecutionTests(TestCase):
             server_config=self.server_config,
         )
 
-    def test_brightdata_google_search_retries_three_times_without_bing_fallback(self):
+    def _brightdata_runtime_with_fallback_metadata(self, *, primary_zone: str = ""):
+        return MCPServerRuntime(
+            config_id=self.config_id,
+            name="brightdata",
+            display_name="BrightData",
+            description="",
+            command="npx",
+            args=["-y", "@brightdata/mcp"],
+            url=None,
+            auth_method=MCPServerConfig.AuthMethod.NONE,
+            env={"WEB_UNLOCKER_ZONE": primary_zone} if primary_zone else {},
+            headers={},
+            prefetch_apps=[],
+            scope=MCPServerConfig.Scope.PLATFORM,
+            organization_id=None,
+            user_id=None,
+            updated_at=self.server_config.updated_at,
+            metadata={BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY: "WEB_UNLOCKER_ZONE_FALLBACK"},
+        )
+
+    def test_brightdata_google_search_returns_error_without_fallback_zone(self):
         run_once = MagicMock(
             return_value={"status": "success", "result": "<html>rate limited</html>"}
         )
 
-        with patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
-            result = self.manager._execute_with_brightdata_search_retries(
-                run_once,
-                "brightdata",
-                "search_engine",
-                {"query": "openai"},
-            )
+        result = self.manager._execute_with_brightdata_search_fallback(
+            run_once,
+            "brightdata",
+            "search_engine",
+            {"query": "openai"},
+            runtime=self._brightdata_runtime_with_fallback_metadata(),
+        )
 
         self.assertEqual(result["status"], "error")
-        self.assertIn(f"after {BRIGHTDATA_SEARCH_MAX_RETRIES + 1} attempts", result["message"])
-        self.assertEqual(run_once.call_count, BRIGHTDATA_SEARCH_MAX_RETRIES + 1)
-        self.assertEqual(
-            [call.args[0] for call in mock_sleep.call_args_list],
-            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * BRIGHTDATA_SEARCH_MAX_RETRIES,
-        )
-        params_used = [call.args[0] for call in run_once.call_args_list]
-        self.assertTrue(all(params == {"query": "openai"} for params in params_used))
-        self.assertFalse(any(params.get("engine") == "bing" for params in params_used))
+        self.assertIn("no fallback zone is configured", result["message"])
+        run_once.assert_called_once_with({"query": "openai"})
 
-    def test_brightdata_google_search_returns_successful_retry(self):
-        run_once = MagicMock(
-            side_effect=[
-                {"status": "success", "result": "<html>rate limited</html>"},
-                {"status": "success", "result": json.dumps({"organic": []})},
-            ]
-        )
+    def test_brightdata_google_search_uses_configured_fallback_zone_once(self):
+        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
+        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
+        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="primary-zone")
 
-        with patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
-            result = self.manager._execute_with_brightdata_search_retries(
+        with patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}):
+            result = self.manager._execute_with_brightdata_search_fallback(
                 run_once,
                 "brightdata",
                 "search_engine",
                 {"query": "openai"},
+                runtime=runtime,
+                run_fallback=run_fallback,
             )
 
         self.assertEqual(
             result,
             {"status": "success", "result": json.dumps({"organic": []})},
         )
-        self.assertEqual(run_once.call_count, 2)
-        mock_sleep.assert_called_once_with(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
+        run_once.assert_called_once_with({"query": "openai"})
+        run_fallback.assert_called_once_with(
+            {"query": "openai"},
+            {"WEB_UNLOCKER_ZONE": "fallback-zone"},
+        )
+
+    def test_brightdata_google_search_skips_fallback_zone_when_same_as_primary(self):
+        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
+        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
+        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="same-zone")
+
+        with patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "same-zone"}):
+            result = self.manager._execute_with_brightdata_search_fallback(
+                run_once,
+                "brightdata",
+                "search_engine",
+                {"query": "openai"},
+                runtime=runtime,
+                run_fallback=run_fallback,
+            )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("no fallback zone is configured", result["message"])
+        run_once.assert_called_once_with({"query": "openai"})
+        run_fallback.assert_not_called()
+
+    def test_transient_fallback_client_does_not_mutate_runtime_env_or_client_cache(self):
+        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="primary-zone")
+        fallback_client = MagicMock(name="fallback-client")
+        self.manager._clients[runtime.config_id] = MagicMock(name="primary-client")
+
+        with patch.object(
+            self.manager,
+            "_build_client_for_runtime",
+            return_value=fallback_client,
+        ) as mock_build, patch.object(
+            self.manager,
+            "_execute_async",
+            return_value=object(),
+        ) as mock_execute, patch.object(
+            self.manager,
+            "_run_coroutine_sync",
+            return_value={"status": "success", "result": "{}"},
+        ), patch.object(self.manager, "_close_client_sync") as mock_close:
+            result = self.manager._execute_with_transient_stdio_env(
+                runtime,
+                "search_engine",
+                {"query": "openai"},
+                timeout_seconds=30,
+                proxy_url="http://proxy.example:8080",
+                env_overrides={"WEB_UNLOCKER_ZONE": "fallback-zone"},
+            )
+
+        self.assertEqual(result, {"status": "success", "result": "{}"})
+        self.assertEqual(runtime.env["WEB_UNLOCKER_ZONE"], "primary-zone")
+        self.assertIsNot(self.manager._clients[runtime.config_id], fallback_client)
+        env_overrides = mock_build.call_args.kwargs["env_overrides"]
+        self.assertEqual(env_overrides["WEB_UNLOCKER_ZONE"], "fallback-zone")
+        self.assertEqual(env_overrides["HTTP_PROXY"], "http://proxy.example:8080")
+        mock_execute.assert_called_once()
+        mock_close.assert_called_once_with(fallback_client, context=f"{runtime.config_id}:transient-env")
 
     def test_execute_mcp_tool_isolated_does_not_reuse_shared_loop_or_client_cache(self):
         shared_client = MagicMock(name="shared-client")

@@ -57,6 +57,7 @@ Bright Data is preconfigured as a platform MCP server in self-hosted deployments
 1. Set `BRIGHT_DATA_TOKEN` in your deployment environment.
    - For Docker Compose, place it in a `.env` file and pass it into the `web` and `worker` services (or use an `env_file`).
    - Optional: set `BRIGHT_DATA_WEB_UNLOCKER_ZONE` if you use Bright Data Web Unlocker.
+   - Optional: set `WEB_UNLOCKER_ZONE_FALLBACK` to retry failed Bright Data search calls with a fallback Web Unlocker zone.
 2. Restart the stack so the containers pick up the variable.
 3. In the Console, open **MCP Servers** and enable Bright Data tools for the agents that should use them.
 
