@@ -1,6 +1,7 @@
 from typing import Any, Dict, Optional
 
 from api.models import PersistentAgent
+from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 
 from .charter_updater import execute_update_charter
 from .custom_tools import execute_create_custom_tool
@@ -43,6 +44,9 @@ def execute_runtime_tool_call(
             "status": "error",
             "message": f"{tool_name} is unavailable while planning mode is active. Complete or skip planning first.",
         }, updated_tools
+
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return tool_blacklist_error(tool_name), updated_tools
 
     if isolated_mcp:
         return execute_enabled_tool(agent, tool_name, exec_params, isolated_mcp=True), updated_tools

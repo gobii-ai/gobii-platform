@@ -138,6 +138,14 @@ class IntelligenceTier(models.Model):
         default=False,
         help_text="When enabled, this tier is used as the system default for new agents (clamped per plan).",
     )
+    blacklisted_tools = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=(
+            "Tool function names that should be unavailable for agents running on this "
+            "intelligence tier. Examples: sqlite_batch, mcp_server_tool_name."
+        ),
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

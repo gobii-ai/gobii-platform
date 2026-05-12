@@ -7,6 +7,7 @@ from django.db.models import Q
 from agents.services import AgentService
 from api.models import AgentPeerLink, PersistentAgent
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
+from api.services.tool_blacklist import get_agent_tool_blacklist
 
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
     "create_custom_tool",
@@ -40,6 +41,16 @@ def _filter_planning_mode_tools(agent: PersistentAgent, tools: List[dict]) -> Li
     return [
         tool for tool in tools
         if (_get_tool_name(tool) not in PLANNING_MODE_DISABLED_TOOL_NAMES)
+    ]
+
+
+def _filter_tier_blacklisted_tools(agent: PersistentAgent, tools: List[dict]) -> List[dict]:
+    blacklisted_tools = get_agent_tool_blacklist(agent)
+    if not blacklisted_tools:
+        return tools
+    return [
+        tool for tool in tools
+        if (_get_tool_name(tool) not in blacklisted_tools)
     ]
 
 
@@ -112,7 +123,7 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     if has_peer_links:
         static_tools.append(get_send_agent_message_tool())
 
-    return _filter_planning_mode_tools(agent, static_tools)
+    return _filter_tier_blacklisted_tools(agent, _filter_planning_mode_tools(agent, static_tools))
 
 
 def get_static_tool_names(agent: Optional[PersistentAgent]) -> Set[str]:

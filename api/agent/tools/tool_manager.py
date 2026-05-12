@@ -27,6 +27,11 @@ from ...services.sandbox_compute import (
     track_sandbox_unavailable,
 )
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
+from ...services.tool_blacklist import (
+    get_agent_tool_blacklist,
+    is_tool_blacklisted_for_agent,
+    tool_blacklist_error,
+)
 from ...utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from ..core.llm_config import AgentLLMTier, get_agent_llm_tier
 from .mcp_manager import MCPToolManager, get_mcp_manager, execute_mcp_tool, execute_mcp_tool_isolated
@@ -363,7 +368,10 @@ def get_available_builtin_tool_entries(
 ) -> Dict[str, "ToolCatalogEntry"]:
     """Return builtin tool catalog entries available to the provided agent."""
     catalog: Dict[str, ToolCatalogEntry] = {}
+    blacklisted_tools = get_agent_tool_blacklist(agent)
     for name, registry_entry in BUILTIN_TOOL_REGISTRY.items():
+        if name in blacklisted_tools:
+            continue
         if not _is_builtin_tool_available(name, agent, include_hidden=include_hidden):
             continue
         entry = _build_builtin_catalog_entry(name, registry_entry)
@@ -406,6 +414,14 @@ def _sanitize_tool_definition_for_llm(tool_def: Dict[str, Any]) -> Dict[str, Any
     return sanitized
 
 
+def _tool_definition_name(tool_def: Dict[str, Any]) -> Optional[str]:
+    function_block = tool_def.get("function") if isinstance(tool_def, dict) else None
+    if not isinstance(function_block, dict):
+        return None
+    name = function_block.get("name")
+    return name if isinstance(name, str) and name else None
+
+
 def get_available_custom_tool_entries(
     agent: Optional[PersistentAgent],
 ) -> Dict[str, ToolCatalogEntry]:
@@ -414,7 +430,10 @@ def get_available_custom_tool_entries(
         return {}
 
     catalog: Dict[str, ToolCatalogEntry] = {}
+    blacklisted_tools = get_agent_tool_blacklist(agent)
     for tool in PersistentAgentCustomTool.objects.filter(agent=agent).order_by("tool_name"):
+        if tool.tool_name in blacklisted_tools:
+            continue
         catalog[tool.tool_name] = ToolCatalogEntry(
             provider="custom",
             full_name=tool.tool_name,
@@ -477,8 +496,11 @@ def _build_available_tool_index(
     """Build an index of enableable tools across all providers."""
     manager = _get_manager()
     catalog: Dict[str, ToolCatalogEntry] = {}
+    blacklisted_tools = get_agent_tool_blacklist(agent)
 
     for info in manager.get_tools_for_agent(agent):
+        if info.full_name in blacklisted_tools:
+            continue
         catalog[info.full_name] = ToolCatalogEntry(
             provider="mcp",
             full_name=info.full_name,
@@ -757,6 +779,8 @@ def enable_tools(
 def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEntry) -> Dict[str, Any]:
     """Enable a tool just in time without recording usage (execution will handle usage)."""
     tool_name = entry.full_name
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return tool_blacklist_error(tool_name)
     if entry.provider == "mcp":
         manager = _get_manager()
         if manager.is_tool_blacklisted(tool_name):
@@ -803,6 +827,9 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     catalog = _build_available_tool_index(agent)
     manager = _get_manager()
     limit = get_enabled_tool_limit(agent)
+
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return tool_blacklist_error(tool_name)
 
     if manager.is_tool_blacklisted(tool_name):
         return {
@@ -876,6 +903,9 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
     if not tool_name:
         return {"status": "error", "message": "Tool name is required"}
 
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return tool_blacklist_error(tool_name)
+
     now = datetime.now(UTC)
     try:
         row = PersistentAgentEnabledTool.objects.filter(
@@ -948,6 +978,9 @@ def ensure_default_tools_enabled(
         }
 
     for tool_name in missing_mcp:
+        if is_tool_blacklisted_for_agent(agent, tool_name):
+            logger.warning("Default tool '%s' is tier-blacklisted, skipping", tool_name)
+            continue
         if manager.is_tool_blacklisted(tool_name):
             logger.warning("Default tool '%s' is blacklisted, skipping", tool_name)
             continue
@@ -958,29 +991,36 @@ def ensure_default_tools_enabled(
         logger.info("Enabled default tool '%s' for agent %s", tool_name, agent.id)
 
     for tool_name in missing_builtin:
+        if is_tool_blacklisted_for_agent(agent, tool_name):
+            logger.warning("Default builtin tool '%s' is tier-blacklisted, skipping", tool_name)
+            continue
         if tool_name not in BUILTIN_TOOL_REGISTRY:
             logger.warning("Default builtin tool '%s' not registered, skipping", tool_name)
             continue
-        mark_tool_enabled_without_discovery(agent, tool_name)
-        logger.info("Enabled default builtin tool '%s' for agent %s", tool_name, agent.id)
+        result = mark_tool_enabled_without_discovery(agent, tool_name)
+        if result.get("status") == "success":
+            logger.info("Enabled default builtin tool '%s' for agent %s", tool_name, agent.id)
 
 
 def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]:
     """Return tool definitions for all enabled tools (MCP, built-ins, custom)."""
     manager = _get_manager()
+    blacklisted_tools = get_agent_tool_blacklist(agent)
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
         for definition in manager.get_enabled_tools_definitions(agent)
+        if _tool_definition_name(definition) not in blacklisted_tools
     ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)
+        .exclude(tool_full_name__in=list(blacklisted_tools))
         .values_list("tool_full_name", flat=True)
     )
 
     enabled_builtin_rows = PersistentAgentEnabledTool.objects.filter(
         agent=agent,
         tool_full_name__in=list(BUILTIN_TOOL_REGISTRY.keys()),
-    )
+    ).exclude(tool_full_name__in=list(blacklisted_tools))
     existing_names = {
         entry.get("function", {}).get("name")
         for entry in definitions
@@ -1058,6 +1098,9 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
 
     Attempts fuzzy matching for MCP tools when exact match fails.
     """
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return None
+
     catalog = _build_available_tool_index(agent, include_hidden_builtin=True)
 
     # Try exact match first
@@ -1069,6 +1112,8 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
     if tool_name.startswith("mcp_"):
         normalized_name = _normalize_mcp_tool_name(tool_name, catalog)
         if normalized_name:
+            if is_tool_blacklisted_for_agent(agent, normalized_name):
+                return None
             logger.info(
                 "Normalized MCP tool name '%s' -> '%s'",
                 tool_name, normalized_name
@@ -1079,6 +1124,8 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
         manager = _get_manager()
         info = manager.resolve_tool_info(tool_name)
         if info:
+            if is_tool_blacklisted_for_agent(agent, info.full_name):
+                return None
             logger.info(
                 "Resolved MCP tool '%s' via manager discovery (server=%s)",
                 tool_name, info.server_name

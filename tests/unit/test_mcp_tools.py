@@ -57,6 +57,8 @@ from api.agent.tools.tool_manager import (
     execute_enabled_tool,
     mark_tool_enabled_without_discovery,
 )
+from api.agent.tools.static_tools import get_static_tool_names
+from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.agent.tools.search_tools import (
     execute_search_tools,
     get_search_tools_tool,
@@ -3300,6 +3302,107 @@ class MCPToolFunctionsTests(TestCase):
             if isinstance(entry, dict)
         }
         self.assertIn("http_request", names)
+
+    @tag("batch_mcp_tools")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_tier_blacklisted_builtin_cannot_be_enabled(self, mock_init, mock_get_tools):
+        """Tier blacklists remove builtins from the enableable catalog."""
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["http_request"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
+        result = enable_tools(self.agent, ["http_request"])
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("http_request", result["invalid"])
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name="http_request",
+            ).exists()
+        )
+
+    @tag("batch_mcp_tools")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent', return_value=[])
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_tier_blacklisted_enabled_builtin_is_hidden_and_not_executed(self, mock_init, mock_get_tools):
+        """Previously enabled rows do not bypass the intelligence-tier blacklist."""
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["http_request"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name="http_request",
+            tool_server="builtin",
+            tool_name="http_request",
+        )
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        names = {
+            entry.get("function", {}).get("name")
+            for entry in definitions
+            if isinstance(entry, dict)
+        }
+        result = execute_enabled_tool(self.agent, "http_request", {"url": "https://example.com"})
+
+        self.assertNotIn("http_request", names)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not available", result["message"])
+
+    @tag("batch_mcp_tools")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_tier_blacklisted_static_tool_is_hidden_and_rejected(self):
+        """Static tools also respect intelligence-tier blacklists."""
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["search_tools"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
+        names = get_static_tool_names(self.agent)
+        result, updated_tools = execute_runtime_tool_call(
+            self.agent,
+            tool_name="search_tools",
+            exec_params={"query": "anything"},
+        )
+
+        self.assertNotIn("search_tools", names)
+        self.assertIsNone(updated_tools)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("intelligence tier", result["message"])
+
+    @tag("batch_mcp_tools")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
+    @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')
+    def test_tier_blacklisted_mcp_tool_cannot_be_enabled(self, mock_init, mock_get_tools):
+        """Tier blacklists reject MCP tools even when the server exposes them."""
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["mcp_test_tool"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        mock_get_tools.return_value = [
+            MCPToolInfo(self.config_id, "mcp_test_tool", self.server_name, "tool", "Test tool", {})
+        ]
+
+        result = enable_mcp_tool(self.agent, "mcp_test_tool")
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("intelligence tier", result["message"])
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name="mcp_test_tool",
+            ).exists()
+        )
 
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=False)
     @patch("api.agent.tools.tool_manager._get_manager")

@@ -26,6 +26,7 @@ from ...services.pipedream_apps import (
     enable_pipedream_apps_for_agent,
     get_effective_pipedream_app_slugs_for_agent,
 )
+from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..system_skills import shortlist_system_skills
@@ -1300,7 +1301,11 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     if not manager._initialized:
         manager.initialize()
 
-    mcp_tools = manager.get_tools_for_agent(agent)
+    blacklisted_tools = get_agent_tool_blacklist(agent)
+    mcp_tools = [
+        tool for tool in manager.get_tools_for_agent(agent)
+        if tool.full_name not in blacklisted_tools
+    ]
 
     builtin_catalog: List[Dict[str, Any]] = [
         {

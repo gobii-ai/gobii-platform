@@ -143,6 +143,7 @@ from ..tools.tool_manager import (
     get_parallel_safe_tool_rejection_reason,
     should_skip_auto_substitution,
 )
+from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
 from ..tools.web_chat_sender import execute_send_chat_message, has_other_contact_channel
 from ..tools.peer_dm import execute_send_agent_message
 from ..tools.webhook_sender import execute_send_webhook_event
@@ -1615,6 +1616,8 @@ def _execute_tool_call_runtime(
             "status": "error",
             "message": f"{tool_name} is unavailable while planning mode is active. Complete or skip planning first.",
         }, updated_tools
+    if is_tool_blacklisted_for_agent(agent, tool_name):
+        return tool_blacklist_error(tool_name), updated_tools
     if mock_result is not None:
         logger.info(
             "Agent %s: using mock for %s (eval_run_id=%s)",
