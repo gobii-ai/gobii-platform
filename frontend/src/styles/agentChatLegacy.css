@@ -163,6 +163,8 @@
   display: flex;
   align-items: center;
   gap: 1rem;
+  container-type: inline-size;
+  container-name: agent-chat-banner;
   width: 100%;
   padding: 0.625rem 1.25rem;
   overflow: hidden;
@@ -1058,6 +1060,31 @@
 
 .banner-share-label {
   line-height: 1;
+}
+
+@container agent-chat-banner (max-width: 58rem) {
+  .banner-upgrade span,
+  .banner-plan-label,
+  .banner-share-label {
+    display: none;
+  }
+
+  .banner-upgrade {
+    padding: 0.375rem;
+    margin-right: 0.25rem;
+  }
+
+  .banner-share {
+    width: 1.75rem;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .banner-plan {
+    min-width: 1.75rem;
+    padding: 0 0.45rem;
+    justify-content: center;
+  }
 }
 
 .banner-close {

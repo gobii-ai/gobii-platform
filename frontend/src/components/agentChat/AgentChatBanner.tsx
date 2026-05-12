@@ -283,6 +283,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               type="button"
               className="banner-upgrade"
               onClick={handleBannerUpgradeClick}
+              aria-label={upgradeButtonLabel}
+              title={upgradeButtonLabel}
             >
               <Zap size={14} strokeWidth={2} />
               <span>{upgradeButtonLabel}</span>
