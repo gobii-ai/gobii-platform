@@ -9,6 +9,9 @@ import logging
 import re
 from typing import Dict, Any
 
+from django.conf import settings
+from django.db import transaction
+
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -17,7 +20,6 @@ from ...models import (
     CommsChannel,
     DeliveryStatus,
 )
-from django.conf import settings
 from ..comms.email_threading import (
     get_message_channel,
     get_message_contact_address,
@@ -58,6 +60,14 @@ _MISSING_ATTACHMENT_CLAIM_ERROR_MESSAGE = (
     "Email body claims attachments are included, but send_email.attachments is empty. "
     "Pass the exact $[/path] values returned by recent file tools in send_email.attachments."
 )
+
+
+class _EmailDeliveryFailed(Exception):
+    pass
+
+
+class _EmailMessageCreateOperationalError(Exception):
+    pass
 
 
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
@@ -333,52 +343,50 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
         )
 
         close_old_connections()
+        def _create_message():
+            message = PersistentAgentMessage.objects.create(
+                owner_agent=agent,
+                from_endpoint=from_endpoint,
+                conversation=conversation,
+                parent=reply_target,
+                is_outbound=True,
+                body=mobile_first_html,
+                raw_payload={"subject": subject},
+            )
+            if cc_endpoint_objects:
+                message.cc_endpoints.set(cc_endpoint_objects)
+            if resolved_attachments:
+                create_message_attachments(message, resolved_attachments)
+            return message
+
+        def _create_and_deliver_message():
+            with transaction.atomic():
+                try:
+                    message = _create_message()
+                except OperationalError as exc:
+                    raise _EmailMessageCreateOperationalError from exc
+
+                # Immediately attempt delivery
+                deliver_agent_email(message)
+
+                # deliver_agent_email updates this instance before returning; checking it here lets
+                # the transaction roll back before message-created on_commit handlers can run.
+                if message.latest_status == DeliveryStatus.FAILED:
+                    raise _EmailDeliveryFailed(message.latest_error_message)
+                return message
+
         try:
-            message = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=from_endpoint,
-                conversation=conversation,
-                parent=reply_target,
-                is_outbound=True,
-                body=mobile_first_html,
-                raw_payload={"subject": subject},
-            )
-            # Add CC endpoints to the message
-            if cc_endpoint_objects:
-                message.cc_endpoints.set(cc_endpoint_objects)
-            if resolved_attachments:
-                create_message_attachments(message, resolved_attachments)
-                broadcast_message_attachment_update(str(message.id))
-        except OperationalError:
-            close_old_connections()
-            message = PersistentAgentMessage.objects.create(
-                owner_agent=agent,
-                from_endpoint=from_endpoint,
-                conversation=conversation,
-                parent=reply_target,
-                is_outbound=True,
-                body=mobile_first_html,
-                raw_payload={"subject": subject},
-            )
-            # Add CC endpoints to the message
-            if cc_endpoint_objects:
-                message.cc_endpoints.set(cc_endpoint_objects)
-            if resolved_attachments:
-                create_message_attachments(message, resolved_attachments)
-                broadcast_message_attachment_update(str(message.id))
+            try:
+                message = _create_and_deliver_message()
+            except _EmailMessageCreateOperationalError:
+                close_old_connections()
+                message = _create_and_deliver_message()
+        except _EmailDeliveryFailed as exc:
+            return {"status": "error", "message": f"Email failed to send: {exc}"}
 
-        # Immediately attempt delivery
-        deliver_agent_email(message)
-
-        # Check the result
         close_old_connections()
-        try:
-            message.refresh_from_db()
-        except OperationalError:
-            close_old_connections()
-            message.refresh_from_db()
-        if message.latest_status == DeliveryStatus.FAILED:
-            return {"status": "error", "message": f"Email failed to send: {message.latest_error_message}"}
+        if resolved_attachments:
+            broadcast_message_attachment_update(str(message.id))
 
         return {
             "status": "ok",
