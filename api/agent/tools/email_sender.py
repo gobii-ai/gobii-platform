@@ -66,6 +66,10 @@ class _EmailDeliveryFailed(Exception):
     pass
 
 
+class _EmailMessageCreateOperationalError(Exception):
+    pass
+
+
 def _maybe_provision_simulated_from_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint | None:
     """Provision a local sender endpoint for dev simulation when real transport is unavailable."""
     simulation_flag = getattr(settings, "SIMULATE_EMAIL_DELIVERY", False)
@@ -355,27 +359,28 @@ def execute_send_email(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
                 create_message_attachments(message, resolved_attachments)
             return message
 
-        try:
+        def _create_and_deliver_message():
             with transaction.atomic():
                 try:
-                    with transaction.atomic():
-                        message = _create_message()
-                except OperationalError:
-                    close_old_connections()
-                    with transaction.atomic():
-                        message = _create_message()
+                    message = _create_message()
+                except OperationalError as exc:
+                    raise _EmailMessageCreateOperationalError from exc
 
                 # Immediately attempt delivery
                 deliver_agent_email(message)
 
-                # Check the result before committing the message row.
-                try:
-                    message.refresh_from_db()
-                except OperationalError:
-                    close_old_connections()
-                    message.refresh_from_db()
+                # deliver_agent_email updates this instance before returning; checking it here lets
+                # the transaction roll back before message-created on_commit handlers can run.
                 if message.latest_status == DeliveryStatus.FAILED:
                     raise _EmailDeliveryFailed(message.latest_error_message)
+                return message
+
+        try:
+            try:
+                message = _create_and_deliver_message()
+            except _EmailMessageCreateOperationalError:
+                close_old_connections()
+                message = _create_and_deliver_message()
         except _EmailDeliveryFailed as exc:
             return {"status": "error", "message": f"Email failed to send: {exc}"}
 
