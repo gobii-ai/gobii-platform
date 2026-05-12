@@ -4142,7 +4142,12 @@ class MCPIsolatedExecutionTests(TestCase):
             server_config=self.server_config,
         )
 
-    def _brightdata_runtime_with_fallback_metadata(self, *, primary_zone: str = ""):
+    def _brightdata_runtime_with_fallback_metadata(self, *, primary_zone: str = "", fallback_zone: str = ""):
+        env = {}
+        if primary_zone:
+            env["WEB_UNLOCKER_ZONE"] = primary_zone
+        if fallback_zone:
+            env["WEB_UNLOCKER_ZONE_FALLBACK"] = fallback_zone
         return MCPServerRuntime(
             config_id=self.config_id,
             name="brightdata",
@@ -4152,7 +4157,7 @@ class MCPIsolatedExecutionTests(TestCase):
             args=["-y", "@brightdata/mcp"],
             url=None,
             auth_method=MCPServerConfig.AuthMethod.NONE,
-            env={"WEB_UNLOCKER_ZONE": primary_zone} if primary_zone else {},
+            env=env,
             headers={},
             prefetch_apps=[],
             scope=MCPServerConfig.Scope.PLATFORM,
@@ -4179,10 +4184,9 @@ class MCPIsolatedExecutionTests(TestCase):
         self.assertIn("no fallback zone is configured", result["message"])
         run_once.assert_called_once_with({"query": "openai"})
 
-    def test_brightdata_google_search_uses_configured_fallback_zone_once(self):
+    def test_brightdata_google_search_ignores_process_env_without_runtime_fallback_zone(self):
         run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
         run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
-        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="primary-zone")
 
         with patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}):
             result = self.manager._execute_with_brightdata_search_fallback(
@@ -4190,9 +4194,31 @@ class MCPIsolatedExecutionTests(TestCase):
                 "brightdata",
                 "search_engine",
                 {"query": "openai"},
-                runtime=runtime,
+                runtime=self._brightdata_runtime_with_fallback_metadata(),
                 run_fallback=run_fallback,
             )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("no fallback zone is configured", result["message"])
+        run_once.assert_called_once_with({"query": "openai"})
+        run_fallback.assert_not_called()
+
+    def test_brightdata_google_search_uses_configured_fallback_zone_once(self):
+        run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
+        run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
+        runtime = self._brightdata_runtime_with_fallback_metadata(
+            primary_zone="primary-zone",
+            fallback_zone="fallback-zone",
+        )
+
+        result = self.manager._execute_with_brightdata_search_fallback(
+            run_once,
+            "brightdata",
+            "search_engine",
+            {"query": "openai"},
+            runtime=runtime,
+            run_fallback=run_fallback,
+        )
 
         self.assertEqual(
             result,
@@ -4207,17 +4233,19 @@ class MCPIsolatedExecutionTests(TestCase):
     def test_brightdata_google_search_skips_fallback_zone_when_same_as_primary(self):
         run_once = MagicMock(return_value={"status": "success", "result": "<html>rate limited</html>"})
         run_fallback = MagicMock(return_value={"status": "success", "result": json.dumps({"organic": []})})
-        runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="same-zone")
+        runtime = self._brightdata_runtime_with_fallback_metadata(
+            primary_zone="same-zone",
+            fallback_zone="same-zone",
+        )
 
-        with patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "same-zone"}):
-            result = self.manager._execute_with_brightdata_search_fallback(
-                run_once,
-                "brightdata",
-                "search_engine",
-                {"query": "openai"},
-                runtime=runtime,
-                run_fallback=run_fallback,
-            )
+        result = self.manager._execute_with_brightdata_search_fallback(
+            run_once,
+            "brightdata",
+            "search_engine",
+            {"query": "openai"},
+            runtime=runtime,
+            run_fallback=run_fallback,
+        )
 
         self.assertEqual(result["status"], "error")
         self.assertIn("no fallback zone is configured", result["message"])

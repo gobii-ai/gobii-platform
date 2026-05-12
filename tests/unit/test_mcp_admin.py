@@ -141,6 +141,27 @@ class MCPServerConfigAdminTests(TestCase):
         self.assertEqual(config.prefetch_apps, ["sheets"])
         self.assertEqual(config.auth_method, MCPServerConfig.AuthMethod.BEARER_TOKEN)
 
+    def test_admin_form_rejects_invalid_environment_variable_name(self):
+        form_data = {
+            "name": "platform_scraper",
+            "display_name": "Platform Scraper",
+            "description": "Runs a managed integration.",
+            "command": "python",
+            "command_args": '["-m", "scraper"]',
+            "url": "",
+            "auth_method": MCPServerConfig.AuthMethod.NONE,
+            "prefetch_apps": "[]",
+            "metadata": "{}",
+            "is_active": "on",
+            "environment": '{"WEB_UNLOCKER_ZONE_FALLBACK=fallback-zone": "mcp_serp"}',
+            "headers": "{}",
+        }
+
+        form = MCPServerConfigAdminForm(data=form_data)
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Invalid environment variable name", form.errors["environment"][0])
+
     def test_reserved_identifier_blocked_for_non_platform(self):
         owner = get_user_model().objects.create_user(
             username="owner2",

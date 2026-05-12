@@ -1,6 +1,5 @@
 import asyncio
 import json
-import os
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -311,16 +310,17 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self._enable_tool(tool_info)
         payload = {"organic": [{"title": "Example", "link": "https://example.com", "image": "http://example.com/a.png"}]}
         dummy_result = DummyResult(json.dumps(payload))
-        loop = MagicMock()
-        loop.run_until_complete.side_effect = lambda _: dummy_result
 
-        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
-             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+        async def fake_execute(_client, _tool_name, params, timeout_seconds):
+            return dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
+             patch.object(manager, "_execute_async", side_effect=fake_execute), \
              patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
-                {"query": "test"},
+                {"query": "test", "engine": "bing"},
             )
 
         self.assertEqual(response.get("status"), "success")
@@ -334,6 +334,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
+        self.runtime.env = {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}
         calls = []
         payload = {"organic": [{"title": "Example", "link": "https://example.com"}]}
         fallback_client = MagicMock(name="fallback-client")
@@ -348,8 +349,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
              patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
              patch.object(manager, "_build_client_for_runtime", return_value=fallback_client) as mock_build_client, \
-             patch.object(manager, "_close_client_sync"), \
-             patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}):
+             patch.object(manager, "_close_client_sync"):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
@@ -372,6 +372,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
+        self.runtime.env = {}
         calls = []
 
         async def fake_execute(_client, _tool_name, params, timeout_seconds):
@@ -380,8 +381,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
 
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
-             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
-             patch.dict(os.environ, {"WEB_UNLOCKER_ZONE_FALLBACK": ""}):
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,

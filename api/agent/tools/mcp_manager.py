@@ -2001,7 +2001,7 @@ class MCPToolManager:
         if not env_var:
             return None
 
-        fallback_zone = os.getenv(env_var, "").strip()
+        fallback_zone = str((runtime.env or {}).get(env_var) or "").strip()
         if not fallback_zone:
             return None
 
