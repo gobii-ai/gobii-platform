@@ -4255,7 +4255,11 @@ class MCPIsolatedExecutionTests(TestCase):
     def test_transient_fallback_client_does_not_mutate_runtime_env_or_client_cache(self):
         runtime = self._brightdata_runtime_with_fallback_metadata(primary_zone="primary-zone")
         fallback_client = MagicMock(name="fallback-client")
+        fallback_client.close = AsyncMock()
         self.manager._clients[runtime.config_id] = MagicMock(name="primary-client")
+
+        def run_coroutine(coroutine):
+            return asyncio.run(coroutine)
 
         with patch.object(
             self.manager,
@@ -4264,12 +4268,12 @@ class MCPIsolatedExecutionTests(TestCase):
         ) as mock_build, patch.object(
             self.manager,
             "_execute_async",
-            return_value=object(),
+            new=AsyncMock(return_value={"status": "success", "result": "{}"}),
         ) as mock_execute, patch.object(
             self.manager,
             "_run_coroutine_sync",
-            return_value={"status": "success", "result": "{}"},
-        ), patch.object(self.manager, "_close_client_sync") as mock_close:
+            side_effect=run_coroutine,
+        ):
             result = self.manager._execute_with_transient_stdio_env(
                 runtime,
                 "search_engine",
@@ -4285,8 +4289,8 @@ class MCPIsolatedExecutionTests(TestCase):
         env_overrides = mock_build.call_args.kwargs["env_overrides"]
         self.assertEqual(env_overrides["WEB_UNLOCKER_ZONE"], "fallback-zone")
         self.assertEqual(env_overrides["HTTP_PROXY"], "http://proxy.example:8080")
-        mock_execute.assert_called_once()
-        mock_close.assert_called_once_with(fallback_client, context=f"{runtime.config_id}:transient-env")
+        mock_execute.assert_awaited_once()
+        fallback_client.close.assert_awaited_once()
 
     def test_execute_mcp_tool_isolated_does_not_reuse_shared_loop_or_client_cache(self):
         shared_client = MagicMock(name="shared-client")

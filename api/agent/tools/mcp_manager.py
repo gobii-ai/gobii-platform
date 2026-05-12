@@ -488,19 +488,30 @@ class MCPToolManager:
         merged_env = self._build_stdio_proxy_env(proxy_url) if proxy_url else {}
         merged_env.update(env_overrides)
         client = self._build_client_for_runtime(runtime, env_overrides=merged_env)
-        try:
-            coroutine = self._execute_async(
-                client,
-                tool_name,
-                params,
-                timeout_seconds=timeout_seconds,
-            )
-            if isolated:
-                return self._run_coroutine_isolated(coroutine)
-            return self._run_coroutine_sync(coroutine)
-        finally:
-            self._close_client_sync(client, context=f"{runtime.config_id}:transient-env")
-    
+
+        async def execute_and_close():
+            try:
+                return await self._execute_async(
+                    client,
+                    tool_name,
+                    params,
+                    timeout_seconds=timeout_seconds,
+                )
+            finally:
+                try:
+                    await client.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to close MCP client for %s:transient-env",
+                        runtime.config_id,
+                        exc_info=True,
+                    )
+
+        coroutine = execute_and_close()
+        if isolated:
+            return self._run_coroutine_isolated(coroutine)
+        return self._run_coroutine_sync(coroutine)
+
     def _is_tool_blacklisted(self, tool_name: str) -> bool:
         """Check if a tool name matches any blacklist pattern."""
         for pattern in self.TOOL_BLACKLIST:
