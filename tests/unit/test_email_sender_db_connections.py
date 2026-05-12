@@ -65,6 +65,13 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message.latest_error_message = ""
         message.save(update_fields=["latest_status", "latest_sent_at", "latest_error_message"])
 
+    def _mark_message_failed_rejected_recipients(self, message):
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = (
+            "An unexpected error occurred: All message recipients were rejected or invalid"
+        )
+        message.save(update_fields=["latest_status", "latest_error_message"])
+
     def _create_email_conversation(self, address=None):
         return PersistentAgentConversation.objects.create(
             owner_agent=self.agent,
@@ -297,6 +304,30 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
         message = PersistentAgentMessage.objects.get(id=result["message_id"])
         self.assertIsNone(message.parent_id)
         self.assertEqual(message.conversation.address, self.user.email)
+
+    def test_execute_send_email_rolls_back_message_when_delivery_fails(self):
+        params = {
+            "to_address": self.user.email,
+            "subject": "Rejected recipients",
+            "mobile_first_html": "<p>This delivery will fail.</p>",
+        }
+
+        with patch(
+            "api.agent.tools.email_sender.deliver_agent_email",
+            side_effect=self._mark_message_failed_rejected_recipients,
+        ):
+            result = execute_send_email(self.agent, params)
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn(
+            "Email failed to send: An unexpected error occurred: "
+            "All message recipients were rejected or invalid",
+            result.get("message", ""),
+        )
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(),
+            0,
+        )
 
     def test_execute_send_email_duplicate_guard_matches_legacy_outbound_email(self):
         legacy_to_endpoint = PersistentAgentCommsEndpoint.objects.create(
