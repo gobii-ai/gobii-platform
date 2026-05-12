@@ -22,6 +22,7 @@ from allauth.account.models import EmailAddress
 from api.agent.core.event_processing import (
     OrchestratorPromptStale,
     _completion_with_failover,
+    _execute_tool_call_runtime,
     _execute_prepared_tool_call,
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
@@ -49,6 +50,7 @@ from api.agent.core.processing_flags import (
     set_processing_stop_requested,
     set_processing_queued_flag,
 )
+from tests.utils.llm_seed import get_intelligence_tier
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.human_input_requests import submit_human_input_responses_batch
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
@@ -3967,6 +3969,26 @@ class EventProcessingRuntimeGuardTests(TestCase):
             charter="Test runtime guard",
             browser_use_agent=self.browser_agent,
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_tool_call_runtime_rejects_tier_blacklisted_static_tool(self):
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = ["search_tools"]
+        tier.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = tier
+        self.agent.save(update_fields=["preferred_llm_tier"])
+
+        result, updated_tools = _execute_tool_call_runtime(
+            self.agent,
+            tool_name="search_tools",
+            exec_params={"query": "anything"},
+            budget_ctx=None,
+            eval_run_id=None,
+        )
+
+        self.assertIsNone(updated_tools)
+        self.assertEqual(result["status"], "error")
+        self.assertIn("intelligence tier", result["message"])
 
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")

@@ -28,6 +28,7 @@ from api.models import (
     TaskCreditConfig,
     UserQuota,
 )
+from api.services.tool_blacklist import get_agent_tool_blacklist, get_tier_tool_blacklist
 from constants.plans import PlanNames
 from tests.utils.llm_seed import get_intelligence_tier
 from util.tool_costs import clear_tool_credit_cost_cache
@@ -81,6 +82,38 @@ class AgentTierPreferenceTests(TestCase):
         self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.MAX), AgentLLMTier.PREMIUM)
         self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.PREMIUM), AgentLLMTier.STANDARD)
         self.assertEqual(get_next_lower_configured_tier(AgentLLMTier.STANDARD), AgentLLMTier.STANDARD)
+
+    def test_tool_blacklist_cache_invalidates_when_tier_changes(self):
+        cache.clear()
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = []
+        tier.save(update_fields=["blacklisted_tools"])
+        self.assertEqual(get_tier_tool_blacklist("standard"), set())
+
+        tier.blacklisted_tools = ["http_request"]
+        tier.save(update_fields=["blacklisted_tools"])
+
+        self.assertEqual(get_tier_tool_blacklist("standard"), {"http_request"})
+
+    def test_tool_blacklist_uses_current_agent_tier_when_instance_is_stale(self):
+        self.user.quota.max_intelligence_tier = AgentLLMTier.PREMIUM.value
+        self.user.quota.save(update_fields=["max_intelligence_tier"])
+        standard = get_intelligence_tier("standard")
+        premium = get_intelligence_tier("premium")
+        standard.blacklisted_tools = ["http_request"]
+        standard.save(update_fields=["blacklisted_tools"])
+        premium.blacklisted_tools = []
+        premium.save(update_fields=["blacklisted_tools"])
+        self.agent.preferred_llm_tier = standard
+        self.agent.save(update_fields=["preferred_llm_tier"])
+        self.assertEqual(getattr(self.agent.preferred_llm_tier, "key", None), "standard")
+        self.assertEqual(get_agent_tool_blacklist(self.agent), {"http_request"})
+
+        PersistentAgent.objects.filter(id=self.agent.id).update(preferred_llm_tier=premium)
+
+        self.assertEqual(getattr(self.agent.preferred_llm_tier, "key", None), "standard")
+        self.assertEqual(get_agent_tool_blacklist(self.agent), set())
+        self.assertEqual(self.agent.preferred_llm_tier_id, premium.id)
 
     def test_runtime_override_changes_runtime_tier_and_billing_but_not_baseline(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")

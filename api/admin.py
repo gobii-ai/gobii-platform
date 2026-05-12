@@ -5869,9 +5869,26 @@ class FileHandlerLLMTierAdmin(admin.ModelAdmin):
 
 
 class IntelligenceTierAdminForm(forms.ModelForm):
+    blacklisted_tools = forms.CharField(
+        required=False,
+        widget=forms.Textarea(attrs={"rows": 8, "cols": 80}),
+        help_text="One tool function name per line, or comma-separated.",
+    )
+
     class Meta:
         model = IntelligenceTier
         fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        value = getattr(self.instance, "blacklisted_tools", None)
+        if isinstance(value, list):
+            self.initial["blacklisted_tools"] = "\n".join(str(item) for item in value)
+
+    def clean_blacklisted_tools(self):
+        from api.services.tool_blacklist import normalize_tool_blacklist
+
+        return normalize_tool_blacklist(self.cleaned_data.get("blacklisted_tools"))
 
     def validate_constraints(self):
         # IntelligenceTier enforces a single default tier via a DB UniqueConstraint.
@@ -5890,10 +5907,22 @@ class IntelligenceTierAdminForm(forms.ModelForm):
 @admin.register(IntelligenceTier)
 class IntelligenceTierAdmin(admin.ModelAdmin):
     form = IntelligenceTierAdminForm
-    list_display = ("display_name", "key", "rank", "credit_multiplier", "is_default", "updated_at")
+    list_display = (
+        "display_name",
+        "key",
+        "rank",
+        "credit_multiplier",
+        "is_default",
+        "blacklisted_tool_count",
+        "updated_at",
+    )
     list_filter = ("key", "is_default")
     search_fields = ("display_name", "key")
     ordering = ("rank", "key")
+
+    @admin.display(description="Blacklisted tools")
+    def blacklisted_tool_count(self, obj):
+        return len(obj.blacklisted_tools or [])
 
     def save_model(self, request, obj, form, change):
         # Keep "default tier" selection unique without relying solely on constraint errors.
