@@ -337,6 +337,27 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(screen.getByTestId('agent-composer')).toBeInTheDocument()
   })
 
+  it('keeps skip planning available while spawn intent loading hides the composer', () => {
+    const handleSkipPlanning = vi.fn()
+
+    render(
+      <AgentChatLayout
+        agentFirstName="Agent"
+        events={[]}
+        spawnIntentLoading
+        planningState="planning"
+        onSkipPlanning={handleSkipPlanning}
+      />,
+    )
+
+    expect(screen.queryByTestId('agent-composer')).not.toBeInTheDocument()
+    expect(screen.getByText('Preparing your agent…')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Skip Planning' }))
+
+    expect(handleSkipPlanning).toHaveBeenCalledTimes(1)
+  })
+
   it('opens the settings panel when a chat message links to the current agent settings page', () => {
     render(
       <AgentChatLayout

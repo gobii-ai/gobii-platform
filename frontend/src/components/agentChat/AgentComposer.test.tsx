@@ -269,6 +269,35 @@ describe('AgentComposer pending action insights panel', () => {
     })
   })
 
+  it('returns to the normal composer when paging from free text input to a non-human request', async () => {
+    const handleSubmit = vi.fn(async () => undefined)
+    const handleRespondHumanInput = vi.fn(async () => undefined)
+
+    renderAgentComposer({
+      pendingActionRequests: [makeFreeTextHumanInputAction(), makeRequestedSecretsAction()],
+      onSubmit: handleSubmit,
+      onRespondHumanInput: handleRespondHumanInput,
+    })
+
+    const freeTextComposer = screen.getByPlaceholderText(/^Type your answer/)
+    fireEvent.change(freeTextComposer, { target: { value: 'human input draft' } })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Next pending request' }))
+
+    expect(screen.getByText('Stripe API key')).toBeInTheDocument()
+    expect(screen.queryByPlaceholderText(/^Type your answer/)).not.toBeInTheDocument()
+
+    const messageComposer = screen.getByPlaceholderText(/^Message/)
+    expect(messageComposer).toHaveValue('')
+    fireEvent.change(messageComposer, { target: { value: 'normal message' } })
+    fireEvent.submit(messageComposer.closest('form') as HTMLFormElement)
+
+    await waitFor(() => {
+      expect(handleSubmit).toHaveBeenCalledWith('normal message', [])
+    })
+    expect(handleRespondHumanInput).not.toHaveBeenCalled()
+  })
+
   it('keeps the normal message composer available for non-human pending actions', () => {
     renderAgentComposer({
       pendingActionRequests: [makeRequestedSecretsAction()],

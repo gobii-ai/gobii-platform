@@ -1355,9 +1355,20 @@ export const AgentComposer = memo(function AgentComposer({
     if (!item) {
       return
     }
+    const leavingMainComposerHumanInput = activeHumanInputUsesMainComposer
+      && (
+        item.kind !== 'human_input'
+        || item.requestId !== activeHumanInputRequest?.id
+      )
     setActivePendingActionId(item.actionId)
     if (item.kind === 'human_input') {
       setActiveHumanInputRequestId(item.requestId)
+    } else {
+      setActiveHumanInputRequestId(null)
+    }
+    if (leavingMainComposerHumanInput) {
+      setBody('')
+      requestAnimationFrame(() => adjustTextareaHeight(true))
     }
   }
 
@@ -1435,7 +1446,7 @@ export const AgentComposer = memo(function AgentComposer({
             ) : (
               <>
                 <ArrowUp className="h-4 w-4" aria-hidden="true" />
-                <span className="sr-only">Send</span>
+                <span className="sr-only">{activeHumanInputUsesMainComposer ? 'Submit' : 'Send'}</span>
               </>
             )}
           </button>
