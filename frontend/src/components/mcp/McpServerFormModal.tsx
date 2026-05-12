@@ -51,6 +51,7 @@ type FormState = {
 
 const BLANK_HEADER: HeaderEntry = { key: '', value: '' }
 const BLANK_ENV: EnvEntry = { key: '', value: '' }
+const ENVIRONMENT_VARIABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/
 
 const createBlankHeaders = (): HeaderEntry[] => [{ ...BLANK_HEADER }]
 const createBlankEnvEntries = (): EnvEntry[] => [{ ...BLANK_ENV }]
@@ -135,6 +136,13 @@ export function McpServerFormModal({
       }
       command = parseResult.command
       commandArgs = parseResult.args
+      const environmentValidationError = validateEnvironmentEntries(state.environmentEntries)
+      if (environmentValidationError) {
+        setFormErrors({ environment: [environmentValidationError] })
+        setStatusMessage(environmentValidationError)
+        onError(environmentValidationError)
+        return
+      }
       environment = entriesToObject(state.environmentEntries)
     } else if (!state.url.trim()) {
       const message = 'URL is required for HTTP connections.'
@@ -816,6 +824,21 @@ function entriesToObject(entries: EnvEntry[]): Record<string, string> {
     }
   })
   return result
+}
+
+function validateEnvironmentEntries(entries: EnvEntry[]): string | null {
+  const invalidKeys = entries
+    .map(({ key }) => key.trim())
+    .filter((key) => key && !ENVIRONMENT_VARIABLE_NAME_PATTERN.test(key))
+  if (!invalidKeys.length) {
+    return null
+  }
+  const preview = invalidKeys.slice(0, 5).map((key) => `"${key}"`).join(', ')
+  const suffix = invalidKeys.length > 5 ? ', ...' : ''
+  return [
+    `Invalid environment variable name(s): ${preview}${suffix}.`,
+    'Use letters, numbers, and underscores, start with a letter or underscore, and enter only the variable name, not KEY=value.',
+  ].join(' ')
 }
 
 function parsePrefetchAppsInput(raw: string): string[] {

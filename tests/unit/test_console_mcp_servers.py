@@ -1900,6 +1900,46 @@ class MCPServerConfigFormTests(TestCase):
         self.assertEqual(config.metadata, {})
         self.assertEqual(config.auth_method, MCPServerConfig.AuthMethod.NONE)
 
+    def test_form_rejects_invalid_environment_variable_name_for_command_server(self):
+        form = MCPServerConfigForm(
+            data={
+                "display_name": "Command Server",
+                "name": "",
+                "command": "npx",
+                "command_args": "[]",
+                "url": "",
+                "metadata": "{}",
+                "environment": '{"WEB_UNLOCKER_ZONE_FALLBACK=fallback-zone": "mcp_serp"}',
+                "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
+                "is_active": "on",
+            },
+            allow_commands=True,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Invalid environment variable name", form.errors["environment"][0])
+
+    def test_form_rejects_invalid_env_fallback_metadata_names(self):
+        form = MCPServerConfigForm(
+            data={
+                "display_name": "Command Server",
+                "name": "",
+                "command": "npx",
+                "command_args": "[]",
+                "url": "",
+                "metadata": '{"env_fallback": {"WEB_UNLOCKER_ZONE=bad": "LOCAL_ZONE"}}',
+                "environment": "{}",
+                "headers": "{}",
+                "auth_method": MCPServerConfig.AuthMethod.NONE,
+                "is_active": "on",
+            },
+            allow_commands=True,
+        )
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("metadata.env_fallback", form.errors["metadata"][0])
+
     def test_reserved_identifier_rejected_for_user_scope(self):
         form = MCPServerConfigForm(
             data={

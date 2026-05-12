@@ -19,7 +19,6 @@ import fnmatch
 import contextlib
 import contextvars
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse
 from typing import Callable, Dict, Any, Iterable, List, Optional, Tuple
@@ -113,8 +112,8 @@ MCP_WILL_CONTINUE_TOOL_NAMES = {
 # Bright Data MCP's search_utils.parse_google_search_response raises this
 # message when Google returns HTML or other non-JSON content despite brd_json=1.
 BRIGHTDATA_NON_JSON_ERROR = "Unexpected non-JSON response from Bright Data"
-BRIGHTDATA_SEARCH_MAX_RETRIES = 3
-BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS = 5
+BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV = "WEB_UNLOCKER_ZONE_FALLBACK"
+BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY = "brightdata_search_fallback_zone_env"
 MCP_TOOL_SUCCESS_SENTINEL = "Tool executed successfully"
 
 def _inject_will_continue_work_param(parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -199,6 +198,7 @@ class MCPServerRuntime:
     oauth_token_type: Optional[str] = None
     oauth_expires_at: Optional[datetime] = None
     oauth_updated_at: Optional[datetime] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass 
@@ -473,7 +473,45 @@ class MCPToolManager:
         )
         self._stdio_proxy_clients[cache_key] = client
         return client
-    
+
+    def _execute_with_transient_stdio_env(
+        self,
+        runtime: MCPServerRuntime,
+        tool_name: str,
+        params: Dict[str, Any],
+        *,
+        timeout_seconds: float,
+        proxy_url: Optional[str],
+        env_overrides: Dict[str, str],
+        isolated: bool = False,
+    ) -> Any:
+        merged_env = self._build_stdio_proxy_env(proxy_url) if proxy_url else {}
+        merged_env.update(env_overrides)
+        client = self._build_client_for_runtime(runtime, env_overrides=merged_env)
+
+        async def execute_and_close():
+            try:
+                return await self._execute_async(
+                    client,
+                    tool_name,
+                    params,
+                    timeout_seconds=timeout_seconds,
+                )
+            finally:
+                try:
+                    await client.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to close MCP client for %s:transient-env",
+                        runtime.config_id,
+                        exc_info=True,
+                    )
+
+        coroutine = execute_and_close()
+        if isolated:
+            return self._run_coroutine_isolated(coroutine)
+        return self._run_coroutine_sync(coroutine)
+
     def _is_tool_blacklisted(self, tool_name: str) -> bool:
         """Check if a tool name matches any blacklist pattern."""
         for pattern in self.TOOL_BLACKLIST:
@@ -976,6 +1014,7 @@ class MCPToolManager:
             organization_id=str(cfg.organization_id) if cfg.organization_id else None,
             user_id=str(cfg.user_id) if cfg.user_id else None,
             updated_at=cfg.updated_at,
+            metadata=dict(metadata) if isinstance(metadata, dict) else {},
         )
 
     def _maybe_refresh_oauth_credential(
@@ -1939,14 +1978,14 @@ class MCPToolManager:
         tool_name: str,
         params: Dict[str, Any],
     ) -> bool:
-        if server_name != "brightdata" or tool_name != "search_engine":
+        if str(server_name or "").strip().lower() != "brightdata" or tool_name != "search_engine":
             return False
         engine = params.get("engine") if isinstance(params, dict) else None
         return not engine or str(engine).strip().lower() == "google"
 
     @staticmethod
-    def _is_brightdata_non_json_exception(exc: Exception) -> bool:
-        return isinstance(exc, ToolError) and BRIGHTDATA_NON_JSON_ERROR in str(exc)
+    def _is_brightdata_search_exception(exc: Exception) -> bool:
+        return isinstance(exc, ToolError)
 
     def _is_brightdata_search_non_json_result(self, result: Any) -> bool:
         message = self._tool_result_error_message(result)
@@ -1961,55 +2000,102 @@ class MCPToolManager:
             return not self._json_loads_ok(content)
         return False
 
-    def _execute_with_brightdata_search_retries(
+    def _brightdata_search_fallback_zone(self, runtime: Optional[MCPServerRuntime]) -> Optional[str]:
+        if runtime is None or str(runtime.name or "").strip().lower() != "brightdata":
+            return None
+
+        metadata = runtime.metadata if isinstance(runtime.metadata, dict) else {}
+        env_var = str(
+            metadata.get(BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY)
+            or BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV
+        ).strip()
+        if not env_var:
+            return None
+
+        fallback_zone = str((runtime.env or {}).get(env_var) or "").strip()
+        if not fallback_zone:
+            return None
+
+        primary_zone = str((runtime.env or {}).get("WEB_UNLOCKER_ZONE") or "").strip()
+        if primary_zone and primary_zone == fallback_zone:
+            return None
+        return fallback_zone
+
+    def _is_brightdata_search_failure_result(self, result: Any) -> bool:
+        if self._tool_result_error_message(result) is not None:
+            return True
+        return self._is_brightdata_search_non_json_result(result)
+
+    def _brightdata_search_failure_message(self, result: Any) -> str:
+        return self._tool_result_error_message(result) or "Non-JSON search response"
+
+    def _execute_with_brightdata_search_fallback(
         self,
         run_once: Callable[[Dict[str, Any]], Any],
         server_name: str,
         tool_name: str,
         params: Dict[str, Any],
+        *,
+        runtime: Optional[MCPServerRuntime] = None,
+        run_fallback: Optional[Callable[[Dict[str, Any], Dict[str, str]], Any]] = None,
     ) -> Any:
         if not self._is_google_brightdata_search(server_name, tool_name, params):
             return run_once(params)
 
         original_params = dict(params)
-        total_attempts = BRIGHTDATA_SEARCH_MAX_RETRIES + 1
         last_failure: Optional[str] = None
-        for attempt in range(total_attempts):
-            if attempt > 0:
-                time.sleep(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
-            try:
-                result = run_once(dict(original_params))
-            except Exception as exc:
-                if not self._is_brightdata_non_json_exception(exc):
-                    raise
-                last_failure = str(exc)
-                logger.warning(
-                    "Bright Data Google search returned non-JSON response on attempt %d of %d.",
-                    attempt + 1,
-                    total_attempts,
-                )
-                continue
 
-            if not self._is_brightdata_search_non_json_result(result):
-                return result
-
-            last_failure = self._tool_result_error_message(result) or "Non-JSON search response"
+        try:
+            result = run_once(dict(original_params))
+        except Exception as exc:
+            if not self._is_brightdata_search_exception(exc):
+                raise
+            last_failure = str(exc)
             logger.warning(
-                "Bright Data Google search returned non-JSON content on attempt %d of %d.",
-                attempt + 1,
-                total_attempts,
+                "Bright Data Google search failed on the primary zone attempt: %s",
+                last_failure,
             )
+        else:
+            if not self._is_brightdata_search_failure_result(result):
+                return result
+            last_failure = self._brightdata_search_failure_message(result)
+            logger.warning("Bright Data Google search failed on the primary zone attempt: %s", last_failure)
 
-        logger.warning(
-            "Bright Data Google search failed with non-JSON response after %d attempts. Last failure: %s",
-            total_attempts,
-            last_failure or "unknown",
-        )
+        fallback_zone = self._brightdata_search_fallback_zone(runtime)
+        if not fallback_zone or run_fallback is None:
+            logger.warning(
+                "Bright Data Google search failed on the primary zone attempt and no fallback zone is configured. "
+                "Last failure: %s",
+                last_failure or "unknown",
+            )
+            return {
+                "status": "error",
+                "message": (
+                    "Bright Data Google search failed on the primary zone attempt and no fallback zone is configured. "
+                    f"Last failure: {last_failure or 'unknown'}"
+                ),
+            }
+
+        fallback_env = {"WEB_UNLOCKER_ZONE": fallback_zone}
+        try:
+            fallback_result = run_fallback(dict(original_params), fallback_env)
+        except Exception as exc:
+            if not self._is_brightdata_search_exception(exc):
+                raise
+            last_failure = str(exc)
+            logger.warning("Bright Data Google search failed on the fallback zone attempt: %s", last_failure)
+        else:
+            if not self._is_brightdata_search_failure_result(fallback_result):
+                logger.info("Bright Data Google search succeeded on the fallback zone attempt.")
+                return fallback_result
+            last_failure = self._brightdata_search_failure_message(fallback_result)
+            logger.warning("Bright Data Google search failed on the fallback zone attempt: %s", last_failure)
+
         return {
             "status": "error",
             "message": (
-                "Bright Data Google search failed with non-JSON response after "
-                f"{total_attempts} attempts. Last failure: {last_failure or 'unknown'}"
+                "Bright Data Google search failed after primary and fallback zone attempts. "
+                f"Last failure: {last_failure or 'unknown'}"
             ),
         }
 
@@ -2087,11 +2173,28 @@ class MCPToolManager:
                             timeout_seconds=timeout_seconds,
                         )
                     )
-                result = self._execute_with_brightdata_search_retries(
+                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
+                    if not self._is_stdio_runtime(runtime):
+                        return {
+                            "status": "error",
+                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
+                        }
+                    return self._execute_with_transient_stdio_env(
+                        runtime,
+                        info.tool_name,
+                        attempt_params,
+                        timeout_seconds=timeout_seconds,
+                        proxy_url=proxy_url,
+                        env_overrides=env_overrides,
+                    )
+
+                result = self._execute_with_brightdata_search_fallback(
                     run_once,
                     runtime.name,
                     info.tool_name,
                     params,
+                    runtime=runtime,
+                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(None):
                 result = self._adapt_tool_result(runtime.name, info.tool_name, result)
@@ -2131,12 +2234,7 @@ class MCPToolManager:
                 full_tool_name=full_tool_name,
             )
 
-        sandbox_result = self._execute_with_brightdata_search_retries(
-            run_once,
-            server_name,
-            actual_tool_name,
-            params,
-        )
+        sandbox_result = run_once(params)
         if (
             isinstance(sandbox_result, dict)
             and sandbox_result.get("error_code") == "sandbox_unsupported_mcp"
@@ -2285,11 +2383,28 @@ class MCPToolManager:
                             timeout_seconds=timeout_seconds,
                         )
                     )
-                result = self._execute_with_brightdata_search_retries(
+                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
+                    if not runtime or not self._is_stdio_runtime(runtime):
+                        return {
+                            "status": "error",
+                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
+                        }
+                    return self._execute_with_transient_stdio_env(
+                        runtime,
+                        actual_tool_name,
+                        attempt_params,
+                        timeout_seconds=timeout_seconds,
+                        proxy_url=proxy_url,
+                        env_overrides=env_overrides,
+                    )
+
+                result = self._execute_with_brightdata_search_fallback(
                     run_once,
                     server_name,
                     actual_tool_name,
                     params,
+                    runtime=runtime,
+                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)
@@ -2517,11 +2632,29 @@ class MCPToolManager:
                             timeout_seconds=timeout_seconds,
                         )
                     )
-                result = self._execute_with_brightdata_search_retries(
+                def run_fallback(attempt_params: Dict[str, Any], env_overrides: Dict[str, str]) -> Any:
+                    if not self._is_stdio_runtime(runtime):
+                        return {
+                            "status": "error",
+                            "message": "Bright Data search fallback zone requires a stdio MCP runtime.",
+                        }
+                    return self._execute_with_transient_stdio_env(
+                        runtime,
+                        actual_tool_name,
+                        attempt_params,
+                        timeout_seconds=timeout_seconds,
+                        proxy_url=proxy_url,
+                        env_overrides=env_overrides,
+                        isolated=True,
+                    )
+
+                result = self._execute_with_brightdata_search_fallback(
                     run_once,
                     server_name,
                     actual_tool_name,
                     params,
+                    runtime=runtime,
+                    run_fallback=run_fallback,
                 )
             with mcp_result_owner_context(owner):
                 result = self._adapt_tool_result(server_name, actual_tool_name, result)

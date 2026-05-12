@@ -18,6 +18,10 @@ from .models import (
     TrialPromo,
     UserFlagDefinition,
 )
+from .services.mcp_config_validation import (
+    validate_environment_mapping,
+    validate_mcp_metadata_environment_references,
+)
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 class AgentEmailAccountForm(ModelForm):
@@ -187,6 +191,24 @@ class MCPServerConfigAdminForm(forms.ModelForm):
         if name and name.strip().lower() != name:
             raise forms.ValidationError("Name must be lowercase and may not contain leading/trailing whitespace.")
         return name
+
+    def clean_environment(self):
+        value = self.cleaned_data.get("environment") or {}
+        if not isinstance(value, dict):
+            raise forms.ValidationError("Environment must be a JSON object.")
+        environment_errors = validate_environment_mapping(value)
+        if environment_errors:
+            raise forms.ValidationError(environment_errors)
+        return value
+
+    def clean_metadata(self):
+        value = self.cleaned_data.get("metadata") or {}
+        if not isinstance(value, dict):
+            raise forms.ValidationError("Metadata must be a JSON object.")
+        metadata_errors = validate_mcp_metadata_environment_references(value)
+        if metadata_errors:
+            raise forms.ValidationError(metadata_errors)
+        return value
 
     def save(self, commit=True):
         obj = super().save(commit=False)

@@ -22,6 +22,10 @@ from constants.regex import E164_PHONE_REGEX
 from constants.phone_countries import SUPPORTED_REGION_CODES
 from util.phone import validate_and_format_e164
 from api.services.user_timezone import normalize_timezone_value, resolve_user_timezone
+from api.services.mcp_config_validation import (
+    validate_environment_mapping,
+    validate_mcp_metadata_environment_references,
+)
 from api.models import CommsChannel
 from util import sms
 import logging
@@ -381,6 +385,9 @@ class MCPServerConfigForm(forms.Form):
             return {}
         if not isinstance(value, dict):
             raise forms.ValidationError("Metadata must be a JSON object.")
+        metadata_errors = validate_mcp_metadata_environment_references(value)
+        if metadata_errors:
+            raise forms.ValidationError(metadata_errors)
         return value
 
     def clean_prefetch_apps(self):
@@ -407,6 +414,9 @@ class MCPServerConfigForm(forms.Form):
             return {}
         if not isinstance(value, dict):
             raise forms.ValidationError("Environment must be a JSON object.")
+        environment_errors = validate_environment_mapping(value)
+        if environment_errors:
+            raise forms.ValidationError(environment_errors)
         return value
 
     def clean_headers(self):

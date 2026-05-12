@@ -7,8 +7,7 @@ from django.test import SimpleTestCase, TestCase, tag
 from fastmcp.exceptions import ToolError
 
 from api.agent.tools.mcp_manager import (
-    BRIGHTDATA_SEARCH_MAX_RETRIES,
-    BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS,
+    BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY,
     MCP_TOOL_SUCCESS_SENTINEL,
     MCPServerRuntime,
     MCPToolInfo,
@@ -241,8 +240,9 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
             description="",
             command="echo",
             command_args=[],
-            url="https://brightdata.example.com",
+            url="",
             auth_method=MCPServerConfig.AuthMethod.NONE,
+            metadata={BRIGHTDATA_SEARCH_FALLBACK_ZONE_ENV_METADATA_KEY: "WEB_UNLOCKER_ZONE_FALLBACK"},
         )
         self.runtime = MCPServerRuntime(
             config_id=str(self.config.id),
@@ -260,6 +260,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
             organization_id=str(self.config.organization_id) if self.config.organization_id else None,
             user_id=str(self.config.user_id) if self.config.user_id else None,
             updated_at=self.config.updated_at,
+            metadata=self.config.metadata or {},
         )
         self.search_tool_info = MCPToolInfo(
             config_id=self.runtime.config_id,
@@ -309,16 +310,17 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self._enable_tool(tool_info)
         payload = {"organic": [{"title": "Example", "link": "https://example.com", "image": "http://example.com/a.png"}]}
         dummy_result = DummyResult(json.dumps(payload))
-        loop = MagicMock()
-        loop.run_until_complete.side_effect = lambda _: dummy_result
 
-        with patch.object(manager, "_ensure_event_loop", return_value=loop), \
-             patch.object(manager, "_execute_async", new_callable=MagicMock, return_value=dummy_result), \
+        async def fake_execute(_client, _tool_name, params, timeout_seconds):
+            return dummy_result
+
+        with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
+             patch.object(manager, "_execute_async", side_effect=fake_execute), \
              patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
-                {"query": "test"},
+                {"query": "test", "engine": "bing"},
             )
 
         self.assertEqual(response.get("status"), "success")
@@ -328,12 +330,14 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(cleaned["items"][0]["t"], "Example")
         self.assertNotIn("image", cleaned["items"][0])
 
-    def test_search_engine_retries_google_non_json_exception(self):
+    def test_search_engine_uses_fallback_zone_after_google_non_json_exception(self):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
+        self.runtime.env = {"WEB_UNLOCKER_ZONE_FALLBACK": "fallback-zone"}
         calls = []
         payload = {"organic": [{"title": "Example", "link": "https://example.com"}]}
+        fallback_client = MagicMock(name="fallback-client")
 
         async def fake_execute(_client, _tool_name, params, timeout_seconds):
             calls.append(dict(params))
@@ -344,7 +348,8 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
              patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
-             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+             patch.object(manager, "_build_client_for_runtime", return_value=fallback_client) as mock_build_client, \
+             patch.object(manager, "_close_client_sync"):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
@@ -355,14 +360,19 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(len(calls), 2)
         self.assertNotIn("engine", calls[0])
         self.assertNotIn("engine", calls[1])
-        mock_sleep.assert_called_once_with(BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS)
+        mock_build_client.assert_called_once()
+        self.assertEqual(
+            mock_build_client.call_args.kwargs["env_overrides"]["WEB_UNLOCKER_ZONE"],
+            "fallback-zone",
+        )
         cleaned = json.loads(response.get("result"))
         self.assertEqual(cleaned["items"][0]["t"], "Example")
 
-    def test_search_engine_returns_error_after_google_non_json_retries_without_bing(self):
+    def test_search_engine_returns_error_after_google_non_json_without_fallback_zone(self):
         tool_info = self.search_tool_info
         manager = self._build_manager(tool_info)
         self._enable_tool(tool_info)
+        self.runtime.env = {}
         calls = []
 
         async def fake_execute(_client, _tool_name, params, timeout_seconds):
@@ -371,8 +381,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
 
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
-             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
-             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
@@ -380,13 +389,9 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
             )
 
         self.assertEqual(response.get("status"), "error")
-        self.assertIn(f"after {BRIGHTDATA_SEARCH_MAX_RETRIES + 1} attempts", response.get("message"))
-        self.assertEqual(len(calls), BRIGHTDATA_SEARCH_MAX_RETRIES + 1)
+        self.assertIn("no fallback zone is configured", response.get("message"))
+        self.assertEqual(len(calls), 1)
         self.assertTrue(all("engine" not in call for call in calls))
-        self.assertEqual(
-            [call.args[0] for call in mock_sleep.call_args_list],
-            [BRIGHTDATA_SEARCH_RETRY_DELAY_SECONDS] * BRIGHTDATA_SEARCH_MAX_RETRIES,
-        )
 
     def test_search_engine_accepts_bing_markdown_without_json_retry(self):
         tool_info = self.search_tool_info
@@ -400,8 +405,7 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
 
         with patch.object(manager, "_ensure_event_loop", return_value=SyncLoop()), \
              patch.object(manager, "_execute_async", side_effect=fake_execute), \
-             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)), \
-             patch("api.agent.tools.mcp_manager.time.sleep") as mock_sleep:
+             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)):
             response = manager.execute_mcp_tool(
                 self.agent,
                 tool_info.full_name,
@@ -411,7 +415,6 @@ class MCPToolManagerAdapterIntegrationTests(TestCase):
         self.assertEqual(response.get("status"), "success")
         self.assertEqual(len(calls), 1)
         self.assertEqual(calls[0]["engine"], "bing")
-        mock_sleep.assert_not_called()
         self.assertIn("Bing Search", response.get("result"))
 
     def test_execute_mcp_tool_strips_linkedin_text_html(self):
