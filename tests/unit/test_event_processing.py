@@ -4675,6 +4675,27 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertIn("update_plan", second_tool_names)
         self.assertEqual(usage.get("total_tokens"), 2)
 
+    @patch("api.agent.core.event_processing._close_active_cycle_for_skipped_agent")
+    @patch("api.agent.core.event_processing.clear_processing_work_state")
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    def test_loop_refresh_missing_agent_clears_processing_state(
+        self,
+        _mock_get_tools,
+        mock_clear_processing_state,
+        mock_close_cycle,
+    ):
+        agent_id = self.agent.id
+
+        with patch.object(self.agent, "refresh_from_db", side_effect=PersistentAgent.DoesNotExist):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        mock_clear_processing_state.assert_called_once_with(agent_id, client=ANY)
+        mock_close_cycle.assert_called_once()
+        _, close_kwargs = mock_close_cycle.call_args
+        self.assertEqual(close_kwargs["budget_id"], None)
+        self.assertEqual(close_kwargs["check_context"], "loop_refresh_missing")
+
 
 @tag("batch_event_processing")
 class EventProcessingDeletedAgentAbortTests(TestCase):

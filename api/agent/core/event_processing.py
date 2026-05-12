@@ -4672,6 +4672,13 @@ def _run_agent_loop(
                 agent.refresh_from_db(fields=["planning_state", "updated_at"])
             except PersistentAgent.DoesNotExist:
                 logger.info("Agent %s no longer exists; stopping loop.", agent.id)
+                clear_processing_work_state(agent.id, client=redis_client)
+                _close_active_cycle_for_skipped_agent(
+                    agent.id,
+                    budget_id=getattr(budget_ctx, "budget_id", None),
+                    span=span,
+                    check_context="loop_refresh_missing",
+                )
                 return cumulative_token_usage
 
             current_planning_state = agent.planning_state
