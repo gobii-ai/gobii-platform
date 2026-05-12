@@ -26,6 +26,7 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
     _gate_send_chat_tool_for_delivery,
+    _tool_definition_names_for_completion,
     _persist_tool_call_step,
     build_prompt_context,
     _get_completed_process_run_count,
@@ -4571,6 +4572,108 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(usage.get("total_tokens"), 0)
         mock_execute_tool.assert_not_called()
         self.assertFalse(PersistentAgentCompletion.objects.filter(agent=self.agent).exists())
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.resolve_web_stream_target", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_llm_config_with_failover", return_value=[("mock", "mock-model", {})])
+    @patch("api.agent.core.event_processing.get_agent_tools")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_skip_planning_refreshes_agent_and_tools_after_stale_completion(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        mock_get_tools,
+        _mock_failover,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_stream_target,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        planning_tools = [
+            {"type": "function", "function": {"name": "end_planning", "parameters": {"type": "object"}}},
+        ]
+        skipped_tools = [
+            {"type": "function", "function": {"name": "update_plan", "parameters": {"type": "object"}}},
+        ]
+        prompt_planning_states = []
+
+        def _tools_for_agent(agent):
+            if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+                return planning_tools
+            return skipped_tools
+
+        def _build_prompt(agent, *_args, **_kwargs):
+            prompt_planning_states.append(agent.planning_state)
+            return self._prompt_context()
+
+        def _completion(*_args, **kwargs):
+            if mock_completion.call_count == 1:
+                PersistentAgent.objects.filter(pk=self.agent.pk).update(
+                    planning_state=PersistentAgent.PlanningState.SKIPPED,
+                    updated_at=timezone.now(),
+                )
+                bump_human_inbound_generation(self.agent.id)
+                stale_prompt_checker = kwargs["stale_prompt_checker"]
+                self.assertTrue(stale_prompt_checker())
+                raise OrchestratorPromptStale("Prompt became stale during test.")
+            response_message = SimpleNamespace(
+                content="",
+                tool_calls=None,
+                function_call=None,
+                reasoning_content=None,
+            )
+            return (
+                SimpleNamespace(
+                    choices=[SimpleNamespace(message=response_message)],
+                    model="mock-model",
+                    provider="mock-provider",
+                    model_extra={},
+                ),
+                {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                    "cached_tokens": 0,
+                    "model": "mock-model",
+                    "provider": "mock-provider",
+                },
+            )
+
+        mock_get_tools.side_effect = _tools_for_agent
+        mock_build_prompt.side_effect = _build_prompt
+        mock_completion.side_effect = _completion
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(prompt_planning_states, [
+            PersistentAgent.PlanningState.PLANNING,
+            PersistentAgent.PlanningState.SKIPPED,
+        ])
+        first_tools = mock_completion.call_args_list[0].kwargs["tools"]
+        second_tools = mock_completion.call_args_list[1].kwargs["tools"]
+        self.assertIn("end_planning", _tool_definition_names_for_completion(first_tools))
+        second_tool_names = _tool_definition_names_for_completion(second_tools)
+        self.assertNotIn("end_planning", second_tool_names)
+        self.assertIn("update_plan", second_tool_names)
+        self.assertEqual(usage.get("total_tokens"), 2)
 
 
 @tag("batch_event_processing")
