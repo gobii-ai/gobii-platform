@@ -15,25 +15,25 @@ tags:
 <img src="/static/images/blog/newsletters/newsletter-2025-11-25-your-agents-now-come-with-a-brain-dial-image-1.png" alt="Your agents now come with a “brain dial”" style="max-width: 100%; border-radius: 10px;">
 <img src="/static/images/blog/newsletters/newsletter-2025-11-25-your-agents-now-come-with-a-brain-dial-image-2.png" alt="Your agents now come with a “brain dial”" style="max-width: 100%; border-radius: 10px;">
 
-Gobii has two new features we're excited to share with you!
+Gobii now gives you more control over how agents spend intelligence and credits.
 
-🧠 Intelligence Selector
+## Intelligence Selector
 
 You can now choose the intelligence level for each agent.
 
-Smarter intelligence → better reasoning and higher accuracy, with a faster task-credit burn rate.
+- Smarter intelligence gives agents stronger reasoning and higher accuracy, with a faster task-credit burn rate.
+- Standard intelligence uses credits more slowly and is ideal for routine or high-volume tasks.
 
-Standard intelligence → slower burn rate, ideal for routine or high-volume tasks.
-
-Under the hood, the Smarter tier uses high-power models like GPT 5.1, Gemini 3 Pro, and Claude Opus 4.5. Oh, and of course, Smarter is a nice blend of the two.
+Under the hood, the Smarter tier uses higher-power models like GPT 5.1, Gemini 3 Pro, and Claude Opus 4.5.
 
 The highest intelligence tier is exclusive to Pro, Scale, and Team plans.
 
-[View your agents here](https://gobii.ai/console/agents/)
+[View your agents](https://gobii.ai/console/agents/)
 
-📊 Agent Dashboard: Daily Usage Insights
+## Daily Usage Insights
 
 The Agent Dashboard now shows your agents' average daily task-credit usage so you can quickly understand how much an agent costs to run.
 
-See your dashboard here:
-<https://gobii.ai/console/agents/>
+That makes it easier to decide which agents should use smarter reasoning, which ones should stay on standard intelligence, and where a budget adjustment would help.
+
+[See your dashboard](https://gobii.ai/console/agents/)

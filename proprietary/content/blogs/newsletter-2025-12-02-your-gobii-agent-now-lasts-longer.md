@@ -1,9 +1,9 @@
 ---
-title: "Your Gobii Agent Now Lasts Longer 🔋"
+title: "Your Gobii agent now lasts longer"
 date: 2025-12-02
 description: "A quiet upgrade with a big quality-of-life payoff."
 author: "The Gobii Team"
-seo_title: "Your Gobii Agent Now Lasts Longer 🔋"
+seo_title: "Your Gobii agent now lasts longer"
 seo_description: "A quiet upgrade with a big quality-of-life payoff."
 tags:
   - newsletter
@@ -11,29 +11,30 @@ tags:
   - product-updates
 ---
 
-Quick post–holiday-week update from the Gobii crew — even with the short week, we rolled out a sneaky-useful improvement:
+Gobii agents now pace themselves when they start burning through too many task credits in a short window.
 
-Agent Pacing
+## What Agent Pacing Does
 
-What it does:
-Gobii agents now automatically slow their roll if they start burning through too many task credits in a short window.
+Agent Pacing helps agents avoid sprinting through a daily credit budget too quickly. When usage spikes, the agent can slow down instead of immediately running itself into the limit.
 
-Why this matters:
+## Why It Matters
 
-💡 More usable hours each day. No more blowing through your daily credit budget in 20 minutes.
+### More usable hours each day
 
-🔋 Longer sessions on complex tasks. Your agent paces itself instead of sprinting straight into the red.
+Pacing helps prevent an agent from using the entire daily budget in a short burst.
 
-🧹 Fewer accidental, premature credit burnouts.
+### Longer sessions on complex tasks
 
-And yes — we'll be honest — this also helps us keep infrastructure demands steadier behind the scenes. Win-win.
+Complex tasks can keep moving for longer because the agent is less likely to burn out early.
 
-This pacing system is the first piece of a larger optimization series we're rolling out (holiday weeks are perfect for backend upgrades).
+### Fewer accidental credit spikes
 
-Want more daily task credits? Upgrade to Pro or Scale and keep your agent running longer:
+It also makes platform usage steadier behind the scenes, which helps keep the service reliable.
+
+Agent Pacing is part of a broader set of optimization work focused on making persistent agents more predictable and affordable to run.
+
+Want more daily task credits? Pro and Scale plans give agents more room to work:
 
 [Pro](https://gobii.ai/pricing/?utm_source=blog&utm_medium=web&utm_campaign=pacing&utm_content=pro)
 
 [Scale](https://gobii.ai/pricing/?utm_source=blog&utm_medium=web&utm_campaign=pacing&utm_content=scale)
-
-More soon — hope you're all easing back into the week after the holiday chaos!

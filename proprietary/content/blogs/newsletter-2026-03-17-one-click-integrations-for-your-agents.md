@@ -14,28 +14,38 @@ tags:
 
 <img src="/static/images/blog/newsletters/newsletter-2026-03-17-one-click-integrations-for-your-agents-hero.png" alt="One-click integrations for your agents" style="max-width: 100%; border-radius: 10px;">
 
-One-Click Integrations are Here 🔌
+Connecting agents to everyday tools should not require a pile of API keys, OAuth setup, or custom glue code.
 
-Your agents just got a lot more powerful.
+Gobii's integration library gives agents a simpler way to connect to the systems your team already uses. Instead of configuring everything from scratch, you can browse pre-configured integrations in the console and add the ones your workflows need.
 
-Hey there,
+[Explore integrations](https://gobii.ai/console/advanced/mcp-servers/?utm_source=blog&utm_medium=web&utm_content=hero)
 
-Integrating your AI agents with your daily tools shouldn't be a hurdle. That's why we've introduced pre-configured integrations directly in the Gobii Console.
+## Why Integrations Matter
 
-View integrations:
-<https://gobii.ai/console/advanced/mcp-servers/?utm_source=blog&utm_medium=web&utm_content=hero>
+Agents become more useful when they can operate inside the tools where work already happens. Calendar events, CRM records, project notes, documents, and internal systems all contain context an agent can use to complete a task.
 
-What's New?
+The hard part is usually setup. A useful automation can stall before it starts if someone has to create credentials, copy secrets, and wire up a custom integration by hand.
 
-Search & Add: Find integrations for Google Calendar, Notion, CRMs, and more in a searchable library.
+One-click integrations move that setup into the Gobii console.
 
-Zero-Config Setup: No more hunting for API keys or client secrets.
+## What's Included
 
-Seamless Auth: Your agent provides a direct login link to get you connected in seconds.
+### Searchable integration library
 
-Focus on the work, not the plumbing.
+Find integrations for tools like Google Calendar, Notion, CRMs, and other everyday systems from a single place.
 
-Whether you're automating your schedule or syncing data across platforms, these new integrations make your workflow smoother than ever. Folks who were previously managing direct APIs will find this a breath of fresh air.
+### Zero-config setup
 
-Explore integrations in the console:
-<https://gobii.ai/console/advanced/mcp-servers/?utm_source=blog&utm_medium=web&utm_content=cta>
+Add integrations without hunting for API keys, client secrets, or one-off configuration details.
+
+### Guided authorization
+
+When authentication is needed, the agent provides a direct login link so you can connect the tool in seconds.
+
+## What This Unlocks
+
+Connected agents can do more than answer questions. They can coordinate schedules, update records, pull context from knowledge bases, sync information across systems, and complete work where the source data already lives.
+
+The goal is simple: spend less time managing plumbing and more time giving agents useful work.
+
+[Explore integrations in the console](https://gobii.ai/console/advanced/mcp-servers/?utm_source=blog&utm_medium=web&utm_content=cta)

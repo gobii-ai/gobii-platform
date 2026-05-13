@@ -1,23 +1,23 @@
 ---
-title: "Real-Time Updates, Bonus Credits, and a Sneak Peek 👀"
+title: "Real-time agent updates and bonus credits"
 date: 2025-12-30
-description: "Live updates today. Our most-requested feature next."
+description: "Live agent progress updates make Gobii tasks easier to follow as they run."
 author: "The Gobii Team"
-seo_title: "Real-Time Updates, Bonus Credits, and a Sneak Peek 👀"
-seo_description: "Live updates today. Our most-requested feature next."
+seo_title: "Real-time agent updates and bonus credits"
+seo_description: "Live agent progress updates make Gobii tasks easier to follow as they run."
 tags:
   - newsletter
   - weekly
   - product-updates
 ---
 
-Real-Time Updates, Bonus Credits, and a Sneak Peek 👀
+Real-time agent updates make Gobii tasks easier to follow while they run.
 
-As we wrap up 2025, we wanted to ship something that’s been at the top of a lot of wishlists — and say thanks for being part of the Gobii journey so far.
+Instead of waiting for a finished response, you can now see more of what an agent is doing as the work unfolds. It is a small shift that makes long-running tasks feel more transparent and easier to trust.
 
 ## Real-Time Agent Updates
 
-You’ll now see your agents update live as they work.
+You can now see agents update live as they work.
 
 - Watch their reasoning and progress in real time.
 - No more wondering "is it thinking... or stuck?"
@@ -27,20 +27,12 @@ It’s a big step toward making agents feel less like background jobs — and mo
 
 ## A Small Thank-You
 
-To say thanks for being with us during Gobii’s first six months, we’ve added bonus credits to your account (https://gobii.ai/console/)
-
-They’re there for one reason: to help you dive back in, experiment with what’s new, and see how much Gobii has improved over 2025.
-
-No action needed — they’re already added to your account.
+To mark Gobii's first six months, we added bonus credits for early users so they could experiment with the improvements that shipped through 2025.
 
 We genuinely wouldn’t be here without early users kicking the tires, finding edge cases, and pushing us to make this better every week.
 
-## One More Thing
+## What Comes Next
 
-Next week, we’re rolling out our most requested feature so far.
-
-Let’s just say: agents are about to get a lot better at working with the same materials you do every day.
-
-More soon.
+This work also set up the next wave of file and workflow improvements, where agents became better at working with the same materials people use every day.
 
 Thanks again for building with us — and happy almost-New-Year 🥂

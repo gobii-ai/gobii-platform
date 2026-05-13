@@ -1,10 +1,10 @@
 ---
 title: "Your agents just learned data visualization"
 date: 2026-01-13
-description: "Turn raw data into charts — automatically, inside emails and reports"
+description: "How Gobii agents turn collected data into charts for emails, reports, and PDFs."
 author: "The Gobii Team"
 seo_title: "Your agents just learned data visualization"
-seo_description: "Turn raw data into charts — automatically, inside emails and reports"
+seo_description: "How Gobii agents turn collected data into charts for emails, reports, and PDFs."
 image: "/static/images/blog/newsletters/newsletter-2026-01-13-your-agents-just-learned-data-visualization-hero.png"
 tags:
   - newsletter
@@ -14,62 +14,57 @@ tags:
 
 <img src="/static/images/blog/newsletters/newsletter-2026-01-13-your-agents-just-learned-data-visualization-hero.png" alt="Your agents just learned data visualization" style="max-width: 100%; border-radius: 10px;">
 
-## 📊 File Series: Part 2 Of 3
+Gobii agents can now generate charts directly from the data they collect.
 
-📈 Your Agents Just Became Data Visualization Pros
-From raw data to publication-quality charts — automatically.
+That matters because many agent workflows do more than gather information. They track prices, compare candidates, score leads, monitor competitors, and build up useful structured data over time. Until now, turning that data into a useful visual usually meant exporting it somewhere else first.
 
-Last week we gave your agents a paper trail — the ability to receive, process, and return files.
+Embedded Charts remove that extra step. An agent can query its internal database, turn the result into a chart, and include that chart in the same email, report, or PDF it was already going to send.
 
-This week, we’re giving them something even more powerful: the ability to see patterns.
+[View your agents](https://gobii.ai/console/agents/?utm_source=blog&utm_medium=web&utm_campaign=20260113&utm_content=ga)
 
-Introducing Embedded Charts.
+## Why This Matters
 
-Your Gobii agents can now generate publication-quality visualizations directly from their internal database — and embed them in emails, reports, and PDFs automatically.
+Agents are most useful when they can keep context over time. A recruiting agent that reviews candidates every day should be able to show pipeline trends. A pricing monitor should be able to show movement across competitors. A sales research agent should be able to summarize lead quality instead of handing you a pile of rows.
 
-View your agents here:
-<https://gobii.ai/console/agents/?utm_source=blog&utm_medium=web&utm_campaign=20260113&utm_content=ga>
+Charts make that work easier to scan. They also make agent output more useful for people who were not part of the original task, because the pattern is visible immediately.
 
-## 🎯 How It Works
+## How It Works
 
-Every piece of data your agent collects — scraped prices, candidate scores, lead metrics — lives in its internal database. Now, with a single query, that data becomes a chart:
+Every piece of structured data your agent collects can live in its internal database: scraped prices, candidate scores, lead metrics, task history, and more. Embedded Charts turn that stored data into visuals through a simple flow.
 
-Collect
-Your agent gathers data from any source — web, email, files.
+1. The agent collects data from the web, email, files, or other connected sources.
+2. It uses SQL to shape the data into the view the task needs.
+3. It generates a bar, line, pie, scatter, or area chart.
+4. It embeds the chart directly into an email, report, or PDF.
 
-Query
-It uses SQL to shape the data exactly how you need it.
+No separate export. No spreadsheet cleanup. No manual chart-building step.
 
-Visualize
-One command generates bar, line, pie, scatter, or area charts.
+## What You Can Build
 
-Embed
-Charts drop directly into emails, reports, and PDFs — no export needed.
+### Recruiting
 
-## 💡 What You Can Build
+- Funnel views of candidate pipeline stages.
+- Score distributions across applicants.
+- Time-to-hire trends by role.
 
-📊 Recruiting
-- Funnel views of candidate pipeline stages
-- Score distributions across applicants
-- Time-to-hire trends by role
+### Sales And Lead Generation
 
-📈 Sales & Lead Gen
-- Lead scoring distributions
-- Conversion rate trends over time
-- Outreach response comparisons by segment
+- Lead scoring distributions.
+- Conversion rate trends over time.
+- Outreach response comparisons by segment.
 
-🔍 Market Research
-- Competitor pricing comparisons
-- Feature coverage matrices
-- Market share breakdowns by segment
+### Market Research
 
-📉 Operations
-- Task completion trends
-- Error rate dashboards
-- Resource utilization over time
+- Competitor pricing comparisons.
+- Feature coverage matrices.
+- Market share breakdowns by segment.
 
-The best part?
-These charts appear right in your inbox — no clicking, no exporting, no manual work.
+### Operations
 
-Try Embedded Charts today:
-<https://gobii.ai/console/?utm_source=blog&utm_medium=web&utm_campaign=20260113&utm_content=try>
+- Task completion trends.
+- Error rate dashboards.
+- Resource utilization over time.
+
+The best part is that the chart arrives where the work already happens. If your agent is sending a weekly report, the visualization can be part of that report automatically.
+
+[Try Embedded Charts](https://gobii.ai/console/?utm_source=blog&utm_medium=web&utm_campaign=20260113&utm_content=try)
