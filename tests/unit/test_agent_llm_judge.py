@@ -377,8 +377,29 @@ class AgentJudgeTests(TestCase):
 
         user_content = messages[1]["content"]
         self.assertIn("<judge_contract>", user_content)
+        self.assertIn("identity_boundary", user_content)
         self.assertIn("<high_priority>", user_content)
+        self.assertIn("<subject_agent>", user_content)
         self.assertFalse(user_content.strip().startswith("{"))
+
+    def test_judge_prompt_distinguishes_judge_from_subject_agent(self):
+        trigger = build_manual_judge_trigger(self.agent, tools=[])
+        limits = JudgePromptLimits(
+            prompt_token_budget=500,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+
+        with patch("api.agent.core.agent_judge._create_token_estimator", return_value=lambda text: len(text.split())):
+            messages = _build_judge_messages(trigger.trajectory, model="test-model", prompt_limits=limits)
+
+        self.assertIn("You are not the subject agent", messages[0]["content"])
+        user_content = messages[1]["content"]
+        self.assertIn("<subject_agent>", user_content)
+        self.assertIn("The reviewed entity is the subject_agent", user_content)
+        self.assertNotIn("<agent>", user_content)
 
     def test_judge_prompt_shrinks_large_tool_result_under_budget(self):
         trajectory = {
