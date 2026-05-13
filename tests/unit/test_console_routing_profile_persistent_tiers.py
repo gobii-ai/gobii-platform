@@ -87,6 +87,7 @@ class ConsoleProfilePersistentTierTests(TestCase):
             display_name="Profile Persistent Default",
             is_active=False,
             summarization_endpoint=endpoint,
+            agent_judge_endpoint=endpoint,
         )
         profile_range = ProfileTokenRange.objects.create(
             profile=profile,
@@ -117,6 +118,7 @@ class ConsoleProfilePersistentTierTests(TestCase):
                 ("Default persistent config", "large-delete / Standard tier 4", "primary"),
                 ("Profile Persistent Default", "large / Standard tier 4", "primary"),
                 ("Profile Persistent Default", "Summarization override", "summarization"),
+                ("Profile Persistent Default", "Agent judge endpoint", "agent_judge"),
             },
         )
         overview = build_llm_overview()
@@ -132,6 +134,7 @@ class ConsoleProfilePersistentTierTests(TestCase):
                 ("Default persistent config", "large-delete / Standard tier 4", "primary"),
                 ("Profile Persistent Default", "large / Standard tier 4", "primary"),
                 ("Profile Persistent Default", "Summarization override", "summarization"),
+                ("Profile Persistent Default", "Agent judge endpoint", "agent_judge"),
             },
         )
 
@@ -143,3 +146,4 @@ class ConsoleProfilePersistentTierTests(TestCase):
         self.assertFalse(ProfilePersistentTierEndpoint.objects.filter(id=profile_ref.id).exists())
         profile.refresh_from_db()
         self.assertIsNone(profile.summarization_endpoint_id)
+        self.assertIsNone(profile.agent_judge_endpoint_id)

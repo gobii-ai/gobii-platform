@@ -28,6 +28,28 @@ type StaffAgentSearchResponse = {
   agents: StaffAgentSearchResult[]
 }
 
+export type ManualJudgeSuggestion = {
+  id: string
+  suggestionId: string
+  suggestionType: 'intelligence_upgrade' | 'stonewall_reframe' | 'strategy_shift'
+  title: string
+  message: string
+  agentDirective?: string | null
+  recommendedTier?: string | null
+  status?: string | null
+  createdAt?: string | null
+  reasoning?: string | null
+  completionId?: string | null
+  decisionApiUrl?: string | null
+}
+
+type ManualJudgeResponse = {
+  ran: boolean
+  status: string
+  suggestion_type?: string | null
+  suggestion?: ManualJudgeSuggestion | null
+}
+
 export async function fetchAuditEvents(
   agentId: string,
   params: { cursor?: string | null; limit?: number; at?: string | null; day?: string | null; tzOffsetMinutes?: number | null } = {},
@@ -67,6 +89,18 @@ export async function searchStaffAgents(query: string, params: { limit?: number 
 export async function triggerProcessEvents(agentId: string): Promise<{ queued: boolean; processing_active: boolean }> {
   const url = `/console/api/staff/agents/${agentId}/audit/process/`
   return jsonRequest(url, { method: 'POST', includeCsrf: true })
+}
+
+export async function runAgentJudge(agentId: string): Promise<ManualJudgeResponse> {
+  const url = `/console/api/staff/agents/${agentId}/audit/judge/`
+  return jsonRequest(url, { method: 'POST', includeCsrf: true })
+}
+
+export async function decideAgentJudgeSuggestion(decisionApiUrl: string, decision: 'approve' | 'reject'): Promise<{
+  status: string
+  system_message_active?: boolean
+}> {
+  return jsonRequest(decisionApiUrl, { method: 'POST', includeCsrf: true, json: { decision } })
 }
 
 export async function createSystemMessage(

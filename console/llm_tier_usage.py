@@ -80,7 +80,9 @@ def build_persistent_endpoint_tier_usage_map(endpoint_ids: Iterable[Any]) -> dic
         )
 
     override_profiles = LLMRoutingProfile.objects.filter(
-        Q(eval_judge_endpoint_id__in=endpoint_ids) | Q(summarization_endpoint_id__in=endpoint_ids)
+        Q(eval_judge_endpoint_id__in=endpoint_ids)
+        | Q(summarization_endpoint_id__in=endpoint_ids)
+        | Q(agent_judge_endpoint_id__in=endpoint_ids)
     ).order_by("display_name")
     for profile in override_profiles:
         if profile.eval_judge_endpoint_id in usage_by_endpoint:
@@ -109,6 +111,20 @@ def build_persistent_endpoint_tier_usage_map(endpoint_ids: Iterable[Any]) -> dic
                     "intelligence_tier": "",
                     "description": "",
                     "role": "summarization",
+                }
+            )
+        if profile.agent_judge_endpoint_id in usage_by_endpoint:
+            usage_by_endpoint[profile.agent_judge_endpoint_id].append(
+                {
+                    "id": f"{profile.id}:agent_judge",
+                    "source": "routing_profile",
+                    "routing_profile": profile.display_name or profile.name,
+                    "routing_profile_active": bool(profile.is_active),
+                    "tier": "Agent judge endpoint",
+                    "tier_order": 0,
+                    "intelligence_tier": "",
+                    "description": "",
+                    "role": "agent_judge",
                 }
             )
     return usage_by_endpoint

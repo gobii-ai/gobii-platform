@@ -139,6 +139,8 @@ class AnalyticsEvent(StrEnum):
     PERSISTENT_AGENT_BROWSER_DAILY_LIMIT_REACHED = 'Persistent Agent Browser Daily Limit Reached'
     PERSISTENT_AGENT_BURN_RATE_LIMIT_REACHED = 'Persistent Agent Burn Rate Limit Reached'
     PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN = 'Persistent Agent Burn Rate Runtime Tier Stepped Down'
+    PERSISTENT_AGENT_LLM_JUDGE_TRIGGERED = 'Persistent Agent LLM Judge Triggered'
+    PERSISTENT_AGENT_LLM_JUDGE_COMPLETED = 'Persistent Agent LLM Judge Completed'
     PERSISTENT_AGENT_CAPTCHA_ATTEMPTED = 'Persistent Agent CAPTCHA Attempted'
     PERSISTENT_AGENT_CAPTCHA_SUCCEEDED = 'Persistent Agent CAPTCHA Succeeded'
     PERSISTENT_AGENT_CAPTCHA_FAILED = 'Persistent Agent CAPTCHA Failed'

@@ -22,11 +22,21 @@ type CompletionCardProps = {
   onToggle?: () => void
 }
 
-function PromptSection({ label, text, onCopy }: { label: string; text: string; onCopy: (text: string) => void }) {
+function CollapsibleTextSection({
+  label,
+  text,
+  onCopy,
+  className = 'border-slate-200/80 bg-white/90',
+}: {
+  label: string
+  text: string
+  onCopy: (text: string) => void
+  className?: string
+}) {
   const [expanded, setExpanded] = useState(false)
 
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-white/90">
+    <div className={`overflow-hidden rounded-lg border ${className}`}>
       <div className="flex items-center justify-between gap-2 px-3 py-2">
         <button
           type="button"
@@ -74,6 +84,7 @@ export function CompletionCard({
     () => (completion.llm_tool_names || []).filter((name): name is string => typeof name === 'string' && name.length > 0),
     [completion.llm_tool_names],
   )
+  const thinking = typeof completion.thinking === 'string' ? completion.thinking.trim() : ''
 
   const copyText = async (text?: string | null) => {
     if (!text) return
@@ -109,6 +120,8 @@ export function CompletionCard({
         return 'Agent Chat Suggestion'
       case 'human_input_request_matching':
         return 'Human Input Request Matching'
+      case 'llm_judge':
+        return 'Judge Evaluation'
       default:
         return 'Other'
     }
@@ -177,6 +190,17 @@ export function CompletionCard({
             </div>
           ) : null}
 
+          {thinking ? (
+            <div className="mt-3">
+              <CollapsibleTextSection
+                label="Thinking"
+                text={thinking}
+                onCopy={copyText}
+                className="border-amber-200/80 bg-amber-50/70"
+              />
+            </div>
+          ) : null}
+
           {archiveId ? (
             <div className="mt-3 rounded-lg border border-slate-200/70 bg-indigo-50/70 px-3 py-2">
               <div className="flex items-center justify-between gap-2">
@@ -200,10 +224,10 @@ export function CompletionCard({
               {expanded && promptPayload ? (
                 <div className="mt-2 space-y-2">
                   {systemPrompt ? (
-                    <PromptSection label="System Prompt" text={systemPrompt} onCopy={copyText} />
+                    <CollapsibleTextSection label="System Prompt" text={systemPrompt} onCopy={copyText} />
                   ) : null}
                   {userPrompt ? (
-                    <PromptSection label="User Prompt" text={userPrompt} onCopy={copyText} />
+                    <CollapsibleTextSection label="User Prompt" text={userPrompt} onCopy={copyText} />
                   ) : null}
                 </div>
               ) : null}

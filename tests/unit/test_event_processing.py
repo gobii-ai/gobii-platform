@@ -116,6 +116,7 @@ from api.models import (
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 from api.agent.core.llm_config import AgentLLMTier
+from api.agent.core.burn_control import BurnRateAction
 from api.services.prompt_settings import get_prompt_settings, invalidate_prompt_settings_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -4365,6 +4366,89 @@ class OrchestratorHumanInputInterruptTests(TestCase):
 
     def _prompt_context(self):
         return ([{"role": "system", "content": "sys"}], 1000, None, {})
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.maybe_run_agent_judge")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value=BurnRateAction.PAUSED)
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_burn_rate_pause_triggers_judge_before_exiting_loop(
+        self,
+        mock_build_prompt,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_judge,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+
+        usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        mock_build_prompt.assert_not_called()
+        mock_judge.assert_called_once_with(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["burn_rate_throttled"],
+        )
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.maybe_run_agent_judge")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value=BurnRateAction.STEPPED_DOWN)
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_burn_rate_tier_step_down_triggers_judge(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_judge,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+
+        def _build_prompt_and_interrupt(*_args, **_kwargs):
+            bump_human_inbound_generation(self.agent.id)
+            return self._prompt_context()
+
+        mock_build_prompt.side_effect = _build_prompt_and_interrupt
+
+        from api.agent.core import event_processing as ep
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(usage.get("total_tokens"), 0)
+        mock_completion.assert_not_called()
+        mock_judge.assert_called_once_with(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["burn_rate_tier_step_down"],
+        )
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")

@@ -27,6 +27,7 @@ import {
   Sparkles,
   Crown,
   Star,
+  Brain,
 } from 'lucide-react'
 import { Fragment, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type ReactNode, type FormEvent } from 'react'
 import { createPortal } from 'react-dom'
@@ -1216,6 +1217,7 @@ function EndpointDeleteMessage({
                   {entry.role === 'extraction' ? ' · extraction endpoint' : ''}
                   {entry.role === 'eval_judge' ? ' · eval judge' : ''}
                   {entry.role === 'summarization' ? ' · summarization' : ''}
+                  {entry.role === 'agent_judge' ? ' · agent judge' : ''}
                 </p>
               </div>
               {typeof entry.weight === 'number' ? (
@@ -4004,6 +4006,7 @@ export function LlmConfigScreen() {
       description?: string
       eval_judge_endpoint_id?: string | null
       summarization_endpoint_id?: string | null
+      agent_judge_endpoint_id?: string | null
     },
   ) => {
     return runWithFeedback(
@@ -4067,6 +4070,23 @@ export function LlmConfigScreen() {
         label: 'Updating summarization model…',
         busyKey: actionKey('profile', selectedProfileId, 'summarization'),
         context: 'Summarization model',
+      },
+    )
+  }
+
+  const handleUpdateAgentJudgeEndpoint = async (endpointId: string | null) => {
+    if (!selectedProfileId) return
+    return runWithFeedback(
+      async () => {
+        await llmApi.updateRoutingProfile(selectedProfileId, { agent_judge_endpoint_id: endpointId })
+        await invalidateProfiles()
+        await invalidateProfileDetail()
+      },
+      {
+        successMessage: endpointId ? 'Agent judge model updated' : 'Agent judge model cleared',
+        label: 'Updating agent judge model…',
+        busyKey: actionKey('profile', selectedProfileId, 'agent-judge'),
+        context: 'Agent judge model',
       },
     )
   }
@@ -4715,7 +4735,7 @@ export function LlmConfigScreen() {
         </SectionCard>
         <SectionCard
           title="Other model consumers"
-          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, embeddings, file handling, image generation, and video generation.'}
+          description={selectedProfile ? `Editing profile: ${selectedProfile.display_name || selectedProfile.name}` : 'Surface-level overview of summarization, judge models, embeddings, file handling, image generation, and video generation.'}
         >
           <div className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4758,6 +4778,49 @@ export function LlmConfigScreen() {
                       </div>
                     ) : (
                       <p className="text-xs text-slate-500">Select a routing profile to configure this override.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <div className="rounded-xl border border-slate-200/80 bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <Brain className="size-5 text-violet-500 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <h4 className="font-semibold text-slate-900/90">Agent Judge</h4>
+                    <p className="text-sm text-slate-600 mb-3">
+                      Dedicated model for advisory trajectory judge calls. Does not use tier fallback when unset.
+                    </p>
+                    {selectedProfile ? (
+                      <div className="flex items-center gap-2">
+                        <select
+                          className="flex-1 min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40"
+                          value={selectedProfile.agent_judge_endpoint?.endpoint_id ?? ''}
+                          onChange={(e) => handleUpdateAgentJudgeEndpoint(e.target.value || null)}
+                          disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
+                        >
+                          <option value="">— No judge endpoint —</option>
+                          {endpointChoices.persistent_endpoints.map((ep) => (
+                            <option key={ep.id} value={ep.id}>
+                              {ep.label} ({ep.model})
+                            </option>
+                          ))}
+                        </select>
+                        {selectedProfile.agent_judge_endpoint && (
+                          <button
+                            type="button"
+                            className="flex-shrink-0 inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 focus:outline-none focus:ring-2 focus:ring-rose-200/60 disabled:opacity-50 disabled:cursor-not-allowed"
+                            onClick={() => handleUpdateAgentJudgeEndpoint(null)}
+                            disabled={isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge'))}
+                          >
+                            <X className="size-4" />
+                          </button>
+                        )}
+                        {isBusy(actionKey('profile', selectedProfileId ?? '', 'agent-judge')) && (
+                          <Loader2 className="size-4 text-violet-600 animate-spin flex-shrink-0" />
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500">Select a routing profile to configure this judge model.</p>
                     )}
                   </div>
                 </div>

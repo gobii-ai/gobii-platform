@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  Brain,
   ChevronDown,
   ChevronUp,
   Download,
@@ -14,7 +15,17 @@ import {
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
-import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
+import {
+  createSystemMessage,
+  decideAgentJudgeSuggestion,
+  fetchPromptArchive,
+  runAgentJudge,
+  searchStaffAgents,
+  triggerProcessEvents,
+  updateSystemMessage,
+  type ManualJudgeSuggestion,
+  type StaffAgentSearchResult,
+} from '../api/agentAudit'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
@@ -113,6 +124,15 @@ const COMPLETION_TYPE_FILTERS: {
   { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
 ]
 
+function formatJudgeSuggestionType(value?: string | null): string {
+  if (!value) return 'Suggestion'
+  return value
+    .split('_')
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ')
+}
+
 export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAuditScreenProps) {
   const {
     initialize,
@@ -144,6 +164,10 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
   const [eventCollapseOverrideKeys, setEventCollapseOverrideKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
+  const [judgeRunning, setJudgeRunning] = useState(false)
+  const [judgeReviewSuggestion, setJudgeReviewSuggestion] = useState<ManualJudgeSuggestion | null>(null)
+  const [judgeDecisionBusy, setJudgeDecisionBusy] = useState<'approve' | 'reject' | null>(null)
+  const [judgeDecisionError, setJudgeDecisionError] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [editingMessage, setEditingMessage] = useState<AuditSystemMessageEvent | null>(null)
@@ -329,6 +353,44 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
       setActionError(err instanceof Error ? err.message : 'Failed to queue processing')
     } finally {
       setProcessQueueing(false)
+    }
+  }
+
+  const handleRunJudge = async () => {
+    if (!agentId || judgeRunning) return
+    setJudgeRunning(true)
+    setActionError(null)
+    setJudgeDecisionError(null)
+    try {
+      const payload = await runAgentJudge(agentId)
+      if (!payload.ran) {
+        setActionError(payload.status === 'llm_not_configured' ? 'Agent judge LLM is not configured.' : 'Judge did not run.')
+      } else if (payload.suggestion) {
+        setJudgeReviewSuggestion(payload.suggestion)
+      } else if (payload.suggestion_type === 'no_action') {
+        setActionError('Judge completed with no suggested action.')
+      } else {
+        setActionError('Judge completed without a reviewable suggestion.')
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to run judge')
+    } finally {
+      setJudgeRunning(false)
+    }
+  }
+
+  const handleJudgeDecision = async (decision: 'approve' | 'reject') => {
+    const suggestion = judgeReviewSuggestion
+    if (!suggestion?.decisionApiUrl || judgeDecisionBusy) return
+    setJudgeDecisionBusy(decision)
+    setJudgeDecisionError(null)
+    try {
+      await decideAgentJudgeSuggestion(suggestion.decisionApiUrl, decision)
+      setJudgeReviewSuggestion(null)
+    } catch (err) {
+      setJudgeDecisionError(err instanceof Error ? err.message : `Failed to ${decision} suggestion`)
+    } finally {
+      setJudgeDecisionBusy(null)
     }
   }
 
@@ -635,6 +697,17 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
               />
               {processingActive ? 'Processing…' : processQueueing ? 'Queueing…' : 'Process events'}
             </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm transition hover:border-violet-300 hover:text-violet-900 disabled:cursor-not-allowed disabled:text-violet-300"
+              onClick={handleRunJudge}
+              disabled={judgeRunning}
+              title={judgeRunning ? 'Running judge' : 'Run judge now'}
+              aria-label={judgeRunning ? 'Running judge' : 'Run judge now'}
+            >
+              <Brain className={`h-4 w-4 ${judgeRunning ? 'animate-pulse' : ''}`} aria-hidden />
+              {judgeRunning ? 'Judging…' : 'Run judge'}
+            </button>
             {adminAgentUrl ? (
               <a
                 className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
@@ -823,6 +896,72 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
           </div>
         </div>
       </div>
+
+      {judgeReviewSuggestion ? (
+        <Modal
+          title="Review judge suggestion"
+          subtitle="Approve to activate the directive for the agent, or reject to discard it."
+          onClose={() => {
+            setJudgeDecisionError(null)
+          }}
+          dismissible={false}
+          icon={Brain}
+          iconBgClass="bg-violet-100"
+          iconColorClass="text-violet-700"
+          widthClass="sm:max-w-3xl"
+          footer={
+            <div className="flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-md bg-violet-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-violet-400"
+                onClick={() => void handleJudgeDecision('approve')}
+                disabled={Boolean(judgeDecisionBusy)}
+              >
+                {judgeDecisionBusy === 'approve' ? 'Approving...' : 'Approve suggestion'}
+              </button>
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:border-rose-300 hover:text-rose-800 disabled:cursor-not-allowed disabled:text-rose-300"
+                onClick={() => void handleJudgeDecision('reject')}
+                disabled={Boolean(judgeDecisionBusy)}
+              >
+                {judgeDecisionBusy === 'reject' ? 'Rejecting...' : 'Reject'}
+              </button>
+            </div>
+          }
+        >
+          <div className="space-y-4">
+            <div className="rounded-lg border border-violet-200 bg-violet-50/70 px-4 py-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-violet-700">
+                {formatJudgeSuggestionType(judgeReviewSuggestion.suggestionType)}
+              </div>
+              <h3 className="mt-1 text-base font-semibold text-slate-900">{judgeReviewSuggestion.title}</h3>
+              <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">{judgeReviewSuggestion.message}</p>
+              {judgeReviewSuggestion.recommendedTier ? (
+                <p className="mt-2 text-xs font-medium uppercase tracking-[0.14em] text-violet-700">
+                  Recommended: {judgeReviewSuggestion.recommendedTier.replace(/_/g, ' ')}
+                </p>
+              ) : null}
+            </div>
+
+            {judgeReviewSuggestion.agentDirective ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-4 py-3">
+                <div className="text-xs font-semibold uppercase tracking-wide text-amber-800">Directive to activate on approval</div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-800">{judgeReviewSuggestion.agentDirective}</p>
+              </div>
+            ) : null}
+
+            <details className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800">Thinking</summary>
+              <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-950 px-3 py-3 text-xs leading-5 text-slate-100">
+                {judgeReviewSuggestion.reasoning?.trim() || 'No reasoning was captured for this judge completion.'}
+              </pre>
+            </details>
+
+            {judgeDecisionError ? <div className="text-sm text-rose-600">{judgeDecisionError}</div> : null}
+          </div>
+        </Modal>
+      ) : null}
 
       {messageModalOpen ? (
         <Modal

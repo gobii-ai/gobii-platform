@@ -1300,23 +1300,38 @@ def get_summarization_llm_config(
     return configs[0]
 
 
-def _resolve_summarization_profile(routing_profile: Any | None) -> Any | None:
+def _resolve_active_routing_profile(routing_profile: Any | None, *, purpose: str) -> Any | None:
     if routing_profile is not None:
         return routing_profile
     try:
         LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
         return LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
     except (LookupError, DatabaseError):
-        logger.debug("Unable to resolve active routing profile for summarization", exc_info=True)
+        logger.debug("Unable to resolve active routing profile for %s", purpose, exc_info=True)
         return None
 
 
 def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str, dict] | None:
+    return _build_profile_endpoint_config(
+        profile,
+        endpoint_attr="summarization_endpoint",
+        endpoint_id_attr="summarization_endpoint_id",
+        tier_label="summarization_override",
+    )
+
+
+def _build_profile_endpoint_config(
+    profile: Any | None,
+    *,
+    endpoint_attr: str,
+    endpoint_id_attr: str,
+    tier_label: str,
+) -> Tuple[str, str, dict] | None:
     if profile is None:
         return None
 
-    endpoint = getattr(profile, "summarization_endpoint", None)
-    endpoint_id = getattr(profile, "summarization_endpoint_id", None)
+    endpoint = getattr(profile, endpoint_attr, None)
+    endpoint_id = getattr(profile, endpoint_id_attr, None)
     if endpoint is None and endpoint_id:
         try:
             PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
@@ -1326,7 +1341,7 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
                 .first()
             )
         except (LookupError, DatabaseError):
-            logger.debug("Unable to resolve summarization endpoint %s", endpoint_id, exc_info=True)
+            logger.debug("Unable to resolve %s endpoint %s", tier_label, endpoint_id, exc_info=True)
             endpoint = None
 
     if endpoint is None:
@@ -1350,7 +1365,7 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
 
     configs = _build_weighted_failover_configs(
         [(endpoint, provider, 1.0, effective_model, None)],
-        tier_label="summarization_override",
+        tier_label=tier_label,
     )
     if not configs:
         return None
@@ -1398,7 +1413,7 @@ def get_summarization_llm_configs(
         if possible_id is not None:
             agent_id = str(possible_id)
 
-    profile = _resolve_summarization_profile(routing_profile)
+    profile = _resolve_active_routing_profile(routing_profile, purpose="summarization")
     override_config = _build_summarization_override_config(profile)
 
     fallback_configs = get_llm_config_with_failover(
@@ -1435,6 +1450,144 @@ def get_summarization_llm_configs(
         )
 
     return deduped
+
+
+def get_agent_judge_llm_config(
+    *,
+    routing_profile: Any | None = None,
+) -> Tuple[str, str, dict]:
+    """Return the agent-judge LLM config, falling back to the highest regular tier."""
+    profile = _resolve_active_routing_profile(routing_profile, purpose="agent judge")
+    config = _build_profile_endpoint_config(
+        profile,
+        endpoint_attr="agent_judge_endpoint",
+        endpoint_id_attr="agent_judge_endpoint_id",
+        tier_label="agent_judge",
+    )
+    if config is None:
+        configs = _get_highest_regular_agent_llm_configs(routing_profile=profile)
+        config = configs[0] if configs else None
+
+    if config is None:
+        raise LLMNotConfiguredError(
+            "No agent judge or regular persistent-agent LLM endpoint is configured."
+        )
+
+    provider_key, model, params_with_hints = config
+    return provider_key, model, _prepare_summarization_params(model, params_with_hints)
+
+
+def _get_highest_regular_agent_llm_configs(
+    *,
+    routing_profile: Any | None,
+    token_count: int = 0,
+) -> List[Tuple[str, str, dict]]:
+    configs = _get_highest_regular_agent_llm_configs_from_profile(
+        routing_profile=routing_profile,
+        token_count=token_count,
+    )
+    if configs:
+        return configs
+    return _get_highest_regular_agent_llm_configs_from_legacy(token_count=token_count)
+
+
+def _get_highest_regular_agent_llm_configs_from_profile(
+    *,
+    routing_profile: Any | None,
+    token_count: int,
+) -> List[Tuple[str, str, dict]]:
+    if routing_profile is None:
+        return []
+
+    try:
+        ProfileTokenRange = apps.get_model('api', 'ProfileTokenRange')
+        ProfilePersistentTier = apps.get_model('api', 'ProfilePersistentTier')
+    except (LookupError, AppRegistryNotReady):
+        logger.debug("Unable to resolve profile LLM models for agent judge fallback", exc_info=True)
+        return []
+
+    try:
+        token_range = (
+            ProfileTokenRange.objects
+            .filter(profile=routing_profile)
+            .filter(min_tokens__lte=token_count)
+            .filter(Q(max_tokens__gt=token_count) | Q(max_tokens__isnull=True))
+            .order_by('min_tokens')
+            .last()
+        )
+
+        if token_range is None:
+            profile_ranges = ProfileTokenRange.objects.filter(profile=routing_profile)
+            smallest_range = profile_ranges.order_by('min_tokens').first()
+            largest_range = profile_ranges.order_by('-min_tokens').first()
+            if smallest_range and token_count < smallest_range.min_tokens:
+                token_range = smallest_range
+            else:
+                token_range = largest_range
+        if token_range is None:
+            return []
+
+        tiers = (
+            ProfilePersistentTier.objects
+            .filter(token_range=token_range)
+            .select_related("intelligence_tier")
+            .order_by("-intelligence_tier__rank", "order")
+        )
+        profile_name = getattr(routing_profile, 'name', 'unknown')
+        return _collect_failover_configs(
+            tiers,
+            token_range_name=f"{profile_name}:{token_range.name}",
+            prefer_low_latency=False,
+        )
+    except DatabaseError:
+        logger.debug("Unable to resolve profile agent judge fallback config", exc_info=True)
+        return []
+
+
+def _get_highest_regular_agent_llm_configs_from_legacy(
+    *,
+    token_count: int,
+) -> List[Tuple[str, str, dict]]:
+    try:
+        PersistentTokenRange = apps.get_model('api', 'PersistentTokenRange')
+        PersistentLLMTier = apps.get_model('api', 'PersistentLLMTier')
+    except (LookupError, AppRegistryNotReady):
+        logger.debug("Unable to resolve legacy LLM models for agent judge fallback", exc_info=True)
+        return []
+
+    try:
+        token_range = (
+            PersistentTokenRange.objects
+            .filter(min_tokens__lte=token_count)
+            .filter(Q(max_tokens__gt=token_count) | Q(max_tokens__isnull=True))
+            .order_by('min_tokens')
+            .last()
+        )
+
+        if token_range is None:
+            smallest_range = PersistentTokenRange.objects.order_by('min_tokens').first()
+            largest_range = PersistentTokenRange.objects.order_by('-min_tokens').first()
+            if smallest_range and token_count < smallest_range.min_tokens:
+                token_range = smallest_range
+            else:
+                token_range = largest_range
+        if token_range is None:
+            return []
+
+        tiers = (
+            PersistentLLMTier.objects
+            .filter(token_range=token_range)
+            .select_related("intelligence_tier")
+            .order_by("-intelligence_tier__rank", "order")
+        )
+        return _collect_failover_configs(
+            tiers,
+            token_range_name=token_range.name,
+            prefer_low_latency=False,
+        )
+    except DatabaseError:
+        logger.debug("Unable to resolve legacy agent judge fallback config", exc_info=True)
+        return []
 
 
 def _cache_bootstrap_status(is_required: bool) -> None:
@@ -1478,6 +1631,7 @@ __all__ = [
     "REFERENCE_TOKENIZER_MODEL",
     "get_summarization_llm_configs",
     "get_summarization_llm_config",
+    "get_agent_judge_llm_config",
     "LLMNotConfiguredError",
     "invalidate_llm_bootstrap_cache",
     "is_llm_bootstrap_required",

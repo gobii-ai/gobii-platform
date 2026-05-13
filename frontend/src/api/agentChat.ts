@@ -404,6 +404,7 @@ export function normalizePendingActionRequests(raw: unknown): PendingActionReque
         count: count || requests.length,
         resolveApiUrl: asNonEmptyString(request.resolveApiUrl) ?? asNonEmptyString(request.resolve_api_url),
       })
+      return
     }
   })
 

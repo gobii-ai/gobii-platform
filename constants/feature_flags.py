@@ -155,3 +155,6 @@ SIMPLIFIED_CHAT_DEFAULT_CONVERSATIONAL = "simplified_chat_default_conversational
 
 # Controls whether newly provisioned persistent agents start in prompt-led planning mode.
 PERSISTENT_AGENT_PLANNING_MODE = "persistent_agent_planning_mode"
+
+# Controls whether persistent agents run the advisory LLM trajectory judge.
+PERSISTENT_AGENT_LLM_JUDGE = "persistent_agent_llm_judge"

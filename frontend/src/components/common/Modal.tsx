@@ -17,6 +17,7 @@ type ModalProps = {
   bodyClassName?: string
   containerClassName?: string
   panelClassName?: string
+  dismissible?: boolean
 }
 
 export function Modal({
@@ -32,10 +33,11 @@ export function Modal({
   bodyClassName = '',
   containerClassName = '',
   panelClassName = '',
+  dismissible = true,
 }: ModalProps) {
   useEffect(() => {
     const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (dismissible && event.key === 'Escape') {
         onClose()
       }
     }
@@ -46,7 +48,7 @@ export function Modal({
       document.removeEventListener('keydown', handleKey)
       document.body.style.overflow = originalOverflow
     }
-  }, [onClose])
+  }, [dismissible, onClose])
 
   if (typeof document === 'undefined') {
     return null
@@ -56,7 +58,7 @@ export function Modal({
     <div className="fixed inset-0 z-[100] overflow-y-auto">
       <div
         className="fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-sm"
-        onClick={onClose}
+        onClick={dismissible ? onClose : undefined}
         role="presentation"
         aria-hidden="true"
       />
@@ -82,14 +84,16 @@ export function Modal({
                     </h2>
                     {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
                   </div>
-                  <button
-                    type="button"
-                    className="text-slate-400 hover:text-slate-500"
-                    onClick={onClose}
-                    aria-label="Close dialog"
-                  >
-                    <X className="h-5 w-5" strokeWidth={2} />
-                  </button>
+                  {dismissible ? (
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-slate-500"
+                      onClick={onClose}
+                      aria-label="Close dialog"
+                    >
+                      <X className="h-5 w-5" strokeWidth={2} />
+                    </button>
+                  ) : null}
                 </div>
                 <div className={`mt-4 max-h-[70vh] overflow-y-auto pr-1 text-left ${bodyClassName}`}>{children}</div>
               </div>

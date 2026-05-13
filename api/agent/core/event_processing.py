@@ -108,6 +108,7 @@ from .daily_limit_mode import (
     is_daily_hard_limit_message_only_mode,
     is_daily_limit_message_tool,
 )
+from .agent_judge import maybe_run_agent_judge
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -4769,12 +4770,22 @@ def _run_agent_loop(
                     follow_up_task=burn_follow_up_task,
                 )
                 if burn_rate_action == BurnRateAction.PAUSED:
+                    maybe_run_agent_judge(
+                        agent,
+                        tools=tools,
+                        extra_trigger_reasons=["burn_rate_throttled"],
+                    )
                     logger.info(
                         "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
                         agent.id,
                         i + 1,
                     )
                     return cumulative_token_usage
+
+                judge_trigger_reasons = []
+                if burn_rate_action == BurnRateAction.STEPPED_DOWN:
+                    judge_trigger_reasons.append("burn_rate_tier_step_down")
+                maybe_run_agent_judge(agent, tools=tools, extra_trigger_reasons=judge_trigger_reasons)
 
                 prompt_human_generation = _current_human_inbound_generation()
                 config_snapshot = seed_sqlite_agent_config(agent)

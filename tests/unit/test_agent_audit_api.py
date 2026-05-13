@@ -18,11 +18,34 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentError,
+    PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentPromptArchive,
     PersistentAgentStep,
+    PersistentAgentSystemMessage,
     PersistentAgentToolCall,
 )
+from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
+
+
+def _judge_response(payload: dict):
+    return MagicMock(
+        choices=[
+            MagicMock(
+                message=MagicMock(
+                    content=None,
+                    tool_calls=[
+                        {
+                            "function": {
+                                "name": REPORT_TOOL_NAME,
+                                "arguments": json.dumps(payload),
+                            }
+                        }
+                    ],
+                )
+            )
+        ]
+    )
 
 
 @tag("batch_console_api")
@@ -58,6 +81,158 @@ class StaffAgentAuditAPITests(TestCase):
         payload = response.json()
         self.assertIn("queued", payload)
         self.assertIn("processing_active", payload)
+
+    def test_manual_judge_endpoint_bypasses_cooldown(self):
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+        )
+        response_payload = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ) as config_mock, patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response_payload,
+        ) as run_mock:
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ran"])
+        config_mock.assert_called_once_with()
+        run_mock.assert_called_once()
+        self.assertEqual(
+            PersistentAgentCompletion.objects.filter(
+                agent=self.agent,
+                completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            ).count(),
+            2,
+        )
+
+    def test_manual_judge_endpoint_returns_handled_not_run_payload(self):
+        with patch(
+            "console.api_views.run_manual_agent_judge",
+            return_value={"ran": False, "status": "llm_not_configured"},
+        ):
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ran": False, "status": "llm_not_configured"})
+
+    def test_manual_judge_endpoint_returns_reviewable_suggestion(self):
+        response_payload = _judge_response(
+            {
+                "suggestion_type": "strategy_shift",
+                "message": "Try a different plan.",
+                "agent_directive": "Draft a new approach before using another tool.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response_payload,
+        ):
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        suggestion_payload = payload["suggestion"]
+        self.assertEqual(suggestion_payload["suggestionType"], "strategy_shift")
+        self.assertEqual(suggestion_payload["status"], PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW)
+        self.assertIn("/decision/", suggestion_payload["decisionApiUrl"])
+        suggestion = PersistentAgentJudgeSuggestion.objects.get(id=suggestion_payload["suggestionId"])
+        self.assertIsNone(suggestion.system_message)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(agent=self.agent).exists())
+
+    def test_manual_judge_suggestion_decision_approves_and_rejects(self):
+        system_message = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Judge directive",
+            is_active=False,
+        )
+        suggestion = PersistentAgentJudgeSuggestion.objects.create(
+            agent=self.agent,
+            suggestion_type=PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
+            title="Shift strategy",
+            ui_message="Try another approach.",
+            agent_directive="Use a different plan.",
+            evidence_hash="manual-review-test",
+            status=PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW,
+            system_message=system_message,
+        )
+
+        decision_url = (
+            f"/console/api/staff/agents/{self.agent.id}/audit/"
+            f"judge-suggestions/{suggestion.id}/decision/"
+        )
+        approve_response = self.client.post(
+            decision_url,
+            data=json.dumps({"decision": "approve"}),
+            content_type="application/json",
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        suggestion.refresh_from_db()
+        system_message.refresh_from_db()
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        self.assertTrue(system_message.is_active)
+
+        reject_response = self.client.post(
+            decision_url,
+            data=json.dumps({"decision": "reject"}),
+            content_type="application/json",
+        )
+        self.assertEqual(reject_response.status_code, 200)
+        suggestion.refresh_from_db()
+        system_message.refresh_from_db()
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.DISMISSED)
+        self.assertFalse(system_message.is_active)
+
+    def test_reject_pending_manual_judge_suggestion_does_not_leave_system_message(self):
+        system_message = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Unapproved judge directive",
+            is_active=False,
+        )
+        suggestion = PersistentAgentJudgeSuggestion.objects.create(
+            agent=self.agent,
+            suggestion_type=PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
+            title="Shift strategy",
+            ui_message="Try another approach.",
+            agent_directive="Use a different plan.",
+            evidence_hash="manual-review-reject-test",
+            status=PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW,
+            system_message=system_message,
+        )
+
+        decision_url = (
+            f"/console/api/staff/agents/{self.agent.id}/audit/"
+            f"judge-suggestions/{suggestion.id}/decision/"
+        )
+        reject_response = self.client.post(
+            decision_url,
+            data=json.dumps({"decision": "reject"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(reject_response.status_code, 200)
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.DISMISSED)
+        self.assertIsNone(suggestion.system_message)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(id=system_message.id).exists())
+
+    def test_manual_judge_endpoint_requires_staff(self):
+        self.client.force_login(self.nonstaff)
+        response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+        self.assertEqual(response.status_code, 403)
 
     def test_create_system_message(self):
         payload = {"body": "Priority directive", "is_active": True}
@@ -160,6 +335,22 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(error_event["category"], PersistentAgentError.Category.TASK_QUOTA_EXCEEDED)
         self.assertEqual(error_event["source"], "tests.quota")
         self.assertEqual(error_event["context"]["validation_messages"], ["Task quota exceeded"])
+
+    def test_audit_api_returns_completion_reasoning(self):
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            thinking_content="Judge reasoning trace.",
+            llm_model="ultra-max-test",
+            llm_provider="test-provider",
+        )
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/?limit=10")
+        self.assertEqual(response.status_code, 200)
+        events = response.json()["events"]
+        completion_event = next(event for event in events if event["kind"] == "completion")
+        self.assertEqual(completion_event["completion_type"], PersistentAgentCompletion.CompletionType.LLM_JUDGE)
+        self.assertEqual(completion_event["thinking"], "Judge reasoning trace.")
 
     def test_audit_timeline_counts_error_events(self):
         PersistentAgentError.objects.create(
