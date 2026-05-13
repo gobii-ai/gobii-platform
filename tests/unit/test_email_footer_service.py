@@ -50,6 +50,19 @@ class PersistentAgentEmailFooterTests(TestCase):
         self.assertIn("HTML Footer", html)
         self.assertIn("Plain footer text", text)
 
+    @patch(
+        "api.agent.comms.email_footer_service.get_owner_plan",
+        side_effect=AssertionError("footer eligibility must not use get_owner_plan"),
+        create=True,
+    )
+    def test_footer_uses_local_billing_without_owner_plan_helper(self, _mock_get_owner_plan):
+        agent = self._create_agent()
+
+        html, text = append_footer_if_needed(agent, "<p>Hello</p>", "Hello")
+
+        self.assertIn("HTML Footer", html)
+        self.assertIn("Plain footer text", text)
+
     def test_footer_table_is_separated_from_body_table(self):
         agent = self._create_agent()
 

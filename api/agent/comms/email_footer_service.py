@@ -4,7 +4,6 @@ from waffle import switch_is_active
 
 from constants.plans import PlanNames
 from constants.feature_flags import AGENT_CRON_THROTTLE
-from util.subscription_helper import get_owner_plan
 from config.redis_client import get_redis_client
 
 from api.models import PersistentAgent, PersistentAgentEmailFooter
@@ -121,21 +120,16 @@ def _should_apply_footer(agent: PersistentAgent) -> bool:
     if owner is None:
         return False
 
-    try:
-        plan = get_owner_plan(owner) or {}
-    except Exception:
-        logger.exception("Unable to determine plan for agent %s", agent.id)
-        return False
+    billing = getattr(owner, "billing", None)
+    if billing is None:
+        return True
 
-    plan_id = str(plan.get("id") or "").lower()
-    if plan_id == PlanNames.FREE:
+    subscription = str(billing.subscription or "").strip().lower()
+    if subscription == PlanNames.FREE:
         return True
 
     if agent.organization_id:
-        billing = getattr(agent.organization, "billing", None)
-        seats = getattr(billing, "purchased_seats", 0) if billing else 0
-        if seats <= 0:
-            return True
+        return (billing.purchased_seats or 0) <= 0
 
     return False
 
