@@ -789,6 +789,59 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
         self.assertIn("PodScheduled=False/Unschedulable", summary)
         self.assertIn("sandbox-supervisor=waiting/ContainerCreating", summary)
 
+    def test_wait_for_pod_ready_logs_when_summary_changes_with_same_phase(self):
+        backend = object.__new__(KubernetesSandboxBackend)
+        backend._pod_ready_timeout = 10
+        pending_unscheduled = {
+            "status": {
+                "phase": "Pending",
+                "conditions": [
+                    {
+                        "type": "PodScheduled",
+                        "status": "False",
+                        "reason": "Unschedulable",
+                    }
+                ],
+            }
+        }
+        pending_creating = {
+            "status": {
+                "phase": "Pending",
+                "conditions": [{"type": "PodScheduled", "status": "True"}],
+                "containerStatuses": [
+                    {
+                        "name": "sandbox-supervisor",
+                        "ready": False,
+                        "state": {"waiting": {"reason": "ContainerCreating"}},
+                    }
+                ],
+            }
+        }
+        running_ready = {
+            "status": {
+                "phase": "Running",
+                "conditions": [{"type": "Ready", "status": "True"}],
+            }
+        }
+        backend._get_pod = Mock(side_effect=[pending_unscheduled, pending_creating, running_ready])
+
+        with patch("api.services.sandbox_kubernetes.logger") as logger_mock, patch(
+            "api.services.sandbox_kubernetes.time.sleep",
+            return_value=None,
+        ):
+            result = backend._wait_for_pod_ready("sandbox-agent-agent-1")
+
+        self.assertTrue(result)
+        pending_progress_logs = [
+            call
+            for call in logger_mock.info.call_args_list
+            if call.args and str(call.args[0]).startswith("Sandbox pod readiness progress")
+            and call.args[2] == "Pending"
+        ]
+        self.assertEqual(len(pending_progress_logs), 2)
+        self.assertIn("Unschedulable", pending_progress_logs[0].args[-1])
+        self.assertIn("ContainerCreating", pending_progress_logs[1].args[-1])
+
     @override_settings(
         SANDBOX_COMPUTE_API_TOKEN="test-token",
         SANDBOX_COMPUTE_POD_CPU_REQUEST="750m",

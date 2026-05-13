@@ -11,6 +11,7 @@ from django.utils import timezone
 
 from api.agent.core import event_processing as ep
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentToolCall, TaskCredit, UserQuota
+from constants.grant_types import GrantTypeChoices
 
 
 @tag("batch_event_processing_credits")
@@ -33,6 +34,7 @@ class ToolErrorHandlingTests(TestCase):
             credits_used=Decimal("0"),
             granted_date=now - timedelta(days=1),
             expiration_date=now + timedelta(days=30),
+            grant_type=GrantTypeChoices.COMPENSATION,
         )
 
     def setUp(self):

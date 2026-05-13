@@ -928,19 +928,20 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             if not pod:
                 time.sleep(2)
                 continue
-            last_summary = _pod_readiness_summary(pod)
+            summary = _pod_readiness_summary(pod)
             status = pod.get("status") or {}
             phase = status.get("phase")
-            if phase != last_phase:
+            if phase != last_phase or summary != last_summary:
                 logger.info(
                     "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s summary=%s",
                     pod_name,
                     phase,
                     attempts,
                     _elapsed_ms(started_at),
-                    last_summary,
+                    summary,
                 )
                 last_phase = phase
+                last_summary = summary
             if phase == "Running":
                 for condition in status.get("conditions", []):
                     if condition.get("type") == "Ready" and condition.get("status") == "True":
