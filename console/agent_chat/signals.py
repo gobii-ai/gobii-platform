@@ -20,6 +20,7 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentError,
     PersistentAgentHumanInputRequest,
+    PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentSecret,
     PersistentAgentStep,
@@ -426,6 +427,16 @@ def broadcast_spawn_requests_updated(sender, instance: AgentSpawnRequest, **kwar
 
 @receiver(post_delete, sender=AgentSpawnRequest)
 def broadcast_spawn_requests_deleted(sender, instance: AgentSpawnRequest, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_save, sender=PersistentAgentJudgeSuggestion)
+def broadcast_judge_suggestions_updated(sender, instance: PersistentAgentJudgeSuggestion, **kwargs):
+    _broadcast_pending_action_requests_for_agent(instance.agent_id)
+
+
+@receiver(post_delete, sender=PersistentAgentJudgeSuggestion)
+def broadcast_judge_suggestions_deleted(sender, instance: PersistentAgentJudgeSuggestion, **kwargs):
     _broadcast_pending_action_requests_for_agent(instance.agent_id)
 
 

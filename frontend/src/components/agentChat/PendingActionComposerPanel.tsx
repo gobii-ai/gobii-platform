@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
+import { Brain, KeyRound, Mail, MessageSquareQuote, Zap } from 'lucide-react'
 
 import { HttpError } from '../../api/http'
 import type { PendingActionRequest } from '../../types/agentChat'
 import { HumanInputComposerPanel } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
 import { PendingContactRequestsPanel, type PendingContactDraft } from './PendingContactRequestsPanel'
+import { PendingJudgeSuggestionPanel } from './PendingJudgeSuggestionPanel'
 import { PendingRequestedSecretsPanel } from './PendingRequestedSecretsPanel'
 import { PendingSpawnRequestPanel } from './PendingSpawnRequestPanel'
 
@@ -31,6 +32,8 @@ type PendingActionComposerPanelProps = {
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
+  onOpenJudgeSuggestionSettings?: (settingsUrl?: string | null) => void
+  onDismissJudgeSuggestion?: (dismissApiUrl: string) => Promise<void>
   onResolveContactRequests?: (
     responses: Array<{
       requestId: string
@@ -71,6 +74,8 @@ function actionHeading(action: PendingActionRequest): string {
       return action.secrets[0]?.name ?? 'Requested secret'
     case 'contact_requests':
       return action.requests[0]?.name || action.requests[0]?.address || 'Contact approval'
+    case 'judge_suggestion':
+      return action.title
     default:
       return 'Pending action'
   }
@@ -89,6 +94,8 @@ function actionMeta(action: PendingActionRequest): string | null {
       const address = request?.name ? (request?.address ?? null) : null
       return [address, request?.purpose].filter(Boolean).join(' · ') || null
     }
+    case 'judge_suggestion':
+      return action.suggestionType === 'intelligence_upgrade' ? 'Intelligence suggestion' : 'Agent guidance'
     default:
       return null
   }
@@ -104,6 +111,8 @@ function actionIcon(action: PendingActionRequest) {
       return KeyRound
     case 'contact_requests':
       return Mail
+    case 'judge_suggestion':
+      return Brain
     default:
       return MessageSquareQuote
   }
@@ -124,6 +133,8 @@ export function PendingActionComposerPanel({
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
+  onOpenJudgeSuggestionSettings,
+  onDismissJudgeSuggestion,
   onResolveContactRequests,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
@@ -132,6 +143,8 @@ export function PendingActionComposerPanel({
   const [makeGlobal, setMakeGlobal] = useState(false)
   const [busySecretsAction, setBusySecretsAction] = useState<'save' | 'remove' | null>(null)
   const [secretError, setSecretError] = useState<string | null>(null)
+  const [busyJudgeSuggestion, setBusyJudgeSuggestion] = useState(false)
+  const [judgeSuggestionError, setJudgeSuggestionError] = useState<string | null>(null)
   const [contactDrafts, setContactDrafts] = useState<Record<string, PendingContactDraft>>({})
   const [busyContacts, setBusyContacts] = useState(false)
   const [contactError, setContactError] = useState<string | null>(null)
@@ -283,10 +296,26 @@ export function PendingActionComposerPanel({
     }
   }
 
+  const handleDismissJudgeSuggestion = async (dismissApiUrl: string) => {
+    if (!onDismissJudgeSuggestion || busyJudgeSuggestion) {
+      return
+    }
+    setBusyJudgeSuggestion(true)
+    setJudgeSuggestionError(null)
+    try {
+      await onDismissJudgeSuggestion(dismissApiUrl)
+    } catch (error) {
+      setJudgeSuggestionError(parseInlineError(error))
+    } finally {
+      setBusyJudgeSuggestion(false)
+    }
+  }
+
   const hasActionBody = showHumanInputComposer
     || activeAction.kind === 'spawn_request'
     || activeAction.kind === 'requested_secrets'
     || activeAction.kind === 'contact_requests'
+    || activeAction.kind === 'judge_suggestion'
 
   return (
     <section className="bg-white px-3 py-3 text-slate-800" aria-label="Pending action request">
@@ -363,6 +392,17 @@ export function PendingActionComposerPanel({
                 setContactDrafts((current) => ({ ...current, [requestId]: nextDraft }))
               }}
               onSubmit={handleResolveContacts}
+            />
+          ) : null}
+
+          {activeAction.kind === 'judge_suggestion' ? (
+            <PendingJudgeSuggestionPanel
+              action={activeAction}
+              disabled={disabled}
+              busy={busyJudgeSuggestion}
+              error={judgeSuggestionError}
+              onOpenSettings={onOpenJudgeSuggestionSettings}
+              onDismiss={handleDismissJudgeSuggestion}
             />
           ) : null}
         </div>

@@ -23,6 +23,27 @@ from api.models import (
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
+from api.agent.core.agent_judge import NO_ACTION, REPORT_TOOL_NAME
+
+
+def _judge_response(payload: dict):
+    return MagicMock(
+        choices=[
+            MagicMock(
+                message=MagicMock(
+                    content=None,
+                    tool_calls=[
+                        {
+                            "function": {
+                                "name": REPORT_TOOL_NAME,
+                                "arguments": json.dumps(payload),
+                            }
+                        }
+                    ],
+                )
+            )
+        ]
+    )
 
 
 @tag("batch_console_api")
@@ -58,6 +79,48 @@ class StaffAgentAuditAPITests(TestCase):
         payload = response.json()
         self.assertIn("queued", payload)
         self.assertIn("processing_active", payload)
+
+    def test_manual_judge_endpoint_bypasses_cooldown(self):
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+        )
+        response_payload = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "title": "No action",
+                "ui_message": "No action needed.",
+                "agent_directive": "No action needed.",
+                "confidence": 0.2,
+                "evidence": {},
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ) as config_mock, patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response_payload,
+        ) as run_mock:
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["ran"])
+        config_mock.assert_called_once_with()
+        run_mock.assert_called_once()
+        self.assertEqual(
+            PersistentAgentCompletion.objects.filter(
+                agent=self.agent,
+                completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            ).count(),
+            2,
+        )
+
+    def test_manual_judge_endpoint_requires_staff(self):
+        self.client.force_login(self.nonstaff)
+        response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+        self.assertEqual(response.status_code, 403)
 
     def test_create_system_message(self):
         payload = {"body": "Priority directive", "is_active": True}

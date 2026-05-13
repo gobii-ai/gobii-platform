@@ -4,6 +4,7 @@ import type {
   PendingHumanInputRequest,
   PendingHumanInputRequestInputMode,
   PendingHumanInputRequestStatus,
+  PendingJudgeSuggestionAction,
   PlanSnapshot,
   ProcessingSnapshot,
   RequestedSecret,
@@ -141,6 +142,21 @@ type PendingActionRequestWire = {
   remove_api_url?: unknown
   resolveApiUrl?: unknown
   resolve_api_url?: unknown
+  suggestionId?: unknown
+  suggestion_id?: unknown
+  suggestionType?: unknown
+  suggestion_type?: unknown
+  title?: unknown
+  message?: unknown
+  recommendedTier?: unknown
+  recommended_tier?: unknown
+  confidence?: unknown
+  createdAt?: unknown
+  created_at?: unknown
+  settingsUrl?: unknown
+  settings_url?: unknown
+  dismissApiUrl?: unknown
+  dismiss_api_url?: unknown
 }
 
 type RequestedSecretWire = {
@@ -327,6 +343,18 @@ function normalizePendingContactRequest(raw: unknown): PendingContactRequest | n
   }
 }
 
+function normalizeJudgeSuggestionType(raw: string): PendingJudgeSuggestionAction['suggestionType'] | null {
+  if (
+    raw === 'intelligence_upgrade'
+    || raw === 'stonewall_reframe'
+    || raw === 'request_human_input'
+    || raw === 'strategy_shift'
+  ) {
+    return raw
+  }
+  return null
+}
+
 export function normalizePendingHumanInputRequests(raw: unknown): PendingHumanInputRequest[] {
   if (!Array.isArray(raw)) {
     return []
@@ -403,6 +431,31 @@ export function normalizePendingActionRequests(raw: unknown): PendingActionReque
         requests,
         count: count || requests.length,
         resolveApiUrl: asNonEmptyString(request.resolveApiUrl) ?? asNonEmptyString(request.resolve_api_url),
+      })
+      return
+    }
+    if (kind === 'judge_suggestion') {
+      const suggestionId = asNonEmptyString(request.suggestionId) ?? asNonEmptyString(request.suggestion_id)
+      const suggestionType = normalizeJudgeSuggestionType(
+        asNonEmptyString(request.suggestionType) ?? asNonEmptyString(request.suggestion_type) ?? '',
+      )
+      const title = asNonEmptyString(request.title)
+      const message = asNonEmptyString(request.message)
+      if (!suggestionId || !suggestionType || !title || !message) {
+        return
+      }
+      normalized.push({
+        id,
+        kind,
+        suggestionId,
+        suggestionType,
+        title,
+        message,
+        recommendedTier: asNonEmptyString(request.recommendedTier) ?? asNonEmptyString(request.recommended_tier),
+        confidence: typeof request.confidence === 'number' ? request.confidence : null,
+        createdAt: asNonEmptyString(request.createdAt) ?? asNonEmptyString(request.created_at),
+        settingsUrl: asNonEmptyString(request.settingsUrl) ?? asNonEmptyString(request.settings_url),
+        dismissApiUrl: asNonEmptyString(request.dismissApiUrl) ?? asNonEmptyString(request.dismiss_api_url),
       })
     }
   })
@@ -622,6 +675,10 @@ export function resolveSpawnRequest(
   payload: SpawnRequestDecisionPayload,
 ): Promise<PendingActionMutationResult> {
   return postPendingActionMutation(decisionApiUrl, payload)
+}
+
+export function dismissJudgeSuggestion(dismissApiUrl: string): Promise<PendingActionMutationResult> {
+  return postPendingActionMutation(dismissApiUrl, {})
 }
 
 export type ProcessingStatusResponse = {

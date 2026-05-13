@@ -108,6 +108,7 @@ from .daily_limit_mode import (
     is_daily_hard_limit_message_only_mode,
     is_daily_limit_message_tool,
 )
+from .agent_judge import maybe_run_agent_judge
 from .prompt_context import (
     build_prompt_context,
     get_agent_daily_credit_state,
@@ -4775,6 +4776,8 @@ def _run_agent_loop(
                         i + 1,
                     )
                     return cumulative_token_usage
+
+                maybe_run_agent_judge(agent, tools=tools)
 
                 prompt_human_generation = _current_human_inbound_generation()
                 config_snapshot = seed_sqlite_agent_config(agent)

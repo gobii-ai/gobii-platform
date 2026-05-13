@@ -506,6 +506,7 @@ export type RoutingProfileListItem = {
   cloned_from_id: string | null
   eval_judge_endpoint_id: string | null
   summarization_endpoint_id: string | null
+  agent_judge_endpoint_id: string | null
 }
 
 export type EvalJudgeEndpoint = {
@@ -557,6 +558,7 @@ export type RoutingProfileDetail = {
   cloned_from_id: string | null
   eval_judge_endpoint: EvalJudgeEndpoint | null
   summarization_endpoint: EvalJudgeEndpoint | null
+  agent_judge_endpoint: EvalJudgeEndpoint | null
   persistent: { ranges: ProfileTokenRange[] }
   browser: { tiers: ProfileBrowserTier[] }
   embeddings: { tiers: ProfileEmbeddingTier[] }

@@ -219,11 +219,13 @@ class LLMRoutingProfileModelTests(TestCase):
             name="snapshot-source",
             display_name="Snapshot Source",
             summarization_endpoint=self.persistent_endpoint,
+            agent_judge_endpoint=self.persistent_endpoint,
         )
 
         snapshot = create_eval_profile_snapshot(profile, suite_run_id="12345678-1234-5678-1234-567812345678")
         self.assertIsNotNone(snapshot)
         self.assertEqual(snapshot.summarization_endpoint_id, self.persistent_endpoint.id)
+        self.assertEqual(snapshot.agent_judge_endpoint_id, self.persistent_endpoint.id)
 
 
 @tag("llm_routing_profiles_batch")
@@ -317,7 +319,8 @@ class LLMRoutingProfileSerializerTests(TestCase):
 
         profile = self._create_full_profile("list-item-test")
         profile.summarization_endpoint = self.persistent_endpoint
-        profile.save(update_fields=["summarization_endpoint"])
+        profile.agent_judge_endpoint = self.persistent_endpoint
+        profile.save(update_fields=["summarization_endpoint", "agent_judge_endpoint"])
         data = serialize_routing_profile_list_item(profile)
 
         self.assertEqual(data["id"], str(profile.id))
@@ -327,6 +330,7 @@ class LLMRoutingProfileSerializerTests(TestCase):
         self.assertIn("created_at", data)
         self.assertIn("updated_at", data)
         self.assertEqual(data["summarization_endpoint_id"], str(self.persistent_endpoint.id))
+        self.assertEqual(data["agent_judge_endpoint_id"], str(self.persistent_endpoint.id))
 
     def test_serialize_profile_detail(self):
         """Test serializing a full profile with nested config."""
@@ -337,7 +341,8 @@ class LLMRoutingProfileSerializerTests(TestCase):
 
         profile = self._create_full_profile("detail-test")
         profile.summarization_endpoint = self.persistent_endpoint
-        profile.save(update_fields=["summarization_endpoint"])
+        profile.agent_judge_endpoint = self.persistent_endpoint
+        profile.save(update_fields=["summarization_endpoint", "agent_judge_endpoint"])
         prefetched = get_routing_profile_with_prefetch(str(profile.id))
         data = serialize_routing_profile_detail(prefetched)
 
@@ -364,6 +369,11 @@ class LLMRoutingProfileSerializerTests(TestCase):
         self.assertIsNotNone(data["summarization_endpoint"])
         self.assertEqual(
             data["summarization_endpoint"]["endpoint_id"],
+            str(self.persistent_endpoint.id),
+        )
+        self.assertIsNotNone(data["agent_judge_endpoint"])
+        self.assertEqual(
+            data["agent_judge_endpoint"]["endpoint_id"],
             str(self.persistent_endpoint.id),
         )
 
@@ -487,6 +497,28 @@ class LLMRoutingProfileApiTests(TestCase):
         self.profile.refresh_from_db()
         self.assertEqual(self.profile.summarization_endpoint_id, self.endpoint.id)
 
+    def test_patch_updates_agent_judge_endpoint(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"agent_judge_endpoint_id": "%s"}' % self.endpoint.id,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+
+        self.profile.refresh_from_db()
+        self.assertEqual(self.profile.agent_judge_endpoint_id, self.endpoint.id)
+
+    def test_patch_rejects_invalid_agent_judge_endpoint(self):
+        url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
+        response = self.client.patch(
+            url,
+            data='{"agent_judge_endpoint_id": "00000000-0000-0000-0000-000000000000"}',
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Invalid agent judge endpoint ID", response.content.decode("utf-8"))
+
     def test_patch_rejects_invalid_summarization_endpoint(self):
         url = reverse("console_llm_routing_profile_detail", kwargs={"profile_id": str(self.profile.id)})
         response = self.client.patch(
@@ -509,7 +541,8 @@ class LLMRoutingProfileApiTests(TestCase):
 
     def test_clone_copies_summarization_endpoint(self):
         self.profile.summarization_endpoint = self.endpoint
-        self.profile.save(update_fields=["summarization_endpoint"])
+        self.profile.agent_judge_endpoint = self.endpoint
+        self.profile.save(update_fields=["summarization_endpoint", "agent_judge_endpoint"])
 
         url = reverse("console_llm_routing_profile_clone", kwargs={"profile_id": str(self.profile.id)})
         response = self.client.post(url, data="{}", content_type="application/json")
@@ -518,3 +551,4 @@ class LLMRoutingProfileApiTests(TestCase):
         payload = response.json()
         clone = LLMRoutingProfile.objects.get(id=payload["profile_id"])
         self.assertEqual(clone.summarization_endpoint_id, self.endpoint.id)
+        self.assertEqual(clone.agent_judge_endpoint_id, self.endpoint.id)

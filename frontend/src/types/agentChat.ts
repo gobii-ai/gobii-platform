@@ -218,11 +218,26 @@ export type PendingSpawnRequestAction = {
   kind: 'spawn_request'
 } & PendingSpawnRequest
 
+export type PendingJudgeSuggestionAction = {
+  id: string
+  kind: 'judge_suggestion'
+  suggestionId: string
+  suggestionType: 'intelligence_upgrade' | 'stonewall_reframe' | 'request_human_input' | 'strategy_shift'
+  title: string
+  message: string
+  recommendedTier?: string | null
+  confidence?: number | null
+  createdAt?: string | null
+  settingsUrl?: string | null
+  dismissApiUrl?: string | null
+}
+
 export type PendingActionRequest =
   | PendingHumanInputAction
   | PendingSpawnRequestAction
   | PendingRequestedSecretsAction
   | PendingContactRequestsAction
+  | PendingJudgeSuggestionAction
 
 export type MessageEvent = {
   kind: 'message'

@@ -69,6 +69,15 @@ export async function triggerProcessEvents(agentId: string): Promise<{ queued: b
   return jsonRequest(url, { method: 'POST', includeCsrf: true })
 }
 
+export async function runAgentJudge(agentId: string): Promise<{
+  ran: boolean
+  status: string
+  suggestion_type?: string | null
+}> {
+  const url = `/console/api/staff/agents/${agentId}/audit/judge/`
+  return jsonRequest(url, { method: 'POST', includeCsrf: true })
+}
+
 export async function createSystemMessage(
   agentId: string,
   payload: { body: string; is_active?: boolean },

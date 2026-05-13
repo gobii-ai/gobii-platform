@@ -3887,6 +3887,14 @@ class LLMRoutingProfile(models.Model):
         related_name="summarization_profiles",
         help_text="Optional endpoint override used for summarization and lightweight generation tasks.",
     )
+    agent_judge_endpoint = models.ForeignKey(
+        "PersistentModelEndpoint",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="agent_judge_profiles",
+        help_text="Endpoint used for advisory persistent-agent trajectory judge calls.",
+    )
 
     class Meta:
         ordering = ["-is_active", "display_name"]
@@ -7938,6 +7946,73 @@ class PersistentAgentSystemMessage(models.Model):
         return f"System message for {self.agent_id} ({status})"
 
 
+class PersistentAgentJudgeSuggestion(models.Model):
+    """Advisory suggestion produced by the internal trajectory judge."""
+
+    class SuggestionType(models.TextChoices):
+        INTELLIGENCE_UPGRADE = "intelligence_upgrade", "Intelligence Upgrade"
+        STONEWALL_REFRAME = "stonewall_reframe", "Stonewall Reframe"
+        REQUEST_HUMAN_INPUT = "request_human_input", "Request Human Input"
+        STRATEGY_SHIFT = "strategy_shift", "Strategy Shift"
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISMISSED = "dismissed", "Dismissed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="judge_suggestions",
+    )
+    suggestion_type = models.CharField(max_length=64, choices=SuggestionType.choices)
+    title = models.CharField(max_length=255)
+    ui_message = models.TextField()
+    agent_directive = models.TextField(blank=True)
+    confidence = models.FloatField(default=0)
+    recommended_tier = models.CharField(max_length=64, blank=True)
+    evidence = models.JSONField(default=dict, blank=True)
+    trigger_reasons = models.JSONField(default=list, blank=True)
+    evidence_hash = models.CharField(max_length=64, db_index=True)
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.ACTIVE,
+        db_index=True,
+    )
+    source_step = models.ForeignKey(
+        "PersistentAgentStep",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="judge_suggestions",
+    )
+    system_message = models.ForeignKey(
+        PersistentAgentSystemMessage,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="judge_suggestions",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pa_judge_agent_status_idx"),
+        ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent", "suggestion_type", "evidence_hash"],
+                name="uniq_pa_judge_suggestion_evidence",
+            ),
+        ]
+
+    def __str__(self):
+        return f"JudgeSuggestion<{self.suggestion_type}:{self.status}>"
+
+
 class PersistentAgentMCPServer(models.Model):
     """Explicit mapping for personal MCP servers enabled on an agent."""
 
@@ -11437,6 +11512,7 @@ class PersistentAgentCompletion(models.Model):
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
         AGENT_CHAT_SUGGESTION = ("agent_chat_suggestion", "Agent Chat Suggestion")
         HUMAN_INPUT_REQUEST_MATCHING = ("human_input_request_matching", "Human Input Request Matching")
+        LLM_JUDGE = ("llm_judge", "LLM Judge")
         OTHER = ("other", "Other")
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
@@ -11923,6 +11999,7 @@ class PersistentAgentSystemStep(models.Model):
         LLM_CONFIGURATION_REQUIRED = "LLM_CONFIGURATION_REQUIRED", "LLM Configuration Required"
         PROACTIVE_TRIGGER = "PROACTIVE_TRIGGER", "Proactive Trigger"
         SYSTEM_DIRECTIVE = "SYSTEM_DIRECTIVE", "System Directive"
+        LLM_JUDGE_SUGGESTION = "LLM_JUDGE_SUGGESTION", "LLM Judge Suggestion"
         BURN_RATE_COOLDOWN = "BURN_RATE_COOLDOWN", "Burn Rate Cooldown"
         RATE_LIMIT = "RATE_LIMIT", "Rate Limit"
         # Add more system-generated step codes here as needed.

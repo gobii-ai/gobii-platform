@@ -1300,23 +1300,38 @@ def get_summarization_llm_config(
     return configs[0]
 
 
-def _resolve_summarization_profile(routing_profile: Any | None) -> Any | None:
+def _resolve_active_routing_profile(routing_profile: Any | None, *, purpose: str) -> Any | None:
     if routing_profile is not None:
         return routing_profile
     try:
         LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
         return LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False).first()
     except (LookupError, DatabaseError):
-        logger.debug("Unable to resolve active routing profile for summarization", exc_info=True)
+        logger.debug("Unable to resolve active routing profile for %s", purpose, exc_info=True)
         return None
 
 
 def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str, dict] | None:
+    return _build_profile_endpoint_config(
+        profile,
+        endpoint_attr="summarization_endpoint",
+        endpoint_id_attr="summarization_endpoint_id",
+        tier_label="summarization_override",
+    )
+
+
+def _build_profile_endpoint_config(
+    profile: Any | None,
+    *,
+    endpoint_attr: str,
+    endpoint_id_attr: str,
+    tier_label: str,
+) -> Tuple[str, str, dict] | None:
     if profile is None:
         return None
 
-    endpoint = getattr(profile, "summarization_endpoint", None)
-    endpoint_id = getattr(profile, "summarization_endpoint_id", None)
+    endpoint = getattr(profile, endpoint_attr, None)
+    endpoint_id = getattr(profile, endpoint_id_attr, None)
     if endpoint is None and endpoint_id:
         try:
             PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
@@ -1326,7 +1341,7 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
                 .first()
             )
         except (LookupError, DatabaseError):
-            logger.debug("Unable to resolve summarization endpoint %s", endpoint_id, exc_info=True)
+            logger.debug("Unable to resolve %s endpoint %s", tier_label, endpoint_id, exc_info=True)
             endpoint = None
 
     if endpoint is None:
@@ -1350,7 +1365,7 @@ def _build_summarization_override_config(profile: Any | None) -> Tuple[str, str,
 
     configs = _build_weighted_failover_configs(
         [(endpoint, provider, 1.0, effective_model, None)],
-        tier_label="summarization_override",
+        tier_label=tier_label,
     )
     if not configs:
         return None
@@ -1398,7 +1413,7 @@ def get_summarization_llm_configs(
         if possible_id is not None:
             agent_id = str(possible_id)
 
-    profile = _resolve_summarization_profile(routing_profile)
+    profile = _resolve_active_routing_profile(routing_profile, purpose="summarization")
     override_config = _build_summarization_override_config(profile)
 
     fallback_configs = get_llm_config_with_failover(
@@ -1435,6 +1450,25 @@ def get_summarization_llm_configs(
         )
 
     return deduped
+
+
+def get_agent_judge_llm_config(
+    *,
+    routing_profile: Any | None = None,
+) -> Tuple[str, str, dict]:
+    """Return the dedicated agent-judge LLM config with no tier fallback."""
+    profile = _resolve_active_routing_profile(routing_profile, purpose="agent judge")
+    config = _build_profile_endpoint_config(
+        profile,
+        endpoint_attr="agent_judge_endpoint",
+        endpoint_id_attr="agent_judge_endpoint_id",
+        tier_label="agent_judge",
+    )
+    if config is None:
+        raise LLMNotConfiguredError("No agent judge LLM endpoint is configured.")
+
+    provider_key, model, params_with_hints = config
+    return provider_key, model, _prepare_summarization_params(model, params_with_hints)
 
 
 def _cache_bootstrap_status(is_required: bool) -> None:
@@ -1478,6 +1512,7 @@ __all__ = [
     "REFERENCE_TOKENIZER_MODEL",
     "get_summarization_llm_configs",
     "get_summarization_llm_config",
+    "get_agent_judge_llm_config",
     "LLMNotConfiguredError",
     "invalidate_llm_bootstrap_cache",
     "is_llm_bootstrap_required",

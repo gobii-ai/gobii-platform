@@ -498,6 +498,7 @@ def serialize_routing_profile_list_item(profile: LLMRoutingProfile) -> dict[str,
         "summarization_endpoint_id": (
             str(profile.summarization_endpoint_id) if profile.summarization_endpoint_id else None
         ),
+        "agent_judge_endpoint_id": str(profile.agent_judge_endpoint_id) if profile.agent_judge_endpoint_id else None,
     }
 
 
@@ -604,6 +605,17 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
             "model": ep.litellm_model,
         }
 
+    agent_judge_endpoint = None
+    if profile.agent_judge_endpoint:
+        ep = profile.agent_judge_endpoint
+        provider_name = ep.provider.display_name if ep.provider else "Unlinked"
+        agent_judge_endpoint = {
+            "endpoint_id": str(ep.id),
+            "endpoint_key": ep.key,
+            "label": f"{provider_name} · {ep.litellm_model}",
+            "model": ep.litellm_model,
+        }
+
     return {
         "id": str(profile.id),
         "name": profile.name,
@@ -616,6 +628,7 @@ def serialize_routing_profile_detail(profile: LLMRoutingProfile) -> dict[str, An
         "cloned_from_id": str(profile.cloned_from_id) if profile.cloned_from_id else None,
         "eval_judge_endpoint": eval_judge_endpoint,
         "summarization_endpoint": summarization_endpoint,
+        "agent_judge_endpoint": agent_judge_endpoint,
         "persistent": {"ranges": persistent_ranges},
         "browser": {"tiers": browser_tiers},
         "embeddings": {"tiers": embedding_tiers},
@@ -679,6 +692,7 @@ def get_routing_profile_with_prefetch(profile_id: str) -> LLMRoutingProfile:
     return LLMRoutingProfile.objects.select_related(
         "eval_judge_endpoint__provider",
         "summarization_endpoint__provider",
+        "agent_judge_endpoint__provider",
     ).prefetch_related(
         persistent_range_prefetch,
         browser_tier_prefetch,

@@ -57,6 +57,7 @@ from api.agent.core.processing_flags import (
     clear_processing_work_state,
     set_processing_stop_requested,
 )
+from api.agent.core.agent_judge import dismiss_judge_suggestion, run_manual_agent_judge
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -97,6 +98,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
+    PersistentAgentJudgeSuggestion,
     PersistentAgentSecret,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
@@ -2603,6 +2605,23 @@ class StaffAgentProcessEventsAPIView(SystemAdminAPIView):
         return JsonResponse({"queued": queued, "processing_active": processing_active}, status=202)
 
 
+class StaffAgentRunJudgeAPIView(SystemAdminAPIView):
+    """Staff-only hook to run the advisory judge immediately for an agent."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        try:
+            result = run_manual_agent_judge(agent)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Failed to run manual judge for agent %s", agent.id)
+            return JsonResponse({"error": "judge_failed", "detail": str(exc)}, status=500)
+
+        status = 200 if result.get("ran") else 409
+        return JsonResponse(result, status=status)
+
+
 class StaffAgentSystemMessageAPIView(SystemAdminAPIView):
     """Create a per-agent system directive for staff audit UI."""
 
@@ -3820,6 +3839,39 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
                 **_pending_action_payload(agent, request.user),
             },
             status=201,
+        )
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentJudgeSuggestionDismissAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, suggestion_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        if not user_can_manage_agent_settings(
+            request.user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        ):
+            return HttpResponseForbidden("You do not have permission to dismiss this suggestion.")
+
+        suggestion = get_object_or_404(
+            PersistentAgentJudgeSuggestion.objects,
+            id=suggestion_id,
+            agent=agent,
+        )
+        dismiss_judge_suggestion(suggestion)
+        return JsonResponse(
+            {
+                "message": "Suggestion dismissed.",
+                **_pending_action_payload(agent, request.user),
+            },
+            status=200,
         )
 
 
@@ -5320,6 +5372,7 @@ class PersistentEndpointDetailAPIView(SystemAdminAPIView):
             ProfilePersistentTierEndpoint.objects.filter(endpoint=endpoint).delete()
             LLMRoutingProfile.objects.filter(eval_judge_endpoint=endpoint).update(eval_judge_endpoint=None)
             LLMRoutingProfile.objects.filter(summarization_endpoint=endpoint).update(summarization_endpoint=None)
+            LLMRoutingProfile.objects.filter(agent_judge_endpoint=endpoint).update(agent_judge_endpoint=None)
             endpoint.delete()
         invalidate_llm_bootstrap_cache()
         from api.agent.core.llm_config import invalidate_min_endpoint_input_tokens_cache
@@ -6380,6 +6433,17 @@ class LLMRoutingProfileDetailAPIView(SystemAdminAPIView):
                 except (PersistentModelEndpoint.DoesNotExist, ValidationError):
                     return HttpResponseBadRequest("Invalid summarization endpoint ID")
 
+        if "agent_judge_endpoint_id" in payload:
+            endpoint_id = payload.get("agent_judge_endpoint_id")
+            if endpoint_id is None or endpoint_id == "":
+                profile.agent_judge_endpoint = None
+            else:
+                try:
+                    endpoint = PersistentModelEndpoint.objects.get(pk=endpoint_id)
+                    profile.agent_judge_endpoint = endpoint
+                except (PersistentModelEndpoint.DoesNotExist, ValidationError):
+                    return HttpResponseBadRequest("Invalid agent judge endpoint ID")
+
         profile.save()
         return _json_ok(profile_id=str(profile.id))
 
@@ -6463,6 +6527,7 @@ class LLMRoutingProfileCloneAPIView(SystemAdminAPIView):
                 cloned_from=source,
                 eval_judge_endpoint=source.eval_judge_endpoint,
                 summarization_endpoint=source.summarization_endpoint,
+                agent_judge_endpoint=source.agent_judge_endpoint,
             )
 
             # Clone persistent config: token ranges -> tiers -> endpoints

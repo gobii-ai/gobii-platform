@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  Brain,
   ChevronDown,
   ChevronUp,
   Download,
@@ -14,7 +15,7 @@ import {
 import { useAgentAuditStore } from '../stores/agentAuditStore'
 import { useAgentAuditSocket } from '../hooks/useAgentAuditSocket'
 import type { AuditToolCallEvent, AuditErrorEvent, AuditMessageEvent, AuditStepEvent, AuditSystemMessageEvent, AuditEvent } from '../types/agentAudit'
-import { createSystemMessage, fetchPromptArchive, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
+import { createSystemMessage, fetchPromptArchive, runAgentJudge, searchStaffAgents, triggerProcessEvents, updateSystemMessage, type StaffAgentSearchResult } from '../api/agentAudit'
 import { AuditTimeline } from '../components/agentAudit/AuditTimeline'
 import { Modal } from '../components/common/Modal'
 import { SystemMessageCard } from '../components/agentAudit/SystemMessageCard'
@@ -144,6 +145,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
   const [eventCollapseOverrideKeys, setEventCollapseOverrideKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
+  const [judgeRunning, setJudgeRunning] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const [messageModalOpen, setMessageModalOpen] = useState(false)
   const [editingMessage, setEditingMessage] = useState<AuditSystemMessageEvent | null>(null)
@@ -329,6 +331,22 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
       setActionError(err instanceof Error ? err.message : 'Failed to queue processing')
     } finally {
       setProcessQueueing(false)
+    }
+  }
+
+  const handleRunJudge = async () => {
+    if (!agentId || judgeRunning) return
+    setJudgeRunning(true)
+    setActionError(null)
+    try {
+      const payload = await runAgentJudge(agentId)
+      if (!payload.ran) {
+        setActionError(payload.status === 'llm_not_configured' ? 'Agent judge LLM is not configured.' : 'Judge did not run.')
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to run judge')
+    } finally {
+      setJudgeRunning(false)
     }
   }
 
@@ -634,6 +652,17 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 aria-hidden
               />
               {processingActive ? 'Processing…' : processQueueing ? 'Queueing…' : 'Process events'}
+            </button>
+            <button
+              type="button"
+              className="inline-flex items-center gap-2 rounded-lg border border-violet-200 bg-white px-3 py-2 text-sm font-semibold text-violet-700 shadow-sm transition hover:border-violet-300 hover:text-violet-900 disabled:cursor-not-allowed disabled:text-violet-300"
+              onClick={handleRunJudge}
+              disabled={judgeRunning}
+              title={judgeRunning ? 'Running judge' : 'Run judge now'}
+              aria-label={judgeRunning ? 'Running judge' : 'Run judge now'}
+            >
+              <Brain className={`h-4 w-4 ${judgeRunning ? 'animate-pulse' : ''}`} aria-hidden />
+              {judgeRunning ? 'Judging…' : 'Run judge'}
             </button>
             {adminAgentUrl ? (
               <a
