@@ -58,22 +58,32 @@ ALLOWED_SUGGESTION_TYPES = {
     PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
     NO_ACTION,
 }
-NEGATIVE_LANGUAGE_PATTERNS = (
-    "not working",
-    "still broken",
-    "you already",
-    "why can't",
-    "stop repeating",
-    "same thing again",
-    "this is frustrating",
-    "so frustrating",
-    "useless",
-    "still wrong",
-    "this is wrong",
-    "completely wrong",
-)
 NEGATIVE_LANGUAGE_REGEX_PATTERNS = (
-    r"\b(?:fuck|fucking|fucked|shit|shitty|bullshit|wtf|asshole|idiot|stupid|damn)\b",
+    r"\byou (failed|forgot|missed|ignored|didn'?t|did not)\b",
+    r"\byou (failed|didn'?t|did not) respond\b",
+    r"\bwhy (didn'?t|did not) you\b",
+    r"\b(can'?t|cant) you\b",
+    r"\byou already\b",
+    r"\byou keep (sending|repeating|doing|missing|failing)\b",
+    r"\b(stop repeating|same thing again|keeps repeating|looping)\b",
+    r"\b(not working|still broken|still not working|not fixed)\b",
+    (
+        r"\b(the|this|your) .{0,50}"
+        r"(tool|platform|system|backend|webhook|integration|credential|secret|api|delivery|call)"
+        r".{0,80}(broken|failing|failed|error|invalid|incorrect|not found|timed out)\b"
+    ),
+    r"\b(this is|so|really|extremely|very) frustrating\b",
+    r"\b(i'?m|i am) (frustrated|annoyed|stuck)\b",
+    r"\b(stuck in .*loop|technical loop|another .*loop)\b",
+    r"\b(this is wrong|completely wrong|still wrong|not what i asked|not what was asked)\b",
+    r"\b(useless|garbage|trash|terrible|awful|horrible)\b",
+    (
+        r"\b("
+        r"fuck|fucking|fucked|fucked up|shit|shitty|bullshit|horseshit|wtf|"
+        r"asshole|idiot|stupid|dumb|moron|damn|dammit|goddamn|crap|sucks|"
+        r"pissed|screw this"
+        r")\b"
+    ),
 )
 BLOCKER_PATTERNS = (
     "i can't proceed",
@@ -687,9 +697,7 @@ def _has_negative_user_language(messages: list[PersistentAgentMessage]) -> bool:
     if latest_user_message is None:
         return False
     text = (latest_user_message.body or "").lower()
-    return any(pattern in text for pattern in NEGATIVE_LANGUAGE_PATTERNS) or any(
-        re.search(pattern, text) for pattern in NEGATIVE_LANGUAGE_REGEX_PATTERNS
-    )
+    return any(re.search(pattern, text) for pattern in NEGATIVE_LANGUAGE_REGEX_PATTERNS)
 
 
 def _has_stonewall_loop(messages: list[PersistentAgentMessage]) -> bool:

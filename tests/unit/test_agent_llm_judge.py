@@ -236,6 +236,44 @@ class AgentJudgeTests(TestCase):
         self.assertIsNotNone(trigger)
         self.assertIn("negative_user_language", trigger.reasons)
 
+    def test_negative_language_trigger_includes_high_signal_complaints(self):
+        self._add_steps(1)
+        examples = (
+            "Why didn't you respond?",
+            "You keep repeating the same thing.",
+            "This integration timed out and is still not working.",
+            "This is not what I asked.",
+            "Can't you just do the task?",
+        )
+        for index, body in enumerate(examples):
+            with self.subTest(body=body):
+                PersistentAgentMessage.objects.filter(owner_agent=self.agent).delete()
+                self._add_message(index, body=body)
+
+                trigger = build_judge_trigger(self.agent, tools=[])
+
+                self.assertIsNotNone(trigger)
+                self.assertIn("negative_user_language", trigger.reasons)
+
+    def test_negative_language_trigger_includes_common_profanity_and_insults(self):
+        self._add_steps(1)
+        examples = (
+            "This sucks.",
+            "That was a dumb answer.",
+            "I'm pissed.",
+            "This is crap.",
+            "Screw this.",
+        )
+        for index, body in enumerate(examples):
+            with self.subTest(body=body):
+                PersistentAgentMessage.objects.filter(owner_agent=self.agent).delete()
+                self._add_message(index, body=body)
+
+                trigger = build_judge_trigger(self.agent, tools=[])
+
+                self.assertIsNotNone(trigger)
+                self.assertIn("negative_user_language", trigger.reasons)
+
     def test_extra_trigger_reason_runs_judge(self):
         self._add_steps(1)
 
