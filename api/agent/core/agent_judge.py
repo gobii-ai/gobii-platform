@@ -54,7 +54,6 @@ NO_ACTION = "no_action"
 ALLOWED_SUGGESTION_TYPES = {
     PersistentAgentJudgeSuggestion.SuggestionType.INTELLIGENCE_UPGRADE,
     PersistentAgentJudgeSuggestion.SuggestionType.STONEWALL_REFRAME,
-    PersistentAgentJudgeSuggestion.SuggestionType.REQUEST_HUMAN_INPUT,
     PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
     NO_ACTION,
 }
@@ -62,25 +61,36 @@ NEGATIVE_LANGUAGE_PATTERNS = (
     "not working",
     "still broken",
     "you already",
-    "i already",
-    "again",
-    "stuck",
     "why can't",
     "stop repeating",
-    "same thing",
-    "frustrating",
+    "same thing again",
+    "this is frustrating",
+    "so frustrating",
     "useless",
-    "wrong",
+    "still wrong",
+    "this is wrong",
+    "completely wrong",
+)
+NEGATIVE_LANGUAGE_REGEX_PATTERNS = (
+    r"\b(?:fuck|fucking|fucked|shit|shitty|bullshit|wtf|asshole|idiot|stupid|damn)\b",
 )
 BLOCKER_PATTERNS = (
-    "can't",
-    "cannot",
-    "unable",
-    "need more information",
-    "need you to",
-    "i need",
-    "blocked",
-    "not able",
+    "i can't proceed",
+    "i cannot proceed",
+    "i'm unable to proceed",
+    "i am unable to proceed",
+    "i can't continue",
+    "i cannot continue",
+    "i'm unable to continue",
+    "i am unable to continue",
+    "i need more information before i can proceed",
+    "i need more information to proceed",
+    "i need you to provide",
+    "i need you to clarify",
+    "i'm blocked until",
+    "i am blocked until",
+    "i'm not able to proceed",
+    "i am not able to proceed",
 )
 
 
@@ -101,13 +111,18 @@ class JudgePromptLimits:
     enabled_tool_limit: int
 
 
-def maybe_run_agent_judge(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> None:
+def maybe_run_agent_judge(
+    agent: PersistentAgent,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    extra_trigger_reasons: list[str] | None = None,
+) -> None:
     """Run the internal judge when heuristics indicate the agent may need guidance."""
 
     try:
         if not is_agent_judge_enabled_for_agent(agent):
             return
-        trigger = build_judge_trigger(agent, tools=tools)
+        trigger = build_judge_trigger(agent, tools=tools, extra_trigger_reasons=extra_trigger_reasons)
         if trigger is None:
             return
         _run_judge(agent, trigger)
@@ -154,7 +169,12 @@ def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, 
     )
 
 
-def build_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> JudgeTrigger | None:
+def build_judge_trigger(
+    agent: PersistentAgent,
+    *,
+    tools: list[dict[str, Any]] | None = None,
+    extra_trigger_reasons: list[str] | None = None,
+) -> JudgeTrigger | None:
     if not is_agent_judge_enabled_for_agent(agent):
         return None
 
@@ -177,7 +197,10 @@ def build_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] |
 
     recent_messages = _recent_messages(agent)
     recent_tool_calls = _recent_tool_calls(agent)
-    reasons = _trigger_reasons(recent_messages, recent_tool_calls)
+    reasons = _merge_trigger_reasons(
+        _trigger_reasons(recent_messages, recent_tool_calls),
+        extra_trigger_reasons or [],
+    )
     if not reasons:
         return None
 
@@ -207,6 +230,15 @@ def build_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] |
         trajectory=trajectory,
         non_judge_step_count=non_judge_step_count,
     )
+
+
+def _merge_trigger_reasons(primary: list[str], extra: list[str]) -> list[str]:
+    reasons: list[str] = []
+    for reason in [*primary, *extra]:
+        cleaned = _clean_choice(reason)
+        if cleaned and cleaned not in reasons:
+            reasons.append(cleaned)
+    return reasons
 
 
 def _run_judge(
@@ -543,8 +575,13 @@ def _recent_tool_calls(agent: PersistentAgent) -> list[PersistentAgentToolCall]:
 
 
 def _has_negative_user_language(messages: list[PersistentAgentMessage]) -> bool:
-    text = "\n".join((message.body or "").lower() for message in messages if not message.is_outbound)
-    return any(pattern in text for pattern in NEGATIVE_LANGUAGE_PATTERNS)
+    latest_user_message = next((message for message in messages if not message.is_outbound), None)
+    if latest_user_message is None:
+        return False
+    text = (latest_user_message.body or "").lower()
+    return any(pattern in text for pattern in NEGATIVE_LANGUAGE_PATTERNS) or any(
+        re.search(pattern, text) for pattern in NEGATIVE_LANGUAGE_REGEX_PATTERNS
+    )
 
 
 def _has_stonewall_loop(messages: list[PersistentAgentMessage]) -> bool:
@@ -606,8 +643,8 @@ def _build_trajectory_packet(
         "trigger_reasons": trigger_reasons,
         "non_judge_step_count": non_judge_step_count,
         "policy_excerpts": [
-            "If the agent is blocked or missing a user decision, it should use request_human_input rather than repeating a blocker.",
-            "If the user repeats the same command and the agent repeats the same blocker for three turns, reframe the ask prominently or request tracked human input.",
+            "If the agent is blocked or missing a user decision, it should reframe the blocker and ask a clearer question rather than repeating itself.",
+            "If the user repeats the same command and the agent repeats the same blocker for three turns, reframe the ask prominently with one clear next question.",
             "If task complexity exceeds the current intelligence tier, suggest an intelligence upgrade instead of silently struggling.",
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],
@@ -963,8 +1000,6 @@ def _format_agent_directive(title: str, agent_directive: str, suggestion_type: s
 def _default_title(suggestion_type: str) -> str:
     if suggestion_type == PersistentAgentJudgeSuggestion.SuggestionType.INTELLIGENCE_UPGRADE:
         return "Consider higher intelligence"
-    if suggestion_type == PersistentAgentJudgeSuggestion.SuggestionType.REQUEST_HUMAN_INPUT:
-        return "Ask for the missing decision"
     if suggestion_type == PersistentAgentJudgeSuggestion.SuggestionType.STONEWALL_REFRAME:
         return "Reframe the blocker"
     return "Adjust strategy"

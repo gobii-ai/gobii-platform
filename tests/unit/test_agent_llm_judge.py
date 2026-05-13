@@ -14,6 +14,7 @@ from api.agent.core.agent_judge import (
     NO_ACTION,
     REPORT_TOOL_NAME,
     _build_judge_messages,
+    _judge_tool_definition,
     _judge_prompt_limits,
     approve_judge_suggestion,
     build_manual_judge_trigger,
@@ -139,13 +140,13 @@ class AgentJudgeTests(TestCase):
         for index in range(3):
             self._add_error_tool_call(index)
 
-    def _add_message(self, index: int, *, outbound: bool = False) -> None:
-        PersistentAgentMessage.objects.create(
+    def _add_message(self, index: int, *, outbound: bool = False, body: str | None = None) -> PersistentAgentMessage:
+        return PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.agent_endpoint if outbound else self.user_endpoint,
             to_endpoint=self.user_endpoint if outbound else self.agent_endpoint,
             is_outbound=outbound,
-            body=f"Message {index}",
+            body=body or f"Message {index}",
         )
 
     def test_steps_alone_do_not_trigger_judge(self):
@@ -200,6 +201,82 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNotNone(trigger)
         self.assertIn("failed_tool_calls", trigger.reasons)
+
+    def test_negative_language_trigger_only_checks_latest_user_message(self):
+        self._add_steps(1)
+        older_message = self._add_message(0, body="This is still broken.")
+        latest_message = self._add_message(1, body="Can you try that again?")
+        PersistentAgentMessage.objects.filter(id=older_message.id).update(
+            timestamp=timezone.now() - timedelta(minutes=2)
+        )
+        PersistentAgentMessage.objects.filter(id=latest_message.id).update(
+            timestamp=timezone.now() - timedelta(minutes=1)
+        )
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNone(trigger)
+
+    def test_negative_language_trigger_uses_stronger_latest_user_signal(self):
+        self._add_steps(1)
+        self._add_message(0, body="This is still broken.")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNotNone(trigger)
+        self.assertIn("negative_user_language", trigger.reasons)
+
+    def test_negative_language_trigger_includes_latest_user_profanity(self):
+        self._add_steps(1)
+        self._add_message(0, body="This is fucking broken.")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNotNone(trigger)
+        self.assertIn("negative_user_language", trigger.reasons)
+
+    def test_extra_trigger_reason_runs_judge(self):
+        self._add_steps(1)
+
+        trigger = build_judge_trigger(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["burn_rate_throttled"],
+        )
+
+        self.assertIsNotNone(trigger)
+        self.assertEqual(trigger.reasons, ["burn_rate_throttled"])
+
+    def test_judge_tool_does_not_offer_request_human_input_suggestion(self):
+        tool = _judge_tool_definition()
+
+        suggestion_types = tool["function"]["parameters"]["properties"]["suggestion_type"]["enum"]
+        self.assertNotIn("request_human_input", suggestion_types)
+
+    def test_stonewall_loop_ignores_generic_blocker_words(self):
+        self._add_steps(1)
+        self._add_message(0, body="Please continue")
+        self._add_message(1, outbound=True, body="I need to check the page before continuing.")
+        self._add_message(2, body="Please continue")
+        self._add_message(3, outbound=True, body="This is blocked by a slow page load.")
+        self._add_message(4, body="Please continue")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNone(trigger)
+
+    def test_stonewall_loop_requires_explicit_blocker_phrase(self):
+        self._add_steps(1)
+        self._add_message(0, body="Please continue")
+        self._add_message(1, outbound=True, body="I need more information before I can proceed.")
+        self._add_message(2, body="Please continue")
+        self._add_message(3, outbound=True, body="I need more information before I can proceed.")
+        self._add_message(4, body="Please continue")
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNotNone(trigger)
+        self.assertIn("stonewall_loop", trigger.reasons)
 
     def test_trajectory_packet_includes_generic_context_and_provenance(self):
         PersistentAgentSkill.objects.create(

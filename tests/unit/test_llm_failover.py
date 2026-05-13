@@ -691,7 +691,7 @@ class TestLLMFailover(TestCase):
         self.assertEqual(provider_key, fallback_endpoint.key)
         self.assertEqual(model, fallback_endpoint.litellm_model)
 
-    def test_agent_judge_uses_dedicated_endpoint_without_tier_fallback(self):
+    def test_agent_judge_uses_dedicated_endpoint_then_highest_regular_tier(self):
         clear_llm_db()
         LLMProvider = apps.get_model('api', 'LLMProvider')
         PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
@@ -721,6 +721,13 @@ class TestLLMFailover(TestCase):
             litellm_model='openrouter/z-ai/glm-4.5',
             supports_tool_choice=True,
         )
+        highest_endpoint = PersistentModelEndpoint.objects.create(
+            key='fallback_ultra_max',
+            provider=provider,
+            enabled=True,
+            litellm_model='openrouter/openai/gpt-5.1-ultra-max',
+            supports_tool_choice=True,
+        )
         profile = LLMRoutingProfile.objects.create(
             name='agent-judge-test',
             display_name='Agent Judge Test',
@@ -734,6 +741,12 @@ class TestLLMFailover(TestCase):
             intelligence_tier=get_intelligence_tier("standard"),
         )
         ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=fallback_endpoint, weight=1.0)
+        highest_tier = ProfilePersistentTier.objects.create(
+            token_range=token_range,
+            order=2,
+            intelligence_tier=get_intelligence_tier("ultra_max"),
+        )
+        ProfilePersistentTierEndpoint.objects.create(tier=highest_tier, endpoint=highest_endpoint, weight=1.0)
 
         with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-openrouter"}, clear=True):
             provider_key, model, _params = get_agent_judge_llm_config(routing_profile=profile)
@@ -744,8 +757,10 @@ class TestLLMFailover(TestCase):
         profile.agent_judge_endpoint = None
         profile.save(update_fields=["agent_judge_endpoint", "updated_at"])
         with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "sk-openrouter"}, clear=True):
-            with self.assertRaises(LLMNotConfiguredError):
-                get_agent_judge_llm_config(routing_profile=profile)
+            provider_key, model, _params = get_agent_judge_llm_config(routing_profile=profile)
+
+        self.assertEqual(provider_key, highest_endpoint.key)
+        self.assertEqual(model, highest_endpoint.litellm_model)
 
 
 @tag("batch_event_llm")
