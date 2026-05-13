@@ -23,7 +23,9 @@ from api.models import (
     PersistentAgentCompletion,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
+    PersistentAgentSkill,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -33,9 +35,14 @@ from constants.feature_flags import PERSISTENT_AGENT_LLM_JUDGE
 logger = logging.getLogger(__name__)
 
 JUDGE_FAILED_TOOL_THRESHOLD = 3
-JUDGE_RECENT_TOOL_LIMIT = 12
-JUDGE_RECENT_MESSAGE_LIMIT = 12
-JUDGE_RECENT_STEP_LIMIT = 12
+JUDGE_TRIGGER_TOOL_LIMIT = 12
+JUDGE_TRIGGER_MESSAGE_LIMIT = 12
+JUDGE_RECENT_TOOL_LIMIT = 60
+JUDGE_RECENT_MESSAGE_LIMIT = 50
+JUDGE_RECENT_STEP_LIMIT = 80
+JUDGE_RECENT_DIRECTIVE_LIMIT = 20
+JUDGE_SKILL_LIMIT = 20
+JUDGE_SQLITE_CONTEXT_CHARS = 30000
 JUDGE_RUN_CACHE_TTL_SECONDS = 60 * 60 * 12
 JUDGE_MIN_STEP_GAP = 10
 JUDGE_RUN_COOLDOWN_SECONDS = 60 * 45
@@ -124,8 +131,8 @@ def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, 
             "manual_run_at": timezone.now().isoformat(),
             "step_count": non_judge_step_count,
             "reasons": reasons,
-            "message_ids": [item["id"] for item in trajectory["recent_messages"]],
-            "tool_step_ids": [item["step_id"] for item in trajectory["recent_tool_calls"]],
+            "message_ids": [str(message.id) for message in recent_messages],
+            "tool_step_ids": [str(call.step_id) for call in recent_tool_calls],
         }
     )
     return JudgeTrigger(
@@ -176,8 +183,8 @@ def build_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] |
             "agent_id": str(agent.id),
             "step_count": non_judge_step_count,
             "reasons": reasons,
-            "message_ids": [item["id"] for item in trajectory["recent_messages"]],
-            "tool_step_ids": [item["step_id"] for item in trajectory["recent_tool_calls"]],
+            "message_ids": [str(message.id) for message in recent_messages],
+            "tool_step_ids": [str(call.step_id) for call in recent_tool_calls],
         }
     )
     if cache.get(_judge_run_cache_key(agent, evidence_hash)):
@@ -386,14 +393,16 @@ def _trigger_reasons(
     recent_tool_calls: list[PersistentAgentToolCall],
 ) -> list[str]:
     reasons: list[str] = []
-    recent_errors = [call for call in recent_tool_calls if (call.status or "").lower() == "error"]
+    trigger_tool_calls = recent_tool_calls[:JUDGE_TRIGGER_TOOL_LIMIT]
+    trigger_messages = recent_messages[:JUDGE_TRIGGER_MESSAGE_LIMIT]
+    recent_errors = [call for call in trigger_tool_calls if (call.status or "").lower() == "error"]
     if len(recent_errors) >= JUDGE_FAILED_TOOL_THRESHOLD:
         reasons.append("failed_tool_calls")
 
-    if _has_negative_user_language(recent_messages):
+    if _has_negative_user_language(trigger_messages):
         reasons.append("negative_user_language")
 
-    if _has_stonewall_loop(recent_messages):
+    if _has_stonewall_loop(trigger_messages):
         reasons.append("stonewall_loop")
 
     return reasons
@@ -451,15 +460,17 @@ def _build_trajectory_packet(
     tier = get_agent_llm_tier(agent)
     recent_steps = list(
         PersistentAgentStep.objects.filter(agent=agent)
+        .select_related("system_step")
         .exclude(system_step__code=PersistentAgentSystemStep.Code.LLM_JUDGE_SUGGESTION)
         .order_by("-created_at")[:JUDGE_RECENT_STEP_LIMIT]
     )
     recent_directives = list(
         PersistentAgentSystemMessage.objects.filter(agent=agent)
         .order_by("-created_at")
-        .values("id", "body", "created_at", "delivered_at")[:5]
+        .values("id", "body", "created_at", "delivered_at", "is_active")[:JUDGE_RECENT_DIRECTIVE_LIMIT]
     )
     plan_snapshot = _plan_snapshot(agent)
+    current_context = _build_current_context_snapshot(agent)
 
     return {
         "agent": {
@@ -468,6 +479,12 @@ def _build_trajectory_packet(
             "current_tier": tier.value,
             "charter": _truncate(agent.charter or "", 1200),
         },
+        "packet_notes": [
+            "This is a generic trajectory-debug packet for an advisory judge.",
+            "All chronology arrays are oldest-to-newest within their retained windows.",
+            "Recent trajectory may include the current processing run and prior runs; use timestamps, system_step_code, and message direction to avoid overclaiming run boundaries.",
+            "Distinguish directly observed facts from inferred causes. If a cause is not directly visible, phrase it as uncertainty.",
+        ],
         "trigger_reasons": trigger_reasons,
         "non_judge_step_count": non_judge_step_count,
         "policy_excerpts": [
@@ -477,11 +494,14 @@ def _build_trajectory_packet(
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],
         "capability_manifest": _capability_manifest(tools),
-        "plan_snapshot": plan_snapshot,
-        "recent_messages": [_serialize_message(message) for message in reversed(recent_messages)],
-        "recent_tool_calls": [_serialize_tool_call(call) for call in reversed(recent_tool_calls)],
-        "recent_steps": [_serialize_step(step) for step in reversed(recent_steps)],
-        "recent_system_directives": [_serialize_directive(row) for row in reversed(recent_directives)],
+        "current_context": current_context,
+        "recent_trajectory": {
+            "plan_snapshot": plan_snapshot,
+            "messages": [_serialize_message(message) for message in reversed(recent_messages)],
+            "tool_calls": [_serialize_tool_call(call) for call in reversed(recent_tool_calls)],
+            "steps": [_serialize_step(step) for step in reversed(recent_steps)],
+            "system_directives": [_serialize_directive(row) for row in reversed(recent_directives)],
+        },
     }
 
 
@@ -497,6 +517,82 @@ def _plan_snapshot(agent: PersistentAgent) -> dict[str, Any]:
         "todo_titles": list(getattr(snapshot, "todo_titles", [])[:5]),
         "doing_titles": list(getattr(snapshot, "doing_titles", [])[:5]),
     }
+
+
+def _build_current_context_snapshot(agent: PersistentAgent) -> dict[str, Any]:
+    return {
+        "skills": _skill_context(agent),
+        "sqlite": _sqlite_context_snapshot(),
+    }
+
+
+def _skill_context(agent: PersistentAgent) -> dict[str, Any]:
+    latest_skills = list(
+        PersistentAgentSkill.objects.filter(agent=agent)
+        .order_by("name", "-version", "-updated_at")
+    )
+    latest_by_name: dict[str, PersistentAgentSkill] = {}
+    for skill in latest_skills:
+        if skill.name not in latest_by_name:
+            latest_by_name[skill.name] = skill
+
+    saved_skills = sorted(
+        latest_by_name.values(),
+        key=lambda row: (
+            row.last_used_at is not None,
+            row.last_used_at or row.updated_at,
+            row.updated_at,
+        ),
+        reverse=True,
+    )[:JUDGE_SKILL_LIMIT]
+    system_skills = list(
+        PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
+        .order_by("-last_used_at", "-enabled_at")[:JUDGE_SKILL_LIMIT]
+    )
+    return {
+        "saved_skills": [
+            {
+                "source_type": "agent_skill",
+                "name": skill.name,
+                "description": _truncate(skill.description or "", 1000),
+                "version": skill.version,
+                "tools": skill.tools if isinstance(skill.tools, list) else [],
+                "instructions": _truncate(skill.instructions or "", 3000),
+                "last_used_at": skill.last_used_at.isoformat() if skill.last_used_at else None,
+                "updated_at": skill.updated_at.isoformat() if skill.updated_at else None,
+            }
+            for skill in saved_skills
+        ],
+        "enabled_system_skills": [
+            {
+                "source_type": "system_skill_state",
+                "skill_key": state.skill_key,
+                "last_used_at": state.last_used_at.isoformat() if state.last_used_at else None,
+                "enabled_at": state.enabled_at.isoformat() if state.enabled_at else None,
+                "usage_count": state.usage_count,
+            }
+            for state in system_skills
+        ],
+    }
+
+
+def _sqlite_context_snapshot() -> dict[str, Any]:
+    try:
+        from api.agent.tools.sqlite_state import get_sqlite_digest_prompt, get_sqlite_schema_prompt
+
+        return {
+            "source_type": "sqlite_context",
+            "schema": _truncate(get_sqlite_schema_prompt(), JUDGE_SQLITE_CONTEXT_CHARS),
+            "digest": _truncate(get_sqlite_digest_prompt(), JUDGE_SQLITE_CONTEXT_CHARS),
+        }
+    except (OSError, RuntimeError, ValueError, DatabaseError):
+        logger.debug("Unable to build judge SQLite context snapshot.", exc_info=True)
+        return {
+            "source_type": "sqlite_context",
+            "schema": "",
+            "digest": "",
+            "error": "unavailable",
+        }
 
 
 def _capability_manifest(tools: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -520,6 +616,8 @@ def _capability_manifest(tools: list[dict[str, Any]]) -> list[dict[str, str]]:
 
 def _serialize_message(message: PersistentAgentMessage) -> dict[str, Any]:
     return {
+        "source_type": "message",
+        "trajectory_scope": "recent",
         "id": str(message.id),
         "direction": "agent_to_user" if message.is_outbound else "user_to_agent",
         "channel": _message_channel(message),
@@ -538,6 +636,8 @@ def _message_channel(message: PersistentAgentMessage) -> str:
 
 def _serialize_tool_call(call: PersistentAgentToolCall) -> dict[str, Any]:
     return {
+        "source_type": "tool_call",
+        "trajectory_scope": "recent",
         "step_id": str(call.step_id),
         "tool_name": call.tool_name,
         "status": call.status or "complete",
@@ -548,19 +648,27 @@ def _serialize_tool_call(call: PersistentAgentToolCall) -> dict[str, Any]:
 
 
 def _serialize_step(step: PersistentAgentStep) -> dict[str, Any]:
+    system_step = getattr(step, "system_step", None)
     return {
+        "source_type": "step",
+        "trajectory_scope": "recent",
         "id": str(step.id),
         "created_at": step.created_at.isoformat() if step.created_at else None,
+        "system_step_code": system_step.code if system_step is not None else None,
+        "system_step_notes": _truncate(system_step.notes or "", 1000) if system_step is not None else None,
         "description": _truncate(step.description or "", 1000),
     }
 
 
 def _serialize_directive(row: dict[str, Any]) -> dict[str, Any]:
     return {
+        "source_type": "system_directive",
+        "trajectory_scope": "recent",
         "id": str(row.get("id")),
         "body": _truncate(row.get("body") or "", 1000),
         "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
         "delivered_at": row["delivered_at"].isoformat() if row.get("delivered_at") else None,
+        "is_active": bool(row.get("is_active")),
     }
 
 
@@ -573,7 +681,9 @@ def _build_judge_messages(trajectory: dict[str, Any]) -> list[dict[str, str]]:
                 "the agent needs one concise intervention. You are not the working agent. You cannot execute the "
                 "agent's tools. You may call exactly one tool: report_judge_suggestion. Prefer no_action unless the "
                 "evidence shows a meaningful quality issue. Keep message short. For intelligence_upgrade, recommend "
-                "the minimum higher tier that would likely help."
+                "the minimum higher tier that would likely help. Base suggestions only on evidence in the packet. "
+                "Separate directly observed facts from inferred causes; when a cause is uncertain, say so instead "
+                "of presenting it as fact. Prefer concrete operational guidance over diagnosis."
             ),
         },
         {

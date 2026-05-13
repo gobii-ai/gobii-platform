@@ -2618,8 +2618,7 @@ class StaffAgentRunJudgeAPIView(SystemAdminAPIView):
             logger.exception("Failed to run manual judge for agent %s", agent.id)
             return JsonResponse({"error": "judge_failed", "detail": str(exc)}, status=500)
 
-        status = 200 if result.get("ran") else 409
-        return JsonResponse(result, status=status)
+        return JsonResponse(result, status=200)
 
 
 class StaffAgentSystemMessageAPIView(SystemAdminAPIView):

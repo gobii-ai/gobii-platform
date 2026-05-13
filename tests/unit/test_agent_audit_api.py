@@ -113,6 +113,16 @@ class StaffAgentAuditAPITests(TestCase):
             2,
         )
 
+    def test_manual_judge_endpoint_returns_handled_not_run_payload(self):
+        with patch(
+            "console.api_views.run_manual_agent_judge",
+            return_value={"ran": False, "status": "llm_not_configured"},
+        ):
+            response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ran": False, "status": "llm_not_configured"})
+
     def test_manual_judge_endpoint_requires_staff(self):
         self.client.force_login(self.nonstaff)
         response = self.client.post(f"/console/api/staff/agents/{self.agent.id}/audit/judge/")

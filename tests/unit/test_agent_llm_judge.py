@@ -22,7 +22,9 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentJudgeSuggestion,
+    PersistentAgentSkill,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
@@ -164,6 +166,53 @@ class AgentJudgeTests(TestCase):
 
         self.assertIsNotNone(trigger)
         self.assertIn("failed_tool_calls", trigger.reasons)
+
+    def test_trajectory_packet_includes_generic_context_and_provenance(self):
+        PersistentAgentSkill.objects.create(
+            agent=self.agent,
+            name="Daily report",
+            description="Prepare a recurring report.",
+            version=1,
+            tools=["sqlite_batch"],
+            instructions="Query source data before writing the report.",
+        )
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="documents",
+            is_enabled=True,
+        )
+        PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Use the latest user directive first.",
+        )
+        self._add_failed_tool_trigger()
+
+        trigger = build_judge_trigger(self.agent, tools=[])
+
+        self.assertIsNotNone(trigger)
+        trajectory = trigger.trajectory
+        self.assertIn("current_context", trajectory)
+        self.assertEqual(
+            trajectory["current_context"]["skills"]["saved_skills"][0]["name"],
+            "Daily report",
+        )
+        self.assertEqual(
+            trajectory["current_context"]["skills"]["enabled_system_skills"][0]["skill_key"],
+            "documents",
+        )
+        self.assertIn("sqlite", trajectory["current_context"])
+        self.assertEqual(
+            trajectory["recent_trajectory"]["tool_calls"][-1]["source_type"],
+            "tool_call",
+        )
+        self.assertEqual(
+            trajectory["recent_trajectory"]["steps"][-1]["trajectory_scope"],
+            "recent",
+        )
+        self.assertEqual(
+            trajectory["recent_trajectory"]["system_directives"][-1]["source_type"],
+            "system_directive",
+        )
 
     def test_intelligence_upgrade_creates_step_directive_and_pending_action(self):
         self._add_failed_tool_trigger()
