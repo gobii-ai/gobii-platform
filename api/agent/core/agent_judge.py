@@ -287,8 +287,7 @@ def _run_judge(
     provider, model, params = config
     prompt_limits = _judge_prompt_limits()
     messages = _build_judge_messages(trigger.trajectory, model=model, prompt_limits=prompt_limits)
-    judge_params = dict(params or {})
-    judge_params["tool_choice"] = {"type": "function", "function": {"name": REPORT_TOOL_NAME}}
+    judge_params = _judge_completion_params(params)
     try:
         response = run_completion(
             model=model,
@@ -947,10 +946,19 @@ def _serialize_directive(row: dict[str, Any]) -> dict[str, Any]:
         "trajectory_scope": "recent",
         "id": str(row.get("id")),
         "body": _truncate(row.get("body") or "", 1000),
-        "created_at": row["created_at"].isoformat() if row.get("created_at") else None,
-        "delivered_at": row["delivered_at"].isoformat() if row.get("delivered_at") else None,
+        "created_at": row["created_at"].isoformat(),
+        "delivered_at": row["delivered_at"].isoformat() if row["delivered_at"] else None,
         "is_active": bool(row.get("is_active")),
     }
+
+
+def _judge_completion_params(params: dict[str, Any] | None) -> dict[str, Any]:
+    judge_params = dict(params or {})
+    if judge_params.get("supports_tool_choice", True) is not False:
+        judge_params["tool_choice"] = {"type": "function", "function": {"name": REPORT_TOOL_NAME}}
+    else:
+        judge_params.pop("tool_choice", None)
+    return judge_params
 
 
 def _judge_system_prompt() -> str:

@@ -584,6 +584,29 @@ class AgentJudgeTests(TestCase):
             ).exists()
         )
 
+    def test_judge_does_not_force_tool_choice_when_endpoint_disallows_it(self):
+        self._add_failed_tool_trigger()
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {"supports_tool_choice": False}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ) as run_mock:
+            maybe_run_agent_judge(self.agent, tools=[])
+
+        run_kwargs = run_mock.call_args.kwargs
+        self.assertNotIn("tool_choice", run_kwargs["params"])
+        self.assertEqual(run_kwargs["params"]["supports_tool_choice"], False)
+        self.assertEqual(run_kwargs["tools"][0]["function"]["name"], REPORT_TOOL_NAME)
+
     def test_judge_analytics_include_trigger_reasons_and_outcome(self):
         self._add_failed_tool_trigger()
         response = _judge_response(
