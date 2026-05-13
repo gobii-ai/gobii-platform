@@ -105,7 +105,6 @@ class Migration(migrations.Migration):
                         choices=[
                             ("intelligence_upgrade", "Intelligence Upgrade"),
                             ("stonewall_reframe", "Stonewall Reframe"),
-                            ("request_human_input", "Request Human Input"),
                             ("strategy_shift", "Strategy Shift"),
                         ],
                         max_length=64,
@@ -114,9 +113,7 @@ class Migration(migrations.Migration):
                 ("title", models.CharField(max_length=255)),
                 ("ui_message", models.TextField()),
                 ("agent_directive", models.TextField(blank=True)),
-                ("confidence", models.FloatField(default=0)),
                 ("recommended_tier", models.CharField(blank=True, max_length=64)),
-                ("evidence", models.JSONField(blank=True, default=dict)),
                 ("trigger_reasons", models.JSONField(blank=True, default=list)),
                 ("evidence_hash", models.CharField(db_index=True, max_length=64)),
                 (
@@ -171,7 +168,7 @@ class Migration(migrations.Migration):
                 "constraints": [
                     models.UniqueConstraint(
                         fields=("agent", "suggestion_type", "evidence_hash"),
-                        name="uniq_pa_judge_suggestion_evidence",
+                        name="uniq_pa_judge_suggestion_hash",
                     ),
                 ],
             },

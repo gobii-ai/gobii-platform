@@ -31,12 +31,11 @@ type StaffAgentSearchResponse = {
 export type ManualJudgeSuggestion = {
   id: string
   suggestionId: string
-  suggestionType: 'intelligence_upgrade' | 'stonewall_reframe' | 'request_human_input' | 'strategy_shift'
+  suggestionType: 'intelligence_upgrade' | 'stonewall_reframe' | 'strategy_shift'
   title: string
   message: string
   agentDirective?: string | null
   recommendedTier?: string | null
-  confidence?: number | null
   status?: string | null
   createdAt?: string | null
   reasoning?: string | null

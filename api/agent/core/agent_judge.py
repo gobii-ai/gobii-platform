@@ -106,20 +106,21 @@ BLOCKER_PATTERNS = (
 
 
 @dataclass(frozen=True)
-class JudgeTrigger:
-    reasons: list[str]
-    evidence_hash: str
-    trajectory: dict[str, Any]
-    non_judge_step_count: int
-
-
-@dataclass(frozen=True)
 class JudgePromptLimits:
     prompt_token_budget: int
     message_history_limit: int
     tool_call_history_limit: int
     skill_prompt_limit: int
     enabled_tool_limit: int
+
+
+@dataclass(frozen=True)
+class JudgeTrigger:
+    reasons: list[str]
+    evidence_hash: str
+    trajectory: dict[str, Any]
+    non_judge_step_count: int
+    prompt_limits: JudgePromptLimits
 
 
 def maybe_run_agent_judge(
@@ -150,9 +151,10 @@ def run_manual_agent_judge(agent: PersistentAgent, *, tools: list[dict[str, Any]
 
 
 def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> JudgeTrigger:
+    prompt_limits = _judge_prompt_limits()
     non_judge_step_count = _count_non_judge_steps(agent)
-    recent_messages = _recent_messages(agent)
-    recent_tool_calls = _recent_tool_calls(agent)
+    recent_messages = _recent_messages(agent, prompt_limits)
+    recent_tool_calls = _recent_tool_calls(agent, prompt_limits)
     reasons = ["manual_audit"]
     trajectory = _build_trajectory_packet(
         agent,
@@ -161,6 +163,7 @@ def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, 
         recent_tool_calls=recent_tool_calls,
         trigger_reasons=reasons,
         non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
     )
     evidence_hash = _hash_payload(
         {
@@ -177,6 +180,7 @@ def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, 
         evidence_hash=evidence_hash,
         trajectory=trajectory,
         non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
     )
 
 
@@ -194,9 +198,10 @@ def build_judge_trigger(
         return None
 
     latest_completion_at = _latest_judge_completion_created_at(agent)
+    latest_suggestion_at = _latest_judge_suggestion_created_at(agent)
     if (
-        _recent_judge_completion_step_count(agent, non_judge_step_count, latest_completion_at) < JUDGE_MIN_STEP_GAP
-        or _recent_judge_suggestion_step_count(agent, non_judge_step_count) < JUDGE_MIN_STEP_GAP
+        _non_judge_steps_since(agent, latest_completion_at, non_judge_step_count) < JUDGE_MIN_STEP_GAP
+        or _non_judge_steps_since(agent, latest_suggestion_at, non_judge_step_count) < JUDGE_MIN_STEP_GAP
     ):
         return None
 
@@ -206,8 +211,9 @@ def build_judge_trigger(
     if _judge_completion_count_today(agent) >= JUDGE_DAILY_RUN_LIMIT:
         return None
 
-    recent_messages = _recent_messages(agent)
-    recent_tool_calls = _recent_tool_calls(agent)
+    prompt_limits = _judge_prompt_limits()
+    recent_messages = _recent_messages(agent, prompt_limits)
+    recent_tool_calls = _recent_tool_calls(agent, prompt_limits)
     reasons = _merge_trigger_reasons(
         _trigger_reasons(recent_messages, recent_tool_calls),
         extra_trigger_reasons or [],
@@ -222,6 +228,7 @@ def build_judge_trigger(
         recent_tool_calls=recent_tool_calls,
         trigger_reasons=reasons,
         non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
     )
     evidence_hash = _hash_payload(
         {
@@ -240,6 +247,7 @@ def build_judge_trigger(
         evidence_hash=evidence_hash,
         trajectory=trajectory,
         non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
     )
 
 
@@ -259,9 +267,6 @@ def _run_judge(
     cache_evidence: bool = True,
     review_required: bool = False,
 ) -> dict[str, Any]:
-    if cache_evidence:
-        cache.set(_judge_run_cache_key(agent, trigger.evidence_hash), True, timeout=JUDGE_RUN_CACHE_TTL_SECONDS)
-
     _track_judge_analytics(
         agent,
         AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_TRIGGERED,
@@ -285,8 +290,7 @@ def _run_judge(
 
     tool_def = _judge_tool_definition()
     provider, model, params = config
-    prompt_limits = _judge_prompt_limits()
-    messages = _build_judge_messages(trigger.trajectory, model=model, prompt_limits=prompt_limits)
+    messages = _build_judge_messages(trigger.trajectory, model=model, prompt_limits=trigger.prompt_limits)
     judge_params = _judge_completion_params(params)
     try:
         response = run_completion(
@@ -335,6 +339,7 @@ def _run_judge(
             model=model,
             completion=completion,
         )
+        _cache_judge_evidence_if_needed(agent, trigger, cache_evidence)
         return _judge_run_result(
             status="missing_report_tool_call",
             payload=None,
@@ -355,6 +360,7 @@ def _run_judge(
         suggestion=suggestion,
         suggestion_type=suggestion_type,
     )
+    _cache_judge_evidence_if_needed(agent, trigger, cache_evidence)
     return {
         "ran": True,
         "status": "completed",
@@ -421,6 +427,15 @@ def _track_judge_analytics(
         )
 
 
+def _cache_judge_evidence_if_needed(
+    agent: PersistentAgent,
+    trigger: JudgeTrigger,
+    cache_evidence: bool,
+) -> None:
+    if cache_evidence:
+        cache.set(_judge_run_cache_key(agent, trigger.evidence_hash), True, timeout=JUDGE_RUN_CACHE_TTL_SECONDS)
+
+
 def _judge_run_result(
     *,
     status: str,
@@ -450,7 +465,6 @@ def _serialize_judge_result_suggestion(
         "message": suggestion.ui_message,
         "agentDirective": suggestion.agent_directive,
         "recommendedTier": suggestion.recommended_tier or None,
-        "confidence": suggestion.confidence,
         "status": suggestion.status,
         "createdAt": suggestion.created_at.isoformat() if suggestion.created_at else None,
         "reasoning": (completion.thinking_content if completion else None) or "",
@@ -509,9 +523,7 @@ def report_judge_suggestion(
                 title=title,
                 ui_message=ui_message,
                 agent_directive=agent_directive,
-                confidence=0,
                 recommended_tier=recommended_tier,
-                evidence={},
                 trigger_reasons=trigger.reasons,
                 evidence_hash=trigger.evidence_hash,
                 status=(
@@ -534,21 +546,13 @@ def _count_non_judge_steps(agent: PersistentAgent) -> int:
     )
 
 
-def _recent_judge_suggestion_step_count(agent: PersistentAgent, non_judge_step_count: int) -> int:
-    latest = (
+def _latest_judge_suggestion_created_at(agent: PersistentAgent):
+    return (
         PersistentAgentJudgeSuggestion.objects.filter(agent=agent)
         .order_by("-created_at")
         .values_list("source_step__created_at", flat=True)
         .first()
     )
-    if latest is None:
-        return JUDGE_MIN_STEP_GAP
-    later_count = (
-        PersistentAgentStep.objects.filter(agent=agent, created_at__gt=latest)
-        .exclude(system_step__code=PersistentAgentSystemStep.Code.LLM_JUDGE_SUGGESTION)
-        .count()
-    )
-    return max(0, min(non_judge_step_count, later_count))
 
 
 def _latest_judge_completion_created_at(agent: PersistentAgent):
@@ -561,19 +565,15 @@ def _latest_judge_completion_created_at(agent: PersistentAgent):
     )
 
 
-def _recent_judge_completion_step_count(
-    agent: PersistentAgent,
-    non_judge_step_count: int,
-    latest,
-) -> int:
-    if latest is None:
+def _non_judge_steps_since(agent: PersistentAgent, since, cap: int) -> int:
+    if since is None:
         return JUDGE_MIN_STEP_GAP
     later_count = (
-        PersistentAgentStep.objects.filter(agent=agent, created_at__gt=latest)
+        PersistentAgentStep.objects.filter(agent=agent, created_at__gt=since)
         .exclude(system_step__code=PersistentAgentSystemStep.Code.LLM_JUDGE_SUGGESTION)
         .count()
     )
-    return max(0, min(non_judge_step_count, later_count))
+    return max(0, min(cap, later_count))
 
 
 def _is_judge_completion_in_cooldown(latest) -> bool:
@@ -673,8 +673,8 @@ def _trigger_reasons(
     return reasons
 
 
-def _recent_messages(agent: PersistentAgent) -> list[PersistentAgentMessage]:
-    limit = _judge_prompt_limits().message_history_limit
+def _recent_messages(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> list[PersistentAgentMessage]:
+    limit = prompt_limits.message_history_limit
     return list(
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("conversation", "from_endpoint")
@@ -682,8 +682,8 @@ def _recent_messages(agent: PersistentAgent) -> list[PersistentAgentMessage]:
     )
 
 
-def _recent_tool_calls(agent: PersistentAgent) -> list[PersistentAgentToolCall]:
-    limit = _judge_prompt_limits().tool_call_history_limit
+def _recent_tool_calls(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> list[PersistentAgentToolCall]:
+    limit = prompt_limits.tool_call_history_limit
     return list(
         PersistentAgentToolCall.objects.filter(step__agent=agent)
         .select_related("step")
@@ -726,6 +726,7 @@ def _build_trajectory_packet(
     recent_tool_calls: list[PersistentAgentToolCall],
     trigger_reasons: list[str],
     non_judge_step_count: int,
+    prompt_limits: JudgePromptLimits,
 ) -> dict[str, Any]:
     tier = get_agent_llm_tier(agent)
     recent_steps = list(
@@ -740,7 +741,7 @@ def _build_trajectory_packet(
         .values("id", "body", "created_at", "delivered_at", "is_active")[:JUDGE_RECENT_DIRECTIVE_LIMIT]
     )
     plan_snapshot = _plan_snapshot(agent)
-    current_context = _build_current_context_snapshot(agent)
+    current_context = _build_current_context_snapshot(agent, prompt_limits)
 
     return {
         "agent": {
@@ -765,7 +766,7 @@ def _build_trajectory_packet(
             "If task complexity exceeds the current intelligence tier, suggest an intelligence upgrade instead of silently struggling.",
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],
-        "capability_manifest": _capability_manifest(tools),
+        "capability_manifest": _capability_manifest(tools, prompt_limits),
         "current_context": current_context,
         "recent_trajectory": {
             "plan_snapshot": plan_snapshot,
@@ -791,15 +792,15 @@ def _plan_snapshot(agent: PersistentAgent) -> dict[str, Any]:
     }
 
 
-def _build_current_context_snapshot(agent: PersistentAgent) -> dict[str, Any]:
+def _build_current_context_snapshot(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> dict[str, Any]:
     return {
-        "skills": _skill_context(agent),
+        "skills": _skill_context(agent, prompt_limits),
         "sqlite": _sqlite_context_snapshot(),
     }
 
 
-def _skill_context(agent: PersistentAgent) -> dict[str, Any]:
-    limit = _judge_prompt_limits().skill_prompt_limit
+def _skill_context(agent: PersistentAgent, prompt_limits: JudgePromptLimits) -> dict[str, Any]:
+    limit = prompt_limits.skill_prompt_limit
     if limit <= 0:
         return {
             "saved_skills": [],
@@ -874,9 +875,9 @@ def _sqlite_context_snapshot() -> dict[str, Any]:
         }
 
 
-def _capability_manifest(tools: list[dict[str, Any]]) -> list[dict[str, str]]:
+def _capability_manifest(tools: list[dict[str, Any]], prompt_limits: JudgePromptLimits) -> list[dict[str, str]]:
     manifest: list[dict[str, str]] = []
-    limit = _judge_prompt_limits().enabled_tool_limit
+    limit = prompt_limits.enabled_tool_limit
     for tool in tools[:limit]:
         fn = tool.get("function") if isinstance(tool, dict) else None
         if not isinstance(fn, dict):

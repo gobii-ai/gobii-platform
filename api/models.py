@@ -7952,7 +7952,6 @@ class PersistentAgentJudgeSuggestion(models.Model):
     class SuggestionType(models.TextChoices):
         INTELLIGENCE_UPGRADE = "intelligence_upgrade", "Intelligence Upgrade"
         STONEWALL_REFRAME = "stonewall_reframe", "Stonewall Reframe"
-        REQUEST_HUMAN_INPUT = "request_human_input", "Request Human Input"
         STRATEGY_SHIFT = "strategy_shift", "Strategy Shift"
 
     class Status(models.TextChoices):
@@ -7970,9 +7969,7 @@ class PersistentAgentJudgeSuggestion(models.Model):
     title = models.CharField(max_length=255)
     ui_message = models.TextField()
     agent_directive = models.TextField(blank=True)
-    confidence = models.FloatField(default=0)
     recommended_tier = models.CharField(max_length=64, blank=True)
-    evidence = models.JSONField(default=dict, blank=True)
     trigger_reasons = models.JSONField(default=list, blank=True)
     evidence_hash = models.CharField(max_length=64, db_index=True)
     status = models.CharField(
@@ -8006,7 +8003,7 @@ class PersistentAgentJudgeSuggestion(models.Model):
         constraints = [
             models.UniqueConstraint(
                 fields=["agent", "suggestion_type", "evidence_hash"],
-                name="uniq_pa_judge_suggestion_evidence",
+                name="uniq_pa_judge_suggestion_hash",
             ),
         ]
 

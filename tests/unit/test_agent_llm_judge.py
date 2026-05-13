@@ -536,8 +536,6 @@ class AgentJudgeTests(TestCase):
             suggestion.agent_directive,
             "Re-evaluate the current approach and suggest a higher intelligence tier.",
         )
-        self.assertEqual(suggestion.confidence, 0)
-        self.assertEqual(suggestion.evidence, {})
         self.assertEqual(suggestion.recommended_tier, "max")
         self.assertEqual(PersistentAgentSystemMessage.objects.filter(agent=self.agent).count(), 1)
         self.assertTrue(
@@ -674,6 +672,34 @@ class AgentJudgeTests(TestCase):
         self.assertEqual(completed_props["trigger_reasons"], ["failed_tool_calls"])
         self.assertEqual(completed_props["provider"], "test-provider")
         self.assertEqual(completed_props["model"], "test-model")
+
+    def test_failed_judge_completion_does_not_cache_evidence_window(self):
+        self._add_failed_tool_trigger()
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            side_effect=[RuntimeError("provider failed"), response],
+        ) as run_mock:
+            maybe_run_agent_judge(self.agent, tools=[])
+            maybe_run_agent_judge(self.agent, tools=[])
+
+        self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(
+            PersistentAgentCompletion.objects.filter(
+                agent=self.agent,
+                completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            ).count(),
+            1,
+        )
 
     def test_manual_judge_suggestion_requires_staff_review(self):
         self._add_failed_tool_trigger()
