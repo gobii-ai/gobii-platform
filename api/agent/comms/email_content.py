@@ -57,6 +57,7 @@ BLOCK_MARKDOWN_PATTERNS = [
 TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
 TAG_NAME_RE = re.compile(r"^</?\s*([a-zA-Z0-9]+)")
 HR_RE = re.compile(r"<hr\s*/?>", re.IGNORECASE)
+HTML_TAG_LINE_RE = re.compile(HTML_TAG_PATTERN, re.IGNORECASE)
 
 VOID_TAGS = {
     "area",
@@ -161,6 +162,26 @@ def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+def _normalize_html_tag_line_indentation(text: str) -> str:
+    """Remove template indentation that Markdown would otherwise treat as code."""
+    lines = text.split("\n")
+    normalized_lines: list[str] = []
+    stack: list[str] = []
+    changed = False
+
+    for line in lines:
+        stripped = line.lstrip(" \t")
+        in_preformatted_context = _stack_contains_any(stack, SKIP_MARKDOWN_TAGS)
+        if stripped != line and not in_preformatted_context and HTML_TAG_LINE_RE.match(stripped):
+            normalized_lines.append(stripped)
+            changed = True
+        else:
+            normalized_lines.append(line)
+        _update_html_tag_stack(stack, stripped)
+
+    return "\n".join(normalized_lines) if changed else text
+
+
 def _contains_markdown(text: str) -> bool:
     return any(pattern.search(text) for pattern in INLINE_MARKDOWN_PATTERNS + BLOCK_MARKDOWN_PATTERNS)
 
@@ -233,6 +254,23 @@ def _stack_contains_any(stack: list[str], tags: set[str]) -> bool:
     return any(tag in tags for tag in stack)
 
 
+def _update_html_tag_stack(stack: list[str], html_content: str) -> None:
+    for part in TAG_SPLIT_RE.split(html_content):
+        if not part or not part.startswith("<") or not part.endswith(">"):
+            continue
+        tag_name = _extract_tag_name(part)
+        if not tag_name:
+            continue
+        if part.startswith("</"):
+            if stack and stack[-1] == tag_name:
+                stack.pop()
+            elif tag_name in stack:
+                last_index = len(stack) - 1 - stack[::-1].index(tag_name)
+                del stack[last_index:]
+        elif not _is_void_tag(tag_name, part):
+            stack.append(tag_name)
+
+
 def _apply_inline_markdown_in_html(html_content: str) -> str:
     if not html_content:
         return html_content
@@ -245,16 +283,7 @@ def _apply_inline_markdown_in_html(html_content: str) -> str:
         if not part:
             continue
         if part.startswith("<") and part.endswith(">"):
-            tag_name = _extract_tag_name(part)
-            if tag_name:
-                if part.startswith("</"):
-                    if stack and stack[-1] == tag_name:
-                        stack.pop()
-                    elif tag_name in stack:
-                        last_index = len(stack) - 1 - stack[::-1].index(tag_name)
-                        stack = stack[:last_index]
-                elif not _is_void_tag(tag_name, part):
-                    stack.append(tag_name)
+            _update_html_tag_stack(stack, part)
             rendered.append(part)
             continue
 
@@ -343,7 +372,8 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
     )
 
     if has_html or has_markdown:
-        html_snippet = _render_markdown_html(normalized_body)
+        render_body = _normalize_html_tag_line_indentation(normalized_body) if has_html else normalized_body
+        html_snippet = _render_markdown_html(render_body)
         repaired = _apply_inline_markdown_in_html(html_snippet)
         html_snippet = _replace_horizontal_rules(repaired)
         html_snippet = _add_table_styles(html_snippet)
