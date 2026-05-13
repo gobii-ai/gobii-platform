@@ -304,6 +304,7 @@ def _infer_retryable_from_text(message: str) -> bool:
             "connection refused",
             "service unavailable",
             "gateway timeout",
+            "sandbox session is not ready",
         )
     )
 
