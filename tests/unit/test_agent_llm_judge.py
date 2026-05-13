@@ -44,6 +44,7 @@ from api.models import (
 )
 from console.agent_chat.pending_actions import list_pending_action_requests
 from constants.feature_flags import PERSISTENT_AGENT_LLM_JUDGE
+from util.analytics import AnalyticsEvent
 
 
 def _judge_response(payload: dict):
@@ -524,6 +525,74 @@ class AgentJudgeTests(TestCase):
                 completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
             ).exists()
         )
+
+    def test_judge_analytics_include_trigger_reasons_and_outcome(self):
+        self._add_failed_tool_trigger()
+        response = _judge_response(
+            {
+                "suggestion_type": NO_ACTION,
+                "message": "No action needed.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ), patch(
+            "api.agent.core.agent_judge.Analytics.track_event",
+        ) as analytics_mock:
+            maybe_run_agent_judge(self.agent, tools=[])
+
+        self.assertEqual(analytics_mock.call_count, 2)
+        triggered_call = analytics_mock.call_args_list[0].kwargs
+        completed_call = analytics_mock.call_args_list[1].kwargs
+        self.assertEqual(triggered_call["event"], AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_TRIGGERED)
+        self.assertEqual(completed_call["event"], AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED)
+
+        triggered_props = triggered_call["properties"]
+        self.assertEqual(triggered_props["status"], "triggered")
+        self.assertEqual(triggered_props["trigger_reasons"], ["failed_tool_calls"])
+        self.assertEqual(triggered_props["trigger_reason_primary"], "failed_tool_calls")
+        self.assertEqual(triggered_props["trigger_reason_count"], 1)
+        self.assertEqual(triggered_props["non_judge_step_count"], 3)
+        self.assertFalse(triggered_props["review_required"])
+
+        completed_props = completed_call["properties"]
+        self.assertEqual(completed_props["status"], "completed")
+        self.assertEqual(completed_props["trigger_reasons"], ["failed_tool_calls"])
+        self.assertEqual(completed_props["suggestion_type"], NO_ACTION)
+        self.assertFalse(completed_props["suggestion_created"])
+        self.assertEqual(completed_props["provider"], "test-provider")
+        self.assertEqual(completed_props["model"], "test-model")
+        self.assertTrue(completed_props["completion_id"])
+
+    def test_judge_analytics_record_failed_completion_attempt(self):
+        self._add_failed_tool_trigger()
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            side_effect=RuntimeError("provider failed"),
+        ), patch(
+            "api.agent.core.agent_judge.Analytics.track_event",
+        ) as analytics_mock:
+            maybe_run_agent_judge(self.agent, tools=[])
+
+        self.assertEqual(analytics_mock.call_count, 2)
+        completed_props = analytics_mock.call_args_list[1].kwargs["properties"]
+        self.assertEqual(
+            analytics_mock.call_args_list[1].kwargs["event"],
+            AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED,
+        )
+        self.assertEqual(completed_props["status"], "failed")
+        self.assertEqual(completed_props["trigger_reasons"], ["failed_tool_calls"])
+        self.assertEqual(completed_props["provider"], "test-provider")
+        self.assertEqual(completed_props["model"], "test-model")
 
     def test_manual_judge_suggestion_requires_staff_review(self):
         self._add_failed_tool_trigger()

@@ -35,6 +35,7 @@ from api.models import (
     PersistentAgentToolCall,
 )
 from constants.feature_flags import PERSISTENT_AGENT_LLM_JUDGE
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
 
@@ -251,10 +252,25 @@ def _run_judge(
     if cache_evidence:
         cache.set(_judge_run_cache_key(agent, trigger.evidence_hash), True, timeout=JUDGE_RUN_CACHE_TTL_SECONDS)
 
+    _track_judge_analytics(
+        agent,
+        AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_TRIGGERED,
+        trigger=trigger,
+        status="triggered",
+        review_required=review_required,
+    )
+
     try:
         config = get_agent_judge_llm_config()
     except LLMNotConfiguredError:
         logger.info("Skipping agent judge for %s because no LLM config is available.", agent.id)
+        _track_judge_analytics(
+            agent,
+            AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED,
+            trigger=trigger,
+            status="llm_not_configured",
+            review_required=review_required,
+        )
         return {"ran": False, "status": "llm_not_configured"}
 
     tool_def = _judge_tool_definition()
@@ -263,13 +279,25 @@ def _run_judge(
     messages = _build_judge_messages(trigger.trajectory, model=model, prompt_limits=prompt_limits)
     judge_params = dict(params or {})
     judge_params["tool_choice"] = {"type": "function", "function": {"name": REPORT_TOOL_NAME}}
-    response = run_completion(
-        model=model,
-        messages=messages,
-        params=judge_params,
-        tools=[tool_def],
-        drop_params=True,
-    )
+    try:
+        response = run_completion(
+            model=model,
+            messages=messages,
+            params=judge_params,
+            tools=[tool_def],
+            drop_params=True,
+        )
+    except Exception:
+        _track_judge_analytics(
+            agent,
+            AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED,
+            trigger=trigger,
+            status="failed",
+            review_required=review_required,
+            provider=provider,
+            model=model,
+        )
+        raise
     log_agent_completion(
         agent,
         completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
@@ -288,6 +316,16 @@ def _run_judge(
     payload = _extract_report_payload(response)
     if payload is None:
         logger.info("Agent judge for %s returned no report tool call.", agent.id)
+        _track_judge_analytics(
+            agent,
+            AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED,
+            trigger=trigger,
+            status="missing_report_tool_call",
+            review_required=review_required,
+            provider=provider,
+            model=model,
+            completion=completion,
+        )
         return _judge_run_result(
             status="missing_report_tool_call",
             payload=None,
@@ -296,12 +334,82 @@ def _run_judge(
         )
     suggestion = report_judge_suggestion(agent, trigger, payload, review_required=review_required)
     suggestion_type = _clean_choice(payload.get("suggestion_type")) or None
+    _track_judge_analytics(
+        agent,
+        AnalyticsEvent.PERSISTENT_AGENT_LLM_JUDGE_COMPLETED,
+        trigger=trigger,
+        status="completed",
+        review_required=review_required,
+        provider=provider,
+        model=model,
+        completion=completion,
+        suggestion=suggestion,
+        suggestion_type=suggestion_type,
+    )
     return {
         "ran": True,
         "status": "completed",
         "suggestion_type": suggestion_type,
         "suggestion": _serialize_judge_result_suggestion(suggestion, completion),
     }
+
+
+def _track_judge_analytics(
+    agent: PersistentAgent,
+    event: AnalyticsEvent,
+    *,
+    trigger: JudgeTrigger,
+    status: str,
+    review_required: bool,
+    provider: str | None = None,
+    model: str | None = None,
+    completion: PersistentAgentCompletion | None = None,
+    suggestion: PersistentAgentJudgeSuggestion | None = None,
+    suggestion_type: str | None = None,
+) -> None:
+    try:
+        trigger_reasons = list(trigger.reasons or [])
+        properties: dict[str, Any] = {
+            "agent_id": str(agent.id),
+            "agent_name": agent.name or "",
+            "status": status,
+            "trigger_reasons": trigger_reasons,
+            "trigger_reason_primary": trigger_reasons[0] if trigger_reasons else "",
+            "trigger_reason_count": len(trigger_reasons),
+            "evidence_hash": trigger.evidence_hash,
+            "non_judge_step_count": trigger.non_judge_step_count,
+            "review_required": bool(review_required),
+            "manual_review": bool(review_required),
+        }
+        if provider:
+            properties["provider"] = provider
+        if model:
+            properties["model"] = model
+        if completion is not None:
+            properties["completion_id"] = str(completion.id)
+        if suggestion_type:
+            properties["suggestion_type"] = suggestion_type
+        if suggestion is not None:
+            properties["suggestion_id"] = str(suggestion.id)
+            properties["suggestion_status"] = suggestion.status
+        properties["suggestion_created"] = suggestion is not None
+
+        Analytics.track_event(
+            user_id=getattr(getattr(agent, "user", None), "id", None),
+            event=event,
+            source=AnalyticsSource.AGENT,
+            properties=Analytics.with_org_properties(
+                properties,
+                organization=getattr(agent, "organization", None),
+            ),
+        )
+    except Exception:
+        logger.debug(
+            "Failed to emit judge analytics for agent %s event %s",
+            getattr(agent, "id", None),
+            event,
+            exc_info=True,
+        )
 
 
 def _judge_run_result(
