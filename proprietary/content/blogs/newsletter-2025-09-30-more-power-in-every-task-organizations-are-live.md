@@ -1,39 +1,30 @@
 ---
-title: "More power in every task + Organizations are live!"
+title: "Lower tool costs and organizations are live"
 date: 2025-09-30
-description: "Tool costs slashed + Organizations are live! — Gobii"
+description: "Gobii tasks now use fewer credits, and teams can manage billing and permissions in one organization."
 author: "The Gobii Team"
-seo_title: "More power in every task + Organizations are live!"
-seo_description: "Tool costs slashed + Organizations are live! — Gobii"
+seo_title: "Lower tool costs and organizations are live"
+seo_description: "Gobii tasks now use fewer credits, and teams can manage billing and permissions in one organization."
 tags:
   - newsletter
   - weekly
   - product-updates
 ---
 
-Tool costs slashed + Organizations are live! — Gobii
+Two platform updates make Gobii easier to use at scale: lower tool task costs and organization support.
 
-No Longer Annoying
-==================
-Tool task credit usage is now 75% lower!
+## Tool Task Costs Are Lower
 
-We listened, and we agreed. Running agents just got way more affordable.
-We've cut task usage costs across the board so you can do more while using less.
+Tool task credit usage is now 75% lower.
 
-Launch an Agent Today:
-<https://gobii.ai/g/tJR/?utm_source=blog&utm_campaign=cost>
+That means agents can do more work before hitting the same credit limits. For workflows with lots of tool calls, research steps, or repeated checks, the difference is especially noticeable.
 
-New Feature
-===========
-Organizations are Now Live
+[Launch an agent](https://gobii.ai/g/tJR/?utm_source=blog&utm_campaign=cost)
 
-You can now create a team, invite colleagues, and share billing + permissions
-under one org. No more juggling accounts—everything in one place.
+## Organizations Are Live
 
-Create an Organization Today:
-<https://gobii.ai/console/organizations/add/>
+You can now create a team, invite colleagues, and manage billing and permissions under one organization.
 
-Available to all Gobii users starting today.
+That gives teams a cleaner way to collaborate without juggling separate accounts or ad hoc access patterns.
 
-—
-Stay in the loop:
+[Create an organization](https://gobii.ai/console/organizations/add/)

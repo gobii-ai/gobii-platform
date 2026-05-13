@@ -16,17 +16,26 @@ tags:
 
 We’ve all been there: an email thread gets passed around, replies pile up, and suddenly there are 30 scattered messages to catch up on.
 
-Until now, asking an AI agent to handle that kind of deep, long-form communication was asking for trouble.
+Threaded agent conversations help Gobii keep that context together. When a conversation spans multiple replies, your agent can stay attached to the same thread instead of forcing everyone to reconstruct what happened.
 
-With our new Email Thread Support, your Gobii agent maintains threads across your conversations. What might seem like a small convenience feature becomes a game changer when you and your agents are doing real work.
+## Why Threading Matters
 
-How you can use it today:
+Long-running work rarely fits into a single message. A prospect replies with more detail. A teammate adds context. A customer asks a follow-up question. Without thread support, those messages can become scattered and hard for both people and agents to follow.
 
-- Everything stays neatly in one thread
-No scattered emails or lost context. Conversations with your agent (and prospects) live exactly where you expect them in your inbox.
+With Email Thread Support, your Gobii agent maintains threads across conversations, so the history stays connected.
 
-- Feels like a normal, ongoing conversation
-Replies come through in the same thread, so you can jump in anytime without digging through past emails or piecing things together.
+## What Improves
 
-👉 Get the Conversation Started 🎙️
-<https://gobii.ai/app/agents/?utm_source=blog&utm_medium=web&utm_content=btn>
+### Context stays in one place
+
+No scattered emails or lost history. Conversations with your agent and prospects live where you expect them.
+
+### Replies feel natural
+
+Follow-ups come through in the same thread, so you can jump in without digging through past messages or piecing context together manually.
+
+### Agents can handle deeper communication
+
+When the thread stays intact, agents can work on longer conversations without losing the setup, decisions, or prior replies.
+
+[Start a threaded agent conversation](https://gobii.ai/app/agents/?utm_source=blog&utm_medium=web&utm_content=btn)

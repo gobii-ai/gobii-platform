@@ -16,10 +16,16 @@ tags:
 
 Meet Gobii's new Web Chat UI — the easiest way to talk to your agents without ever leaving your browser.
 
-No email threads, no text messages — just open chat, type, and go. You'll see your agents'tools and actions in real time, and it works perfectly with all your existing agents. (Even on mobile.)
+No email threads, no text messages. Open chat, type, and go. You can see your agents' tools and actions in real time, and it works with your existing agents, including on mobile.
 
-If you prefer keeping things in-browser, this one's for you. If not — no hard feelings. 😄
+## Why Web Chat Helps
 
-Try it now:
-<https://gobii.ai/console/agents/>
-Then click “Talk to Agent” → “Open Web Chat.”
+Persistent agents often keep working across tasks, messages, and follow-ups. Web Chat gives you a central place to check in, redirect work, and continue the conversation from the browser.
+
+It is especially useful when you want a fast back-and-forth without switching to email or SMS.
+
+## How To Open It
+
+Go to your agents, choose an agent, then select "Talk to Agent" and "Open Web Chat."
+
+[Open your agents](https://gobii.ai/console/agents/)
