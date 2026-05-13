@@ -150,7 +150,8 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(suggestion_payload["status"], PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW)
         self.assertIn("/decision/", suggestion_payload["decisionApiUrl"])
         suggestion = PersistentAgentJudgeSuggestion.objects.get(id=suggestion_payload["suggestionId"])
-        self.assertFalse(suggestion.system_message.is_active)
+        self.assertIsNone(suggestion.system_message)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(agent=self.agent).exists())
 
     def test_manual_judge_suggestion_decision_approves_and_rejects(self):
         system_message = PersistentAgentSystemMessage.objects.create(
@@ -194,6 +195,39 @@ class StaffAgentAuditAPITests(TestCase):
         system_message.refresh_from_db()
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.DISMISSED)
         self.assertFalse(system_message.is_active)
+
+    def test_reject_pending_manual_judge_suggestion_does_not_leave_system_message(self):
+        system_message = PersistentAgentSystemMessage.objects.create(
+            agent=self.agent,
+            body="Unapproved judge directive",
+            is_active=False,
+        )
+        suggestion = PersistentAgentJudgeSuggestion.objects.create(
+            agent=self.agent,
+            suggestion_type=PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT,
+            title="Shift strategy",
+            ui_message="Try another approach.",
+            agent_directive="Use a different plan.",
+            evidence_hash="manual-review-reject-test",
+            status=PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW,
+            system_message=system_message,
+        )
+
+        decision_url = (
+            f"/console/api/staff/agents/{self.agent.id}/audit/"
+            f"judge-suggestions/{suggestion.id}/decision/"
+        )
+        reject_response = self.client.post(
+            decision_url,
+            data=json.dumps({"decision": "reject"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(reject_response.status_code, 200)
+        suggestion.refresh_from_db()
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.DISMISSED)
+        self.assertIsNone(suggestion.system_message)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(id=system_message.id).exists())
 
     def test_manual_judge_endpoint_requires_staff(self):
         self.client.force_login(self.nonstaff)

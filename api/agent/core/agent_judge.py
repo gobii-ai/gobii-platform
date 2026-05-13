@@ -347,11 +347,13 @@ def report_judge_suggestion(
                 code=PersistentAgentSystemStep.Code.LLM_JUDGE_SUGGESTION,
                 notes=f"evidence_hash={trigger.evidence_hash}",
             )
-            system_message = PersistentAgentSystemMessage.objects.create(
-                agent=agent,
-                body=_format_agent_directive(title, agent_directive, suggestion_type),
-                is_active=not review_required,
-            )
+            system_message = None
+            if not review_required:
+                system_message = PersistentAgentSystemMessage.objects.create(
+                    agent=agent,
+                    body=_format_agent_directive(title, agent_directive, suggestion_type),
+                    is_active=True,
+                )
             return PersistentAgentJudgeSuggestion.objects.create(
                 agent=agent,
                 suggestion_type=suggestion_type,
@@ -1004,12 +1006,23 @@ def approve_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None
     if suggestion.status != PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW:
         return
     system_message = suggestion.system_message
-    if system_message is not None and not system_message.is_active:
+    if system_message is None:
+        system_message = PersistentAgentSystemMessage.objects.create(
+            agent=suggestion.agent,
+            body=_format_agent_directive(
+                suggestion.title,
+                suggestion.agent_directive or suggestion.ui_message,
+                suggestion.suggestion_type,
+            ),
+            is_active=True,
+        )
+        suggestion.system_message = system_message
+    elif not system_message.is_active:
         system_message.is_active = True
         system_message.save(update_fields=["is_active"])
     suggestion.status = PersistentAgentJudgeSuggestion.Status.ACTIVE
     suggestion.resolved_at = timezone.now()
-    suggestion.save(update_fields=["status", "resolved_at"])
+    suggestion.save(update_fields=["status", "resolved_at", "system_message"])
 
 
 def dismiss_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:
@@ -1018,13 +1031,23 @@ def dismiss_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None
         PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW,
     }:
         return
+    was_pending_review = suggestion.status == PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW
     system_message = suggestion.system_message
-    if system_message is not None and system_message.is_active:
-        system_message.is_active = False
-        system_message.save(update_fields=["is_active"])
+    should_clear_system_message = False
+    if system_message is not None:
+        if was_pending_review and not system_message.is_active and system_message.delivered_at is None:
+            system_message.delete()
+            should_clear_system_message = True
+        elif system_message.is_active:
+            system_message.is_active = False
+            system_message.save(update_fields=["is_active"])
     suggestion.status = PersistentAgentJudgeSuggestion.Status.DISMISSED
     suggestion.resolved_at = timezone.now()
-    suggestion.save(update_fields=["status", "resolved_at"])
+    if should_clear_system_message:
+        suggestion.system_message = None
+        suggestion.save(update_fields=["status", "resolved_at", "system_message"])
+    else:
+        suggestion.save(update_fields=["status", "resolved_at"])
 
 
 __all__ = [

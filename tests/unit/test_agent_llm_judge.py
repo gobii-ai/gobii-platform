@@ -472,15 +472,16 @@ class AgentJudgeTests(TestCase):
         self.assertEqual(result["suggestion"]["agentDirective"], "Pause and propose a simpler next step.")
         suggestion = PersistentAgentJudgeSuggestion.objects.get(agent=self.agent)
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW)
-        self.assertFalse(suggestion.system_message.is_active)
+        self.assertIsNone(suggestion.system_message)
+        self.assertFalse(PersistentAgentSystemMessage.objects.filter(agent=self.agent).exists())
 
         pending_actions = list_pending_action_requests(self.agent, self.user)
         self.assertFalse([action for action in pending_actions if action.get("kind") == "judge_suggestion"])
 
         approve_judge_suggestion(suggestion)
         suggestion.refresh_from_db()
-        suggestion.system_message.refresh_from_db()
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        self.assertIsNotNone(suggestion.system_message)
         self.assertTrue(suggestion.system_message.is_active)
 
     def test_judge_completion_cooldown_prevents_repeated_recent_runs(self):
