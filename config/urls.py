@@ -31,7 +31,6 @@ from console.api_views import (
     AgentHumanInputRequestBatchResponseAPIView,
     AgentHumanInputRequestDismissAPIView,
     AgentHumanInputRequestResponseAPIView,
-    AgentJudgeSuggestionDismissAPIView,
     AgentPlanningSkipAPIView,
     AgentContactRequestResolveAPIView,
     AgentChatRosterAPIView,
@@ -407,11 +406,6 @@ urlpatterns = [
         "console/api/agents/<uuid:agent_id>/human-input-requests/<uuid:request_id>/dismiss/",
         AgentHumanInputRequestDismissAPIView.as_view(),
         name="console_agent_human_input_request_dismiss",
-    ),
-    path(
-        "console/api/agents/<uuid:agent_id>/judge-suggestions/<uuid:suggestion_id>/dismiss/",
-        AgentJudgeSuggestionDismissAPIView.as_view(),
-        name="console_agent_judge_suggestion_dismiss",
     ),
     path(
         "console/api/agents/<uuid:agent_id>/spawn-requests/<uuid:spawn_request_id>/decision/",

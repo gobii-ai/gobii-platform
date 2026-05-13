@@ -23,7 +23,6 @@ import {
   resolveContactRequests,
   resolveSpawnRequest,
   dismissHumanInputRequest,
-  dismissJudgeSuggestion,
   respondToHumanInputRequest,
   respondToHumanInputRequestsBatch,
   skipAgentPlanning,
@@ -4239,22 +4238,6 @@ export function AgentChatPage({
     replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
   }, [activeAgentId, queryClient])
 
-  const handleOpenJudgeSuggestionSettings = useCallback((settingsUrl?: string | null) => {
-    if (settingsUrl && !window.location.pathname.startsWith('/app')) {
-      navigateShellPath(settingsUrl, activeAgentIdRef.current)
-      return
-    }
-    navigateToShellSubview('settings')
-  }, [navigateShellPath, navigateToShellSubview])
-
-  const handleDismissJudgeSuggestion = useCallback(async (dismissApiUrl: string) => {
-    if (!activeAgentId) {
-      return
-    }
-    const result = await dismissJudgeSuggestion(dismissApiUrl)
-    replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
-  }, [activeAgentId, queryClient])
-
   useEffect(() => {
     if (!isNewAgent || !spawnFlow || !requiresTrialPlanSelection) {
       return
@@ -4622,8 +4605,6 @@ export function AgentChatPage({
         onResolveSpawnRequest={handleResolveSpawnRequest}
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
-        onOpenJudgeSuggestionSettings={handleOpenJudgeSuggestionSettings}
-        onDismissJudgeSuggestion={handleDismissJudgeSuggestion}
         onResolveContactRequests={handleResolveContactRequests}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer

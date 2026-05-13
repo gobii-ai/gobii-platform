@@ -9,7 +9,6 @@ from api.models import (
     AgentSpawnRequest,
     CommsAllowlistRequest,
     PersistentAgent,
-    PersistentAgentJudgeSuggestion,
     PersistentAgentSecret,
 )
 
@@ -84,25 +83,6 @@ def _serialize_spawn_request(agent: PersistentAgent, spawn_request: AgentSpawnRe
     }
 
 
-def _serialize_judge_suggestion(agent: PersistentAgent, suggestion: PersistentAgentJudgeSuggestion) -> dict:
-    return {
-        "id": f"judge_suggestion:{suggestion.id}",
-        "kind": "judge_suggestion",
-        "suggestionId": str(suggestion.id),
-        "suggestionType": suggestion.suggestion_type,
-        "title": suggestion.title,
-        "message": suggestion.ui_message,
-        "recommendedTier": suggestion.recommended_tier or None,
-        "confidence": suggestion.confidence,
-        "createdAt": suggestion.created_at.isoformat() if suggestion.created_at else None,
-        "settingsUrl": reverse("agent_chat_shell_settings", kwargs={"pk": agent.id}),
-        "dismissApiUrl": reverse(
-            "console_agent_judge_suggestion_dismiss",
-            kwargs={"agent_id": agent.id, "suggestion_id": suggestion.id},
-        ),
-    }
-
-
 def _expire_pending_spawn_requests(agent: PersistentAgent) -> None:
     now = timezone.now()
     AgentSpawnRequest.objects.filter(
@@ -153,14 +133,6 @@ def list_pending_action_requests(agent: PersistentAgent, viewer_user) -> list[di
         .order_by("-requested_at")
     ):
         pending_actions.append(_serialize_spawn_request(agent, spawn_request))
-
-    for suggestion in (
-        PersistentAgentJudgeSuggestion.objects.filter(
-            agent=agent,
-            status=PersistentAgentJudgeSuggestion.Status.ACTIVE,
-        ).order_by("-created_at")[:3]
-    ):
-        pending_actions.append(_serialize_judge_suggestion(agent, suggestion))
 
     for secret in (
         PersistentAgentSecret.objects.filter(

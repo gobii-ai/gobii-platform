@@ -251,8 +251,6 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
-  onOpenJudgeSuggestionSettings?: (settingsUrl?: string | null) => void
-  onDismissJudgeSuggestion?: (dismissApiUrl: string) => Promise<void>
   onResolveContactRequests?: (
     responses: Array<{
       requestId: string
@@ -422,8 +420,6 @@ export function AgentChatLayout({
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
-  onOpenJudgeSuggestionSettings,
-  onDismissJudgeSuggestion,
   onResolveContactRequests,
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
@@ -1583,8 +1579,6 @@ export function AgentChatLayout({
               onResolveSpawnRequest={onResolveSpawnRequest}
               onFulfillRequestedSecrets={onFulfillRequestedSecrets}
               onRemoveRequestedSecrets={onRemoveRequestedSecrets}
-              onOpenJudgeSuggestionSettings={onOpenJudgeSuggestionSettings}
-              onDismissJudgeSuggestion={onDismissJudgeSuggestion}
               onResolveContactRequests={onResolveContactRequests}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}

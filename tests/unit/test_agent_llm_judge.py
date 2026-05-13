@@ -470,7 +470,7 @@ class AgentJudgeTests(TestCase):
             capped_limits = _judge_prompt_limits()
         self.assertEqual(capped_limits.prompt_token_budget, 500)
 
-    def test_intelligence_upgrade_creates_step_directive_and_pending_action(self):
+    def test_intelligence_upgrade_creates_step_directive_without_chat_pending_action(self):
         self._add_failed_tool_trigger()
         response = _judge_response(
             {
@@ -517,8 +517,7 @@ class AgentJudgeTests(TestCase):
 
         pending_actions = list_pending_action_requests(self.agent, self.user)
         judge_actions = [action for action in pending_actions if action.get("kind") == "judge_suggestion"]
-        self.assertEqual(len(judge_actions), 1)
-        self.assertEqual(judge_actions[0]["suggestionType"], "intelligence_upgrade")
+        self.assertFalse(judge_actions)
 
     def test_no_action_only_logs_completion(self):
         self._add_failed_tool_trigger()

@@ -3883,39 +3883,6 @@ class AgentHumanInputRequestBatchResponseAPIView(LoginRequiredMixin, View):
         )
 
 
-@method_decorator(csrf_exempt, name="dispatch")
-class AgentJudgeSuggestionDismissAPIView(LoginRequiredMixin, View):
-    http_method_names = ["post"]
-
-    def post(self, request: HttpRequest, agent_id: str, suggestion_id: str, *args: Any, **kwargs: Any):
-        agent = resolve_agent_for_request(
-            request,
-            agent_id,
-            allow_shared=True,
-            allow_delinquent_personal_chat=True,
-        )
-        if not user_can_manage_agent_settings(
-            request.user,
-            agent,
-            allow_delinquent_personal_chat=True,
-        ):
-            return HttpResponseForbidden("You do not have permission to dismiss this suggestion.")
-
-        suggestion = get_object_or_404(
-            PersistentAgentJudgeSuggestion.objects,
-            id=suggestion_id,
-            agent=agent,
-        )
-        dismiss_judge_suggestion(suggestion)
-        return JsonResponse(
-            {
-                "message": "Suggestion dismissed.",
-                **_pending_action_payload(agent, request.user),
-            },
-            status=200,
-        )
-
-
 class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
     http_method_names = ["get", "post"]
 
