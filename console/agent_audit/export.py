@@ -2,7 +2,8 @@ import json
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone as dt_timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import Any, BinaryIO, Iterable, Sequence
 
 from botocore.exceptions import ClientError
@@ -32,6 +33,36 @@ logger = logging.getLogger(__name__)
 DEFAULT_CHUNK_SIZE = 200
 PROMPT_ARCHIVE_LOAD_WORKERS = 8
 S3_MISSING_OBJECT_CODES = {"404", "NoSuchKey", "NotFound"}
+DEFAULT_EXPORT_RANGE_KEY = "all"
+
+
+class InvalidAuditExportRange(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class AuditExportRange:
+    key: str
+    label: str
+    start: datetime | None
+    end: datetime
+
+    def as_payload(self) -> dict[str, str | None]:
+        return {
+            "key": self.key,
+            "label": self.label,
+            "start": _dt_to_iso(self.start),
+            "end": _dt_to_iso(self.end),
+        }
+
+
+AUDIT_EXPORT_RANGE_OPTIONS: dict[str, tuple[str, timedelta | None]] = {
+    "1h": ("Last hour", timedelta(hours=1)),
+    "24h": ("Last 24 hours", timedelta(hours=24)),
+    "7d": ("Last 7 days", timedelta(days=7)),
+    "30d": ("Last 30 days", timedelta(days=30)),
+    "all": ("Full audit", None),
+}
 
 
 def _dt_to_iso(dt: datetime | None) -> str | None:
@@ -41,6 +72,28 @@ def _dt_to_iso(dt: datetime | None) -> str | None:
         dt = timezone.make_aware(dt, timezone.get_current_timezone())
     dt = dt.astimezone(dt_timezone.utc)
     return dt.isoformat().replace("+00:00", "Z")
+
+
+def build_audit_export_range(range_key: str | None, *, now: datetime | None = None) -> AuditExportRange:
+    key = (range_key or DEFAULT_EXPORT_RANGE_KEY).strip() or DEFAULT_EXPORT_RANGE_KEY
+    option = AUDIT_EXPORT_RANGE_OPTIONS.get(key)
+    if option is None:
+        valid_keys = ", ".join(AUDIT_EXPORT_RANGE_OPTIONS.keys())
+        raise InvalidAuditExportRange(f"range must be one of: {valid_keys}")
+
+    label, delta = option
+    end = now or timezone.now()
+    if timezone.is_naive(end):
+        end = timezone.make_aware(end, timezone.get_current_timezone())
+    start = end - delta if delta is not None else None
+    return AuditExportRange(key=key, label=label, start=start, end=end)
+
+
+def _apply_export_range(queryset, export_range: AuditExportRange, field_name: str):
+    filters = {f"{field_name}__lte": export_range.end}
+    if export_range.start is not None:
+        filters[f"{field_name}__gte"] = export_range.start
+    return queryset.filter(**filters)
 
 
 def _load_prompt_archive_payload(archive) -> dict[str, Any] | None:
@@ -100,9 +153,18 @@ def _prime_prompt_payload_cache(
             prompt_payload_cache[str(archive.id)] = payload
 
 
-def _iter_completion_chunks(agent: PersistentAgent, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterable[Sequence[PersistentAgentCompletion]]:
+def _iter_completion_chunks(
+    agent: PersistentAgent,
+    *,
+    export_range: AuditExportRange,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> Iterable[Sequence[PersistentAgentCompletion]]:
     chunk: list[PersistentAgentCompletion] = []
-    queryset = PersistentAgentCompletion.objects.filter(agent=agent).order_by("-created_at", "-id")
+    queryset = _apply_export_range(
+        PersistentAgentCompletion.objects.filter(agent=agent),
+        export_range,
+        "created_at",
+    ).order_by("-created_at", "-id")
     for completion in queryset.iterator(chunk_size=chunk_size):
         chunk.append(completion)
         if len(chunk) >= chunk_size:
@@ -177,9 +239,14 @@ def _serialize_completion_chunk(
     return serialized
 
 
-def _iter_serialized_messages(agent: PersistentAgent, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterable[dict[str, Any]]:
+def _iter_serialized_messages(
+    agent: PersistentAgent,
+    *,
+    export_range: AuditExportRange,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> Iterable[dict[str, Any]]:
     queryset = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent)
+        _apply_export_range(PersistentAgentMessage.objects.filter(owner_agent=agent), export_range, "timestamp")
         .select_related("from_endpoint", "to_endpoint", "conversation__peer_link", "peer_agent", "owner_agent")
         .prefetch_related("attachments__filespace_node")
         .order_by("-timestamp", "-seq")
@@ -188,8 +255,17 @@ def _iter_serialized_messages(agent: PersistentAgent, chunk_size: int = DEFAULT_
         yield serialize_message(message)
 
 
-def _iter_serialized_errors(agent: PersistentAgent, chunk_size: int = DEFAULT_CHUNK_SIZE) -> Iterable[dict[str, Any]]:
-    queryset = PersistentAgentError.objects.filter(agent=agent).order_by("-created_at", "-id")
+def _iter_serialized_errors(
+    agent: PersistentAgent,
+    *,
+    export_range: AuditExportRange,
+    chunk_size: int = DEFAULT_CHUNK_SIZE,
+) -> Iterable[dict[str, Any]]:
+    queryset = _apply_export_range(
+        PersistentAgentError.objects.filter(agent=agent),
+        export_range,
+        "created_at",
+    ).order_by("-created_at", "-id")
     for error in queryset.iterator(chunk_size=chunk_size):
         yield serialize_error(error)
 
@@ -206,14 +282,28 @@ def write_agent_audit_export_json(
     agent: PersistentAgent,
     file_obj: BinaryIO,
     *,
+    export_range: AuditExportRange | None = None,
     chunk_size: int = DEFAULT_CHUNK_SIZE,
 ) -> dict[str, Any]:
-    """Write the full audit export JSON to a binary file-like object incrementally."""
-    exported_at = _dt_to_iso(timezone.now())
+    """Write the audit export JSON to a binary file-like object incrementally."""
+    resolved_range = export_range or build_audit_export_range(DEFAULT_EXPORT_RANGE_KEY)
+    exported_at = _dt_to_iso(resolved_range.end)
     counts = {
-        "completions": PersistentAgentCompletion.objects.filter(agent=agent).count(),
-        "messages": PersistentAgentMessage.objects.filter(owner_agent=agent).count(),
-        "errors": PersistentAgentError.objects.filter(agent=agent).count(),
+        "completions": _apply_export_range(
+            PersistentAgentCompletion.objects.filter(agent=agent),
+            resolved_range,
+            "created_at",
+        ).count(),
+        "messages": _apply_export_range(
+            PersistentAgentMessage.objects.filter(owner_agent=agent),
+            resolved_range,
+            "timestamp",
+        ).count(),
+        "errors": _apply_export_range(
+            PersistentAgentError.objects.filter(agent=agent),
+            resolved_range,
+            "created_at",
+        ).count(),
     }
     agent_payload = {
         "id": str(agent.id),
@@ -226,13 +316,15 @@ def write_agent_audit_export_json(
     _write_json_value(file_obj, exported_at)
     _write_json_bytes(file_obj, ',"agent":')
     _write_json_value(file_obj, agent_payload)
+    _write_json_bytes(file_obj, ',"range":')
+    _write_json_value(file_obj, resolved_range.as_payload())
     _write_json_bytes(file_obj, ',"counts":')
     _write_json_value(file_obj, counts)
 
     _write_json_bytes(file_obj, ',"completions":[')
     first_completion = True
     prompt_payload_cache: dict[str, dict[str, Any] | None] = {}
-    for completion_chunk in _iter_completion_chunks(agent, chunk_size=chunk_size):
+    for completion_chunk in _iter_completion_chunks(agent, export_range=resolved_range, chunk_size=chunk_size):
         serialized_chunk = _serialize_completion_chunk(
             agent,
             completion_chunk,
@@ -248,7 +340,7 @@ def write_agent_audit_export_json(
 
     _write_json_bytes(file_obj, ',"errors":[')
     first_error = True
-    for error_payload in _iter_serialized_errors(agent, chunk_size=chunk_size):
+    for error_payload in _iter_serialized_errors(agent, export_range=resolved_range, chunk_size=chunk_size):
         if not first_error:
             _write_json_bytes(file_obj, ",")
         _write_json_value(file_obj, error_payload)
@@ -257,7 +349,7 @@ def write_agent_audit_export_json(
 
     _write_json_bytes(file_obj, ',"messages":[')
     first_message = True
-    for message_payload in _iter_serialized_messages(agent, chunk_size=chunk_size):
+    for message_payload in _iter_serialized_messages(agent, export_range=resolved_range, chunk_size=chunk_size):
         if not first_message:
             _write_json_bytes(file_obj, ",")
         _write_json_value(file_obj, message_payload)
@@ -272,4 +364,5 @@ def write_agent_audit_export_json(
         "exported_at": exported_at,
         "counts": counts,
         "agent": agent_payload,
+        "range": resolved_range.as_payload(),
     }

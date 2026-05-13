@@ -80,6 +80,14 @@ const DEFAULT_FILTERS = {
 
 const AGENT_SEARCH_LIMIT = 8
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const AUDIT_EXPORT_RANGES = [
+  { key: 'all', label: 'Full audit' },
+  { key: '1h', label: 'Last hour' },
+  { key: '24h', label: 'Last 24 hours' },
+  { key: '7d', label: 'Last 7 days' },
+  { key: '30d', label: 'Last 30 days' },
+] as const
+type AuditExportRangeKey = (typeof AUDIT_EXPORT_RANGES)[number]['key']
 
 function isUuid(value: string): boolean {
   return UUID_PATTERN.test(value)
@@ -162,6 +170,7 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [timelineMaxHeight, setTimelineMaxHeight] = useState<number | null>(null)
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ ...DEFAULT_FILTERS })
+  const [exportRange, setExportRange] = useState<AuditExportRangeKey>('all')
   const [eventCollapseOverrideKeys, setEventCollapseOverrideKeys] = useState<Set<string>>(() => new Set())
   const [processQueueing, setProcessQueueing] = useState(false)
   const [judgeRunning, setJudgeRunning] = useState(false)
@@ -183,7 +192,10 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
   const [agentSearchError, setAgentSearchError] = useState<string | null>(null)
   const pendingMessageScrollId = useRef<string | null>(null)
   useAgentAuditSocket(agentId)
-  const auditExportUrl = useMemo(() => `/console/api/staff/agents/${agentId}/audit/export/`, [agentId])
+  const auditExportUrl = useMemo(
+    () => `/console/api/staff/agents/${agentId}/audit/export/?range=${encodeURIComponent(exportRange)}`,
+    [agentId, exportRange],
+  )
 
   useEffect(() => {
     initialize(agentId)
@@ -720,14 +732,28 @@ export function AgentAuditScreen({ agentId, agentName, adminAgentUrl }: AgentAud
                 <Settings className="h-4 w-4" aria-hidden />
               </a>
             ) : null}
-            <a
-              className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"
-              href={auditExportUrl}
-              title="Download audit export zip"
-              aria-label="Download audit export zip"
-            >
-              <Download className="h-4 w-4" aria-hidden />
-            </a>
+            <div className="inline-flex h-9 items-center overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+              <label htmlFor="audit-export-range" className="sr-only">Audit export range</label>
+              <select
+                id="audit-export-range"
+                className="h-full border-0 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition hover:text-slate-900 focus:ring-2 focus:ring-sky-500"
+                value={exportRange}
+                onChange={(event) => setExportRange(event.target.value as AuditExportRangeKey)}
+                aria-label="Audit export range"
+              >
+                {AUDIT_EXPORT_RANGES.map((range) => (
+                  <option key={range.key} value={range.key}>{range.label}</option>
+                ))}
+              </select>
+              <a
+                className="inline-flex h-full w-9 items-center justify-center border-l border-slate-200 bg-white text-slate-700 transition hover:text-slate-900"
+                href={auditExportUrl}
+                title="Download audit export zip"
+                aria-label="Download audit export zip"
+              >
+                <Download className="h-4 w-4" aria-hidden />
+              </a>
+            </div>
             <button
               type="button"
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:border-slate-300 hover:text-slate-900"

@@ -446,7 +446,8 @@
       const completionCount = auditData.counts && auditData.counts.completions ? auditData.counts.completions : 0;
       const messageCount = auditData.counts && auditData.counts.messages ? auditData.counts.messages : 0;
       const errorCount = auditData.counts && auditData.counts.errors ? auditData.counts.errors : 0;
-      summary.textContent = "Generated " + exportedAt + " - " + completionCount + " completions - " + messageCount + " messages - " + errorCount + " errors";
+      const rangeLabel = auditData.range && auditData.range.label ? auditData.range.label : "Full audit";
+      summary.textContent = "Generated " + exportedAt + " - " + rangeLabel + " - " + completionCount + " completions - " + messageCount + " messages - " + errorCount + " errors";
     }
 
     renderTimeline(auditData);

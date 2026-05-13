@@ -130,7 +130,11 @@ from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
 from console.agent_audit.events import fetch_audit_events, fetch_audit_events_between
-from console.agent_audit.export import write_agent_audit_export_json
+from console.agent_audit.export import (
+    InvalidAuditExportRange,
+    build_audit_export_range,
+    write_agent_audit_export_json,
+)
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
 from console.agent_chat.timeline import compute_processing_status
@@ -2474,9 +2478,13 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        try:
+            export_range = build_audit_export_range(request.GET.get("range"))
+        except InvalidAuditExportRange as exc:
+            return HttpResponseBadRequest(str(exc))
 
         audit_json_file = tempfile.SpooledTemporaryFile(mode="w+b", max_size=5 * 1024 * 1024)
-        audit_summary = write_agent_audit_export_json(agent, audit_json_file)
+        audit_summary = write_agent_audit_export_json(agent, audit_json_file, export_range=export_range)
         audit_json_file.seek(0)
 
         html = render_to_string(
@@ -2484,6 +2492,7 @@ class StaffAgentAuditExportAPIView(SystemAdminAPIView):
             {
                 "agent_name": agent.name or "Agent",
                 "generated_at": audit_summary.get("exported_at"),
+                "range_label": (audit_summary.get("range") or {}).get("label"),
             },
         )
         viewer_js = render_to_string("console/staff_agent_audit_export_viewer.js")

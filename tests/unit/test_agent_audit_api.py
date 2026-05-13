@@ -1,6 +1,7 @@
 import json
 import io
 import zipfile
+from datetime import timedelta
 from uuid import uuid4
 from unittest.mock import MagicMock, patch
 
@@ -10,6 +11,7 @@ from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
 from django.test import Client, TestCase, tag
+from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
@@ -72,6 +74,33 @@ class StaffAgentAuditAPITests(TestCase):
         )
         self.client = Client()
         self.client.force_login(self.staff)
+
+    def _read_export_archive(self, response):
+        archive_bytes = b"".join(response.streaming_content)
+        return zipfile.ZipFile(io.BytesIO(archive_bytes))
+
+    def _read_export_payload(self, response):
+        archive = self._read_export_archive(response)
+        return json.loads(archive.read("audit-data.json").decode("utf-8"))
+
+    def _create_agent_message(self, body):
+        from_ep = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=f"agent-{uuid4().hex}@example.com",
+            is_primary=True,
+        )
+        to_ep = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=f"user-{uuid4().hex}@example.com",
+        )
+        return PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=from_ep,
+            to_endpoint=to_ep,
+            owner_agent=self.agent,
+            body=body,
+        )
 
     def test_process_events_endpoint_enqueues_task(self):
         with patch("console.api_views.process_agent_events_task.delay") as mock_delay:
@@ -465,8 +494,7 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(response["Content-Type"], "application/zip")
         self.assertIn("attachment; filename=", response["Content-Disposition"])
 
-        archive_bytes = b"".join(response.streaming_content)
-        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+        archive = self._read_export_archive(response)
         names = set(archive.namelist())
         self.assertIn("index.html", names)
         self.assertIn("audit-data.json", names)
@@ -477,6 +505,10 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIn("exported_at", export_payload)
         self.assertIn("completions", export_payload)
         self.assertIn("messages", export_payload)
+        self.assertEqual(export_payload["range"]["key"], "all")
+        self.assertEqual(export_payload["range"]["label"], "Full audit")
+        self.assertIsNone(export_payload["range"]["start"])
+        self.assertIsNotNone(export_payload["range"]["end"])
         self.assertEqual(export_payload["counts"]["completions"], 1)
         self.assertEqual(export_payload["counts"]["messages"], 1)
         self.assertEqual(export_payload["counts"]["errors"], 1)
@@ -501,6 +533,90 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertIsNotNone(exported_message.get("timestamp"))
         self.assertEqual(exported_message.get("body_text"), "Hello from the agent.")
         self.assertEqual(exported_message.get("body_html"), "<p><strong>Hello</strong> from the agent.</p>")
+
+    def test_audit_export_24h_range_filters_rows_and_reports_metadata(self):
+        old_at = timezone.now() - timedelta(days=2)
+        recent_completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            llm_model="openrouter/recent-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+        old_completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            llm_model="openrouter/old-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+        PersistentAgentCompletion.objects.filter(id=old_completion.id).update(created_at=old_at)
+
+        recent_message = self._create_agent_message("recent message")
+        old_message = self._create_agent_message("old message")
+        PersistentAgentMessage.objects.filter(id=old_message.id).update(timestamp=old_at)
+
+        recent_error = PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="tests.export.recent",
+            message="Recent error",
+        )
+        old_error = PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="tests.export.old",
+            message="Old error",
+        )
+        PersistentAgentError.objects.filter(id=old_error.id).update(created_at=old_at)
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=24h")
+
+        self.assertEqual(response.status_code, 200)
+        export_payload = self._read_export_payload(response)
+        self.assertEqual(export_payload["range"]["key"], "24h")
+        self.assertEqual(export_payload["range"]["label"], "Last 24 hours")
+        self.assertIsNotNone(export_payload["range"]["start"])
+        self.assertIsNotNone(export_payload["range"]["end"])
+        self.assertEqual(export_payload["counts"], {"completions": 1, "messages": 1, "errors": 1})
+        self.assertEqual([item["id"] for item in export_payload["completions"]], [str(recent_completion.id)])
+        self.assertEqual([item["id"] for item in export_payload["messages"]], [str(recent_message.id)])
+        self.assertEqual([item["id"] for item in export_payload["errors"]], [str(recent_error.id)])
+
+    def test_audit_export_all_range_includes_older_rows(self):
+        old_at = timezone.now() - timedelta(days=2)
+        old_completion = PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            llm_model="openrouter/old-model",
+            llm_provider="openrouter",
+            billed=True,
+        )
+        PersistentAgentCompletion.objects.filter(id=old_completion.id).update(created_at=old_at)
+        old_message = self._create_agent_message("old message")
+        PersistentAgentMessage.objects.filter(id=old_message.id).update(timestamp=old_at)
+        old_error = PersistentAgentError.objects.create(
+            agent=self.agent,
+            category=PersistentAgentError.Category.OTHER,
+            source="tests.export.old",
+            message="Old error",
+        )
+        PersistentAgentError.objects.filter(id=old_error.id).update(created_at=old_at)
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=all")
+
+        self.assertEqual(response.status_code, 200)
+        export_payload = self._read_export_payload(response)
+        self.assertEqual(export_payload["range"]["key"], "all")
+        self.assertEqual(export_payload["counts"], {"completions": 1, "messages": 1, "errors": 1})
+        self.assertEqual([item["id"] for item in export_payload["completions"]], [str(old_completion.id)])
+        self.assertEqual([item["id"] for item in export_payload["messages"]], [str(old_message.id)])
+        self.assertEqual([item["id"] for item in export_payload["errors"]], [str(old_error.id)])
+
+    def test_audit_export_rejects_invalid_range(self):
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/export/?range=yesterday")
+
+        self.assertEqual(response.status_code, 400)
 
     def test_audit_export_handles_missing_s3_prompt_archive_payload(self):
         completion = PersistentAgentCompletion.objects.create(
