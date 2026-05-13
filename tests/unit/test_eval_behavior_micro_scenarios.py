@@ -7,6 +7,8 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    COMMON_USE_CASE_EVAL_CASES,
+    COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     all_requests_have_options,
@@ -44,6 +46,24 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertEqual(planning_suite.scenario_slugs, PLANNING_MICRO_SCENARIO_SLUGS)
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
+
+    def test_common_use_case_micro_evals_are_complete_and_registered(self):
+        registered = ScenarioRegistry.list_all()
+
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 100)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 100)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 100)
+        self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
+        self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
+
+        for case in COMMON_USE_CASE_EVAL_CASES:
+            self.assertIn(case["slug"], registered)
+            self.assertLessEqual(len(case["prompt"]), 180)
+            self.assertGreaterEqual(len(case.get("expected_tools") or []), 1)
+            self.assertEqual(
+                [task.name for task in registered[case["slug"]].tasks],
+                ["inject_prompt", "verify_expected_tool_usage", "verify_forbidden_tool_absence"],
+            )
 
 
 @tag("batch_eval_fingerprint")

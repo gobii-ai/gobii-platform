@@ -3,7 +3,7 @@ import re
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
-from api.evals.registry import register_scenario
+from api.evals.registry import ScenarioRegistry, register_scenario
 from api.models import (
     EvalRunTask,
     PersistentAgent,
@@ -22,6 +22,111 @@ TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_
 TOOL_CHOICE_PDF_DELIVERABLE_USES_CREATE_PDF = "tool_choice_pdf_deliverable_uses_create_pdf"
 TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT = "tool_choice_missing_recipient_uses_human_input"
 
+COMMON_USE_CASE_EVAL_CASES = [
+    {"slug": "common_use_case_001_fetch_inventory_json", "category": "api_lookup", "prompt": "Fetch https://api.example.test/inventory/widget-123.json and report inventory_count.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://api.example.test/inventory/widget-123.json"}},
+    {"slug": "common_use_case_002_fetch_status_json", "category": "api_lookup", "prompt": "Fetch https://status.example.test/api/summary.json and report the status field.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://status.example.test/api/summary.json"}},
+    {"slug": "common_use_case_003_fetch_price_json", "category": "api_lookup", "prompt": "Fetch https://prices.example.test/api/btc-usd.json and report usd_price.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://prices.example.test/api/btc-usd.json"}},
+    {"slug": "common_use_case_004_fetch_weather_json", "category": "api_lookup", "prompt": "Fetch https://weather.example.test/current?city=Boston and report temp_f.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://weather.example.test/current?city=Boston"}},
+    {"slug": "common_use_case_005_fetch_events_json", "category": "api_lookup", "prompt": "Fetch https://events.example.test/api/upcoming.json and report the first event name.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://events.example.test/api/upcoming.json"}},
+    {"slug": "common_use_case_006_fetch_release_json", "category": "api_lookup", "prompt": "Fetch https://releases.example.test/latest.json and report version.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://releases.example.test/latest.json"}},
+    {"slug": "common_use_case_007_fetch_jobs_json", "category": "api_lookup", "prompt": "Fetch https://jobs.example.test/feed.json and report open_roles.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://jobs.example.test/feed.json"}},
+    {"slug": "common_use_case_008_fetch_alerts_json", "category": "api_lookup", "prompt": "Fetch https://alerts.example.test/warnings.json and report alert_count.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://alerts.example.test/warnings.json"}},
+    {"slug": "common_use_case_009_fetch_finance_json", "category": "api_lookup", "prompt": "Fetch https://finance.example.test/api/quote/TSLA.json and report last_price.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://finance.example.test/api/quote/TSLA.json"}},
+    {"slug": "common_use_case_010_fetch_form_json", "category": "api_lookup", "prompt": "Fetch https://permits.example.test/forms/zoning.json and report required_forms.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://permits.example.test/forms/zoning.json"}},
+    {"slug": "common_use_case_011_research_competitor_pricing", "category": "web_research", "prompt": "Search the web for Acme CRM pricing changes and summarize the top result.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_012_research_ai_tools", "category": "web_research", "prompt": "Search the web for current AI meeting note tools and list three names.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_013_research_market_news", "category": "web_research", "prompt": "Search the web for recent warehouse robotics funding news and cite one source.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_014_research_regulation", "category": "web_research", "prompt": "Search the web for the latest California privacy rule update and summarize it.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_015_research_vendor_reviews", "category": "web_research", "prompt": "Search the web for reviews of ExamplePay and return one positive and one negative theme.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_016_search_remote_jobs", "category": "web_research", "prompt": "Search the web for remote senior Django engineer jobs and return three company names.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_017_search_local_events", "category": "web_research", "prompt": "Search the web for upcoming data science meetups in Austin and return two dates.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_018_search_product_launches", "category": "web_research", "prompt": "Search the web for new product launches from Contoso Health and summarize one.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_019_search_public_filings", "category": "web_research", "prompt": "Search the web for ExampleCo SEC enforcement press releases and return one link.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of a gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_021_scrape_known_article", "category": "web_scrape", "prompt": "Scrape https://news.example.test/article-42 and return the headline.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_022_scrape_known_blog", "category": "web_scrape", "prompt": "Scrape https://blog.example.test/q2-roadmap and return the author name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_023_scrape_known_pricing_page", "category": "web_scrape", "prompt": "Scrape https://vendor.example.test/pricing and return the starter plan price.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_024_scrape_known_docs_page", "category": "web_scrape", "prompt": "Scrape https://docs.example.test/api/auth and return the required header name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_025_scrape_known_permit_page", "category": "web_scrape", "prompt": "Scrape https://borough.example.test/permits/zoning and return the filing fee.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_026_scrape_known_jobs_page", "category": "web_scrape", "prompt": "Scrape https://careers.example.test/jobs and return the first listed role.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_027_scrape_known_changelog", "category": "web_scrape", "prompt": "Scrape https://app.example.test/changelog and return the latest release date.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_028_scrape_known_directory", "category": "web_scrape", "prompt": "Scrape https://directory.example.test/vendors and return the first vendor name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_029_scrape_known_support_page", "category": "web_scrape", "prompt": "Scrape https://support.example.test/status and return the support email.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_030_scrape_known_event_page", "category": "web_scrape", "prompt": "Scrape https://events.example.test/summit and return the venue.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_031_linkedin_person_profile", "category": "lead_sourcing", "prompt": "Find the LinkedIn profile for Jordan Lee at Acme AI and return title and location.", "expected_tools": ["mcp_brightdata_web_data_linkedin_person_profile"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_032_linkedin_company_profile", "category": "lead_sourcing", "prompt": "Look up the LinkedIn company profile for Acme AI and return industry and size.", "expected_tools": ["mcp_brightdata_web_data_linkedin_company_profile"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_033_linkedin_job_listings", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for Acme AI and return two open role titles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_034_linkedin_people_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for product leaders at Acme AI and return three names.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_035_linkedin_posts", "category": "lead_sourcing", "prompt": "Find recent LinkedIn posts from Acme AI and summarize the latest post.", "expected_tools": ["mcp_brightdata_web_data_linkedin_posts"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_036_apollo_contacts", "category": "lead_sourcing", "prompt": "Search Apollo for VP Sales contacts at healthcare SaaS companies in Boston.", "expected_tools": ["apollo_io-search-contacts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_037_apollo_accounts", "category": "lead_sourcing", "prompt": "Search Apollo for cybersecurity accounts with 50-200 employees in Austin.", "expected_tools": ["apollo_io-search-accounts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_038_apollo_enrich_person", "category": "lead_sourcing", "prompt": "Enrich the Apollo profile for pat@example.test and return company and title.", "expected_tools": ["apollo_io-people-enrichment"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"]},
+    {"slug": "common_use_case_039_amazon_product", "category": "commerce_research", "prompt": "Get Amazon product data for ASIN B000TEST01 and return rating and price.", "expected_tools": ["mcp_brightdata_web_data_amazon_product"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_040_instagram_profile", "category": "social_research", "prompt": "Get Instagram profile data for examplebrand and return follower count.", "expected_tools": ["mcp_brightdata_web_data_instagram_profiles"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_041_reddit_posts", "category": "social_research", "prompt": "Fetch Reddit posts about ExampleApp and summarize the top complaint.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_042_google_maps_reviews", "category": "local_research", "prompt": "Fetch Google Maps reviews for Example Cafe and summarize the rating themes.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_043_yahoo_finance_business", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT and return market cap.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"]},
+    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "Add one row to the Leads sheet for Acme, high priority, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_050_sheets_update_cell", "category": "sheets", "prompt": "Update cell C8 in spreadsheet sheet-123 to Qualified.", "expected_tools": ["google_sheets-update-cell"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_051_sheets_update_row", "category": "sheets", "prompt": "Update the lead row for Globex with status Contacted.", "expected_tools": ["google_sheets-update-row"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_052_sheets_update_multiple_rows", "category": "sheets", "prompt": "Update three rows in the pipeline sheet to mark follow_up_due as today.", "expected_tools": ["google_sheets-update-multiple-rows"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_053_sheets_upsert_row", "category": "sheets", "prompt": "Upsert the account row keyed by domain example.test with status active.", "expected_tools": ["google_sheets-upsert-row"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_054_sheets_list_worksheets", "category": "sheets", "prompt": "List worksheets in spreadsheet sheet-123 and return their titles.", "expected_tools": ["google_sheets-list-worksheets"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_055_sheets_info", "category": "sheets", "prompt": "Get spreadsheet info for sheet-123 and report the spreadsheet title.", "expected_tools": ["google_sheets-get-spreadsheet-info"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_056_sheets_create_spreadsheet", "category": "sheets", "prompt": "Create a spreadsheet named Q2 Lead Tracker with a Leads worksheet.", "expected_tools": ["google_sheets-create-spreadsheet"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_057_sheets_read_rows", "category": "sheets", "prompt": "Read the first 10 rows from the Tasks worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-read-rows"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"]},
+    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test a three-sentence summary of today's pipeline changes.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"]},
+    {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"]},
+    {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"]},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"]},
+    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Ask permission before texting +15555550123 about the urgent outage.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"]},
+    {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "forbidden_tools": ["send_chat_message"]},
+    {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Request the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "forbidden_tools": ["send_chat_message"]},
+    {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"]},
+    {"slug": "common_use_case_072_create_jobs_csv", "category": "files", "prompt": "Create /exports/jobs.csv with columns title,company,url and three rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"]},
+    {"slug": "common_use_case_073_create_status_pdf", "category": "files", "prompt": "Create a one-page PDF at /exports/status.pdf with wins, risks, and next steps.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"]},
+    {"slug": "common_use_case_074_create_permit_pdf", "category": "files", "prompt": "Create a PDF at /exports/permit-summary.pdf summarizing zoning permit requirements.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"]},
+    {"slug": "common_use_case_075_create_markdown_file", "category": "files", "prompt": "Create /exports/notes.md with a short meeting summary and action items.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"]},
+    {"slug": "common_use_case_076_create_json_file", "category": "files", "prompt": "Create /exports/config.json containing feature_enabled true and retry_count 3.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"]},
+    {"slug": "common_use_case_077_create_bar_chart", "category": "files", "prompt": "Create a bar chart of weekly leads with values 12, 18, 9, and 24.", "expected_tools": ["create_chart"], "forbidden_tools": ["create_csv"]},
+    {"slug": "common_use_case_078_create_line_chart", "category": "files", "prompt": "Create a line chart for daily signups with values 4, 7, 5, 11, and 13.", "expected_tools": ["create_chart"], "forbidden_tools": ["create_csv"]},
+    {"slug": "common_use_case_079_create_report_with_chart", "category": "files", "prompt": "Create a chart showing revenue by month and prepare it for a PDF report.", "expected_tools": ["create_chart"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_080_read_uploaded_file", "category": "files", "prompt": "Read /uploads/brief.txt and summarize the three requested edits.", "expected_tools": ["read_file"], "forbidden_tools": ["mcp_brightdata_search_engine"]},
+    {"slug": "common_use_case_081_sqlite_create_table", "category": "database", "prompt": "Create a SQLite table leads with columns company, email, and priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"]},
+    {"slug": "common_use_case_082_sqlite_insert_rows", "category": "database", "prompt": "Insert two lead rows into the SQLite leads table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"]},
+    {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "Query SQLite for lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"]},
+    {"slug": "common_use_case_084_sqlite_update_status", "category": "database", "prompt": "Update SQLite lead Acme to status contacted.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-row"]},
+    {"slug": "common_use_case_085_sqlite_join_tables", "category": "database", "prompt": "Query SQLite to join accounts and contacts by account_id.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"]},
+    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Run a SQLite query for open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"]},
+    {"slug": "common_use_case_087_sqlite_clean_duplicates", "category": "database", "prompt": "Remove duplicate emails from the SQLite contacts table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-multiple-rows"]},
+    {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"]},
+    {"slug": "common_use_case_089_enable_database", "category": "database", "prompt": "Enable the database so you can store a lead tracker for this agent.", "expected_tools": ["enable_database"], "forbidden_tools": ["google_sheets-create-spreadsheet"]},
+    {"slug": "common_use_case_090_sqlite_summarize_messages", "category": "database", "prompt": "Query SQLite message history and summarize the last five user requests.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"]},
+    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor the support status page.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_095_update_plan_for_research", "category": "planning", "prompt": "Create a three-step plan for researching ten target accounts.", "expected_tools": ["update_plan"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check the borough permit page for updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_099_plan_competitor_monitor", "category": "planning", "prompt": "Create a plan for monitoring competitor pricing, product updates, and executive changes.", "expected_tools": ["update_plan"], "forbidden_tools": ["send_email"]},
+    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily schedule to prepare a concise email digest of market news.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"]},
+]
+
+COMMON_USE_CASE_MICRO_SCENARIO_SLUGS = [case["slug"] for case in COMMON_USE_CASE_EVAL_CASES]
+
 PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
     PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST,
@@ -34,6 +139,7 @@ TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
     TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV,
     TOOL_CHOICE_PDF_DELIVERABLE_USES_CREATE_PDF,
     TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT,
+    *COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
 ]
 
 BEHAVIOR_MICRO_SCENARIO_SLUGS = PLANNING_MICRO_SCENARIO_SLUGS + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
@@ -793,3 +899,140 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 task_name="verify_no_send_email",
                 observed_summary="Agent did not attempt send_email.",
             )
+
+
+class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_expected_tool_usage", assertion_type="manual"),
+        ScenarioTask(name="verify_forbidden_tool_absence", assertion_type="manual"),
+    ]
+    case = None
+
+    @staticmethod
+    def _mock_success(tool_name):
+        return {
+            "status": "ok",
+            "tool": tool_name,
+            "message": f"Mocked {tool_name} result for deterministic common-use-case eval.",
+            "content": {"ok": True},
+        }
+
+    def _build_mock_config(self):
+        case = self.case
+        expected_tools = case.get("expected_tools") or []
+        forbidden_tools = case.get("forbidden_tools") or []
+        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in expected_tools}
+        for tool_name in forbidden_tools:
+            mock_config[tool_name] = {
+                "status": "error",
+                "message": f"{tool_name} is the wrong tool for this common-use-case eval.",
+            }
+        return mock_config
+
+    def run(self, run_id, agent_id):
+        case = self.case
+        expected_tools = list(case.get("expected_tools") or [])
+        forbidden_tools = list(case.get("forbidden_tools") or [])
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        self._enable_builtin_tools(agent_id, [*expected_tools, *forbidden_tools])
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                case["prompt"],
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=self._build_mock_config(),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_expected_tool_usage",
+        )
+        expected_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=expected_tools)
+        expected_params = case.get("expected_params") or {}
+        if expected_calls and self._calls_match_expected_params(expected_calls, expected_params):
+            seen_tools = [call.tool_name for call in expected_calls]
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_expected_tool_usage",
+                observed_summary=f"Agent used expected tool(s): {seen_tools}.",
+                artifacts={"step": expected_calls[0].step},
+            )
+        else:
+            seen_tools = [call.tool_name for call in expected_calls]
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_expected_tool_usage",
+                observed_summary=(
+                    f"Expected tool(s) {expected_tools} with params {expected_params or '{}'}; "
+                    f"saw {seen_tools}."
+                ),
+                artifacts={"step": expected_calls[0].step} if expected_calls else {},
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_forbidden_tool_absence",
+        )
+        forbidden_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=forbidden_tools)
+        if forbidden_calls:
+            seen_tools = [call.tool_name for call in forbidden_calls]
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_forbidden_tool_absence",
+                observed_summary=f"Agent used forbidden tool(s): {seen_tools}.",
+                artifacts={"step": forbidden_calls[0].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_forbidden_tool_absence",
+                observed_summary="Agent avoided forbidden tool(s).",
+            )
+
+    @staticmethod
+    def _calls_match_expected_params(calls, expected_params):
+        if not expected_params:
+            return True
+        for call in calls:
+            params = call.tool_params or {}
+            if all(params.get(key) == value for key, value in expected_params.items()):
+                return True
+        return False
+
+
+def _common_use_case_scenario_class(case):
+    class _CommonUseCaseScenario(CommonUseCaseToolChoiceScenario):
+        slug = case["slug"]
+        description = f"Common {case['category']} request should choose the expected deterministic tool."
+
+    _CommonUseCaseScenario.case = case
+    _CommonUseCaseScenario.__name__ = "".join(part.title() for part in case["slug"].split("_")) + "Scenario"
+    return _CommonUseCaseScenario
+
+
+for common_use_case in COMMON_USE_CASE_EVAL_CASES:
+    ScenarioRegistry.register(_common_use_case_scenario_class(common_use_case)())
