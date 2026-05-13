@@ -10,26 +10,35 @@ from waffle.models import Flag
 
 from api.agent.core.agent_judge import (
     JUDGE_DAILY_RUN_LIMIT,
+    JudgePromptLimits,
     NO_ACTION,
     REPORT_TOOL_NAME,
+    _build_judge_messages,
+    _judge_prompt_limits,
     approve_judge_suggestion,
+    build_manual_judge_trigger,
     build_judge_trigger,
     is_agent_judge_enabled_for_agent,
     maybe_run_agent_judge,
     run_manual_agent_judge,
 )
 from api.agent.core.llm_config import get_agent_llm_tier
+from api.services.prompt_settings import invalidate_prompt_settings_cache
 from api.models import (
     BrowserUseAgent,
+    CommsChannel,
     PersistentAgent,
     PersistentAgentCompletion,
+    PersistentAgentCommsEndpoint,
     PersistentAgentJudgeSuggestion,
+    PersistentAgentMessage,
     PersistentAgentSkill,
     PersistentAgentStep,
     PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    PromptConfig,
     UserQuota,
 )
 from console.agent_chat.pending_actions import list_pending_action_requests
@@ -91,6 +100,20 @@ class AgentJudgeTests(TestCase):
             charter="Do useful work.",
             browser_use_agent=browser_agent,
         )
+        self.agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.EMAIL,
+            address=f"agent-{self.agent.id}@example.com",
+            is_primary=True,
+        )
+        self.user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=f"user-{self.agent.id}@example.com",
+        )
+
+    def tearDown(self):
+        invalidate_prompt_settings_cache()
+        super().tearDown()
 
     def _add_steps(self, count: int) -> None:
         for index in range(count):
@@ -115,6 +138,15 @@ class AgentJudgeTests(TestCase):
     def _add_failed_tool_trigger(self) -> None:
         for index in range(3):
             self._add_error_tool_call(index)
+
+    def _add_message(self, index: int, *, outbound: bool = False) -> None:
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint if outbound else self.user_endpoint,
+            to_endpoint=self.user_endpoint if outbound else self.agent_endpoint,
+            is_outbound=outbound,
+            body=f"Message {index}",
+        )
 
     def test_steps_alone_do_not_trigger_judge(self):
         self._add_steps(40)
@@ -215,6 +247,129 @@ class AgentJudgeTests(TestCase):
             trajectory["recent_trajectory"]["system_directives"][-1]["source_type"],
             "system_directive",
         )
+
+    def test_judge_trajectory_uses_prompt_config_ultra_max_limits(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.ultra_max_message_history_limit = 2
+        config.ultra_max_tool_call_history_limit = 3
+        config.ultra_max_skill_prompt_limit = 1
+        config.ultra_max_enabled_tool_limit = 2
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        for index in range(4):
+            self._add_message(index, outbound=bool(index % 2))
+            self._add_error_tool_call(index)
+            PersistentAgentSkill.objects.create(
+                agent=self.agent,
+                name=f"Skill {index}",
+                description=f"Skill description {index}",
+                version=1,
+                instructions=f"Skill instructions {index}",
+            )
+
+        trigger = build_manual_judge_trigger(
+            self.agent,
+            tools=[
+                {"function": {"name": "first_tool", "description": "First"}},
+                {"function": {"name": "second_tool", "description": "Second"}},
+                {"function": {"name": "third_tool", "description": "Third"}},
+            ],
+        )
+
+        trajectory = trigger.trajectory
+        self.assertEqual(len(trajectory["recent_trajectory"]["messages"]), 2)
+        self.assertEqual(len(trajectory["recent_trajectory"]["tool_calls"]), 3)
+        self.assertEqual(len(trajectory["current_context"]["skills"]["saved_skills"]), 1)
+        self.assertEqual(len(trajectory["current_context"]["skills"]["enabled_system_skills"]), 0)
+        self.assertEqual(len(trajectory["capability_manifest"]), 2)
+
+    def test_judge_prompt_uses_promptree_rendered_user_content(self):
+        trigger = build_manual_judge_trigger(self.agent, tools=[])
+        limits = JudgePromptLimits(
+            prompt_token_budget=500,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+
+        with patch("api.agent.core.agent_judge._create_token_estimator", return_value=lambda text: len(text.split())):
+            messages = _build_judge_messages(trigger.trajectory, model="test-model", prompt_limits=limits)
+
+        user_content = messages[1]["content"]
+        self.assertIn("<judge_contract>", user_content)
+        self.assertIn("<high_priority>", user_content)
+        self.assertFalse(user_content.strip().startswith("{"))
+
+    def test_judge_prompt_shrinks_large_tool_result_under_budget(self):
+        trajectory = {
+            "agent": {
+                "id": str(self.agent.id),
+                "name": "Judge Agent",
+                "current_tier": "standard",
+                "charter": "Do useful work.",
+            },
+            "packet_notes": [],
+            "trigger_reasons": ["manual_audit"],
+            "non_judge_step_count": 1,
+            "policy_excerpts": ["Use evidence."],
+            "capability_manifest": [],
+            "current_context": {
+                "skills": {},
+                "sqlite": {},
+            },
+            "recent_trajectory": {
+                "plan_snapshot": {},
+                "messages": [],
+                "system_directives": [],
+                "steps": [],
+                "tool_calls": [
+                    {
+                        "tool_name": "large_tool",
+                        "status": "complete",
+                        "params": {"query": "large"},
+                        "result": "large_result " * 1000,
+                    }
+                ],
+            },
+        }
+        limits = JudgePromptLimits(
+            prompt_token_budget=140,
+            message_history_limit=2,
+            tool_call_history_limit=2,
+            skill_prompt_limit=1,
+            enabled_tool_limit=1,
+        )
+
+        with patch("api.agent.core.agent_judge._create_token_estimator", return_value=lambda text: len(text.split())):
+            messages = _build_judge_messages(trajectory, model="test-model", prompt_limits=limits)
+
+        user_content = messages[1]["content"]
+        self.assertIn("BYTES TRUNCATED", user_content)
+        self.assertLess(len(user_content.split()), 400)
+
+    def test_judge_prompt_budget_uses_ultra_max_and_endpoint_cap(self):
+        config, _ = PromptConfig.objects.get_or_create(singleton_id=1)
+        config.ultra_max_prompt_token_budget = 1000
+        config.ultra_max_message_history_limit = 4
+        config.ultra_max_tool_call_history_limit = 5
+        config.ultra_max_skill_prompt_limit = 2
+        config.ultra_max_enabled_tool_limit = 3
+        config.save()
+        invalidate_prompt_settings_cache()
+
+        with patch("api.agent.core.agent_judge._agent_judge_endpoint_max_input_tokens", return_value=None):
+            limits = _judge_prompt_limits()
+        self.assertEqual(limits.prompt_token_budget, 1000)
+        self.assertEqual(limits.message_history_limit, 4)
+        self.assertEqual(limits.tool_call_history_limit, 5)
+        self.assertEqual(limits.skill_prompt_limit, 2)
+        self.assertEqual(limits.enabled_tool_limit, 3)
+
+        with patch("api.agent.core.agent_judge._agent_judge_endpoint_max_input_tokens", return_value=2500):
+            capped_limits = _judge_prompt_limits()
+        self.assertEqual(capped_limits.prompt_token_budget, 500)
 
     def test_intelligence_upgrade_creates_step_directive_and_pending_action(self):
         self._add_failed_tool_trigger()

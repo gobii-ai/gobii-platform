@@ -14,11 +14,15 @@ from django.db import DatabaseError, IntegrityError, transaction
 from django.utils import timezone
 from waffle import get_waffle_flag_model
 
-from api.agent.core.llm_config import LLMNotConfiguredError, get_agent_judge_llm_config, get_agent_llm_tier
+from api.agent.core.llm_config import INPUT_TOKEN_HEADROOM, LLMNotConfiguredError, get_agent_judge_llm_config, get_agent_llm_tier
 from api.agent.core.llm_utils import run_completion
+from api.agent.core.prompt_context import _create_token_estimator
+from api.agent.core.promptree import Prompt
 from api.agent.core.token_usage import log_agent_completion
 from api.agent.tools.plan import build_plan_snapshot
+from api.services.prompt_settings import get_prompt_settings
 from api.models import (
+    LLMRoutingProfile,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentJudgeSuggestion,
@@ -37,12 +41,10 @@ logger = logging.getLogger(__name__)
 JUDGE_FAILED_TOOL_THRESHOLD = 3
 JUDGE_TRIGGER_TOOL_LIMIT = 12
 JUDGE_TRIGGER_MESSAGE_LIMIT = 12
-JUDGE_RECENT_TOOL_LIMIT = 60
-JUDGE_RECENT_MESSAGE_LIMIT = 50
 JUDGE_RECENT_STEP_LIMIT = 80
 JUDGE_RECENT_DIRECTIVE_LIMIT = 20
-JUDGE_SKILL_LIMIT = 20
 JUDGE_SQLITE_CONTEXT_CHARS = 30000
+JUDGE_TOOL_RESULT_CONTEXT_CHARS = 100000
 JUDGE_RUN_CACHE_TTL_SECONDS = 60 * 60 * 12
 JUDGE_MIN_STEP_GAP = 10
 JUDGE_RUN_COOLDOWN_SECONDS = 60 * 45
@@ -88,6 +90,15 @@ class JudgeTrigger:
     evidence_hash: str
     trajectory: dict[str, Any]
     non_judge_step_count: int
+
+
+@dataclass(frozen=True)
+class JudgePromptLimits:
+    prompt_token_budget: int
+    message_history_limit: int
+    tool_call_history_limit: int
+    skill_prompt_limit: int
+    enabled_tool_limit: int
 
 
 def maybe_run_agent_judge(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> None:
@@ -214,9 +225,10 @@ def _run_judge(
         logger.info("Skipping agent judge for %s because no LLM config is available.", agent.id)
         return {"ran": False, "status": "llm_not_configured"}
 
-    messages = _build_judge_messages(trigger.trajectory)
     tool_def = _judge_tool_definition()
     provider, model, params = config
+    prompt_limits = _judge_prompt_limits()
+    messages = _build_judge_messages(trigger.trajectory, model=model, prompt_limits=prompt_limits)
     judge_params = dict(params or {})
     judge_params["tool_choice"] = {"type": "function", "function": {"name": REPORT_TOOL_NAME}}
     response = run_completion(
@@ -429,6 +441,38 @@ def _judge_completion_count_today(agent: PersistentAgent) -> int:
     ).count()
 
 
+def _judge_prompt_limits() -> JudgePromptLimits:
+    settings = get_prompt_settings()
+    budget = settings.ultra_max_prompt_token_budget
+    endpoint_limit = _agent_judge_endpoint_max_input_tokens()
+    if endpoint_limit is not None:
+        budget = min(budget, max(1, endpoint_limit - INPUT_TOKEN_HEADROOM))
+
+    return JudgePromptLimits(
+        prompt_token_budget=max(1, budget),
+        message_history_limit=max(1, settings.ultra_max_message_history_limit),
+        tool_call_history_limit=max(1, settings.ultra_max_tool_call_history_limit),
+        skill_prompt_limit=max(0, settings.ultra_max_skill_prompt_limit),
+        enabled_tool_limit=max(1, settings.ultra_max_enabled_tool_limit),
+    )
+
+
+def _agent_judge_endpoint_max_input_tokens() -> int | None:
+    try:
+        profile = (
+            LLMRoutingProfile.objects.filter(is_active=True, is_eval_snapshot=False)
+            .select_related("agent_judge_endpoint")
+            .first()
+        )
+    except DatabaseError:
+        logger.debug("Unable to resolve active routing profile for judge prompt limit.", exc_info=True)
+        return None
+    endpoint = getattr(profile, "agent_judge_endpoint", None) if profile is not None else None
+    if endpoint is None:
+        return None
+    return endpoint.max_input_tokens
+
+
 def is_agent_judge_enabled_for_agent(agent: PersistentAgent) -> bool:
     if not getattr(agent, "user_id", None):
         return False
@@ -479,18 +523,20 @@ def _trigger_reasons(
 
 
 def _recent_messages(agent: PersistentAgent) -> list[PersistentAgentMessage]:
+    limit = _judge_prompt_limits().message_history_limit
     return list(
         PersistentAgentMessage.objects.filter(owner_agent=agent)
         .select_related("conversation", "from_endpoint")
-        .order_by("-timestamp", "-seq")[:JUDGE_RECENT_MESSAGE_LIMIT]
+        .order_by("-timestamp", "-seq")[:limit]
     )
 
 
 def _recent_tool_calls(agent: PersistentAgent) -> list[PersistentAgentToolCall]:
+    limit = _judge_prompt_limits().tool_call_history_limit
     return list(
         PersistentAgentToolCall.objects.filter(step__agent=agent)
         .select_related("step")
-        .order_by("-step__created_at")[:JUDGE_RECENT_TOOL_LIMIT]
+        .order_by("-step__created_at")[:limit]
     )
 
 
@@ -597,6 +643,13 @@ def _build_current_context_snapshot(agent: PersistentAgent) -> dict[str, Any]:
 
 
 def _skill_context(agent: PersistentAgent) -> dict[str, Any]:
+    limit = _judge_prompt_limits().skill_prompt_limit
+    if limit <= 0:
+        return {
+            "saved_skills": [],
+            "enabled_system_skills": [],
+        }
+
     latest_skills = list(
         PersistentAgentSkill.objects.filter(agent=agent)
         .order_by("name", "-version", "-updated_at")
@@ -614,10 +667,10 @@ def _skill_context(agent: PersistentAgent) -> dict[str, Any]:
             row.updated_at,
         ),
         reverse=True,
-    )[:JUDGE_SKILL_LIMIT]
+    )[:limit]
     system_skills = list(
         PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
-        .order_by("-last_used_at", "-enabled_at")[:JUDGE_SKILL_LIMIT]
+        .order_by("-last_used_at", "-enabled_at")[:limit]
     )
     return {
         "saved_skills": [
@@ -667,7 +720,8 @@ def _sqlite_context_snapshot() -> dict[str, Any]:
 
 def _capability_manifest(tools: list[dict[str, Any]]) -> list[dict[str, str]]:
     manifest: list[dict[str, str]] = []
-    for tool in tools[:80]:
+    limit = _judge_prompt_limits().enabled_tool_limit
+    for tool in tools[:limit]:
         fn = tool.get("function") if isinstance(tool, dict) else None
         if not isinstance(fn, dict):
             continue
@@ -712,7 +766,7 @@ def _serialize_tool_call(call: PersistentAgentToolCall) -> dict[str, Any]:
         "tool_name": call.tool_name,
         "status": call.status or "complete",
         "params": call.tool_params if isinstance(call.tool_params, dict) else {},
-        "result": _truncate(call.result or "", 1200),
+        "result": _truncate(call.result or "", JUDGE_TOOL_RESULT_CONTEXT_CHARS),
         "created_at": call.step.created_at.isoformat() if call.step and call.step.created_at else None,
     }
 
@@ -742,23 +796,95 @@ def _serialize_directive(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _build_judge_messages(trajectory: dict[str, Any]) -> list[dict[str, str]]:
+def _judge_system_prompt() -> str:
+    return (
+        "You are Gobii's internal trajectory judge. Review the provided agent trajectory and decide whether "
+        "the agent needs one concise intervention. You are not the working agent. You cannot execute the "
+        "agent's tools. You may call exactly one tool: report_judge_suggestion. Prefer no_action unless the "
+        "evidence shows a meaningful quality issue. Keep message short. For intelligence_upgrade, recommend "
+        "the minimum higher tier that would likely help. Base suggestions only on evidence in the packet. "
+        "Separate directly observed facts from inferred causes; when a cause is uncertain, say so instead "
+        "of presenting it as fact. Prefer concrete operational guidance over diagnosis."
+    )
+
+
+def _json_section(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, default=str, indent=2)
+
+
+def _build_judge_user_prompt(
+    trajectory: dict[str, Any],
+    *,
+    model: str,
+    prompt_limits: JudgePromptLimits,
+) -> str:
+    prompt = Prompt(token_estimator=_create_token_estimator(model))
+    recent_trajectory = trajectory.get("recent_trajectory") or {}
+    current_context = trajectory.get("current_context") or {}
+
+    prompt.section_text(
+        "judge_contract",
+        _json_section(
+            {
+                "trigger_reasons": trajectory.get("trigger_reasons") or [],
+                "policy_excerpts": trajectory.get("policy_excerpts") or [],
+                "packet_notes": trajectory.get("packet_notes") or [],
+                "output_contract": (
+                    "Call exactly one tool named report_judge_suggestion. Use no_action when the evidence "
+                    "does not justify intervention."
+                ),
+            }
+        ),
+        weight=8,
+        non_shrinkable=True,
+    )
+    prompt.section_text(
+        "agent",
+        _json_section(
+            {
+                "agent": trajectory.get("agent") or {},
+                "non_judge_step_count": trajectory.get("non_judge_step_count"),
+            }
+        ),
+        weight=8,
+        non_shrinkable=True,
+    )
+
+    high_priority = prompt.group("high_priority", weight=8)
+    high_priority.section_text("messages", _json_section(recent_trajectory.get("messages") or []), weight=8)
+    high_priority.section_text("system_directives", _json_section(recent_trajectory.get("system_directives") or []), weight=5)
+    high_priority.section_text("plan_snapshot", _json_section(recent_trajectory.get("plan_snapshot") or {}), weight=4)
+    high_priority.section_text("steps", _json_section(recent_trajectory.get("steps") or []), weight=4)
+
+    medium_priority = prompt.group("medium_priority", weight=5)
+    medium_priority.section_text("tool_calls", _json_section(recent_trajectory.get("tool_calls") or []), weight=6)
+    medium_priority.section_text("skills", _json_section((current_context.get("skills") or {})), weight=3)
+    medium_priority.section_text("capability_manifest", _json_section(trajectory.get("capability_manifest") or []), weight=2)
+
+    low_priority = prompt.group("low_priority", weight=2)
+    low_priority.section_text("sqlite", _json_section(current_context.get("sqlite") or {}), weight=2)
+
+    return prompt.render(prompt_limits.prompt_token_budget)
+
+
+def _build_judge_messages(
+    trajectory: dict[str, Any],
+    *,
+    model: str,
+    prompt_limits: JudgePromptLimits,
+) -> list[dict[str, str]]:
     return [
         {
             "role": "system",
-            "content": (
-                "You are Gobii's internal trajectory judge. Review the provided agent trajectory and decide whether "
-                "the agent needs one concise intervention. You are not the working agent. You cannot execute the "
-                "agent's tools. You may call exactly one tool: report_judge_suggestion. Prefer no_action unless the "
-                "evidence shows a meaningful quality issue. Keep message short. For intelligence_upgrade, recommend "
-                "the minimum higher tier that would likely help. Base suggestions only on evidence in the packet. "
-                "Separate directly observed facts from inferred causes; when a cause is uncertain, say so instead "
-                "of presenting it as fact. Prefer concrete operational guidance over diagnosis."
-            ),
+            "content": _judge_system_prompt(),
         },
         {
             "role": "user",
-            "content": json.dumps(trajectory, sort_keys=True, default=str),
+            "content": _build_judge_user_prompt(
+                trajectory,
+                model=model,
+                prompt_limits=prompt_limits,
+            ),
         },
     ]
 
