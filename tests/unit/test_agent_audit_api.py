@@ -88,11 +88,7 @@ class StaffAgentAuditAPITests(TestCase):
         response_payload = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
-                "title": "No action",
-                "ui_message": "No action needed.",
-                "agent_directive": "No action needed.",
-                "confidence": 0.2,
-                "evidence": {},
+                "message": "No action needed.",
             }
         )
 

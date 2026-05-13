@@ -246,12 +246,12 @@ def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, paylo
     ).exists():
         return
 
-    title = _clean_text(payload.get("title"), default=_default_title(suggestion_type), max_length=255)
-    ui_message = _clean_text(payload.get("ui_message"), default=title, max_length=1200)
+    title = _default_title(suggestion_type)
+    ui_message = _clean_text(payload.get("message") or payload.get("ui_message"), default=title, max_length=1200)
     agent_directive = _clean_text(payload.get("agent_directive"), default=ui_message, max_length=2000)
-    recommended_tier = _clean_text(payload.get("recommended_tier"), default="", max_length=64)
-    evidence = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {}
-    confidence = _coerce_confidence(payload.get("confidence"))
+    recommended_tier = ""
+    if suggestion_type == PersistentAgentJudgeSuggestion.SuggestionType.INTELLIGENCE_UPGRADE:
+        recommended_tier = _clean_text(payload.get("recommended_tier"), default="", max_length=64)
 
     try:
         with transaction.atomic():
@@ -262,7 +262,7 @@ def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, paylo
             PersistentAgentSystemStep.objects.create(
                 step=step,
                 code=PersistentAgentSystemStep.Code.LLM_JUDGE_SUGGESTION,
-                notes=f"evidence_hash={trigger.evidence_hash};confidence={confidence:.2f}",
+                notes=f"evidence_hash={trigger.evidence_hash}",
             )
             system_message = PersistentAgentSystemMessage.objects.create(
                 agent=agent,
@@ -274,9 +274,9 @@ def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, paylo
                 title=title,
                 ui_message=ui_message,
                 agent_directive=agent_directive,
-                confidence=confidence,
+                confidence=0,
                 recommended_tier=recommended_tier,
-                evidence=evidence,
+                evidence={},
                 trigger_reasons=trigger.reasons,
                 evidence_hash=trigger.evidence_hash,
                 source_step=step,
@@ -572,8 +572,8 @@ def _build_judge_messages(trajectory: dict[str, Any]) -> list[dict[str, str]]:
                 "You are Gobii's internal trajectory judge. Review the provided agent trajectory and decide whether "
                 "the agent needs one concise intervention. You are not the working agent. You cannot execute the "
                 "agent's tools. You may call exactly one tool: report_judge_suggestion. Prefer no_action unless the "
-                "evidence shows a meaningful quality issue. For intelligence_upgrade, explain why the current tier "
-                "appears insufficient and recommend the minimum higher tier that would likely help."
+                "evidence shows a meaningful quality issue. Keep message short. For intelligence_upgrade, recommend "
+                "the minimum higher tier that would likely help."
             ),
         },
         {
@@ -596,20 +596,19 @@ def _judge_tool_definition() -> dict[str, Any]:
                         "type": "string",
                         "enum": sorted(ALLOWED_SUGGESTION_TYPES),
                     },
-                    "title": {"type": "string"},
-                    "ui_message": {"type": "string"},
-                    "agent_directive": {"type": "string"},
-                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                    "evidence": {"type": "object"},
+                    "message": {
+                        "type": "string",
+                        "description": "Short explanation for humans and audit records.",
+                    },
+                    "agent_directive": {
+                        "type": "string",
+                        "description": "Concrete one-shot instruction for the working agent. Optional for no_action.",
+                    },
                     "recommended_tier": {"type": "string"},
                 },
                 "required": [
                     "suggestion_type",
-                    "title",
-                    "ui_message",
-                    "agent_directive",
-                    "confidence",
-                    "evidence",
+                    "message",
                 ],
             },
         },
@@ -634,7 +633,10 @@ def _extract_report_payload(response: Any) -> dict[str, Any] | None:
         if isinstance(raw_args, dict):
             return raw_args
         if isinstance(raw_args, str):
-            parsed = json.loads(raw_args or "{}")
+            try:
+                parsed = json.loads(raw_args or "{}")
+            except json.JSONDecodeError:
+                return None
             if isinstance(parsed, dict):
                 return parsed
     return None
@@ -658,13 +660,6 @@ def _default_title(suggestion_type: str) -> str:
     if suggestion_type == PersistentAgentJudgeSuggestion.SuggestionType.STONEWALL_REFRAME:
         return "Reframe the blocker"
     return "Adjust strategy"
-
-
-def _coerce_confidence(value: Any) -> float:
-    try:
-        return max(0.0, min(1.0, float(value)))
-    except (TypeError, ValueError):
-        return 0.0
 
 
 def _clean_choice(value: Any) -> str:

@@ -170,12 +170,9 @@ class AgentJudgeTests(TestCase):
         response = _judge_response(
             {
                 "suggestion_type": "intelligence_upgrade",
-                "title": "Use a stronger reasoning tier",
-                "ui_message": "This task appears to need deeper reasoning.",
+                "message": "This task appears to need deeper reasoning.",
                 "agent_directive": "Re-evaluate the current approach and suggest a higher intelligence tier.",
-                "confidence": 0.86,
                 "recommended_tier": "max",
-                "evidence": {"reason": "multi-step campaign stalled"},
             }
         )
 
@@ -189,7 +186,16 @@ class AgentJudgeTests(TestCase):
             maybe_run_agent_judge(self.agent, tools=[])
 
         config_mock.assert_called_once()
-        self.assertEqual(PersistentAgentJudgeSuggestion.objects.filter(agent=self.agent).count(), 1)
+        suggestion = PersistentAgentJudgeSuggestion.objects.get(agent=self.agent)
+        self.assertEqual(suggestion.title, "Consider higher intelligence")
+        self.assertEqual(suggestion.ui_message, "This task appears to need deeper reasoning.")
+        self.assertEqual(
+            suggestion.agent_directive,
+            "Re-evaluate the current approach and suggest a higher intelligence tier.",
+        )
+        self.assertEqual(suggestion.confidence, 0)
+        self.assertEqual(suggestion.evidence, {})
+        self.assertEqual(suggestion.recommended_tier, "max")
         self.assertEqual(PersistentAgentSystemMessage.objects.filter(agent=self.agent).count(), 1)
         self.assertTrue(
             PersistentAgentSystemStep.objects.filter(
@@ -214,11 +220,7 @@ class AgentJudgeTests(TestCase):
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
-                "title": "No action",
-                "ui_message": "No action needed.",
-                "agent_directive": "No action needed.",
-                "confidence": 0.2,
-                "evidence": {},
+                "message": "No action needed.",
             }
         )
 
@@ -245,11 +247,7 @@ class AgentJudgeTests(TestCase):
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
-                "title": "No action",
-                "ui_message": "No action needed.",
-                "agent_directive": "No action needed.",
-                "confidence": 0.2,
-                "evidence": {},
+                "message": "No action needed.",
             }
         )
 
@@ -316,11 +314,7 @@ class AgentJudgeTests(TestCase):
         response = _judge_response(
             {
                 "suggestion_type": NO_ACTION,
-                "title": "No action",
-                "ui_message": "No action needed.",
-                "agent_directive": "No action needed.",
-                "confidence": 0.1,
-                "evidence": {},
+                "message": "No action needed.",
             }
         )
 
