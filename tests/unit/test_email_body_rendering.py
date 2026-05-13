@@ -21,6 +21,25 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertIn("Thanks", plaintext)
 
     @tag("batch_email_body")
+    def test_indented_html_lines_do_not_become_code_blocks(self):
+        body = (
+            "\n"
+            "        <p>Hi Félix Malfait,</p>\n"
+            "        <p>I was doing some research on <strong>Twenty</strong>.</p>\n"
+            "        <p>Best,<br>Sabetha</p>\n"
+        )
+
+        html_snippet, plaintext = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<p>Hi Félix Malfait,</p>", html_snippet)
+        self.assertIn("<p>I was doing some research on <strong>Twenty</strong>.</p>", html_snippet)
+        self.assertIn("<p>Best,<br>Sabetha</p>", html_snippet)
+        self.assertNotIn("<pre>", html_snippet)
+        self.assertNotIn("&lt;p&gt;", html_snippet)
+        self.assertIn("I was doing some research on Twenty", plaintext)
+        self.assertNotIn("<p>I was doing some research", plaintext)
+
+    @tag("batch_email_body")
     def test_plaintext_converted_to_br(self):
         """Plaintext newlines should be converted to <br> tags."""
         body = "Hello\n\nThanks"

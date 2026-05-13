@@ -57,6 +57,7 @@ BLOCK_MARKDOWN_PATTERNS = [
 TAG_SPLIT_RE = re.compile(r"(<[^>]+>)")
 TAG_NAME_RE = re.compile(r"^</?\s*([a-zA-Z0-9]+)")
 HR_RE = re.compile(r"<hr\s*/?>", re.IGNORECASE)
+HTML_TAG_LINE_RE = re.compile(HTML_TAG_PATTERN, re.IGNORECASE)
 
 VOID_TAGS = {
     "area",
@@ -159,6 +160,23 @@ logger = logging.getLogger(__name__)
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _normalize_html_tag_line_indentation(text: str) -> str:
+    """Remove template indentation that Markdown would otherwise treat as code."""
+    lines = text.split("\n")
+    normalized_lines: list[str] = []
+    changed = False
+
+    for line in lines:
+        stripped = line.lstrip(" \t")
+        if stripped != line and HTML_TAG_LINE_RE.match(stripped):
+            normalized_lines.append(stripped)
+            changed = True
+            continue
+        normalized_lines.append(line)
+
+    return "\n".join(normalized_lines) if changed else text
 
 
 def _contains_markdown(text: str) -> bool:
@@ -343,7 +361,8 @@ def convert_body_to_html_and_plaintext(body: str, *, emit_logs: bool = True) -> 
     )
 
     if has_html or has_markdown:
-        html_snippet = _render_markdown_html(normalized_body)
+        render_body = _normalize_html_tag_line_indentation(normalized_body) if has_html else normalized_body
+        html_snippet = _render_markdown_html(render_body)
         repaired = _apply_inline_markdown_in_html(html_snippet)
         html_snippet = _replace_horizontal_rules(repaired)
         html_snippet = _add_table_styles(html_snippet)
