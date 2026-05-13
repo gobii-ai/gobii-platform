@@ -230,6 +230,22 @@ class StaffAgentAuditAPITests(TestCase):
         self.assertEqual(error_event["source"], "tests.quota")
         self.assertEqual(error_event["context"]["validation_messages"], ["Task quota exceeded"])
 
+    def test_audit_api_returns_completion_reasoning(self):
+        PersistentAgentCompletion.objects.create(
+            agent=self.agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+            thinking_content="Judge reasoning trace.",
+            llm_model="ultra-max-test",
+            llm_provider="test-provider",
+        )
+
+        response = self.client.get(f"/console/api/staff/agents/{self.agent.id}/audit/?limit=10")
+        self.assertEqual(response.status_code, 200)
+        events = response.json()["events"]
+        completion_event = next(event for event in events if event["kind"] == "completion")
+        self.assertEqual(completion_event["completion_type"], PersistentAgentCompletion.CompletionType.LLM_JUDGE)
+        self.assertEqual(completion_event["thinking"], "Judge reasoning trace.")
+
     def test_audit_timeline_counts_error_events(self):
         PersistentAgentError.objects.create(
             agent=self.agent,
