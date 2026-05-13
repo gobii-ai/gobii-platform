@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
+import { SubscriptionUpgradeModal } from '../components/common/SubscriptionUpgradeModal'
 import type { SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
+import { AnalyticsEvent } from '../constants/analyticsEvents'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
@@ -10,11 +12,15 @@ import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
+import { type PlanTier, useSubscriptionStore } from '../stores/subscriptionStore'
+import { track } from '../util/analytics'
+import { appendReturnTo } from '../util/returnTo'
 import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 const DEFAULT_CLOSE_PATH = '/console/agents/'
+const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
 
 type AppRoute =
   | { kind: 'command-center' }
@@ -246,6 +252,19 @@ function parseBooleanFlag(value: string | null): boolean {
   return ['1', 'true', 'yes', 'on'].includes(value.toLowerCase())
 }
 
+function hasUpgradeModalRequest(search: string): boolean {
+  return parseBooleanFlag(new URLSearchParams(search).get(UPGRADE_MODAL_QUERY_PARAM))
+}
+
+function stripQueryParams(pathname: string, search: string, hash: string, keys: readonly string[]): string {
+  const params = new URLSearchParams(search)
+  for (const key of keys) {
+    params.delete(key)
+  }
+  const query = params.toString()
+  return `${pathname}${query ? `?${query}` : ''}${hash}`
+}
+
 function isAppPath(pathname: string): boolean {
   return pathname === APP_BASE || pathname.startsWith(`${APP_BASE}/`)
 }
@@ -463,11 +482,47 @@ export function ImmersiveApp({
   const [selectionRefreshKey, setSelectionRefreshKey] = useState(0)
   const hasSkippedInitialSegmentPage = useRef(false)
   const rosterQuery = useAgentRoster()
+  const openUpgradeModal = useSubscriptionStore((state) => state.openUpgradeModal)
+  const closeUpgradeModal = useSubscriptionStore((state) => state.closeUpgradeModal)
+  const ensureAuthenticated = useSubscriptionStore((state) => state.ensureAuthenticated)
+  const isUpgradeModalOpen = useSubscriptionStore((state) => state.isUpgradeModalOpen)
+  const upgradeModalSource = useSubscriptionStore((state) => state.upgradeModalSource)
+  const upgradeModalDismissible = useSubscriptionStore((state) => state.upgradeModalDismissible)
+  const currentPlan = useSubscriptionStore((state) => state.currentPlan)
+  const isProprietaryMode = useSubscriptionStore((state) => state.isProprietaryMode)
   const hasAgents = (rosterQuery.data?.agents?.length ?? 0) > 0
 
   useEffect(() => {
     setReturnTo(resolveReturnTo(location.search))
   }, [location.search])
+
+  useEffect(() => {
+    if (!hasUpgradeModalRequest(location.search)) {
+      return
+    }
+    let shouldOpen = true
+
+    const openRequestedUpgradeModal = async () => {
+      const authenticated = await ensureAuthenticated()
+      if (!shouldOpen || !authenticated) {
+        return
+      }
+      openUpgradeModal('unknown')
+      const nextPath = stripQueryParams(
+        location.pathname,
+        location.search,
+        location.hash,
+        [UPGRADE_MODAL_QUERY_PARAM],
+      )
+      window.history.replaceState({}, '', nextPath)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    }
+
+    void openRequestedUpgradeModal()
+    return () => {
+      shouldOpen = false
+    }
+  }, [ensureAuthenticated, location.hash, location.pathname, location.search, openUpgradeModal])
 
   useEffect(() => {
     if (!embed || window.parent === window) {
@@ -657,6 +712,39 @@ export function ImmersiveApp({
     }
     navigateTo('/app/integrations')
   }, [location.search, route])
+
+  const handleUpgradeModalDismiss = useCallback(() => {
+    if (!upgradeModalDismissible) {
+      return
+    }
+    track(AnalyticsEvent.UPGRADE_MODAL_DISMISSED, {
+      currentPlan,
+      source: upgradeModalSource ?? 'unknown',
+    })
+    closeUpgradeModal()
+  }, [closeUpgradeModal, currentPlan, upgradeModalDismissible, upgradeModalSource])
+
+  const handleUpgradeSelection = useCallback(async (plan: PlanTier) => {
+    const source = upgradeModalSource ?? 'unknown'
+    const authenticated = await ensureAuthenticated()
+    if (!authenticated) {
+      return
+    }
+    track(AnalyticsEvent.UPGRADE_CHECKOUT_REDIRECTED, {
+      plan,
+      source,
+    })
+    closeUpgradeModal()
+    const checkoutPath = plan === 'startup' ? '/subscribe/startup/' : '/subscribe/scale/'
+    window.open(appendReturnTo(checkoutPath), '_top')
+  }, [closeUpgradeModal, ensureAuthenticated, upgradeModalSource])
+
+  const showShellUpgradeModal = (
+    route.kind !== 'agent-chat'
+    && route.kind !== 'billing'
+    && isUpgradeModalOpen
+    && isProprietaryMode
+  )
 
   return (
     <div className="immersive-shell">
@@ -867,6 +955,15 @@ export function ImmersiveApp({
         ) : null}
         {route.kind === 'not-found' ? <NotFound /> : null}
       </div>
+      {showShellUpgradeModal ? (
+        <SubscriptionUpgradeModal
+          currentPlan={currentPlan}
+          onClose={handleUpgradeModalDismiss}
+          onUpgrade={handleUpgradeSelection}
+          source={upgradeModalSource ?? undefined}
+          dismissible={upgradeModalDismissible}
+        />
+      ) : null}
     </div>
   )
 }
