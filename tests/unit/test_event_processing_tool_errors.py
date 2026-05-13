@@ -1,13 +1,16 @@
 """Tests for tool error handling in event processing."""
 import json
+from datetime import timedelta
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 from api.agent.core import event_processing as ep
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentToolCall, UserQuota
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentToolCall, TaskCredit, UserQuota
 
 
 @tag("batch_event_processing_credits")
@@ -23,6 +26,14 @@ class ToolErrorHandlingTests(TestCase):
         quota, _ = UserQuota.objects.get_or_create(user=cls.user)
         quota.agent_limit = 50
         quota.save()
+        now = timezone.now()
+        TaskCredit.objects.create(
+            user=cls.user,
+            credits=Decimal("100"),
+            credits_used=Decimal("0"),
+            granted_date=now - timedelta(days=1),
+            expiration_date=now + timedelta(days=30),
+        )
 
     def setUp(self):
         browser_agent = BrowserUseAgent.objects.create(
@@ -128,3 +139,20 @@ class ToolErrorHandlingTests(TestCase):
         self.assertLessEqual(len(message.encode("utf-8")), ep.TOOL_ERROR_MESSAGE_MAX_BYTES)
         self.assertLessEqual(len(detail.encode("utf-8")), ep.TOOL_ERROR_DETAIL_MAX_BYTES)
         self.assertNotIn("exception", result)
+
+    def test_sandbox_not_ready_tool_error_is_retryable(self):
+        tool_result = {
+            "status": "error",
+            "message": (
+                "Failed to sync the latest sandbox workspace source for /tools/query.py: "
+                "Sandbox session is not ready "
+                "(state=error, pod=sandbox-agent-test, namespace=gobii-prod)."
+            ),
+        }
+        self._run_loop_with_tool("custom_query", {}, tool_result=tool_result)
+
+        tool_call = PersistentAgentToolCall.objects.filter(step__agent=self.agent).first()
+        self.assertIsNotNone(tool_call)
+        result = json.loads(tool_call.result)
+        self.assertEqual(result.get("status"), "error")
+        self.assertTrue(result.get("retryable"))

@@ -13,6 +13,7 @@ from api.services.sandbox_kubernetes import (
     _build_proxy_env,
     _build_pod_manifest,
     _normalize_workspace_volume_mode,
+    _pod_readiness_summary,
     _pod_name,
 )
 
@@ -759,6 +760,34 @@ class KubernetesSandboxMCPDiscoveryTests(SimpleTestCase):
             session.get.call_args_list[-1].args[0],
             "http://sandbox-agent-agent-1.default.svc.cluster.local:8080/healthz",
         )
+
+    def test_pod_readiness_summary_includes_pending_and_container_reasons(self):
+        pod = {
+            "status": {
+                "phase": "Pending",
+                "conditions": [
+                    {
+                        "type": "PodScheduled",
+                        "status": "False",
+                        "reason": "Unschedulable",
+                        "message": "0/1 nodes are available: insufficient memory.",
+                    }
+                ],
+                "containerStatuses": [
+                    {
+                        "name": "sandbox-supervisor",
+                        "ready": False,
+                        "state": {"waiting": {"reason": "ContainerCreating"}},
+                    }
+                ],
+            }
+        }
+
+        summary = _pod_readiness_summary(pod)
+
+        self.assertIn("phase=Pending", summary)
+        self.assertIn("PodScheduled=False/Unschedulable", summary)
+        self.assertIn("sandbox-supervisor=waiting/ContainerCreating", summary)
 
     @override_settings(
         SANDBOX_COMPUTE_API_TOKEN="test-token",

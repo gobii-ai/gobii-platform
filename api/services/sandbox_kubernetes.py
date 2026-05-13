@@ -242,7 +242,7 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
             memory_limit_setting="SANDBOX_EGRESS_PROXY_POD_MEMORY_LIMIT",
         )
         self._no_proxy = getattr(settings, "SANDBOX_COMPUTE_NO_PROXY", "") or ""
-        self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 60))
+        self._pod_ready_timeout = int(getattr(settings, "SANDBOX_COMPUTE_POD_READY_TIMEOUT_SECONDS", 300))
         self._service_routable_timeout = int(settings.SANDBOX_COMPUTE_SERVICE_ROUTABLE_TIMEOUT_SECONDS)
         self._pvc_size = getattr(settings, "SANDBOX_COMPUTE_PVC_SIZE", "1Gi")
         self._pvc_storage_class = getattr(settings, "SANDBOX_COMPUTE_PVC_STORAGE_CLASS", "")
@@ -918,24 +918,27 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
 
     def _wait_for_pod_ready(self, pod_name: str) -> bool:
         started_at = time.monotonic()
-        deadline = time.time() + self._pod_ready_timeout
+        deadline = started_at + max(float(self._pod_ready_timeout), 0.0)
         attempts = 0
         last_phase = None
-        while time.time() < deadline:
+        last_summary = ""
+        while time.monotonic() < deadline:
             attempts += 1
             pod = self._get_pod(pod_name)
             if not pod:
                 time.sleep(2)
                 continue
+            last_summary = _pod_readiness_summary(pod)
             status = pod.get("status") or {}
             phase = status.get("phase")
             if phase != last_phase:
                 logger.info(
-                    "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s",
+                    "Sandbox pod readiness progress pod=%s phase=%s attempts=%s elapsed_ms=%s summary=%s",
                     pod_name,
                     phase,
                     attempts,
                     _elapsed_ms(started_at),
+                    last_summary,
                 )
                 last_phase = phase
             if phase == "Running":
@@ -948,14 +951,14 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                             _elapsed_ms(started_at),
                         )
                         return True
-            time.sleep(2)
+            time.sleep(min(2.0, max(deadline - time.monotonic(), 0.0)))
         logger.warning(
-            "Sandbox pod readiness timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s last_phase=%s",
+            "Sandbox pod readiness timeout pod=%s attempts=%s elapsed_ms=%s timeout_seconds=%s summary=%s",
             pod_name,
             attempts,
             _elapsed_ms(started_at),
             self._pod_ready_timeout,
-            last_phase,
+            last_summary or f"phase={last_phase or 'unknown'}",
         )
         return False
 
@@ -1020,6 +1023,55 @@ class KubernetesSandboxBackend(SandboxComputeBackend):
                 return True
             time.sleep(2)
         return False
+
+
+def _pod_readiness_summary(pod: Dict[str, Any]) -> str:
+    status = pod.get("status") or {}
+    parts = [f"phase={status.get('phase') or 'unknown'}"]
+
+    conditions = []
+    for condition in status.get("conditions") or []:
+        condition_type = condition.get("type")
+        condition_status = condition.get("status")
+        if not condition_type or condition_status == "True":
+            continue
+        reason = condition.get("reason") or ""
+        message = condition.get("message") or ""
+        detail = f"{condition_type}={condition_status}"
+        if reason:
+            detail += f"/{reason}"
+        if message:
+            detail += f":{message[:160]}"
+        conditions.append(detail)
+    if conditions:
+        parts.append("conditions=" + ";".join(conditions))
+
+    container_states = []
+    for container in status.get("containerStatuses") or []:
+        name = container.get("name") or "container"
+        state = container.get("state") or {}
+        waiting = state.get("waiting")
+        terminated = state.get("terminated")
+        if waiting:
+            reason = waiting.get("reason") or "waiting"
+            message = waiting.get("message") or ""
+            detail = f"{name}=waiting/{reason}"
+            if message:
+                detail += f":{message[:160]}"
+            container_states.append(detail)
+        elif terminated:
+            reason = terminated.get("reason") or "terminated"
+            exit_code = terminated.get("exitCode")
+            detail = f"{name}=terminated/{reason}"
+            if exit_code is not None:
+                detail += f":exit={exit_code}"
+            container_states.append(detail)
+        elif not container.get("ready"):
+            container_states.append(f"{name}=not_ready")
+    if container_states:
+        parts.append("containers=" + ";".join(container_states))
+
+    return " ".join(parts)
 
 
 def _read_service_account_token() -> str:
