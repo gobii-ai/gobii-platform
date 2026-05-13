@@ -122,7 +122,11 @@ class Migration(migrations.Migration):
                 (
                     "status",
                     models.CharField(
-                        choices=[("active", "Active"), ("dismissed", "Dismissed")],
+                        choices=[
+                            ("pending_review", "Pending Review"),
+                            ("active", "Active"),
+                            ("dismissed", "Dismissed"),
+                        ],
                         db_index=True,
                         default="active",
                         max_length=16,

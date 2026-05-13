@@ -57,7 +57,7 @@ from api.agent.core.processing_flags import (
     clear_processing_work_state,
     set_processing_stop_requested,
 )
-from api.agent.core.agent_judge import dismiss_judge_suggestion, run_manual_agent_judge
+from api.agent.core.agent_judge import approve_judge_suggestion, dismiss_judge_suggestion, run_manual_agent_judge
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -2618,7 +2618,49 @@ class StaffAgentRunJudgeAPIView(SystemAdminAPIView):
             logger.exception("Failed to run manual judge for agent %s", agent.id)
             return JsonResponse({"error": "judge_failed", "detail": str(exc)}, status=500)
 
+        suggestion = result.get("suggestion")
+        if isinstance(suggestion, dict) and suggestion.get("suggestionId"):
+            suggestion["decisionApiUrl"] = reverse(
+                "console_agent_audit_judge_suggestion_decision",
+                kwargs={"agent_id": agent.id, "suggestion_id": suggestion["suggestionId"]},
+            )
         return JsonResponse(result, status=200)
+
+
+class StaffAgentJudgeSuggestionDecisionAPIView(SystemAdminAPIView):
+    """Approve or reject a staff-reviewed manual judge suggestion."""
+
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, suggestion_id: str, *args: Any, **kwargs: Any):
+        agent = get_object_or_404(PersistentAgent, pk=agent_id)
+        suggestion = get_object_or_404(
+            PersistentAgentJudgeSuggestion.objects,
+            id=suggestion_id,
+            agent=agent,
+        )
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        decision = str(payload.get("decision") or "").strip().lower()
+        if decision == "approve":
+            approve_judge_suggestion(suggestion)
+        elif decision == "reject":
+            dismiss_judge_suggestion(suggestion)
+        else:
+            return HttpResponseBadRequest("decision must be approve or reject")
+
+        suggestion.refresh_from_db()
+        system_message = suggestion.system_message
+        return JsonResponse(
+            {
+                "status": suggestion.status,
+                "system_message_active": bool(system_message and system_message.is_active),
+            },
+            status=200,
+        )
 
 
 class StaffAgentSystemMessageAPIView(SystemAdminAPIView):

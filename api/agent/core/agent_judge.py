@@ -109,7 +109,7 @@ def run_manual_agent_judge(agent: PersistentAgent, *, tools: list[dict[str, Any]
     """Run the judge from staff tooling, bypassing automatic trigger throttles."""
 
     trigger = build_manual_judge_trigger(agent, tools=tools)
-    return _run_judge(agent, trigger, cache_evidence=False)
+    return _run_judge(agent, trigger, cache_evidence=False, review_required=True)
 
 
 def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> JudgeTrigger:
@@ -198,7 +198,13 @@ def build_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] |
     )
 
 
-def _run_judge(agent: PersistentAgent, trigger: JudgeTrigger, *, cache_evidence: bool = True) -> dict[str, Any]:
+def _run_judge(
+    agent: PersistentAgent,
+    trigger: JudgeTrigger,
+    *,
+    cache_evidence: bool = True,
+    review_required: bool = False,
+) -> dict[str, Any]:
     if cache_evidence:
         cache.set(_judge_run_cache_key(agent, trigger.evidence_hash), True, timeout=JUDGE_RUN_CACHE_TTL_SECONDS)
 
@@ -227,31 +233,89 @@ def _run_judge(agent: PersistentAgent, trigger: JudgeTrigger, *, cache_evidence:
         model=model,
         provider=provider,
     )
+    completion = (
+        PersistentAgentCompletion.objects.filter(
+            agent=agent,
+            completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
+        )
+        .order_by("-created_at", "-id")
+        .first()
+    )
     payload = _extract_report_payload(response)
     if payload is None:
         logger.info("Agent judge for %s returned no report tool call.", agent.id)
-        return {"ran": True, "status": "missing_report_tool_call"}
-    report_judge_suggestion(agent, trigger, payload)
+        return _judge_run_result(
+            status="missing_report_tool_call",
+            payload=None,
+            suggestion=None,
+            completion=completion,
+        )
+    suggestion = report_judge_suggestion(agent, trigger, payload, review_required=review_required)
+    suggestion_type = _clean_choice(payload.get("suggestion_type")) or None
     return {
         "ran": True,
         "status": "completed",
-        "suggestion_type": _clean_choice(payload.get("suggestion_type")) or None,
+        "suggestion_type": suggestion_type,
+        "suggestion": _serialize_judge_result_suggestion(suggestion, completion),
     }
 
 
-def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, payload: dict[str, Any]) -> None:
+def _judge_run_result(
+    *,
+    status: str,
+    payload: dict[str, Any] | None,
+    suggestion: PersistentAgentJudgeSuggestion | None,
+    completion: PersistentAgentCompletion | None,
+) -> dict[str, Any]:
+    return {
+        "ran": True,
+        "status": status,
+        "suggestion_type": _clean_choice((payload or {}).get("suggestion_type")) or None,
+        "suggestion": _serialize_judge_result_suggestion(suggestion, completion),
+    }
+
+
+def _serialize_judge_result_suggestion(
+    suggestion: PersistentAgentJudgeSuggestion | None,
+    completion: PersistentAgentCompletion | None,
+) -> dict[str, Any] | None:
+    if suggestion is None:
+        return None
+    return {
+        "id": str(suggestion.id),
+        "suggestionId": str(suggestion.id),
+        "suggestionType": suggestion.suggestion_type,
+        "title": suggestion.title,
+        "message": suggestion.ui_message,
+        "agentDirective": suggestion.agent_directive,
+        "recommendedTier": suggestion.recommended_tier or None,
+        "confidence": suggestion.confidence,
+        "status": suggestion.status,
+        "createdAt": suggestion.created_at.isoformat() if suggestion.created_at else None,
+        "reasoning": (completion.thinking_content if completion else None) or "",
+        "completionId": str(completion.id) if completion else None,
+    }
+
+
+def report_judge_suggestion(
+    agent: PersistentAgent,
+    trigger: JudgeTrigger,
+    payload: dict[str, Any],
+    *,
+    review_required: bool = False,
+) -> PersistentAgentJudgeSuggestion | None:
     suggestion_type = _clean_choice(payload.get("suggestion_type"))
     if suggestion_type not in ALLOWED_SUGGESTION_TYPES:
         suggestion_type = PersistentAgentJudgeSuggestion.SuggestionType.STRATEGY_SHIFT
     if suggestion_type == NO_ACTION:
-        return
+        return None
 
     if PersistentAgentJudgeSuggestion.objects.filter(
         agent=agent,
         suggestion_type=suggestion_type,
         evidence_hash=trigger.evidence_hash,
     ).exists():
-        return
+        return None
 
     title = _default_title(suggestion_type)
     ui_message = _clean_text(payload.get("message") or payload.get("ui_message"), default=title, max_length=1200)
@@ -274,8 +338,9 @@ def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, paylo
             system_message = PersistentAgentSystemMessage.objects.create(
                 agent=agent,
                 body=_format_agent_directive(title, agent_directive, suggestion_type),
+                is_active=not review_required,
             )
-            PersistentAgentJudgeSuggestion.objects.create(
+            return PersistentAgentJudgeSuggestion.objects.create(
                 agent=agent,
                 suggestion_type=suggestion_type,
                 title=title,
@@ -286,11 +351,16 @@ def report_judge_suggestion(agent: PersistentAgent, trigger: JudgeTrigger, paylo
                 evidence={},
                 trigger_reasons=trigger.reasons,
                 evidence_hash=trigger.evidence_hash,
+                status=(
+                    PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW
+                    if review_required
+                    else PersistentAgentJudgeSuggestion.Status.ACTIVE
+                ),
                 source_step=step,
                 system_message=system_message,
             )
     except IntegrityError:
-        return
+        return None
 
 
 def _count_non_judge_steps(agent: PersistentAgent) -> int:
@@ -802,9 +872,30 @@ def _judge_run_cache_key(agent: PersistentAgent, evidence_hash: str) -> str:
     return f"agent-judge:run:{agent.id}:{evidence_hash}"
 
 
-def dismiss_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:
-    if suggestion.status != PersistentAgentJudgeSuggestion.Status.ACTIVE:
+def approve_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:
+    if suggestion.status == PersistentAgentJudgeSuggestion.Status.ACTIVE:
         return
+    if suggestion.status != PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW:
+        return
+    system_message = suggestion.system_message
+    if system_message is not None and not system_message.is_active:
+        system_message.is_active = True
+        system_message.save(update_fields=["is_active"])
+    suggestion.status = PersistentAgentJudgeSuggestion.Status.ACTIVE
+    suggestion.resolved_at = timezone.now()
+    suggestion.save(update_fields=["status", "resolved_at"])
+
+
+def dismiss_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None:
+    if suggestion.status not in {
+        PersistentAgentJudgeSuggestion.Status.ACTIVE,
+        PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW,
+    }:
+        return
+    system_message = suggestion.system_message
+    if system_message is not None and system_message.is_active:
+        system_message.is_active = False
+        system_message.save(update_fields=["is_active"])
     suggestion.status = PersistentAgentJudgeSuggestion.Status.DISMISSED
     suggestion.resolved_at = timezone.now()
     suggestion.save(update_fields=["status", "resolved_at"])
@@ -812,6 +903,7 @@ def dismiss_judge_suggestion(suggestion: PersistentAgentJudgeSuggestion) -> None
 
 __all__ = [
     "REPORT_TOOL_NAME",
+    "approve_judge_suggestion",
     "build_manual_judge_trigger",
     "build_judge_trigger",
     "dismiss_judge_suggestion",

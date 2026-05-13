@@ -12,9 +12,11 @@ from api.agent.core.agent_judge import (
     JUDGE_DAILY_RUN_LIMIT,
     NO_ACTION,
     REPORT_TOOL_NAME,
+    approve_judge_suggestion,
     build_judge_trigger,
     is_agent_judge_enabled_for_agent,
     maybe_run_agent_judge,
+    run_manual_agent_judge,
 )
 from api.agent.core.llm_config import get_agent_llm_tier
 from api.models import (
@@ -290,6 +292,41 @@ class AgentJudgeTests(TestCase):
                 completion_type=PersistentAgentCompletion.CompletionType.LLM_JUDGE,
             ).exists()
         )
+
+    def test_manual_judge_suggestion_requires_staff_review(self):
+        self._add_failed_tool_trigger()
+        response = _judge_response(
+            {
+                "suggestion_type": "strategy_shift",
+                "message": "Try a simpler plan before using more tools.",
+                "agent_directive": "Pause and propose a simpler next step.",
+            }
+        )
+
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ):
+            result = run_manual_agent_judge(self.agent, tools=[])
+
+        self.assertTrue(result["ran"])
+        self.assertEqual(result["suggestion"]["status"], PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW)
+        self.assertEqual(result["suggestion"]["agentDirective"], "Pause and propose a simpler next step.")
+        suggestion = PersistentAgentJudgeSuggestion.objects.get(agent=self.agent)
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.PENDING_REVIEW)
+        self.assertFalse(suggestion.system_message.is_active)
+
+        pending_actions = list_pending_action_requests(self.agent, self.user)
+        self.assertFalse([action for action in pending_actions if action.get("kind") == "judge_suggestion"])
+
+        approve_judge_suggestion(suggestion)
+        suggestion.refresh_from_db()
+        suggestion.system_message.refresh_from_db()
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        self.assertTrue(suggestion.system_message.is_active)
 
     def test_judge_completion_cooldown_prevents_repeated_recent_runs(self):
         self._add_failed_tool_trigger()

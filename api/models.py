@@ -7956,6 +7956,7 @@ class PersistentAgentJudgeSuggestion(models.Model):
         STRATEGY_SHIFT = "strategy_shift", "Strategy Shift"
 
     class Status(models.TextChoices):
+        PENDING_REVIEW = "pending_review", "Pending Review"
         ACTIVE = "active", "Active"
         DISMISSED = "dismissed", "Dismissed"
 
