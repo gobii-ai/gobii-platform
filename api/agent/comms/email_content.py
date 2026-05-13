@@ -166,15 +166,18 @@ def _normalize_html_tag_line_indentation(text: str) -> str:
     """Remove template indentation that Markdown would otherwise treat as code."""
     lines = text.split("\n")
     normalized_lines: list[str] = []
+    stack: list[str] = []
     changed = False
 
     for line in lines:
         stripped = line.lstrip(" \t")
-        if stripped != line and HTML_TAG_LINE_RE.match(stripped):
+        in_preformatted_context = _stack_contains_any(stack, SKIP_MARKDOWN_TAGS)
+        if stripped != line and not in_preformatted_context and HTML_TAG_LINE_RE.match(stripped):
             normalized_lines.append(stripped)
             changed = True
-            continue
-        normalized_lines.append(line)
+        else:
+            normalized_lines.append(line)
+        _update_html_tag_stack(stack, stripped)
 
     return "\n".join(normalized_lines) if changed else text
 
@@ -251,6 +254,23 @@ def _stack_contains_any(stack: list[str], tags: set[str]) -> bool:
     return any(tag in tags for tag in stack)
 
 
+def _update_html_tag_stack(stack: list[str], html_content: str) -> None:
+    for part in TAG_SPLIT_RE.split(html_content):
+        if not part or not part.startswith("<") or not part.endswith(">"):
+            continue
+        tag_name = _extract_tag_name(part)
+        if not tag_name:
+            continue
+        if part.startswith("</"):
+            if stack and stack[-1] == tag_name:
+                stack.pop()
+            elif tag_name in stack:
+                last_index = len(stack) - 1 - stack[::-1].index(tag_name)
+                del stack[last_index:]
+        elif not _is_void_tag(tag_name, part):
+            stack.append(tag_name)
+
+
 def _apply_inline_markdown_in_html(html_content: str) -> str:
     if not html_content:
         return html_content
@@ -263,16 +283,7 @@ def _apply_inline_markdown_in_html(html_content: str) -> str:
         if not part:
             continue
         if part.startswith("<") and part.endswith(">"):
-            tag_name = _extract_tag_name(part)
-            if tag_name:
-                if part.startswith("</"):
-                    if stack and stack[-1] == tag_name:
-                        stack.pop()
-                    elif tag_name in stack:
-                        last_index = len(stack) - 1 - stack[::-1].index(tag_name)
-                        stack = stack[:last_index]
-                elif not _is_void_tag(tag_name, part):
-                    stack.append(tag_name)
+            _update_html_tag_stack(stack, part)
             rendered.append(part)
             continue
 

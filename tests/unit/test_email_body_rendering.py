@@ -40,6 +40,23 @@ class EmailBodyRenderingTestCase(TestCase):
         self.assertNotIn("<p>I was doing some research", plaintext)
 
     @tag("batch_email_body")
+    def test_indented_html_preserves_preformatted_content_indentation(self):
+        body = (
+            "        <pre>\n"
+            "            <p>literal</p>\n"
+            "        </pre>\n"
+            "        <p>After</p>\n"
+        )
+
+        html_snippet, _ = convert_body_to_html_and_plaintext(body)
+
+        self.assertIn("<pre>", html_snippet)
+        self.assertIn("            <p>literal</p>", html_snippet)
+        self.assertIn("        </pre>", html_snippet)
+        self.assertIn("<p>After</p>", html_snippet)
+        self.assertNotIn("&lt;p&gt;After&lt;/p&gt;", html_snippet)
+
+    @tag("batch_email_body")
     def test_plaintext_converted_to_br(self):
         """Plaintext newlines should be converted to <br> tags."""
         body = "Hello\n\nThanks"
