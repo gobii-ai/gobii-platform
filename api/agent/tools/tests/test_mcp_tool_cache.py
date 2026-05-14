@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -381,3 +382,79 @@ class MCPToolCacheTests(SimpleTestCase):
 
         client.list_tools.assert_awaited_once()
         self.assertEqual([tool.full_name for tool in tools], ["google_sheets-add-row"])
+
+
+@tag("batch_mcp_tools")
+class MCPToolErrorNormalizationTests(SimpleTestCase):
+    def _tool_error_result(self, message: str):
+        return SimpleNamespace(
+            is_error=True,
+            content=[SimpleNamespace(text=message)],
+        )
+
+    def test_pipedream_google_sheets_retry_blob_is_normalized(self):
+        manager = MCPToolManager()
+        raw_error = json.dumps(
+            {
+                "os": [
+                    {
+                        "k": "error",
+                        "err": {
+                            "config": {
+                                "userAgentDirectives": [
+                                    {
+                                        "product": "google-api-nodejs-client",
+                                        "version": "8.0.1",
+                                    }
+                                ],
+                                "retry": True,
+                                "retryConfig": {
+                                    "currentRetryAttempt": 3,
+                                    "retry": 3,
+                                    "httpMethodsToRetry": ["GET", "HEAD"],
+                                },
+                            }
+                        },
+                    }
+                ]
+            }
+        )
+
+        result = manager._finalize_mcp_result(
+            "pipedream",
+            "google_sheets-read-rows",
+            self._tool_error_result(raw_error),
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["retryable"], True)
+        self.assertIn("Google Sheets read failed after upstream retries", result["message"])
+        self.assertNotIn("google-api-nodejs-client", result["message"])
+        self.assertNotIn("retryConfig", result["message"])
+
+    def test_pipedream_google_sheets_permission_error_is_not_retryable(self):
+        manager = MCPToolManager()
+        raw_error = json.dumps(
+            {
+                "os": [
+                    {
+                        "k": "error",
+                        "err": {
+                            "response": {"status": 403},
+                            "message": "The caller does not have permission",
+                        },
+                    }
+                ]
+            }
+        )
+
+        result = manager._finalize_mcp_result(
+            "pipedream",
+            "google_sheets-read-rows",
+            self._tool_error_result(raw_error),
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status_code"], 403)
+        self.assertEqual(result["retryable"], False)
+        self.assertIn("authorization failed", result["message"])

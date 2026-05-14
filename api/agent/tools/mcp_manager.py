@@ -48,6 +48,7 @@ from api.services.system_settings import (
 from django.utils import timezone
 
 from .mcp_param_guards import MCPParamGuardRegistry
+from .mcp_error_normalizers import MCPErrorNormalizerRegistry
 from .mcp_result_adapters import MCPResultAdapterRegistry, mcp_result_owner_context
 from ...models import (
     MCPServerConfig,
@@ -363,6 +364,7 @@ class MCPToolManager:
         self._httpx_client_factory = self._build_httpx_client_factory()
         self._pd_missing_credentials_logged = False
         self._param_guards = MCPParamGuardRegistry.default()
+        self._error_normalizers = MCPErrorNormalizerRegistry.default()
         self._result_adapters = MCPResultAdapterRegistry.default()
         
     def _ensure_event_loop(self) -> asyncio.AbstractEventLoop:
@@ -1931,10 +1933,18 @@ class MCPToolManager:
 
         return None
 
-    def _result_to_error_response(self, result: Any) -> Optional[Dict[str, str]]:
+    def _result_to_error_response(
+        self,
+        server_name: str,
+        tool_name: str,
+        result: Any,
+    ) -> Optional[Dict[str, Any]]:
         message = self._tool_result_error_message(result)
         if message is None:
             return None
+        normalized = self._error_normalizers.normalize(server_name, tool_name, message)
+        if normalized is not None:
+            return normalized
         return {"status": "error", "message": message}
 
     def _build_mcp_success_response(
@@ -1960,7 +1970,7 @@ class MCPToolManager:
         *,
         use_success_sentinel: bool = True,
     ) -> Dict[str, Any]:
-        error_response = self._result_to_error_response(result)
+        error_response = self._result_to_error_response(server_name, tool_name, result)
         if error_response:
             return error_response
 
