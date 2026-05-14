@@ -2657,7 +2657,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
         items = [
             'pages:home',
             'pages:library',
-            'pages:docs_index',
         ]
         # Include pricing only when proprietary mode is enabled
         try:
@@ -2668,8 +2667,9 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(4, 'proprietary:about')
                 items.insert(5, 'proprietary:team')
                 items.insert(6, 'proprietary:careers')
-                items.insert(7, 'proprietary:startup_checkout')
-                items.insert(8, 'proprietary:blog_index')
+                items.insert(7, 'proprietary:blog_index')
+            else:
+                items.append('pages:docs_index')
         except Exception:
             pass
         return items

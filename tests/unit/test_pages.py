@@ -1304,6 +1304,38 @@ class SitemapTests(TestCase):
             response.content.decode(),
         )
 
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("http://example.com/pricing/", content)
+        self.assertIn("http://example.com/blog/", content)
+        self.assertNotIn("http://example.com/docs/", content)
+        self.assertNotIn("/subscribe/startup/", content)
+        self.assertNotIn("/subscribe/pro/", content)
+        self.assertNotIn("/subscribe/scale/", content)
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_community_sitemap_includes_local_docs(self):
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("http://example.com/docs/", response.content.decode())
+
+
+@tag("batch_pages")
+class DocsRedirectTests(TestCase):
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_docs_redirects_are_permanent_in_proprietary_mode(self):
+        for path in ("/docs/", "/docs/guides/api/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response["Location"], "https://docs.gobii.ai/")
+
 
 @tag("batch_pages")
 class PretrainedWorkerDirectoryTests(TestCase):
