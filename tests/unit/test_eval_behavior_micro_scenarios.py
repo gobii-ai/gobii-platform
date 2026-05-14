@@ -101,6 +101,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"send_email": ("request_contact_permission",)},
         )
         self.assertEqual(by_slug["common_use_case_069_secure_api_key_request"].forbidden_tools, ())
+        self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].allowed_preamble_tools, ("search_tools",))
+        self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].allowed_preamble_tools, ("search_tools",))
+        self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].allowed_preamble_tools, ("search_tools",))
         self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
