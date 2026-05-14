@@ -1267,3 +1267,59 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         resp = self.client.get(url)
         self.assertEqual(resp.status_code, 200)
         self.assertIn("invalid", resp.content.decode().lower())
+
+    @tag("batch_organizations")
+    def test_admin_can_approve_pending_invite(self):
+        staff = get_user_model().objects.create_superuser(
+            email="staff@example.com",
+            password="pw",
+            username="staff",
+        )
+        invite = self._create_invite(
+            self.invitee.email,
+            OrganizationMembership.OrgRole.MEMBER,
+            token="tok-admin-approve",
+        )
+
+        self.client.force_login(staff)
+        url = reverse("admin:api_organizationinvite_approve", args=[invite.pk])
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+
+        invite.refresh_from_db()
+        self.assertIsNotNone(invite.accepted_at)
+        self.assertTrue(
+            OrganizationMembership.objects.filter(
+                org=self.org,
+                user=self.invitee,
+                role=OrganizationMembership.OrgRole.MEMBER,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        )
+
+    @tag("batch_organizations")
+    def test_admin_approve_pending_invite_requires_existing_user(self):
+        staff = get_user_model().objects.create_superuser(
+            email="staff-missing@example.com",
+            password="pw",
+            username="staff-missing",
+        )
+        invite = self._create_invite(
+            "missing-user@example.com",
+            OrganizationMembership.OrgRole.MEMBER,
+            token="tok-admin-missing",
+        )
+
+        self.client.force_login(staff)
+        url = reverse("admin:api_organizationinvite_approve", args=[invite.pk])
+        resp = self.client.get(url)
+        self.assertEqual(resp.status_code, 302)
+
+        invite.refresh_from_db()
+        self.assertIsNone(invite.accepted_at)
+        self.assertFalse(
+            OrganizationMembership.objects.filter(
+                org=self.org,
+                user__email__iexact="missing-user@example.com",
+            ).exists()
+        )

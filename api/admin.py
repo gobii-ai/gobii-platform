@@ -64,7 +64,7 @@ from .models import (
     PersistentAgentStep, PersistentAgentPromptArchive, PersistentAgentSkill, PersistentAgentSystemMessage, PersistentAgentSystemMessageBroadcast,
     GlobalAgentSkill, GlobalAgentSkillCustomTool,
     CommsChannel, UserBilling, OrganizationBilling, SmsNumber, LinkShortener,
-    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, CommsAllowlistEntry,
+    AgentFileSpace, AgentFileSpaceAccess, AgentFsNode, Organization, OrganizationMembership, OrganizationInvite, CommsAllowlistEntry,
     AgentEmailAccount, ToolFriendlyName, TaskCreditConfig, ReferralIncentiveConfig, ReferralGrant, Plan, PlanVersion, PlanVersionPrice,
     EntitlementDefinition, PlanVersionEntitlement, DailyCreditConfig, BrowserConfig, PromptConfig, ToolCreditCost,
     StripeConfig, ToolConfig, ToolRateLimit, AddonEntitlement,
@@ -1612,12 +1612,240 @@ class MeteringBatchAdmin(admin.ModelAdmin):
         )
 
 
+def _organization_invite_status(invite):
+    if invite.accepted_at is not None:
+        return "Accepted"
+    if invite.revoked_at is not None:
+        return "Revoked"
+    if invite.expires_at < timezone.now():
+        return "Expired"
+    return "Pending"
+
+
+def _approve_organization_invite(invite):
+    """Approve a pending invite by creating/reactivating the matching user's membership."""
+    if invite.accepted_at is not None:
+        return "already_accepted"
+    if invite.revoked_at is not None:
+        return "revoked"
+    if invite.expires_at < timezone.now():
+        return "expired"
+
+    user = get_user_model().objects.filter(email__iexact=invite.email).first()
+    if user is None:
+        return "missing_user"
+
+    with transaction.atomic():
+        invite = (
+            OrganizationInvite.objects
+            .select_for_update()
+            .select_related("org")
+            .get(pk=invite.pk)
+        )
+        if invite.accepted_at is not None:
+            return "already_accepted"
+        if invite.revoked_at is not None:
+            return "revoked"
+        if invite.expires_at < timezone.now():
+            return "expired"
+
+        membership, created = OrganizationMembership.objects.get_or_create(
+            org=invite.org,
+            user=user,
+            defaults={
+                "role": invite.role,
+                "status": OrganizationMembership.OrgStatus.ACTIVE,
+            },
+        )
+        if not created and (
+            membership.status != OrganizationMembership.OrgStatus.ACTIVE
+            or membership.role != invite.role
+        ):
+            membership.status = OrganizationMembership.OrgStatus.ACTIVE
+            membership.role = invite.role
+            membership.save(update_fields=["status", "role"])
+
+        invite.accepted_at = timezone.now()
+        invite.save(update_fields=["accepted_at"])
+
+    return "approved"
+
+
+class OrganizationMembershipInline(admin.TabularInline):
+    model = OrganizationMembership
+    extra = 0
+    autocomplete_fields = ("user",)
+    fields = ("user", "role", "status")
+    show_change_link = True
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("user")
+
+
+class OrganizationInviteInline(admin.TabularInline):
+    model = OrganizationInvite
+    extra = 0
+    fields = (
+        "email",
+        "role",
+        "approval_status",
+        "approve_link",
+        "invited_by",
+        "sent_at",
+        "expires_at",
+        "accepted_at",
+        "revoked_at",
+    )
+    readonly_fields = fields
+    show_change_link = True
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("invited_by")
+
+    @admin.display(description="Status")
+    def approval_status(self, obj):
+        return _organization_invite_status(obj)
+
+    @admin.display(description="Approve")
+    def approve_link(self, obj):
+        if obj is None or obj.pk is None:
+            return "-"
+        if _organization_invite_status(obj) != "Pending":
+            return "-"
+        url = reverse("admin:api_organizationinvite_approve", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Approve</a>', url)
+
+
 # Minimal admin for Organization to enable autocomplete/search
 @admin.register(Organization)
 class OrganizationAdmin(admin.ModelAdmin):
     search_fields = ("name", "slug")
     list_display = ("name", "slug", "is_active", "created_at")
     list_filter = ("is_active", "plan")
+    inlines = (OrganizationMembershipInline, OrganizationInviteInline)
+
+
+@admin.register(OrganizationMembership)
+class OrganizationMembershipAdmin(admin.ModelAdmin):
+    list_select_related = ("org", "user")
+    autocomplete_fields = ("org", "user")
+    list_display = ("org", "user", "role", "status")
+    list_filter = ("role", "status")
+    search_fields = ("org__name", "org__id", "user__email", "user__username", "user__id")
+    actions = ("mark_members_active", "mark_members_removed")
+
+    @admin.action(description="Mark selected memberships active")
+    def mark_members_active(self, request, queryset):
+        updated = queryset.update(status=OrganizationMembership.OrgStatus.ACTIVE)
+        self.message_user(request, f"Marked {updated} membership(s) active.", level=messages.SUCCESS)
+
+    @admin.action(description="Mark selected memberships removed")
+    def mark_members_removed(self, request, queryset):
+        updated = queryset.update(status=OrganizationMembership.OrgStatus.REMOVED)
+        self.message_user(request, f"Marked {updated} membership(s) removed.", level=messages.SUCCESS)
+
+
+@admin.register(OrganizationInvite)
+class OrganizationInviteAdmin(admin.ModelAdmin):
+    list_select_related = ("org", "invited_by")
+    autocomplete_fields = ("org", "invited_by")
+    list_display = ("org", "email", "role", "approval_status", "invited_by", "sent_at", "expires_at")
+    list_filter = ("role", "accepted_at", "revoked_at", "expires_at")
+    search_fields = ("org__name", "org__id", "email", "invited_by__email", "token")
+    readonly_fields = ("token", "sent_at", "accepted_at", "revoked_at", "approval_status", "approve_link")
+    fields = (
+        "org",
+        "email",
+        "role",
+        "approval_status",
+        "approve_link",
+        "token",
+        "expires_at",
+        "sent_at",
+        "invited_by",
+        "accepted_at",
+        "revoked_at",
+    )
+    actions = ("approve_selected_pending_invites",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def get_urls(self):
+        custom_urls = [
+            path(
+                "<path:object_id>/approve/",
+                self.admin_site.admin_view(self.approve_invite_view),
+                name="api_organizationinvite_approve",
+            ),
+        ]
+        return custom_urls + super().get_urls()
+
+    @admin.display(description="Status")
+    def approval_status(self, obj):
+        return _organization_invite_status(obj)
+
+    @admin.display(description="Approve")
+    def approve_link(self, obj):
+        if obj is None or obj.pk is None:
+            return "-"
+        if _organization_invite_status(obj) != "Pending":
+            return "-"
+        url = reverse("admin:api_organizationinvite_approve", args=[obj.pk])
+        return format_html('<a class="button" href="{}">Approve</a>', url)
+
+    def approve_invite_view(self, request, object_id):
+        invite = self.get_object(request, object_id)
+        if invite is None:
+            self.message_user(request, "Organization invite not found.", level=messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:api_organizationinvite_changelist"))
+        if not self.has_change_permission(request, invite):
+            raise PermissionDenied
+
+        result = _approve_organization_invite(invite)
+        self._message_approval_result(request, invite, result)
+        redirect_to = request.META.get("HTTP_REFERER") or reverse("admin:api_organizationinvite_changelist")
+        return HttpResponseRedirect(redirect_to)
+
+    @admin.action(description="Approve selected pending invites")
+    def approve_selected_pending_invites(self, request, queryset):
+        approved = 0
+        missing_user = 0
+        skipped = 0
+        for invite in queryset.select_related("org"):
+            result = _approve_organization_invite(invite)
+            if result == "approved":
+                approved += 1
+            elif result == "missing_user":
+                missing_user += 1
+            else:
+                skipped += 1
+
+        level = messages.SUCCESS if missing_user == 0 and skipped == 0 else messages.WARNING
+        self.message_user(
+            request,
+            (
+                f"Approved {approved} invite(s). "
+                f"Missing user account: {missing_user}. Skipped: {skipped}."
+            ),
+            level=level,
+        )
+
+    def _message_approval_result(self, request, invite, result):
+        if result == "approved":
+            self.message_user(request, f"Approved invite for {invite.email}.", level=messages.SUCCESS)
+            return
+        if result == "missing_user":
+            self.message_user(
+                request,
+                f"No user account exists for {invite.email}; create the user first, then approve the invite.",
+                level=messages.WARNING,
+            )
+            return
+        self.message_user(request, f"Invite for {invite.email} was not approved ({result}).", level=messages.WARNING)
 
 # --- TASKS INSIDE AGENT (BrowserUseAgent) ---
 class BrowserUseAgentTaskInline(admin.TabularInline):
