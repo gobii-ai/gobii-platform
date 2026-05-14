@@ -316,6 +316,14 @@ def get_common_use_case_tool_calls_for_run(run_id, *, after=None, tool_names=Non
     ]
 
 
+def get_first_common_use_case_tool_call(run_id, *, after=None, ignored_tool_names=None):
+    ignored = set(ignored_tool_names or ())
+    for call in get_common_use_case_tool_calls_for_run(run_id, after=after):
+        if call.tool_name not in ignored:
+            return call
+    return None
+
+
 def get_planning_mutation_calls_before_end_planning(run_id, *, after=None):
     calls = []
     for call in get_tool_calls_for_run(run_id, after=after):
@@ -737,7 +745,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_http_request_first")
-        first_call = get_first_relevant_tool_call(
+        first_call = get_first_common_use_case_tool_call(
             run_id,
             after=inbound.timestamp,
             ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,

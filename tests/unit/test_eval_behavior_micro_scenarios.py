@@ -19,6 +19,7 @@ from api.evals.scenarios.behavior_micro import (
     all_requests_have_options,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
+    get_first_common_use_case_tool_call,
     get_first_relevant_tool_call,
     get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
@@ -243,6 +244,21 @@ class BehaviorMicroHelperTests(TestCase):
             [expected, unrelated],
         )
         self.assertNotIn(config_update, get_common_use_case_tool_calls_for_run(self.run.id))
+
+    def test_first_common_use_case_tool_call_ignores_chat_and_config_mutation(self):
+        self._add_tool_call("send_chat_message")
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Fetch inventory'"},
+        )
+        expected = self._add_tool_call("http_request")
+
+        first = get_first_common_use_case_tool_call(
+            self.run.id,
+            ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,
+        )
+
+        self.assertEqual(first, expected)
 
     def test_common_eval_definition_requires_explicit_plan_expected(self):
         with self.assertRaises(ValueError):
