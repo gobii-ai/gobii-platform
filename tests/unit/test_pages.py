@@ -12,6 +12,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.contrib.sites.models import Site
 from django.core import signing
 from django.template.loader import render_to_string
+from django.templatetags.static import static
 from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -408,6 +409,18 @@ class HomePageTests(TestCase):
         self.assertEqual(
             [app["slug"] for app in response.context.get("homepage_integrations_inline_builtins")],
             ["linkedin", "google_sheets", "trello", "slack"],
+        )
+        self.assertEqual(
+            [
+                app["inline_icon_url"]
+                for app in response.context.get("homepage_integrations_inline_builtins")
+            ],
+            [
+                static("images/integrations/pipedream/linkedin.svg"),
+                static("images/integrations/pipedream/google_sheets.svg"),
+                static("images/integrations/pipedream/trello.svg"),
+                static("images/integrations/pipedream/slack.svg"),
+            ],
         )
 
     @patch(

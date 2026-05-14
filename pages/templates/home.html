@@ -248,8 +248,8 @@
                           <div class="flex items-center -space-x-1.5">
                             {% for app in homepage_integrations_inline_builtins %}
                               <span class="relative inline-flex h-7 w-7 items-center justify-center rounded-lg border-2 border-white bg-indigo-50 text-[9px] font-semibold uppercase text-indigo-700 shadow-sm" title="{{ app.name }}">
-                                {% if app.icon_url %}
-                                  <img src="{{ app.icon_url }}" alt="{{ app.name }}" class="h-full w-full rounded-[8px] object-cover" loading="lazy" />
+                                {% if app.inline_icon_url or app.icon_url %}
+                                  <img src="{{ app.inline_icon_url|default:app.icon_url }}" alt="{{ app.name }}" width="28" height="28" class="h-full w-full rounded-[8px] object-contain" loading="lazy" decoding="async" />
                                 {% else %}
                                   <span>{{ app.name|slice:":2"|upper }}</span>
                                 {% endif %}

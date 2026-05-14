@@ -179,7 +179,21 @@ HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
     "trello",
     "slack",
 )
+HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
+    "google_sheets": "images/integrations/pipedream/google_sheets.svg",
+    "linkedin": "images/integrations/pipedream/linkedin.svg",
+    "slack": "images/integrations/pipedream/slack.svg",
+    "trello": "images/integrations/pipedream/trello.svg",
+}
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
+
+
+def _with_homepage_inline_integration_icon(app: dict) -> dict:
+    slug = str(app.get("slug") or "").strip()
+    icon_path = HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS.get(slug)
+    if not icon_path:
+        return app
+    return {**app, "inline_icon_url": static(icon_path)}
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -1062,7 +1076,7 @@ class HomePage(TemplateView):
             if str(app.get("slug") or "").strip()
         }
         inline_builtin_integrations = [
-            builtin_by_slug[slug]
+            _with_homepage_inline_integration_icon(builtin_by_slug[slug])
             for slug in HOMEPAGE_INLINE_INTEGRATION_SLUGS
             if slug in builtin_by_slug
         ]
