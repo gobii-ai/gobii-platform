@@ -12,6 +12,7 @@ from api.agent.files.attachment_helpers import build_signed_filespace_download_u
 from api.agent.tools.file_export_helpers import resolve_export_target
 from api.agent.tools.agent_variables import set_agent_variable, substitute_variables_as_data_uris
 from api.services.system_settings import get_max_file_size
+from util.text_sanitizer import decode_unicode_escapes
 
 logger = logging.getLogger(__name__)
 
@@ -589,6 +590,7 @@ def execute_create_pdf(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[s
     if not isinstance(html, str) or not html.strip():
         return {"status": "error", "message": "Missing required parameter: html"}
 
+    html = decode_unicode_escapes(html)
     html = _coerce_markdown_images_to_html(html)
 
     # Substitute $[path] variables with data URIs (PDF needs embedded content, not URLs)
