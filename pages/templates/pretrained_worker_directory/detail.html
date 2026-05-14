@@ -1,6 +1,22 @@
 {% extends "base.html" %}
 {% load static %}
-{% block title %}{{ pretrained_worker.display_name }} – Pretrained Worker Directory{% endblock %}
+{% block title %}{{ pretrained_worker_seo_title }}{% endblock %}
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="description" content="{{ pretrained_worker_seo_description|truncatechars:160 }}">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{ pretrained_worker_social_title }}">
+  <meta property="og:description" content="{{ pretrained_worker_seo_description|truncatechars:160 }}">
+  <meta property="og:url" content="{{ pretrained_worker_url }}">
+  <meta property="og:site_name" content="Gobii">
+  <meta property="og:image" content="{{ pretrained_worker_social_image_url }}">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ pretrained_worker_social_title }}">
+  <meta name="twitter:description" content="{{ pretrained_worker_seo_description|truncatechars:160 }}">
+  <meta name="twitter:image" content="{{ pretrained_worker_social_image_url }}">
+  <script type="application/ld+json">{{ pretrained_worker_structured_data_json|safe }}</script>
+  <script type="application/ld+json">{{ pretrained_worker_breadcrumb_json|safe }}</script>
+{% endblock %}
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-6">

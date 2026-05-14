@@ -1,5 +1,6 @@
 from datetime import timezone, datetime
 from functools import lru_cache
+import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
+from django.templatetags.static import static
 from django.db import DatabaseError
 from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, TrialPromo, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
@@ -1378,7 +1380,71 @@ class PretrainedWorkerDetailView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        detail_url = self.request.build_absolute_uri(
+            reverse('pages:pretrained_worker_detail', kwargs={'slug': self.employee.code})
+        )
+        home_url = self.request.build_absolute_uri(reverse('pages:home'))
+        default_image_path = (
+            "images/gobii_fish_social_1280x640.png"
+            if is_fish_collateral_enabled()
+            else "images/noBgBlue.png"
+        )
+        default_social_image_url = self.request.build_absolute_uri(static(default_image_path))
+        seo_description = (self.employee.description or self.employee.tagline or "").strip()
+        social_title = f"{self.employee.display_name} AI Agent Template"
+
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": self.employee.display_name,
+            "description": seo_description,
+            "applicationCategory": self.employee.category or "BusinessApplication",
+            "operatingSystem": "Web",
+            "url": detail_url,
+            "image": default_social_image_url,
+            "creator": {
+                "@type": "Organization",
+                "name": "Gobii",
+            },
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+        }
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Pretrained Workers",
+                    "item": f"{home_url}#pretrained-workers",
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": self.employee.display_name,
+                    "item": detail_url,
+                },
+            ],
+        }
+
         context["pretrained_worker"] = self.employee
+        context["pretrained_worker_url"] = detail_url
+        context["pretrained_worker_social_title"] = social_title
+        context["pretrained_worker_seo_title"] = f"{social_title} | Gobii"
+        context["pretrained_worker_seo_description"] = seo_description
+        context["pretrained_worker_social_image_url"] = default_social_image_url
+        context["pretrained_worker_structured_data_json"] = json.dumps(structured_data, ensure_ascii=False)
+        context["pretrained_worker_breadcrumb_json"] = json.dumps(breadcrumb_data, ensure_ascii=False)
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)

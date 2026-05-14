@@ -1,5 +1,6 @@
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
+import json
 import re
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -1439,6 +1440,52 @@ class PretrainedWorkerDirectoryTests(TestCase):
             segment for segment in detail_button.stripped_strings if segment and segment != "→"
         ).strip()
         self.assertEqual(detail_button_text, "Create Agent")
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_pretrained_worker_detail_includes_search_metadata(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        detail_url = f"http://testserver/pretrained-workers/{template.code}/"
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<link rel="canonical" href="{detail_url}">')
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.title.string.strip(),
+            f"{template.display_name} AI Agent Template | Gobii",
+        )
+        description = soup.find("meta", attrs={"name": "description"})
+        self.assertIsNotNone(description)
+        self.assertIn(template.description[:80], description["content"])
+        og_url = soup.find("meta", property="og:url")
+        self.assertIsNotNone(og_url)
+        self.assertEqual(og_url["content"], detail_url)
+        og_image = soup.find("meta", property="og:image")
+        self.assertIsNotNone(og_image)
+        self.assertIn("/static/images/", og_image["content"])
+
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["name"], template.display_name)
+        self.assertEqual(application_schema["url"], detail_url)
+        self.assertEqual(application_schema["creator"]["name"], "Gobii")
+
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(
+            breadcrumb_schema["itemListElement"][-1]["item"],
+            detail_url,
+        )
 
 
 @tag("batch_pages")
