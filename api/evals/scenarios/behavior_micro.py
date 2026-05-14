@@ -1081,9 +1081,16 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         if not case.plan_expected:
             stop_on_tool_names.append(UPDATE_PLAN_TOOL_NAME)
 
+        allowed_tool_names = set(case.expected_tool_names())
+        if case.plan_expected:
+            allowed_tool_names.add(UPDATE_PLAN_TOOL_NAME)
+
         return {
             "ignore_sqlite_agent_config_mutations": True,
+            "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+            "allowed_tool_names": list(allowed_tool_names),
             "stop_on_tool_names": stop_on_tool_names,
+            "stop_on_unexpected_relevant_tool": True,
             "stop_when_all_seen": expected_conditions,
         }
 

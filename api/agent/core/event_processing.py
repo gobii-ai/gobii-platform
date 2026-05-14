@@ -5415,6 +5415,11 @@ def _run_agent_loop(
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
 
+                if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
+                    _mark_accepted_human_generation_consumed()
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+
                 executed_batch = _execute_prepared_tool_batch(
                     agent,
                     prepared_batch,

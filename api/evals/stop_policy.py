@@ -61,6 +61,12 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
             if call.tool_name in stop_on_tool_names:
                 return True, f"terminal tool call observed: {call.tool_name}"
 
+    if policy.get("stop_on_unexpected_relevant_tool"):
+        allowed_tool_names = set(policy.get("allowed_tool_names") or ())
+        for call in calls:
+            if call.tool_name not in allowed_tool_names:
+                return True, f"unexpected relevant tool call observed: {call.tool_name}"
+
     if policy.get("stop_on_sqlite_agent_config_mutation"):
         for call in (
             PersistentAgentToolCall.objects

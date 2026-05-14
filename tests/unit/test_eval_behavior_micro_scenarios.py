@@ -278,6 +278,26 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
+    def test_eval_stop_policy_stops_on_unexpected_relevant_tool(self):
+        self._add_tool_call("send_chat_message")
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Fetch inventory'"},
+        )
+        self._add_tool_call("mcp_brightdata_search_engine")
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {
+                "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+                "allowed_tool_names": ["http_request"],
+                "stop_on_unexpected_relevant_tool": True,
+            },
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("unexpected relevant tool", reason)
+
     def test_eval_stop_policy_ignores_config_mutation_for_common_tool_calls(self):
         self._add_tool_call(
             "sqlite_batch",
