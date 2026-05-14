@@ -330,7 +330,7 @@
   <main class="wrap">
     <section class="header">
       <h1>Agent Audit Export - {{ agent_name }}</h1>
-      <p id="summary-line">Generated {{ generated_at|default:"(unknown)" }}.</p>
+      <p id="summary-line">Generated {{ generated_at|default:"(unknown)" }} - {{ range_label|default:"Full audit" }}.</p>
       <div class="controls">
         <label>
           Sort by timestamp
