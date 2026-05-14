@@ -106,6 +106,8 @@ class CommonUseCaseEvalDefinition:
             raise ValueError(f"{self.slug} is missing prompt.")
         if not self.expected_tools:
             raise ValueError(f"{self.slug} must declare expected_tools.")
+        if self.expected_params and len(self.expected_tools) != 1:
+            raise ValueError(f"{self.slug} expected_params is only supported for single-tool evals.")
         if UPDATE_PLAN_TOOL_NAME in self.expected_tools or UPDATE_PLAN_TOOL_NAME in self.forbidden_tools:
             raise ValueError(f"{self.slug} must use plan_expected instead of tool lists for update_plan.")
         unknown_synthetic_tools = [

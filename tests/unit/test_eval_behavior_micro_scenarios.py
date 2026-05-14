@@ -323,6 +323,22 @@ class BehaviorMicroHelperTests(TestCase):
                 }
             )
 
+    def test_common_eval_definition_rejects_expected_params_for_multi_tool_cases(self):
+        with self.assertRaisesMessage(
+            ValueError,
+            "expected_params is only supported for single-tool evals",
+        ):
+            CommonUseCaseEvalDefinition.from_mapping(
+                {
+                    "slug": "bad_multi_tool_params",
+                    "category": "tool_choice",
+                    "prompt": "Fetch data and export it.",
+                    "expected_tools": ["http_request", "create_csv"],
+                    "expected_params": {"url": "https://example.test/data.json"},
+                    "plan_expected": True,
+                }
+            )
+
     def test_plan_activity_only_includes_update_plan(self):
         read = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
         sqlite_mutation = self._add_tool_call(

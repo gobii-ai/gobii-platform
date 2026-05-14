@@ -83,3 +83,26 @@ class EvalExecutionProcessingTests(TestCase):
             throw=True,
         )
         mock_delay.assert_not_called()
+
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.process_agent_events_task.apply")
+    def test_eval_trigger_processing_forwards_stop_policy_when_present(self, mock_apply, mock_delay):
+        stop_policy = {"stop_when_all_seen": [{"tool_name": "http_request"}]}
+
+        self.tools.trigger_processing(
+            self.agent.id,
+            eval_run_id="00000000-0000-0000-0000-000000000789",
+            mock_config={"http_request": {"status": "ok"}},
+            eval_stop_policy=stop_policy,
+        )
+
+        mock_apply.assert_called_once_with(
+            args=(str(self.agent.id),),
+            kwargs={
+                "eval_run_id": "00000000-0000-0000-0000-000000000789",
+                "mock_config": {"http_request": {"status": "ok"}},
+                "eval_stop_policy": stop_policy,
+            },
+            throw=True,
+        )
+        mock_delay.assert_not_called()
