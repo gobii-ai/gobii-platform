@@ -19,7 +19,7 @@
   {% endif %}
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
   {% if settings.GOBII_PROPRIETARY_MODE %}
-  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
+  <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
   {% endif %}
   {% if fish_collateral_enabled %}
     <link rel="preload" as="image" href="{% static 'images/gobii_fish.png' %}" />
