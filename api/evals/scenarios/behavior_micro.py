@@ -431,6 +431,12 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_on_human_input_request": True,
+                    "stop_on_tool_names": list(SUBSTANTIVE_WORK_TOOL_NAMES | PLANNING_MUTATION_TOOL_NAMES),
+                    "stop_on_sqlite_agent_config_mutation": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -521,6 +527,11 @@ class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+                    "stop_on_first_relevant_tool": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -590,6 +601,11 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+                    "stop_on_first_relevant_tool": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -668,6 +684,11 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_on_tool_names": list(PLANNING_MUTATION_TOOL_NAMES),
+                    "stop_on_sqlite_agent_config_mutation": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -734,6 +755,10 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
+                eval_stop_policy={
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+                    "stop_on_first_relevant_tool": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -829,6 +854,10 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": ["create_file"],
+                    "stop_when_all_seen": [{"tool_name": "create_csv"}],
+                },
             )
         self.record_task_result(
             run_id,
@@ -893,6 +922,10 @@ class ToolChoicePdfDeliverableUsesCreatePdfScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": ["create_file"],
+                    "stop_when_all_seen": [{"tool_name": "create_pdf"}],
+                },
             )
         self.record_task_result(
             run_id,
@@ -949,6 +982,10 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": ["send_email"],
+                    "stop_on_human_input_request": True,
+                },
             )
         self.record_task_result(
             run_id,
@@ -1029,6 +1066,27 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             }
         return mock_config
 
+    def _build_eval_stop_policy(self):
+        case = self.case
+        expected_conditions = []
+        if case.plan_expected:
+            expected_conditions.append({"tool_name": UPDATE_PLAN_TOOL_NAME})
+        for tool_name in case.expected_tool_names():
+            condition = {"tool_name": tool_name}
+            if case.expected_params and len(case.expected_tools) == 1:
+                condition["params"] = case.expected_params
+            expected_conditions.append(condition)
+
+        stop_on_tool_names = list(case.forbidden_tool_names())
+        if not case.plan_expected:
+            stop_on_tool_names.append(UPDATE_PLAN_TOOL_NAME)
+
+        return {
+            "ignore_sqlite_agent_config_mutations": True,
+            "stop_on_tool_names": stop_on_tool_names,
+            "stop_when_all_seen": expected_conditions,
+        }
+
     def run(self, run_id, agent_id):
         case = self.case
         expected_tools = case.expected_tool_names()
@@ -1044,6 +1102,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._build_mock_config(),
+                eval_stop_policy=self._build_eval_stop_policy(),
             )
         self.record_task_result(
             run_id,

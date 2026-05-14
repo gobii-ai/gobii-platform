@@ -26,6 +26,7 @@ from api.evals.scenarios.behavior_micro import (
     get_planning_mutation_calls_before_end_planning,
     tool_call_is_plan_activity,
 )
+from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
@@ -259,6 +260,71 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertEqual(first, expected)
+
+    def test_eval_stop_policy_stops_when_expected_tool_seen(self):
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_when_all_seen": [{"tool_name": "http_request", "params": {"url": "https://example.test"}}]},
+        )
+        self.assertFalse(should_stop)
+
+        self._add_tool_call("http_request", {"url": "https://example.test"})
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_when_all_seen": [{"tool_name": "http_request", "params": {"url": "https://example.test"}}]},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
+    def test_eval_stop_policy_ignores_config_mutation_for_common_tool_calls(self):
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Fetch inventory'"},
+        )
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_when_all_seen": [{"tool_name": "sqlite_batch"}]},
+        )
+        self.assertFalse(should_stop)
+
+        self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM leads"})
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_when_all_seen": [{"tool_name": "sqlite_batch"}]},
+        )
+        self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_can_stop_on_sqlite_config_mutation(self):
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Monitor competitors'"},
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_sqlite_agent_config_mutation": True},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("config mutation", reason)
+
+    def test_eval_stop_policy_stops_on_human_input_request(self):
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_human_input_request": True},
+        )
+        self.assertFalse(should_stop)
+
+        self._add_human_input_request(self.run, "Which client?")
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_human_input_request": True},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("human input", reason)
 
     def test_common_eval_definition_requires_explicit_plan_expected(self):
         with self.assertRaises(ValueError):

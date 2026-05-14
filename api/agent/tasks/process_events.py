@@ -136,6 +136,7 @@ def process_agent_events_task(
     depth: int | None = None,
     eval_run_id: str | None = None,
     mock_config: Optional[Dict[str, Any]] = None,
+    eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: str | None = None,
     inbound_generation: int | str | None = None,
 ) -> None:  # noqa: D401, ANN001
@@ -249,6 +250,7 @@ def process_agent_events_task(
             depth=depth,
             eval_run_id=eval_run_id,
             mock_config=mock_config,
+            eval_stop_policy=eval_stop_policy,
             burn_follow_up_token=burn_follow_up_token,
             inbound_generation=inbound_generation,
             worker_pid=current_worker_pid,
