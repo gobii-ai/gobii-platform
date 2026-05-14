@@ -2,9 +2,6 @@
 User-agent: *
 Allow: /
 Disallow: /console/agents/
-Disallow: /accounts/modal/
-Disallow: /d/
-Disallow: /m/
 
 Sitemap: {{ request.scheme }}://{{ request.get_host }}/sitemap.xml
 {% else %}

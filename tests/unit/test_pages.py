@@ -1242,9 +1242,9 @@ class RobotsTxtTests(TestCase):
         self.assertContains(response, "Sitemap:")
         lines = [line.strip() for line in response.content.decode().splitlines() if line.strip()]
         self.assertIn("Disallow: /console/agents/", lines)
-        self.assertIn("Disallow: /accounts/modal/", lines)
-        self.assertIn("Disallow: /d/", lines)
-        self.assertIn("Disallow: /m/", lines)
+        self.assertNotIn("Disallow: /accounts/modal/", lines)
+        self.assertNotIn("Disallow: /d/", lines)
+        self.assertNotIn("Disallow: /m/", lines)
         self.assertNotIn("Disallow: /", lines)
 
     @tag("batch_pages")
