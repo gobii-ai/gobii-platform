@@ -137,6 +137,7 @@ from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
 from django.utils.html import escape, strip_tags
+from django.utils.safestring import mark_safe
 from opentelemetry import trace
 from marketing_events.api import capi
 from marketing_events.telemetry import record_fbc_synthesized
@@ -152,6 +153,15 @@ tracer = trace.get_tracer("gobii.utils")
 
 INSTALL_SCRIPT_PATH = Path(__file__).with_name("install.sh")
 X_ROBOTS_NOINDEX_FOLLOW = "noindex, follow"
+JSON_SCRIPT_ESCAPES = {
+    ord(">"): "\\u003E",
+    ord("<"): "\\u003C",
+    ord("&"): "\\u0026",
+}
+
+
+def html_safe_json_dumps(value):
+    return mark_safe(json.dumps(value, ensure_ascii=False).translate(JSON_SCRIPT_ESCAPES))
 
 
 class NoIndexFollowMixin:
@@ -1457,8 +1467,8 @@ class PretrainedWorkerDetailView(TemplateView):
         context["pretrained_worker_seo_title"] = f"{social_title} | Gobii"
         context["pretrained_worker_seo_description"] = seo_description
         context["pretrained_worker_social_image_url"] = default_social_image_url
-        context["pretrained_worker_structured_data_json"] = json.dumps(structured_data, ensure_ascii=False)
-        context["pretrained_worker_breadcrumb_json"] = json.dumps(breadcrumb_data, ensure_ascii=False)
+        context["pretrained_worker_structured_data_json"] = html_safe_json_dumps(structured_data)
+        context["pretrained_worker_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)

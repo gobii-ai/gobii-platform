@@ -1500,6 +1500,49 @@ class PretrainedWorkerDirectoryTests(TestCase):
             detail_url,
         )
 
+    @tag("batch_pages")
+    @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
+    def test_pretrained_worker_detail_escapes_json_ld_script_closing_sequence(self, mock_get_template_by_code):
+        display_name = 'Bad </script><script>alert("x")</script>'
+        description = "Description </script><img src=x onerror=alert(1)>"
+        mock_get_template_by_code.return_value = SimpleNamespace(
+            code="unsafe-template",
+            display_name=display_name,
+            tagline="Unsafe tagline",
+            description=description,
+            category="Operations",
+            charter="Do useful work.",
+            base_schedule="0 9 * * *",
+            schedule_jitter_minutes=0,
+            event_triggers=[],
+            default_tools=[],
+            recommended_contact_channel="email",
+        )
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": "unsafe-template"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003Ealert", content)
+        self.assertNotIn('</script><script>alert("x")</script>', content)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["name"], display_name)
+        self.assertEqual(application_schema["description"], description)
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(breadcrumb_schema["itemListElement"][-1]["name"], display_name)
+
 
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
