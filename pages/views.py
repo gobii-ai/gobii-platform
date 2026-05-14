@@ -149,6 +149,14 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 INSTALL_SCRIPT_PATH = Path(__file__).with_name("install.sh")
+X_ROBOTS_NOINDEX_FOLLOW = "noindex, follow"
+
+
+class NoIndexFollowMixin:
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        response["X-Robots-Tag"] = X_ROBOTS_NOINDEX_FOLLOW
+        return response
 
 
 @lru_cache(maxsize=1)
@@ -2232,7 +2240,7 @@ class PaidPlanLanding(LoginRequiredMixin, TemplateView):
         context['plan_slug'] = plan_slug
         return context
 
-class StartupCheckoutView(LoginRequiredMixin, View):
+class StartupCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Startup subscription plan."""
 
     def get(self, request, *args, **kwargs):
@@ -2443,7 +2451,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         return redirect(session.url)
 
 
-class ScaleCheckoutView(LoginRequiredMixin, View):
+class ScaleCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Scale subscription plan."""
 
     def get(self, request, *args, **kwargs):

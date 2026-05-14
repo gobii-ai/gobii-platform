@@ -1338,6 +1338,32 @@ class DocsRedirectTests(TestCase):
 
 
 @tag("batch_pages")
+class ApiDocsRobotsTests(TestCase):
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_swagger_ui_is_noindex_follow(self):
+        for url_name in ("schema-swagger-ui", "api_docs"):
+            with self.subTest(url_name=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_swagger_ui_redirect_is_noindex_follow_in_proprietary_mode(self):
+        response = self.client.get(reverse("schema-swagger-ui"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_redoc_robots_header_unchanged(self):
+        response = self.client.get(reverse("schema-redoc"))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.has_header("X-Robots-Tag"))
+
+
+@tag("batch_pages")
 class PretrainedWorkerDirectoryTests(TestCase):
     @tag("batch_pages")
     def test_directory_redirects_to_home_section(self):
@@ -2131,6 +2157,14 @@ class AgentSpawnIntentApiTests(TestCase):
 
 @tag("batch_pages")
 class CheckoutRedirectTests(TestCase):
+    @tag("batch_pages")
+    def test_checkout_start_pages_are_noindex_follow(self):
+        for url_name in ("proprietary:startup_checkout", "proprietary:pro_checkout", "proprietary:scale_checkout"):
+            with self.subTest(url_name=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
     @tag("batch_pages")
     @patch("pages.views.reconcile_user_plan_from_stripe")
     @patch("pages.views._prepare_stripe_or_404")

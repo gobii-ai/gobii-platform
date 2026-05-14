@@ -311,10 +311,15 @@ _beluga_tracking_redirect_view = RedirectView.as_view(
 )
 
 
+def _with_noindex_follow_header(response):
+    response["X-Robots-Tag"] = "noindex, follow"
+    return response
+
+
 def schema_swagger_view(request, *args, **kwargs):
     if settings.GOBII_PROPRIETARY_MODE:
-        return redirect(API_REFERENCE_DOCS_URL)
-    return _schema_swagger_view(request, *args, **kwargs)
+        return _with_noindex_follow_header(redirect(API_REFERENCE_DOCS_URL))
+    return _with_noindex_follow_header(_schema_swagger_view(request, *args, **kwargs))
 
 
 def schema_redoc_view(request, *args, **kwargs):
