@@ -14,7 +14,7 @@ from api.agent.core.event_processing import (
 )
 from django.urls import reverse
 
-from api.agent.core.prompt_context import build_prompt_context
+from api.agent.core.prompt_context import build_prompt_context, build_prompt_context_preview
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
 from util.urls import build_agent_detail_url, build_site_url
@@ -199,6 +199,49 @@ class DailyLimitPromptContextTests(TestCase):
         self.assertIn(f"double {double_limit_url_prefix}?token=", content)
         self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
+
+
+@tag("batch_event_processing")
+class ContinuationModePromptContextTests(TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user(
+            username="continuation-prompt@example.com",
+            email="continuation-prompt@example.com",
+            password="secret",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="ContinuationPromptBA")
+        self.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Continuation Prompt Agent",
+            charter="Handle ongoing work",
+            browser_use_agent=browser_agent,
+        )
+
+    def _render_system_prompt(self, *, is_first_run: bool) -> str:
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            context, _, _ = build_prompt_context_preview(
+                self.agent,
+                is_first_run=is_first_run,
+            )
+
+        return next(message["content"] for message in context if message["role"] == "system")
+
+    def test_prompt_includes_continuation_mode_after_first_run(self):
+        system_prompt = self._render_system_prompt(is_first_run=False)
+
+        self.assertIn("## Continuation Mode", system_prompt)
+        self.assertIn("You are continuing an existing work thread, not starting a new task.", system_prompt)
+        self.assertIn("Prefer one direct next tool call over broad reassessment.", system_prompt)
+
+    def test_prompt_omits_continuation_mode_on_first_run(self):
+        system_prompt = self._render_system_prompt(is_first_run=True)
+
+        self.assertNotIn("## Continuation Mode", system_prompt)
 
 
 @tag("batch_event_processing")
