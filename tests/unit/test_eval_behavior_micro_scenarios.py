@@ -7,15 +7,23 @@ import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    CommonUseCaseEvalDefinition,
     COMMON_USE_CASE_EVAL_CASES,
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
+    IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+    UPDATE_PLAN_POLICIES,
+    UPDATE_PLAN_POLICY_EXPECT,
+    UPDATE_PLAN_POLICY_FORBID,
     all_requests_have_options,
     get_forbidden_calls_before_end_planning,
+    get_common_use_case_tool_calls_for_run,
     get_first_relevant_tool_call,
+    get_plan_activity_calls_for_run,
     get_pending_human_input_requests,
     get_planning_mutation_calls_before_end_planning,
+    tool_call_is_plan_activity,
 )
 from api.evals.suites import SuiteRegistry
 from api.models import (
@@ -57,13 +65,33 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
         for case in COMMON_USE_CASE_EVAL_CASES:
-            self.assertIn(case["slug"], registered)
-            self.assertLessEqual(len(case["prompt"]), 180)
-            self.assertGreaterEqual(len(case.get("expected_tools") or []), 1)
+            self.assertIsInstance(case, CommonUseCaseEvalDefinition)
+            self.assertIn(case.slug, registered)
+            self.assertLessEqual(len(case.prompt), 180)
+            self.assertGreaterEqual(len(case.expected_tools), 1)
+            self.assertNotIn("update_plan", case.expected_tools)
+            self.assertNotIn("update_plan", case.forbidden_tools)
+            self.assertIsInstance(case.plan_expected, bool)
+            self.assertIn(case.update_plan_policy, UPDATE_PLAN_POLICIES)
             self.assertEqual(
-                [task.name for task in registered[case["slug"]].tasks],
-                ["inject_prompt", "verify_expected_tool_usage", "verify_forbidden_tool_absence"],
+                case.update_plan_policy,
+                UPDATE_PLAN_POLICY_EXPECT if case.plan_expected else UPDATE_PLAN_POLICY_FORBID,
             )
+            self.assertEqual(
+                [task.name for task in registered[case.slug].tasks],
+                [
+                    "inject_prompt",
+                    "verify_plan_policy",
+                    "verify_expected_tool_usage",
+                    "verify_forbidden_tool_absence",
+                ],
+            )
+
+        by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
+        self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
+        self.assertTrue(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
+        self.assertTrue(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
 
 
 @tag("batch_eval_fingerprint")
@@ -136,6 +164,96 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertEqual(first, expected)
+
+    def test_base_first_action_ignore_set_does_not_hide_update_plan(self):
+        expected = self._add_tool_call("update_plan")
+        self._add_tool_call("http_request")
+
+        first = get_first_relevant_tool_call(
+            self.run.id,
+            ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,
+        )
+
+        self.assertEqual(first, expected)
+
+    def test_common_eval_definition_applies_plan_expected_to_update_plan_policy(self):
+        simple = CommonUseCaseEvalDefinition.from_mapping(
+            {
+                "slug": "simple_no_plan",
+                "category": "tool_choice",
+                "prompt": "Fetch a JSON URL.",
+                "expected_tools": ["http_request"],
+                "plan_expected": False,
+            }
+        )
+        planned = CommonUseCaseEvalDefinition.from_mapping(
+            {
+                "slug": "complex_plan",
+                "category": "planning",
+                "prompt": "Create a plan.",
+                "expected_tools": ["request_human_input"],
+                "plan_expected": True,
+            }
+        )
+
+        self.assertNotIn("update_plan", simple.expected_tool_names())
+        self.assertNotIn("update_plan", simple.forbidden_tool_names())
+        self.assertNotIn("update_plan", planned.expected_tool_names())
+        self.assertNotIn("update_plan", planned.forbidden_tool_names())
+
+    def test_common_eval_definition_requires_plan_expected_for_update_plan(self):
+        with self.assertRaises(ValueError):
+            CommonUseCaseEvalDefinition.from_mapping(
+                {
+                    "slug": "bad_expected_update_plan",
+                    "category": "planning",
+                    "prompt": "Create a plan.",
+                    "expected_tools": ["update_plan"],
+                    "plan_expected": True,
+                }
+            )
+
+    def test_plan_activity_only_includes_update_plan(self):
+        read = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
+        sqlite_mutation = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Monitor competitors'"},
+        )
+        update_plan = self._add_tool_call("update_plan", {"plan": [{"step": "Research", "status": "todo"}]})
+
+        self.assertFalse(tool_call_is_plan_activity(read))
+        self.assertFalse(tool_call_is_plan_activity(sqlite_mutation))
+        self.assertTrue(tool_call_is_plan_activity(update_plan))
+        self.assertEqual(get_plan_activity_calls_for_run(self.run.id), [update_plan])
+
+    def test_common_use_case_tool_calls_ignore_sqlite_config_mutations(self):
+        config_update = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter = 'Monitor competitors'"},
+        )
+        expected = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM leads"})
+        unrelated = self._add_tool_call("http_request")
+
+        self.assertEqual(
+            get_common_use_case_tool_calls_for_run(self.run.id, tool_names=["sqlite_batch"]),
+            [expected],
+        )
+        self.assertEqual(
+            get_common_use_case_tool_calls_for_run(self.run.id),
+            [expected, unrelated],
+        )
+        self.assertNotIn(config_update, get_common_use_case_tool_calls_for_run(self.run.id))
+
+    def test_common_eval_definition_requires_explicit_plan_expected(self):
+        with self.assertRaises(ValueError):
+            CommonUseCaseEvalDefinition.from_mapping(
+                {
+                    "slug": "missing_plan_expected",
+                    "category": "tool_choice",
+                    "prompt": "Fetch a JSON URL.",
+                    "expected_tools": ["http_request"],
+                }
+            )
 
     def test_forbidden_calls_before_end_planning_stops_at_end_planning(self):
         before = self._add_tool_call("http_request")
