@@ -50,9 +50,20 @@
   <link rel="manifest" href="{% url 'pages:web_manifest' %}">
   <meta name="theme-color" content="#0ea5e9">
 
-  <script src="https://unpkg.com/lucide@0.546.0"></script>
+  <!-- Connection hints for common third-party script origins -->
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   {% if settings.GOBII_PROPRIETARY_MODE %}
-  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
+  <link rel="preconnect" href="https://js.stripe.com">
+  {% endif %}
+  {% if settings.GA_MEASUREMENT_ID and not debug %}
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  {% endif %}
+
+  <script defer src="https://unpkg.com/lucide@0.546.0"></script>
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
   {% endif %}
   <script>
     document.addEventListener('DOMContentLoaded', function () {
@@ -345,9 +356,6 @@
   <!-- Custom Fonts -->
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
 
-  <!-- Syntax highlighting for code blocks -->
-  <link rel="stylesheet" href="{% static 'css/pygments.css' %}">
-
   <!-- Global CSS styles -->
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
   
@@ -399,7 +407,7 @@
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.13.7/dist/cdn.min.js"></script>
   
   <!-- Preline -->
-  <script src="https://cdn.jsdelivr.net/npm/preline@latest/dist/preline.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/preline@latest/dist/preline.min.js"></script>
 
   <script defer>
     // This script block handles the re-initialization of Preline components
@@ -451,18 +459,18 @@
     });
   </script>
 
-  <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
   {% if settings.TURNSTILE_ENABLED %}
     {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
     {% endif %}
   {% endif %}
-  <script src="{% static 'js/account_identity_signals.js' %}"></script>
-  <script src="{% static 'js/account_auth_forms.js' %}"></script>
-  <script src="{% static 'js/cta_signup_modal.js' %}"></script>
-  <script src="{% static 'js/cta_tracking.js' %}"></script>
-  <script src="{% static 'js/signup_tracking.js' %}"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js"></script>
+  <script src="{% static 'js/account_identity_signals.js' %}" defer></script>
+  <script src="{% static 'js/account_auth_forms.js' %}" defer></script>
+  <script src="{% static 'js/cta_signup_modal.js' %}" defer></script>
+  <script src="{% static 'js/cta_tracking.js' %}" defer></script>
+  <script src="{% static 'js/signup_tracking.js' %}" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js" defer></script>
   <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
 
   <style type="text/css">

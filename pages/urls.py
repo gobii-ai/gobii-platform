@@ -51,13 +51,13 @@ _markdown_page_view = MarkdownPageView.as_view()
 
 def docs_index_view(request, *args, **kwargs):
     if settings.GOBII_PROPRIETARY_MODE:
-        return redirect(EXTERNAL_DOCS_URL)
+        return redirect(EXTERNAL_DOCS_URL, permanent=True)
     return _docs_index_view(request, *args, **kwargs)
 
 
 def markdown_page_view(request, *args, **kwargs):
     if settings.GOBII_PROPRIETARY_MODE:
-        return redirect(EXTERNAL_DOCS_URL)
+        return redirect(EXTERNAL_DOCS_URL, permanent=True)
     return _markdown_page_view(request, *args, **kwargs)
 
 sitemaps = {

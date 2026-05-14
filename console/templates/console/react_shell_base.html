@@ -17,9 +17,17 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}" />
     <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}" />
   {% endif %}
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <link rel="preconnect" href="https://js.stripe.com">
+  {% endif %}
+  {% if settings.GA_MEASUREMENT_ID and not debug %}
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  {% endif %}
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
   {% if settings.GOBII_PROPRIETARY_MODE %}
-  <script src="https://js.stripe.com/dahlia/stripe.js"></script>
+  <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
   {% endif %}
   {% if fish_collateral_enabled %}
     <link rel="preload" as="image" href="{% static 'images/gobii_fish.png' %}" />
@@ -92,8 +100,8 @@
   </script>
   {% endif %}
 
-  <script src="{% static 'js/gobii_analytics.js' %}"></script>
-  <script src="{% static 'js/signup_tracking.js' %}"></script>
+  <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
+  <script src="{% static 'js/signup_tracking.js' %}" defer></script>
 
   {# Signup tracking events - uses shared include with fetch-based retry #}
   {% with signup_tracking_source='react_shell' %}

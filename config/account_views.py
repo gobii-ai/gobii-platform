@@ -139,7 +139,14 @@ class ModalAuthViewMixin:
         return context
 
 
-class AccountSignupModalView(ModalAuthViewMixin, SignupView):
+class ModalAuthNoIndexMixin:
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        response["X-Robots-Tag"] = "noindex, nofollow"
+        return response
+
+
+class AccountSignupModalView(ModalAuthNoIndexMixin, ModalAuthViewMixin, SignupView):
     template_name = "account/modal_signup.html"
     auth_active_tab = "signup"
 
@@ -190,7 +197,7 @@ class AccountSignupModalView(ModalAuthViewMixin, SignupView):
         return super().post(request, *args, **kwargs)
 
 
-class AccountLoginModalView(ModalAuthViewMixin, LoginView):
+class AccountLoginModalView(ModalAuthNoIndexMixin, ModalAuthViewMixin, LoginView):
     template_name = "account/modal_login.html"
     auth_active_tab = "login"
 

@@ -1,5 +1,6 @@
 from datetime import timedelta
 from urllib.parse import parse_qs, urlparse
+import json
 import re
 from types import SimpleNamespace
 from unittest.mock import patch, MagicMock
@@ -11,6 +12,7 @@ from django.contrib.auth.models import AnonymousUser
 from django.contrib.sites.models import Site
 from django.core import signing
 from django.template.loader import render_to_string
+from django.templatetags.static import static
 from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -407,6 +409,18 @@ class HomePageTests(TestCase):
         self.assertEqual(
             [app["slug"] for app in response.context.get("homepage_integrations_inline_builtins")],
             ["linkedin", "google_sheets", "trello", "slack"],
+        )
+        self.assertEqual(
+            [
+                app["inline_icon_url"]
+                for app in response.context.get("homepage_integrations_inline_builtins")
+            ],
+            [
+                static("images/integrations/pipedream/linkedin.svg"),
+                static("images/integrations/pipedream/google_sheets.svg"),
+                static("images/integrations/pipedream/trello.svg"),
+                static("images/integrations/pipedream/slack.svg"),
+            ],
         )
 
     @patch(
@@ -1242,6 +1256,9 @@ class RobotsTxtTests(TestCase):
         self.assertContains(response, "Sitemap:")
         lines = [line.strip() for line in response.content.decode().splitlines() if line.strip()]
         self.assertIn("Disallow: /console/agents/", lines)
+        self.assertNotIn("Disallow: /accounts/modal/", lines)
+        self.assertNotIn("Disallow: /d/", lines)
+        self.assertNotIn("Disallow: /m/", lines)
         self.assertNotIn("Disallow: /", lines)
 
     @tag("batch_pages")
@@ -1300,6 +1317,64 @@ class SitemapTests(TestCase):
             f"http://example.com/pretrained-workers/{template.code}/",
             response.content.decode(),
         )
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("http://example.com/pricing/", content)
+        self.assertIn("http://example.com/blog/", content)
+        self.assertNotIn("http://example.com/docs/", content)
+        self.assertNotIn("/subscribe/startup/", content)
+        self.assertNotIn("/subscribe/pro/", content)
+        self.assertNotIn("/subscribe/scale/", content)
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_community_sitemap_includes_local_docs(self):
+        response = self.client.get("/sitemap.xml")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("http://example.com/docs/", response.content.decode())
+
+
+@tag("batch_pages")
+class DocsRedirectTests(TestCase):
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_docs_redirects_are_permanent_in_proprietary_mode(self):
+        for path in ("/docs/", "/docs/guides/api/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 301)
+                self.assertEqual(response["Location"], "https://docs.gobii.ai/")
+
+
+@tag("batch_pages")
+class ApiDocsRobotsTests(TestCase):
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_swagger_ui_is_noindex_follow(self):
+        for url_name in ("schema-swagger-ui", "api_docs"):
+            with self.subTest(url_name=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_swagger_ui_redirect_is_noindex_follow_in_proprietary_mode(self):
+        response = self.client.get(reverse("schema-swagger-ui"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
+    @tag("batch_pages")
+    @override_settings(GOBII_PROPRIETARY_MODE=False)
+    def test_redoc_robots_header_unchanged(self):
+        response = self.client.get(reverse("schema-redoc"))
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.has_header("X-Robots-Tag"))
 
 
 @tag("batch_pages")
@@ -1378,6 +1453,95 @@ class PretrainedWorkerDirectoryTests(TestCase):
             segment for segment in detail_button.stripped_strings if segment and segment != "→"
         ).strip()
         self.assertEqual(detail_button_text, "Create Agent")
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    @tag("batch_pages")
+    def test_pretrained_worker_detail_includes_search_metadata(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        detail_url = f"http://testserver/pretrained-workers/{template.code}/"
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, f'<link rel="canonical" href="{detail_url}">')
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(
+            soup.title.string.strip(),
+            f"{template.display_name} AI Agent Template | Gobii",
+        )
+        description = soup.find("meta", attrs={"name": "description"})
+        self.assertIsNotNone(description)
+        self.assertIn(template.description[:80], description["content"])
+        og_url = soup.find("meta", property="og:url")
+        self.assertIsNotNone(og_url)
+        self.assertEqual(og_url["content"], detail_url)
+        og_image = soup.find("meta", property="og:image")
+        self.assertIsNotNone(og_image)
+        self.assertIn("/static/images/", og_image["content"])
+
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["name"], template.display_name)
+        self.assertEqual(application_schema["url"], detail_url)
+        self.assertEqual(application_schema["creator"]["name"], "Gobii")
+
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(
+            breadcrumb_schema["itemListElement"][-1]["item"],
+            detail_url,
+        )
+
+    @tag("batch_pages")
+    @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
+    def test_pretrained_worker_detail_escapes_json_ld_script_closing_sequence(self, mock_get_template_by_code):
+        display_name = 'Bad </script><script>alert("x")</script>'
+        description = "Description </script><img src=x onerror=alert(1)>"
+        mock_get_template_by_code.return_value = SimpleNamespace(
+            code="unsafe-template",
+            display_name=display_name,
+            tagline="Unsafe tagline",
+            description=description,
+            category="Operations",
+            charter="Do useful work.",
+            base_schedule="0 9 * * *",
+            schedule_jitter_minutes=0,
+            event_triggers=[],
+            default_tools=[],
+            recommended_contact_channel="email",
+        )
+
+        response = self.client.get(
+            reverse("pages:pretrained_worker_detail", kwargs={"slug": "unsafe-template"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003Ealert", content)
+        self.assertNotIn('</script><script>alert("x")</script>', content)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["name"], display_name)
+        self.assertEqual(application_schema["description"], description)
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(breadcrumb_schema["itemListElement"][-1]["name"], display_name)
 
 
 @tag("batch_pages")
@@ -2096,6 +2260,14 @@ class AgentSpawnIntentApiTests(TestCase):
 
 @tag("batch_pages")
 class CheckoutRedirectTests(TestCase):
+    @tag("batch_pages")
+    def test_checkout_start_pages_are_noindex_follow(self):
+        for url_name in ("proprietary:startup_checkout", "proprietary:pro_checkout", "proprietary:scale_checkout"):
+            with self.subTest(url_name=url_name):
+                response = self.client.get(reverse(url_name))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
+
     @tag("batch_pages")
     @patch("pages.views.reconcile_user_plan_from_stripe")
     @patch("pages.views._prepare_stripe_or_404")
@@ -3686,6 +3858,14 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("lock_email"), ["1"])
         self.assertEqual(params.get("step"), ["password"])
         self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    def test_auth_modal_fragments_are_noindex(self):
+        for route_name in ("account_signup_modal", "account_login_modal"):
+            response = self.client.get(reverse(route_name))
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow")
 
     @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})

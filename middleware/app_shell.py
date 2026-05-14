@@ -81,13 +81,21 @@ def _format_signup_tracking_snippet() -> str:
 
     return """<script>
   (function() {
-    if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
-      return;
+    function fireSignupTracking() {
+      if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
+        return;
+      }
+      window.GobiiSignupTracking.fetchAndFire({
+        endpoint: '/clear_signup_tracking',
+        source: 'app_shell'
+      });
     }
-    window.GobiiSignupTracking.fetchAndFire({
-      endpoint: '/clear_signup_tracking',
-      source: 'app_shell'
-    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fireSignupTracking, { once: true });
+    } else {
+      fireSignupTracking();
+    }
   })();
   </script>"""
 
@@ -176,6 +184,11 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
     fonts_css = static("css/custom_fonts.css")
     pygments_css = static("css/pygments.css")
     globals_css = static("css/globals.css")
+    google_tag_preconnect = (
+        '<link rel="preconnect" href="https://www.googletagmanager.com" />'
+        if settings.GA_MEASUREMENT_ID and not settings.DEBUG
+        else ""
+    )
     csrf_cookie_name = getattr(settings, "CSRF_COOKIE_NAME", "csrftoken") or "csrftoken"
     max_chat_upload_size_bytes = get_max_file_size()
     max_chat_upload_size_attr = (
@@ -199,6 +212,8 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   <meta name="csrf-cookie-name" content="{csrf_cookie_name}">
   <title>Gobii App</title>
   <link rel="icon" type="image/png" href="{icon_url}" />
+  <link rel="preconnect" href="https://cdn.tailwindcss.com" />
+  {google_tag_preconnect}
   <link rel="preload" as="image" href="{icon_url}" />
   <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
   <link rel="stylesheet" href="{fonts_css}">
@@ -207,8 +222,8 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   {pixel_loaders}
   <script src="{segment_bootstrap_js}"></script>
   {segment_snippet}
-  <script src="{analytics_js}"></script>
-  <script src="{signup_tracking_js}"></script>
+  <script src="{analytics_js}" defer></script>
+  <script src="{signup_tracking_js}" defer></script>
   {signup_tracking}
   {vite_tags}
 </head>

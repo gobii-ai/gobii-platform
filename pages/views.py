@@ -1,5 +1,6 @@
 from datetime import timezone, datetime
 from functools import lru_cache
+import json
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit
 from types import SimpleNamespace
@@ -21,6 +22,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
+from django.templatetags.static import static
 from django.db import DatabaseError
 from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, TrialPromo, UserBilling
 from api.agent.short_description import build_listing_description, build_mini_description
@@ -135,6 +137,7 @@ from django.contrib import sitemaps
 from django.urls import NoReverseMatch, reverse
 from django.utils import timezone as dj_timezone
 from django.utils.html import escape, strip_tags
+from django.utils.safestring import mark_safe
 from opentelemetry import trace
 from marketing_events.api import capi
 from marketing_events.telemetry import record_fbc_synthesized
@@ -149,6 +152,23 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
 INSTALL_SCRIPT_PATH = Path(__file__).with_name("install.sh")
+X_ROBOTS_NOINDEX_FOLLOW = "noindex, follow"
+JSON_SCRIPT_ESCAPES = {
+    ord(">"): "\\u003E",
+    ord("<"): "\\u003C",
+    ord("&"): "\\u0026",
+}
+
+
+def html_safe_json_dumps(value):
+    return mark_safe(json.dumps(value, ensure_ascii=False).translate(JSON_SCRIPT_ESCAPES))
+
+
+class NoIndexFollowMixin:
+    def dispatch(self, request, *args, **kwargs):
+        response = super().dispatch(request, *args, **kwargs)
+        response["X-Robots-Tag"] = X_ROBOTS_NOINDEX_FOLLOW
+        return response
 
 
 @lru_cache(maxsize=1)
@@ -169,7 +189,21 @@ HOMEPAGE_INLINE_INTEGRATION_SLUGS = (
     "trello",
     "slack",
 )
+HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS = {
+    "google_sheets": "images/integrations/pipedream/google_sheets.svg",
+    "linkedin": "images/integrations/pipedream/linkedin.svg",
+    "slack": "images/integrations/pipedream/slack.svg",
+    "trello": "images/integrations/pipedream/trello.svg",
+}
 _LANDING_UTM_TRACKER = UTMTrackingMiddleware(lambda request: None)
+
+
+def _with_homepage_inline_integration_icon(app: dict) -> dict:
+    slug = str(app.get("slug") or "").strip()
+    icon_path = HOMEPAGE_INLINE_INTEGRATION_ICON_PATHS.get(slug)
+    if not icon_path:
+        return app
+    return {**app, "inline_icon_url": static(icon_path)}
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -1052,7 +1086,7 @@ class HomePage(TemplateView):
             if str(app.get("slug") or "").strip()
         }
         inline_builtin_integrations = [
-            builtin_by_slug[slug]
+            _with_homepage_inline_integration_icon(builtin_by_slug[slug])
             for slug in HOMEPAGE_INLINE_INTEGRATION_SLUGS
             if slug in builtin_by_slug
         ]
@@ -1370,7 +1404,71 @@ class PretrainedWorkerDetailView(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        detail_url = self.request.build_absolute_uri(
+            reverse('pages:pretrained_worker_detail', kwargs={'slug': self.employee.code})
+        )
+        home_url = self.request.build_absolute_uri(reverse('pages:home'))
+        default_image_path = (
+            "images/gobii_fish_social_1280x640.png"
+            if is_fish_collateral_enabled()
+            else "images/noBgBlue.png"
+        )
+        default_social_image_url = self.request.build_absolute_uri(static(default_image_path))
+        seo_description = (self.employee.description or self.employee.tagline or "").strip()
+        social_title = f"{self.employee.display_name} AI Agent Template"
+
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": self.employee.display_name,
+            "description": seo_description,
+            "applicationCategory": self.employee.category or "BusinessApplication",
+            "operatingSystem": "Web",
+            "url": detail_url,
+            "image": default_social_image_url,
+            "creator": {
+                "@type": "Organization",
+                "name": "Gobii",
+            },
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+        }
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Pretrained Workers",
+                    "item": f"{home_url}#pretrained-workers",
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": self.employee.display_name,
+                    "item": detail_url,
+                },
+            ],
+        }
+
         context["pretrained_worker"] = self.employee
+        context["pretrained_worker_url"] = detail_url
+        context["pretrained_worker_social_title"] = social_title
+        context["pretrained_worker_seo_title"] = f"{social_title} | Gobii"
+        context["pretrained_worker_seo_description"] = seo_description
+        context["pretrained_worker_social_image_url"] = default_social_image_url
+        context["pretrained_worker_structured_data_json"] = html_safe_json_dumps(structured_data)
+        context["pretrained_worker_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
         context["schedule_jitter_minutes"] = self.employee.schedule_jitter_minutes
         context["base_schedule"] = self.employee.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.employee.base_schedule)
@@ -2232,7 +2330,7 @@ class PaidPlanLanding(LoginRequiredMixin, TemplateView):
         context['plan_slug'] = plan_slug
         return context
 
-class StartupCheckoutView(LoginRequiredMixin, View):
+class StartupCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Startup subscription plan."""
 
     def get(self, request, *args, **kwargs):
@@ -2443,7 +2541,7 @@ class StartupCheckoutView(LoginRequiredMixin, View):
         return redirect(session.url)
 
 
-class ScaleCheckoutView(LoginRequiredMixin, View):
+class ScaleCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
     """Initiate Stripe Checkout for the Scale subscription plan."""
 
     def get(self, request, *args, **kwargs):
@@ -2657,7 +2755,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
         items = [
             'pages:home',
             'pages:library',
-            'pages:docs_index',
         ]
         # Include pricing only when proprietary mode is enabled
         try:
@@ -2668,8 +2765,9 @@ class StaticViewSitemap(sitemaps.Sitemap):
                 items.insert(4, 'proprietary:about')
                 items.insert(5, 'proprietary:team')
                 items.insert(6, 'proprietary:careers')
-                items.insert(7, 'proprietary:startup_checkout')
-                items.insert(8, 'proprietary:blog_index')
+                items.insert(7, 'proprietary:blog_index')
+            else:
+                items.append('pages:docs_index')
         except Exception:
             pass
         return items

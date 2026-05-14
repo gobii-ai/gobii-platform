@@ -39,7 +39,7 @@ class SiteDocsUrlTests(TestCase):
         for docs_path in self._docs_paths:
             with self.subTest(docs_path=docs_path):
                 response = self.client.get(docs_path)
-                self.assertEqual(response.status_code, 302)
+                self.assertEqual(response.status_code, 301)
                 self.assertEqual(response["Location"], self._docs_redirect_url)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)

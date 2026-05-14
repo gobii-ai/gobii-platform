@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 import uuid
 import tempfile
 import os
+from urllib.parse import urlparse
 
 from api.models import (
     PersistentAgent, 
@@ -16,6 +17,7 @@ from api.models import (
     AgentFileSpaceAccess,
     AgentFsNode
 )
+from api.agent.files.attachment_helpers import build_signed_filespace_download_url
 
 
 @tag("batch_agent_filesystem")
@@ -317,6 +319,29 @@ class AgentFsNodeModelTests(TestCase):
         self.assertIsNotNone(file_node.content)
         self.assertFalse(file_node.is_dir)
         self.assertTrue(file_node.is_file)
+
+    @tag("batch_agent_filesystem")
+    def test_signed_download_response_is_noindex(self):
+        AgentFileSpaceAccess.objects.create(
+            filespace=self.filespace,
+            agent=self.persistent_agent,
+            role=AgentFileSpaceAccess.Role.READER,
+            is_default=False,
+        )
+        file_node = AgentFsNode.objects.create(
+            filespace=self.filespace,
+            node_type=AgentFsNode.NodeType.FILE,
+            name="hello.txt",
+            content=ContentFile(b"Hello, world!", name="hello.txt"),
+            mime_type="text/plain",
+            created_by_agent=self.persistent_agent,
+        )
+        signed_url = build_signed_filespace_download_url(self.persistent_agent.id, file_node.id)
+
+        response = self.client.get(urlparse(signed_url).path)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow")
 
     def test_nested_directory_structure(self):
         """Test creating nested directories and files."""

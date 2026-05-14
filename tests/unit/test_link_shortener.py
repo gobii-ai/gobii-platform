@@ -92,6 +92,7 @@ class LinkShortenerTests(TestCase):
         resp = self.client.get(f"/m/{link.code}/")
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "https://example.com")
+        self.assertEqual(resp["X-Robots-Tag"], "noindex, nofollow")
         link.refresh_from_db()
         self.assertEqual(link.hits, 1)
 
