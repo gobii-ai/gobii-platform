@@ -1,9 +1,13 @@
 from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.search_tools import search_tools
+from api.agent.tools.tool_manager import get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
@@ -34,6 +38,7 @@ from api.models import (
     EvalRun,
     PersistentAgent,
     PersistentAgentConversation,
+    PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -78,6 +83,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             self.assertIsInstance(case.allowed_preamble_tools, tuple)
             self.assertIsInstance(case.ignored_tools, tuple)
             self.assertIsInstance(case.accepted_tool_alternatives, dict)
+            self.assertIsInstance(case.eval_synthetic_tools, tuple)
             self.assertIsInstance(case.stop_after_success, bool)
             self.assertEqual(
                 case.update_plan_policy,
@@ -104,6 +110,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].allowed_preamble_tools, ("search_tools",))
         self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].allowed_preamble_tools, ("search_tools",))
         self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].allowed_preamble_tools, ("search_tools",))
+        self.assertEqual(
+            by_slug["common_use_case_036_apollo_contacts"].eval_synthetic_tools,
+            ("apollo_io-search-contacts",),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_037_apollo_accounts"].eval_synthetic_tools,
+            ("apollo_io-search-accounts",),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_038_apollo_enrich_person"].eval_synthetic_tools,
+            ("apollo_io-people-enrichment",),
+        )
         self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
@@ -146,6 +164,13 @@ class BehaviorMicroHelperTests(TestCase):
             status=EvalRun.Status.RUNNING,
         )
 
+    def _tool_definition_names(self, agent):
+        with patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False):
+            return {
+                definition["function"]["name"]
+                for definition in get_enabled_tool_definitions(agent)
+            }
+
     def _add_tool_call(self, tool_name, params=None):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
@@ -179,6 +204,65 @@ class BehaviorMicroHelperTests(TestCase):
             options_json=[{"key": "yes", "title": "Yes"}],
             requested_via_channel=CommsChannel.WEB,
         )
+
+    def test_eval_synthetic_tools_are_catalog_backed_for_eval_agents(self):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        scenario = ScenarioRegistry.get("common_use_case_037_apollo_accounts")
+
+        scenario._enable_builtin_tools(self.agent.id, ["apollo_io-search-accounts"])
+        row = PersistentAgentEnabledTool.objects.get(
+            agent=self.agent,
+            tool_full_name="apollo_io-search-accounts",
+        )
+        self.assertEqual(row.tool_server, "")
+        self.assertNotIn("apollo_io-search-accounts", self._tool_definition_names(self.agent))
+
+        scenario._enable_eval_synthetic_tools(self.agent.id, ["apollo_io-search-accounts"])
+        row.refresh_from_db()
+
+        self.assertEqual(row.tool_server, EVAL_SYNTHETIC_TOOL_SERVER)
+        self.assertEqual(row.tool_name, "apollo_io-search-accounts")
+        self.assertIn("apollo_io-search-accounts", self._tool_definition_names(self.agent))
+
+    @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=False)
+    @patch("api.agent.tools.search_tools.enable_tools")
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_search_tools_catalog_includes_eval_synthetic_tools(
+        self,
+        _mock_sandbox_compute_enabled,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        _mock_has_active_pipedream_runtime,
+    ):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        message = MagicMock()
+        message.content = "No relevant tools."
+        message.tool_calls = []
+        choice = MagicMock()
+        choice.message = message
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "Apollo company search")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("apollo_io-search-accounts", user_message)
+        mock_enable_tools.assert_not_called()
 
     def test_first_relevant_tool_call_skips_ignored_tools(self):
         self._add_tool_call("send_chat_message")

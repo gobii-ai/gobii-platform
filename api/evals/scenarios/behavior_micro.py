@@ -1,5 +1,9 @@
 from dataclasses import dataclass, field
 
+from api.agent.tools.eval_synthetic_tools import (
+    EVAL_SYNTHETIC_TOOL_DEFINITIONS,
+    EVAL_SYNTHETIC_TOOL_SERVER,
+)
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
@@ -12,6 +16,7 @@ from api.evals.stop_policy import (
 from api.models import (
     EvalRunTask,
     PersistentAgent,
+    PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentToolCall,
@@ -50,6 +55,7 @@ class CommonUseCaseEvalDefinition:
     allowed_preamble_tools: tuple[str, ...] = field(default_factory=tuple)
     ignored_tools: tuple[str, ...] = field(default_factory=tuple)
     accepted_tool_alternatives: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    eval_synthetic_tools: tuple[str, ...] = field(default_factory=tuple)
     stop_after_success: bool = True
 
     @classmethod
@@ -81,6 +87,7 @@ class CommonUseCaseEvalDefinition:
             allowed_preamble_tools=tuple(value.get("allowed_preamble_tools") or ()),
             ignored_tools=tuple(value.get("ignored_tools") or ()),
             accepted_tool_alternatives=accepted_tool_alternatives,
+            eval_synthetic_tools=tuple(value.get("eval_synthetic_tools") or ()),
             stop_after_success=stop_after_success,
         )
         definition.validate()
@@ -101,6 +108,12 @@ class CommonUseCaseEvalDefinition:
             raise ValueError(f"{self.slug} must declare expected_tools.")
         if UPDATE_PLAN_TOOL_NAME in self.expected_tools or UPDATE_PLAN_TOOL_NAME in self.forbidden_tools:
             raise ValueError(f"{self.slug} must use plan_expected instead of tool lists for update_plan.")
+        unknown_synthetic_tools = [
+            tool_name for tool_name in self.eval_synthetic_tools
+            if tool_name not in EVAL_SYNTHETIC_TOOL_DEFINITIONS
+        ]
+        if unknown_synthetic_tools:
+            raise ValueError(f"{self.slug} declares unknown eval_synthetic_tools: {unknown_synthetic_tools}.")
 
     def expected_tool_names(self):
         return list(self.expected_tools)
@@ -157,9 +170,9 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_033_linkedin_job_listings", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for Acme AI and return two open role titles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
     {"slug": "common_use_case_034_linkedin_people_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for product leaders at Acme AI and return three names.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
     {"slug": "common_use_case_035_linkedin_posts", "category": "lead_sourcing", "prompt": "Find recent LinkedIn posts from Acme AI and summarize the latest post.", "expected_tools": ["mcp_brightdata_web_data_linkedin_posts"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_036_apollo_contacts", "category": "lead_sourcing", "prompt": "Search Apollo for VP Sales contacts at healthcare SaaS companies in Boston.", "expected_tools": ["apollo_io-search-contacts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "plan_expected": True},
-    {"slug": "common_use_case_037_apollo_accounts", "category": "lead_sourcing", "prompt": "Search Apollo for cybersecurity accounts with 50-200 employees in Austin.", "expected_tools": ["apollo_io-search-accounts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "plan_expected": True},
-    {"slug": "common_use_case_038_apollo_enrich_person", "category": "lead_sourcing", "prompt": "Enrich the Apollo profile for pat@example.test and return company and title.", "expected_tools": ["apollo_io-people-enrichment"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "plan_expected": True},
+    {"slug": "common_use_case_036_apollo_contacts", "category": "lead_sourcing", "prompt": "Search Apollo for VP Sales contacts at healthcare SaaS companies in Boston.", "expected_tools": ["apollo_io-search-contacts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-contacts"], "plan_expected": True},
+    {"slug": "common_use_case_037_apollo_accounts", "category": "lead_sourcing", "prompt": "Search Apollo for cybersecurity accounts with 50-200 employees in Austin.", "expected_tools": ["apollo_io-search-accounts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-accounts"], "plan_expected": True},
+    {"slug": "common_use_case_038_apollo_enrich_person", "category": "lead_sourcing", "prompt": "Enrich the Apollo profile for pat@example.test and return company and title.", "expected_tools": ["apollo_io-people-enrichment"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-people-enrichment"], "plan_expected": True},
     {"slug": "common_use_case_039_amazon_product", "category": "commerce_research", "prompt": "Get Amazon product data for ASIN B000TEST01 and return rating and price.", "expected_tools": ["mcp_brightdata_web_data_amazon_product"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_040_instagram_profile", "category": "social_research", "prompt": "Get Instagram profile data for examplebrand and return follower count.", "expected_tools": ["mcp_brightdata_web_data_instagram_profiles"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_041_reddit_posts", "category": "social_research", "prompt": "Fetch Reddit posts about ExampleApp and summarize the top complaint.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
@@ -371,6 +384,18 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
         agent = PersistentAgent.objects.get(id=agent_id)
         for tool_name in tool_names:
             mark_tool_enabled_without_discovery(agent, tool_name)
+
+    def _enable_eval_synthetic_tools(self, agent_id, tool_names):
+        agent = PersistentAgent.objects.get(id=agent_id)
+        for tool_name in tool_names:
+            mark_tool_enabled_without_discovery(agent, tool_name)
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=tool_name,
+            ).update(
+                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+                tool_name=tool_name,
+            )
 
     def _planning_guardrail_mocks(self):
         return {
@@ -1151,6 +1176,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
         self._enable_builtin_tools(agent_id, [*self._accepted_expected_tool_names(), *forbidden_tools])
+        self._enable_eval_synthetic_tools(agent_id, case.eval_synthetic_tools)
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):

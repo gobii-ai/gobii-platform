@@ -56,6 +56,11 @@ from .custom_tools import (
     execute_custom_tool,
     is_custom_tools_available_for_agent,
 )
+from .eval_synthetic_tools import (
+    EVAL_SYNTHETIC_TOOL_DEFINITIONS,
+    EVAL_SYNTHETIC_TOOL_SERVER,
+    get_eval_synthetic_tool_definition,
+)
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
 from .meta_ads import get_meta_ads_tool, execute_meta_ads
@@ -513,6 +518,21 @@ def _build_available_tool_index(
 
     catalog.update(get_available_builtin_tool_entries(agent, include_hidden=include_hidden_builtin))
     catalog.update(get_available_custom_tool_entries(agent))
+    for tool_name, metadata in EVAL_SYNTHETIC_TOOL_DEFINITIONS.items():
+        if tool_name in blacklisted_tools:
+            continue
+        tool_def = get_eval_synthetic_tool_definition(agent, tool_name)
+        if not tool_def:
+            continue
+        catalog[tool_name] = ToolCatalogEntry(
+            provider="eval",
+            full_name=tool_name,
+            description=metadata["description"],
+            parameters=metadata["parameters"],
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=tool_name,
+            server_config_id=None,
+        )
 
     return catalog
 
@@ -1046,6 +1066,25 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
                 }
             )
             existing_names.add(tool.tool_name)
+
+    enabled_eval_tool_names = (
+        PersistentAgentEnabledTool.objects
+        .filter(
+            agent=agent,
+            tool_full_name__in=list(EVAL_SYNTHETIC_TOOL_DEFINITIONS.keys()),
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+        )
+        .exclude(tool_full_name__in=list(blacklisted_tools))
+        .values_list("tool_full_name", flat=True)
+    )
+    for tool_name in enabled_eval_tool_names:
+        if tool_name in existing_names:
+            continue
+        tool_def = get_eval_synthetic_tool_definition(agent, tool_name)
+        if not tool_def:
+            continue
+        definitions.append(_sanitize_tool_definition_for_llm(tool_def))
+        existing_names.add(tool_name)
 
     for row in enabled_builtin_rows:
         registry_entry = BUILTIN_TOOL_REGISTRY.get(row.tool_full_name)

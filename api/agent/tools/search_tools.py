@@ -35,6 +35,7 @@ from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failove
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
 from .global_skills import enable_global_skills, get_compatible_global_skills
+from .eval_synthetic_tools import get_available_eval_synthetic_tool_catalog
 from .mcp_manager import get_mcp_manager
 from .skill_utils import format_skill_secret_requirement, normalize_skill_tool_ids
 from .sqlite_skills import get_latest_skill_versions
@@ -1338,6 +1339,11 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_custom_tool_entries(agent).values()
     ]
+    eval_synthetic_catalog = [
+        entry
+        for entry in get_available_eval_synthetic_tool_catalog(agent)
+        if entry["full_name"] not in blacklisted_tools
+    ]
     global_skill_catalog = get_compatible_global_skills(agent)
     agent_skill_catalog = _filter_agent_skills_for_tool_blacklist(
         get_latest_skill_versions(agent),
@@ -1348,7 +1354,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         available_tool_names=hidden_builtin_names,
     )
 
-    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog
+    combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
     pipedream_app_catalog: list[Any] = []
     enabled_app_slugs: list[str] = []
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
