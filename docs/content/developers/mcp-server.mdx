@@ -1,0 +1,126 @@
+---
+title: "Remote MCP Server"
+sidebarTitle: "Remote MCP Server"
+description: "Connect an MCP client to Gobii over HTTPS and use Gobii as agent infrastructure."
+---
+
+Gobii exposes a remote Model Context Protocol (MCP) endpoint so external AI tools can create, manage, coordinate, message, and attach files to Gobii agents through your existing Gobii API key.
+
+## Endpoint
+
+Use the Streamable HTTP endpoint:
+
+- Production: `https://gobii.ai/api/v1/mcp/`
+- Self-hosted/local: `http://localhost:8000/api/v1/mcp/`
+
+Gobii implements the MCP `2025-06-18` JSON-RPC flow over Streamable HTTP. Each request is a new `POST` with one JSON-RPC object. The endpoint returns `application/json` for requests and `202 Accepted` for notifications/responses. Gobii does not open a standalone GET SSE stream in v1, so `GET /api/v1/mcp/` returns `405 Method Not Allowed`.
+
+References:
+
+- MCP Streamable HTTP transport: https://modelcontextprotocol.io/specification/2025-06-18/basic/transports
+- MCP tools protocol: https://modelcontextprotocol.io/specification/2025-06-18/server/tools
+- MCP HTTP authorization guidance: https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization
+
+## Authentication
+
+Use an existing Gobii API key. Send it on every request with either header:
+
+```http
+X-Api-Key: $GOBII_API_KEY
+```
+
+or:
+
+```http
+Authorization: Bearer $GOBII_API_KEY
+```
+
+Do not put API keys in query strings. Organization API keys scope tools to organization-owned agents; personal API keys scope tools to agents accessible to that user.
+
+## Client Request Shape
+
+Initialize:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "init-1",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-06-18",
+      "capabilities": {},
+      "clientInfo": {"name": "example-client", "version": "1.0.0"}
+    }
+  }'
+```
+
+List tools:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}'
+```
+
+Call a tool:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "method": "tools/call",
+    "params": {
+      "name": "gobii_list_agents",
+      "arguments": {"page_size": 10}
+    }
+  }'
+```
+
+Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients send them.
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `gobii_list_agents` | List accessible persistent agents. |
+| `gobii_get_agent` | Retrieve one agent. |
+| `gobii_create_agent` | Create an agent through Gobii's normal provisioning path. |
+| `gobii_update_agent` | Update mutable agent settings. |
+| `gobii_archive_agent` | Soft-delete/archive an agent. |
+| `gobii_list_agent_links` | List peer-agent links. |
+| `gobii_link_agents` | Create or enable a peer-agent link. |
+| `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
+| `gobii_send_agent_message` | Send a web-chat message to an agent, optionally with existing filespace attachments. |
+| `gobii_get_agent_timeline` | Fetch recent timeline and processing state. |
+| `gobii_list_agent_files` | List an agent's default filespace. |
+| `gobii_upload_agent_file` | Upload a small base64 file into the agent filespace. |
+
+Gobii does not expose MCP resources or prompts in v1. The current product capabilities map more cleanly to MCP tools.
+
+## Files And Attachments
+
+Preferred flow:
+
+1. Upload a small file with `gobii_upload_agent_file`, or create/upload the file in the Gobii agent filespace through the product.
+2. Send a message with `gobii_send_agent_message`.
+3. Pass filespace paths in `attachment_file_paths`, for example `["/uploads/brief.pdf"]`.
+
+This keeps message calls small and uses Gobii's existing filespace and attachment models. Arbitrary URL fetching is intentionally not exposed through the MCP server v1. Very large files should be added to the agent filespace outside MCP, then referenced by path.
+
+## Limitations
+
+- The endpoint is stateless and does not issue `Mcp-Session-Id` values.
+- Standalone GET SSE streams are not exposed in v1.
+- Tool results include both MCP text content and `structuredContent`.
+- All tool calls run with the permissions of the provided Gobii API key.
+- Origin headers are validated for browser-originated requests to reduce DNS rebinding risk.

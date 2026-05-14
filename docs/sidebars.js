@@ -52,6 +52,7 @@ const sidebars = {
       items: [
         'developers/developer-basics',
         'developers/developer-agents',
+        'developers/mcp-server',
         'developers/developer-tasks',
         'developers/structured-data',
         'developers/webhooks',
