@@ -21,6 +21,7 @@ from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.provider_hints import provider_hint_from_model
 from api.agent.core.token_usage import log_agent_completion
+from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import compute_charter_hash
 from api.agent.tools.create_image import (
     ImageGenerationResponseError,
@@ -285,6 +286,10 @@ def generate_agent_visual_description_task(
             persistent_agent_id,
         )
         return
+    if is_eval_agent(agent):
+        _clear_visual_requested_hash(agent.id, charter_hash)
+        logger.debug("Skipping visual description generation for eval agent %s", agent.id)
+        return
 
     charter = (agent.charter or "").strip()
     if not charter:
@@ -373,6 +378,10 @@ def generate_agent_avatar_task(
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
     except PersistentAgent.DoesNotExist:
         logger.info("Skipping avatar generation; agent %s no longer exists", persistent_agent_id)
+        return
+    if is_eval_agent(agent):
+        _clear_avatar_requested_hash(agent.id, charter_hash)
+        logger.debug("Skipping avatar generation for eval agent %s", agent.id)
         return
 
     charter = (agent.charter or "").strip()

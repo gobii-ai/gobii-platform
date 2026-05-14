@@ -38,7 +38,12 @@ class AgentAvatarGenerationTests(TestCase):
             password="pass",
         )
 
-    def _create_agent(self, charter: str = "Run technical recruiting workflows") -> PersistentAgent:
+    def _create_agent(
+        self,
+        charter: str = "Run technical recruiting workflows",
+        *,
+        execution_environment: str | None = None,
+    ) -> PersistentAgent:
         sequence = PersistentAgent.objects.count() + 1
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -49,6 +54,7 @@ class AgentAvatarGenerationTests(TestCase):
             name=f"Avatar Agent {sequence}",
             charter=charter,
             browser_use_agent=browser_agent,
+            **({"execution_environment": execution_environment} if execution_environment else {}),
         )
 
     def _prepare_visual_ready_agent(self, charter: str = "Run technical recruiting workflows") -> PersistentAgent:
@@ -98,6 +104,22 @@ class AgentAvatarGenerationTests(TestCase):
         agent.refresh_from_db()
         self.assertEqual(agent.visual_description_requested_hash, expected_hash)
 
+    def test_maybe_schedule_agent_avatar_skips_eval_agent(self):
+        agent = self._create_agent(execution_environment="eval")
+        with patch(
+            "api.agent.tasks.agent_avatar.generate_agent_visual_description_task.delay"
+        ) as mocked_visual_delay, patch(
+            "api.agent.tasks.agent_avatar.generate_agent_avatar_task.delay"
+        ) as mocked_avatar_delay:
+            scheduled = maybe_schedule_agent_avatar(agent)
+
+        self.assertFalse(scheduled)
+        mocked_visual_delay.assert_not_called()
+        mocked_avatar_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(agent.visual_description_requested_hash, "")
+        self.assertEqual(agent.avatar_requested_hash, "")
+
     def test_maybe_schedule_agent_avatar_enqueues_avatar_when_visual_exists(self):
         agent = self._create_agent()
         agent.visual_description = "A composed professional with distinct freckles and wire-rim glasses."
@@ -138,6 +160,23 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertEqual(agent.visual_description_requested_hash, "")
         mocked_schedule_avatar.assert_called_once_with(agent, routing_profile_id=None)
 
+    def test_generate_visual_description_task_skips_eval_agent_and_clears_request(self):
+        agent = self._create_agent(execution_environment="eval")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.visual_description_requested_hash = charter_hash
+        agent.save(update_fields=["visual_description_requested_hash"])
+
+        with patch("api.agent.tasks.agent_avatar._generate_visual_description_via_llm") as mocked_generate, patch(
+            "api.agent.tasks.agent_avatar.maybe_schedule_agent_avatar"
+        ) as mocked_schedule_avatar:
+            generate_agent_visual_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.visual_description, "")
+        self.assertEqual(agent.visual_description_requested_hash, "")
+        mocked_generate.assert_not_called()
+        mocked_schedule_avatar.assert_not_called()
+
     def test_generate_agent_avatar_task_updates_avatar_fields(self):
         agent = self._create_agent()
         charter_hash = compute_charter_hash(agent.charter)
@@ -161,6 +200,21 @@ class AgentAvatarGenerationTests(TestCase):
         self.assertTrue(agent.avatar)
         self.assertEqual(agent.avatar_charter_hash, charter_hash)
         self.assertEqual(agent.avatar_requested_hash, "")
+
+    def test_generate_agent_avatar_task_skips_eval_agent_and_clears_request(self):
+        agent = self._create_agent(execution_environment="eval")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.visual_description = "A confident operator with sharp features and a tailored charcoal shirt."
+        agent.avatar_requested_hash = charter_hash
+        agent.save(update_fields=["visual_description", "avatar_requested_hash"])
+
+        with patch("api.agent.tasks.agent_avatar._generate_avatar_image") as mocked_image_generation:
+            generate_agent_avatar_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertFalse(agent.avatar)
+        self.assertEqual(agent.avatar_requested_hash, "")
+        mocked_image_generation.assert_not_called()
 
     def test_generate_agent_avatar_task_skips_when_avatar_already_exists(self):
         agent = self._create_agent()

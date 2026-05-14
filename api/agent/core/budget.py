@@ -68,6 +68,7 @@ class BudgetContext:
     max_depth: int
     eval_run_id: Optional[str] = None
     mock_config: Optional[Dict[str, Any]] = None  # Tool mocks for evals
+    eval_stop_policy: Optional[Dict[str, Any]] = None  # Early-stop predicates for evals
 
 
 class AgentBudgetManager:

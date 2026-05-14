@@ -11,6 +11,7 @@ from celery import shared_task
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
+from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import compute_charter_hash
 from api.agent.tags import MAX_TAGS, normalize_tags, strip_code_fence
 from api.models import PersistentAgent, PersistentAgentCompletion
@@ -140,6 +141,10 @@ def generate_agent_tags_task(
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
     except PersistentAgent.DoesNotExist:
         logger.info("Skipping tag generation; agent %s no longer exists", persistent_agent_id)
+        return
+    if is_eval_agent(agent):
+        _clear_requested_hash(agent.id, charter_hash)
+        logger.debug("Skipping tag generation for eval agent %s", agent.id)
         return
 
     # Look up routing profile if provided

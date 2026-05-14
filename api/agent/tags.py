@@ -3,6 +3,7 @@
 import logging
 from typing import Iterable, List
 
+from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import compute_charter_hash
 from api.models import PersistentAgent
 
@@ -99,6 +100,9 @@ def maybe_schedule_agent_tags(
         agent: The agent to generate tags for.
         routing_profile_id: Optional routing profile ID to use for LLM calls.
     """
+    if is_eval_agent(agent):
+        return False
+
     charter = (agent.charter or "").strip()
     if not charter:
         return False

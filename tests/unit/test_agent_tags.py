@@ -25,12 +25,13 @@ class AgentTagGenerationTests(TestCase):
         )
         self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
 
-    def _create_agent(self, charter="Assist with operations") -> PersistentAgent:
+    def _create_agent(self, charter="Assist with operations", *, execution_environment: str | None = None) -> PersistentAgent:
         return PersistentAgent.objects.create(
             user=self.user,
             name="Persistent Agent",
             charter=charter,
             browser_use_agent=self.browser_agent,
+            **({"execution_environment": execution_environment} if execution_environment else {}),
         )
 
     def test_maybe_schedule_agent_tags_skips_when_charter_missing(self):
@@ -51,6 +52,16 @@ class AgentTagGenerationTests(TestCase):
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.tags_requested_hash, expected_hash)
         mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+
+    def test_maybe_schedule_agent_tags_skips_eval_agent(self):
+        agent = self._create_agent(execution_environment="eval")
+        with patch("api.agent.tasks.agent_tags.generate_agent_tags_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_agent_tags(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(agent.tags_requested_hash, "")
 
     def test_generate_agent_tags_updates_fields(self):
         agent = self._create_agent()
@@ -82,6 +93,20 @@ class AgentTagGenerationTests(TestCase):
         self.assertEqual(agent.tags, [])
         self.assertEqual(agent.tags_charter_hash, "")
         self.assertEqual(agent.tags_requested_hash, "")
+
+    def test_generate_agent_tags_skips_eval_agent_and_clears_request(self):
+        agent = self._create_agent(execution_environment="eval")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.tags_requested_hash = charter_hash
+        agent.save(update_fields=["tags_requested_hash"])
+
+        with patch("api.agent.tasks.agent_tags._generate_via_llm") as mocked_generate:
+            generate_agent_tags_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.tags, [])
+        self.assertEqual(agent.tags_requested_hash, "")
+        mocked_generate.assert_not_called()
 
     def test_extract_tags_handles_code_block_json(self):
         content = """```json

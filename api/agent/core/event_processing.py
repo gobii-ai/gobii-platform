@@ -2652,6 +2652,46 @@ def _should_abort_processing(
     )
 
 
+def _should_stop_for_eval_policy(
+    agent: PersistentAgent,
+    *,
+    budget_ctx: Optional[BudgetContext],
+    span: Any,
+) -> bool:
+    if not budget_ctx or not budget_ctx.eval_run_id or not budget_ctx.eval_stop_policy:
+        return False
+    try:
+        from api.evals.stop_policy import should_stop_for_eval_policy
+
+        should_stop, reason = should_stop_for_eval_policy(
+            budget_ctx.eval_run_id,
+            budget_ctx.eval_stop_policy,
+        )
+    except Exception:
+        logger.exception("Failed to evaluate eval stop policy for agent %s", agent.id)
+        return False
+    if not should_stop:
+        return False
+
+    logger.info(
+        "Agent %s: stopping eval processing early for run %s (%s).",
+        agent.id,
+        budget_ctx.eval_run_id,
+        reason or "eval stop policy matched",
+    )
+    try:
+        span.add_event(
+            "Eval stop policy matched",
+            {
+                "eval_run_id": str(budget_ctx.eval_run_id),
+                "reason": reason or "",
+            },
+        )
+    except Exception:
+        pass
+    return True
+
+
 def _close_active_cycle_for_skipped_agent(
     agent_id: Union[str, UUID],
     *,
@@ -3892,6 +3932,7 @@ def process_agent_events(
     depth: Optional[int] = None,
     eval_run_id: Optional[str] = None,
     mock_config: Optional[Dict[str, Any]] = None,
+    eval_stop_policy: Optional[Dict[str, Any]] = None,
     burn_follow_up_token: Optional[str] = None,
     inbound_generation: int | str | None = None,
     worker_pid: Optional[int] = None,
@@ -4077,6 +4118,7 @@ def process_agent_events(
         max_depth=int(max_depth),
         eval_run_id=eval_run_id,
         mock_config=mock_config,
+        eval_stop_policy=eval_stop_policy,
     )
     set_budget_context(ctx)
 
@@ -5384,6 +5426,11 @@ def _run_agent_loop(
                 followup_required = prepared_batch.followup_required
                 all_calls_sleep = prepared_batch.all_calls_sleep
 
+                if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
+                    _mark_accepted_human_generation_consumed()
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
+                    return cumulative_token_usage
+
                 executed_batch = _execute_prepared_tool_batch(
                     agent,
                     prepared_batch,
@@ -5427,6 +5474,11 @@ def _run_agent_loop(
                             )
                             _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     _mark_accepted_human_generation_consumed()
+                    return cumulative_token_usage
+
+                if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
+                    _mark_accepted_human_generation_consumed()
+                    _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
 
                 if _apply_runtime_updates():

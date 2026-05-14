@@ -150,6 +150,7 @@ class ScenarioExecutionTools:
         trigger_processing: bool = True,
         eval_run_id: str | None = None,
         mock_config: dict | None = None,
+        eval_stop_policy: dict | None = None,
     ) -> PersistentAgentMessage:
         """
         Send a message to the agent as a web user.
@@ -189,6 +190,7 @@ class ScenarioExecutionTools:
                 agent_id,
                 eval_run_id=current_run_id,
                 mock_config=mock_config,
+                eval_stop_policy=eval_stop_policy,
             )
 
         return msg
@@ -199,6 +201,7 @@ class ScenarioExecutionTools:
         *,
         eval_run_id: str | None = None,
         mock_config: dict | None = None,
+        eval_stop_policy: dict | None = None,
     ) -> None:
         """
         Manually trigger the agent's event processing loop.
@@ -208,6 +211,7 @@ class ScenarioExecutionTools:
             agent_id,
             eval_run_id=current_run_id,
             mock_config=mock_config,
+            eval_stop_policy=eval_stop_policy,
         )
 
     def _dispatch_agent_processing(
@@ -216,6 +220,7 @@ class ScenarioExecutionTools:
         *,
         eval_run_id: str | None = None,
         mock_config: dict | None = None,
+        eval_stop_policy: dict | None = None,
     ) -> None:
         """
         Start agent processing for scenario execution.
@@ -226,20 +231,23 @@ class ScenarioExecutionTools:
         try:
             from api.agent.tasks import process_agent_events_task
 
+            kwargs = {
+                "eval_run_id": eval_run_id,
+                "mock_config": mock_config,
+            }
+            if eval_stop_policy is not None:
+                kwargs["eval_stop_policy"] = eval_stop_policy
+
             if eval_run_id:
                 process_agent_events_task.apply(
                     args=(str(agent_id),),
-                    kwargs={
-                        "eval_run_id": eval_run_id,
-                        "mock_config": mock_config,
-                    },
+                    kwargs=kwargs,
                     throw=True,
                 )
             else:
                 process_agent_events_task.delay(
                     str(agent_id),
-                    eval_run_id=eval_run_id,
-                    mock_config=mock_config,
+                    **kwargs,
                 )
         except Exception:
             logger.exception("Failed to trigger processing for agent %s", agent_id)
