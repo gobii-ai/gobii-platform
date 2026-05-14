@@ -284,7 +284,7 @@ def _is_warning_status(result: Any) -> bool:
     if not isinstance(result, dict):
         return False
     status = result.get("status")
-    return isinstance(status, str) and status.lower() == "warning"
+    return isinstance(status, str) and status.lower() in {"warning", "debounced", "throttled"}
 
 
 def _infer_retryable_from_text(message: str) -> bool:

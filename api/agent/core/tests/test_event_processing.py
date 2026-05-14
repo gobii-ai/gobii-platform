@@ -1,7 +1,9 @@
 """Tests for event processing continuation decisions."""
 
 from decimal import Decimal
+from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import uuid4
 
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings, tag
@@ -9,12 +11,15 @@ from django.utils import timezone
 
 from api.agent.core.event_processing import (
     _process_agent_events_locked,
+    _is_warning_status,
     _parse_tool_call_params,
     _should_imply_continue,
 )
 from django.urls import reverse
 
 from api.agent.core.prompt_context import build_prompt_context, build_prompt_context_preview
+from api.agent.peer_comm import PeerMessagingError
+from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
 from util.urls import build_agent_detail_url, build_site_url
@@ -139,6 +144,46 @@ class ToolParamParsingTests(SimpleTestCase):
         self.assertNotIn('line1\nline2', tool_params["content"])
         self.assertIn('line1\\nline2', tool_params["content"])
         self.assertIn('import os\\nprint(1)', tool_params["content"])
+
+
+@tag("batch_event_processing")
+class PeerMessageToolHandlingTests(SimpleTestCase):
+    def test_debounced_and_throttled_results_require_followup(self):
+        self.assertTrue(_is_warning_status({"status": "debounced"}))
+        self.assertTrue(_is_warning_status({"status": "throttled"}))
+        self.assertTrue(_is_warning_status({"status": "warning"}))
+        self.assertFalse(_is_warning_status({"status": "ok"}))
+
+    def test_send_agent_message_marks_debounce_retryable(self):
+        agent = SimpleNamespace(id=uuid4())
+        peer_agent = SimpleNamespace(id=uuid4())
+        retry_at = timezone.now()
+
+        with patch(
+            "api.agent.tools.peer_dm.PersistentAgent.objects.get",
+            return_value=peer_agent,
+        ), patch(
+            "api.agent.tools.peer_dm.resolve_filespace_attachments",
+            return_value=[],
+        ), patch("api.agent.tools.peer_dm.PeerMessagingService") as service_cls:
+            service_cls.return_value.send_message.side_effect = PeerMessagingError(
+                "Peer messaging suppressed to avoid a rapid loop.",
+                status="debounced",
+                retry_at=retry_at,
+            )
+
+            result = execute_send_agent_message(
+                agent,
+                {
+                    "peer_agent_id": str(peer_agent.id),
+                    "message": "Status update",
+                    "will_continue_work": False,
+                },
+            )
+
+        self.assertEqual(result["status"], "debounced")
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["retry_at_iso"], retry_at.isoformat())
 
 
 @tag("batch_event_processing")

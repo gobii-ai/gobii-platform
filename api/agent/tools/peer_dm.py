@@ -16,6 +16,9 @@ from ...models import PersistentAgent
 logger = logging.getLogger(__name__)
 
 
+RETRYABLE_PEER_MESSAGE_STATUSES = {"debounced", "throttled"}
+
+
 def _should_continue_work(params: Dict[str, Any]) -> bool:
     """Return True when the agent declares more work coming after this DM."""
     raw = params.get("will_continue_work")
@@ -33,7 +36,9 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
             "name": "send_agent_message",
             "description": (
                 "Send a concise direct message to another agent that shares a peer link with you. "
-                "Use this to coordinate tasks with partner agents. Keep messages focused and avoid loops."
+                "Use this to coordinate tasks with partner agents. Keep messages focused and avoid loops. "
+                "If sending more than one message to the same peer, send the first with will_continue_work=true "
+                "and wait for the result before sending the next; rapid same-peer messages may be debounced."
             ),
             "parameters": {
                 "type": "object",
@@ -118,12 +123,15 @@ def execute_send_agent_message(agent: PersistentAgent, params: Dict[str, Any]) -
         response = dict(exc.duplicate_response)
         return response
     except PeerMessagingError as exc:
+        status = str(exc.status or "error").lower()
         response: Dict[str, Any] = {
             "status": exc.status,
             "message": str(exc),
         }
         if exc.retry_at:
             response["retry_at_iso"] = exc.retry_at.isoformat()
+        if status in RETRYABLE_PEER_MESSAGE_STATUSES:
+            response["retryable"] = True
         return response
     except Exception as exc:  # pragma: no cover - defensive logging
         logger.exception(
