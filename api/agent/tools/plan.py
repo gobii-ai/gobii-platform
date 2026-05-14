@@ -27,7 +27,9 @@ PLAN_STATUSES = {
 _WHITESPACE_RE = re.compile(r"\s+")
 MESSAGE_DELIVERABLE_GUIDANCE = (
     "Use messages only for final user-facing deliveries from send_email, send_sms, or send_chat_message. "
-    "Use the exact returned message_id UUID, or omit messages. Do not include peer messages from send_agent_message."
+    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now, "
+    "send it first with will_continue_work=true, then call update_plan after the send tool returns. "
+    "Do not include peer messages from send_agent_message."
 )
 
 
