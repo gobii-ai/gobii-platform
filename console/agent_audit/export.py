@@ -10,6 +10,7 @@ from botocore.exceptions import ClientError
 from google.cloud.exceptions import NotFound as GoogleCloudNotFound
 import zstandard as zstd
 from django.core.files.storage import default_storage
+from django.db.models import QuerySet
 from django.utils import timezone
 
 from api.models import (
@@ -89,7 +90,7 @@ def build_audit_export_range(range_key: str | None, *, now: datetime | None = No
     return AuditExportRange(key=key, label=label, start=start, end=end)
 
 
-def _apply_export_range(queryset, export_range: AuditExportRange, field_name: str):
+def _apply_export_range(queryset: QuerySet, export_range: AuditExportRange, field_name: str) -> QuerySet:
     filters = {f"{field_name}__lte": export_range.end}
     if export_range.start is not None:
         filters[f"{field_name}__gte"] = export_range.start
