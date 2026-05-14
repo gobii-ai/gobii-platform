@@ -7,6 +7,7 @@ from pages.mini_mode import (
     set_mini_mode_cookie,
     set_request_mini_mode,
 )
+from util.attribution_referrers import clean_acquisition_referrer
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +32,10 @@ class UTMTrackingMiddleware:
     SESSION_FBCLID_FIRST = "fbclid_first"
     SESSION_FBCLID_LAST = "fbclid_last"
     SESSION_QUERYSTRING = "utm_querystring"
+    SESSION_FIRST_REFERRER = "first_referrer"
+    SESSION_LAST_REFERRER = "last_referrer"
+    SESSION_FIRST_PATH = "first_path"
+    SESSION_LAST_PATH = "last_path"
 
     # Referral tracking session keys
     SESSION_REFERRER_CODE = "referrer_code"
@@ -48,6 +53,7 @@ class UTMTrackingMiddleware:
     def __call__(self, request):
         should_set_mini_mode_cookie = False
         if request.method == "GET":
+            self.capture_referrer_context(request)
             should_set_mini_mode_cookie = self._capture_params(request)
 
         response = self.get_response(request)
@@ -57,6 +63,32 @@ class UTMTrackingMiddleware:
 
     def _capture_params(self, request) -> bool:
         return self.capture_params(request, request.GET)
+
+    def capture_referrer_context(self, request) -> bool:
+        session = request.session
+        modified = False
+
+        current_path = request.get_full_path()
+        if current_path:
+            if not session.get(self.SESSION_FIRST_PATH):
+                session[self.SESSION_FIRST_PATH] = current_path
+                modified = True
+            if session.get(self.SESSION_LAST_PATH) != current_path:
+                session[self.SESSION_LAST_PATH] = current_path
+                modified = True
+
+        referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
+        if referrer:
+            if not session.get(self.SESSION_FIRST_REFERRER):
+                session[self.SESSION_FIRST_REFERRER] = referrer
+                modified = True
+            if session.get(self.SESSION_LAST_REFERRER) != referrer:
+                session[self.SESSION_LAST_REFERRER] = referrer
+                modified = True
+
+        if modified:
+            session.modified = True
+        return modified
 
     def capture_params(self, request, params) -> bool:
         if not params:

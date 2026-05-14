@@ -120,3 +120,25 @@ class UTMCaptureMiniModeTests(TestCase):
             request.session.get("click_ids_last"),
             {"rdt_cid": "reddit-click-1"},
         )
+
+    def test_referrer_context_captures_non_auth_referrers(self):
+        request = self._build_request("/pricing/")
+        request.META["HTTP_REFERER"] = "https://agentic.ai/"
+
+        self.middleware(request)
+
+        self.assertEqual(request.session.get("first_referrer"), "https://agentic.ai/")
+        self.assertEqual(request.session.get("last_referrer"), "https://agentic.ai/")
+        self.assertEqual(request.session.get("first_path"), "/pricing/")
+        self.assertEqual(request.session.get("last_path"), "/pricing/")
+
+    def test_referrer_context_ignores_auth_provider_referrers(self):
+        request = self._build_request("/accounts/google/login/callback/")
+        request.META["HTTP_REFERER"] = "https://accounts.google.com/"
+
+        self.middleware(request)
+
+        self.assertNotIn("first_referrer", request.session)
+        self.assertNotIn("last_referrer", request.session)
+        self.assertEqual(request.session.get("first_path"), "/accounts/google/login/callback/")
+        self.assertEqual(request.session.get("last_path"), "/accounts/google/login/callback/")

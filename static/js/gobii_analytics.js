@@ -55,8 +55,27 @@ if (typeof window !== 'undefined') {
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
 const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'fbclid'];
+const AUTH_REFERRER_DOMAINS = new Set([
+  'accounts.google.com',
+  'login.microsoftonline.com'
+]);
 
 const LANDING_PARAM = 'g';
+
+function isAuthProviderReferrer(referrer) {
+  if (!referrer) return false;
+  try {
+    const hostname = new URL(referrer).hostname.toLowerCase().replace(/\.$/, '');
+    for (const domain of AUTH_REFERRER_DOMAINS) {
+      if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
 
 (function() {
   const params = new URLSearchParams(window.location.search);
@@ -132,12 +151,16 @@ const LANDING_PARAM = 'g';
   const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
 
   const currentPath = window.location.pathname + window.location.search;
-  const referrer = document.referrer || '';
+  const rawReferrer = document.referrer || '';
+  const isAuthReferrer = isAuthProviderReferrer(rawReferrer);
+  const referrer = isAuthReferrer ? '' : rawReferrer;
 
   if (!document.cookie.includes('first_referrer=')) {
     document.cookie = `first_referrer=${encodeURIComponent(referrer)}${attrs}`;
   }
-  document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
+  if (!isAuthReferrer) {
+    document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
+  }
 
   if (!document.cookie.includes('first_path=')) {
     document.cookie = `first_path=${encodeURIComponent(currentPath)}${attrs}`;

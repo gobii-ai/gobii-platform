@@ -33,6 +33,7 @@ from dateutil.relativedelta import relativedelta
 from tasks.services import TaskCreditService
 
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+from util.attribution_referrers import clean_acquisition_referrer, decode_attribution_value
 from marketing_events.api import capi
 from marketing_events.constants import AD_CAPI_PROVIDER_TARGETS
 from marketing_events.context import build_marketing_context_from_user, extract_click_context
@@ -2049,6 +2050,11 @@ def handle_user_signed_up(sender, request, user, **kwargs):
                 decoded = raw
             return decoded.strip().strip('"')
 
+        def _decode_cookie_if_present(name: str) -> str | None:
+            if name not in request.COOKIES:
+                return None
+            return _decode_cookie_value(request.COOKIES.get(name))
+
         utm_first_payload: dict[str, str] = {}
         utm_first_cookie = request.COOKIES.get('__utm_first')
         if utm_first_cookie:
@@ -2152,10 +2158,58 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         if not fbclid_cookie and fbclid_session:
             fbclid_cookie = fbclid_session
 
-        first_referrer = _decode_cookie_value(request.COOKIES.get('first_referrer')) or (request.META.get('HTTP_REFERER') or '')
-        last_referrer = _decode_cookie_value(request.COOKIES.get('last_referrer')) or (request.META.get('HTTP_REFERER') or first_referrer)
-        first_path = _decode_cookie_value(request.COOKIES.get('first_path')) or request.get_full_path()
-        last_path = _decode_cookie_value(request.COOKIES.get('last_path')) or request.get_full_path()
+        existing_attribution = (
+            UserAttribution.objects
+            .filter(user=user)
+            .only("first_referrer", "last_referrer", "first_landing_path", "last_landing_path")
+            .first()
+        )
+        existing_first_referrer = clean_acquisition_referrer(
+            getattr(existing_attribution, "first_referrer", "")
+        )
+        existing_last_referrer = clean_acquisition_referrer(
+            getattr(existing_attribution, "last_referrer", "")
+        )
+        first_referrer_cookie = _decode_cookie_if_present("first_referrer")
+        last_referrer_cookie = _decode_cookie_if_present("last_referrer")
+        session_first_referrer = clean_acquisition_referrer(request.session.get("first_referrer"))
+        session_last_referrer = clean_acquisition_referrer(request.session.get("last_referrer"))
+        http_referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
+
+        if existing_first_referrer:
+            first_referrer = existing_first_referrer
+        elif clean_acquisition_referrer(first_referrer_cookie):
+            first_referrer = clean_acquisition_referrer(first_referrer_cookie)
+        elif session_first_referrer:
+            first_referrer = session_first_referrer
+        elif first_referrer_cookie is None:
+            first_referrer = http_referrer
+        else:
+            first_referrer = ""
+
+        if clean_acquisition_referrer(last_referrer_cookie):
+            last_referrer = clean_acquisition_referrer(last_referrer_cookie)
+        elif session_last_referrer:
+            last_referrer = session_last_referrer
+        elif last_referrer_cookie is None:
+            last_referrer = http_referrer or existing_last_referrer or first_referrer
+        else:
+            last_referrer = first_referrer
+        if not last_referrer:
+            last_referrer = existing_last_referrer or first_referrer
+
+        first_path = (
+            _decode_cookie_value(request.COOKIES.get('first_path'))
+            or decode_attribution_value(request.session.get("first_path"))
+            or getattr(existing_attribution, "first_landing_path", "")
+            or request.get_full_path()
+        )
+        last_path = (
+            _decode_cookie_value(request.COOKIES.get('last_path'))
+            or decode_attribution_value(request.session.get("last_path"))
+            or getattr(existing_attribution, "last_landing_path", "")
+            or request.get_full_path()
+        )
 
         segment_anonymous_id = _decode_cookie_value(request.COOKIES.get('ajs_anonymous_id'))
         ga_client_id = (

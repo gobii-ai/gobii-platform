@@ -157,6 +157,10 @@ class SocialAccountProviderTests(TestCase):
             "fbclid_first": "first-fbclid",
             "fbclid_last": "last-fbclid",
             "utm_querystring": "utm_source=meta&utm_campaign=retargeting&fbclid=last-fbclid",
+            "first_referrer": "https://agentic.ai/",
+            "last_referrer": "https://agentic.ai/pricing/",
+            "first_path": "/",
+            "last_path": "/pricing/",
         }
         request.COOKIES[OAUTH_ATTRIBUTION_COOKIE] = signing.dumps(stashed, compress=True)
 
@@ -174,6 +178,10 @@ class SocialAccountProviderTests(TestCase):
         self.assertEqual(request.session.get("fbclid_first"), stashed["fbclid_first"])
         self.assertEqual(request.session.get("fbclid_last"), stashed["fbclid_last"])
         self.assertEqual(request.session.get("utm_querystring"), stashed["utm_querystring"])
+        self.assertEqual(request.session.get("first_referrer"), stashed["first_referrer"])
+        self.assertEqual(request.session.get("last_referrer"), stashed["last_referrer"])
+        self.assertEqual(request.session.get("first_path"), stashed["first_path"])
+        self.assertEqual(request.session.get("last_path"), stashed["last_path"])
 
     def test_pre_social_login_restores_charter_keys_from_cookie(self) -> None:
         request = RequestFactory().get(reverse("google_login"))
