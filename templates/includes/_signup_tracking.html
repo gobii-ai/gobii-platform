@@ -2,13 +2,21 @@
 {% if show_signup_tracking and environment.is_production and settings.GOBII_PROPRIETARY_MODE %}
 <script>
 (function() {
-  if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
-    return;
+  function fireSignupTracking() {
+    if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
+      return;
+    }
+    window.GobiiSignupTracking.fetchAndFire({
+      endpoint: '{% url "pages:clear_signup_tracking" %}',
+      source: '{{ signup_tracking_source|default:"unknown" }}'
+    });
   }
-  window.GobiiSignupTracking.fetchAndFire({
-    endpoint: '{% url "pages:clear_signup_tracking" %}',
-    source: '{{ signup_tracking_source|default:"unknown" }}'
-  });
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fireSignupTracking, { once: true });
+  } else {
+    fireSignupTracking();
+  }
 })();
 </script>
 {% endif %}

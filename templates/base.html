@@ -345,9 +345,6 @@
   <!-- Custom Fonts -->
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
 
-  <!-- Syntax highlighting for code blocks -->
-  <link rel="stylesheet" href="{% static 'css/pygments.css' %}">
-
   <!-- Global CSS styles -->
   <link rel="stylesheet" href="{% static 'css/globals.css' %}">
   
@@ -451,7 +448,7 @@
     });
   </script>
 
-  <script src="{% static 'js/gobii_analytics.js' %}"></script>
+  <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
   {% if settings.TURNSTILE_ENABLED %}
     {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
   <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
@@ -461,7 +458,7 @@
   <script src="{% static 'js/account_auth_forms.js' %}" defer></script>
   <script src="{% static 'js/cta_signup_modal.js' %}" defer></script>
   <script src="{% static 'js/cta_tracking.js' %}" defer></script>
-  <script src="{% static 'js/signup_tracking.js' %}"></script>
+  <script src="{% static 'js/signup_tracking.js' %}" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js" defer></script>
   <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
 

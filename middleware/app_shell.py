@@ -81,13 +81,21 @@ def _format_signup_tracking_snippet() -> str:
 
     return """<script>
   (function() {
-    if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
-      return;
+    function fireSignupTracking() {
+      if (!window.GobiiSignupTracking || typeof window.GobiiSignupTracking.fetchAndFire !== 'function') {
+        return;
+      }
+      window.GobiiSignupTracking.fetchAndFire({
+        endpoint: '/clear_signup_tracking',
+        source: 'app_shell'
+      });
     }
-    window.GobiiSignupTracking.fetchAndFire({
-      endpoint: '/clear_signup_tracking',
-      source: 'app_shell'
-    });
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', fireSignupTracking, { once: true });
+    } else {
+      fireSignupTracking();
+    }
   })();
   </script>"""
 
@@ -207,8 +215,8 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   {pixel_loaders}
   <script src="{segment_bootstrap_js}"></script>
   {segment_snippet}
-  <script src="{analytics_js}"></script>
-  <script src="{signup_tracking_js}"></script>
+  <script src="{analytics_js}" defer></script>
+  <script src="{signup_tracking_js}" defer></script>
   {signup_tracking}
   {vite_tags}
 </head>
