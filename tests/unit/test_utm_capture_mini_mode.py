@@ -121,6 +121,18 @@ class UTMCaptureMiniModeTests(TestCase):
             {"rdt_cid": "reddit-click-1"},
         )
 
+    def test_direct_get_without_attribution_does_not_touch_session(self):
+        request = self._build_request("/")
+        request.session.modified = False
+
+        self.middleware(request)
+
+        self.assertFalse(request.session.modified)
+        self.assertNotIn("first_referrer", request.session)
+        self.assertNotIn("last_referrer", request.session)
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
     def test_referrer_context_captures_non_auth_referrers(self):
         request = self._build_request("/pricing/")
         request.META["HTTP_REFERER"] = "https://agentic.ai/"
@@ -135,10 +147,20 @@ class UTMCaptureMiniModeTests(TestCase):
     def test_referrer_context_ignores_auth_provider_referrers(self):
         request = self._build_request("/accounts/google/login/callback/")
         request.META["HTTP_REFERER"] = "https://accounts.google.com/"
+        request.session.modified = False
 
         self.middleware(request)
 
+        self.assertFalse(request.session.modified)
         self.assertNotIn("first_referrer", request.session)
         self.assertNotIn("last_referrer", request.session)
-        self.assertEqual(request.session.get("first_path"), "/accounts/google/login/callback/")
-        self.assertEqual(request.session.get("last_path"), "/accounts/google/login/callback/")
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
+    def test_referrer_context_captures_landing_path_when_attribution_params_exist(self):
+        request = self._build_request("/pricing/?utm_source=youtube&utm_medium=social")
+
+        self.middleware(request)
+
+        self.assertEqual(request.session.get("first_path"), "/pricing/?utm_source=youtube&utm_medium=social")
+        self.assertEqual(request.session.get("last_path"), "/pricing/?utm_source=youtube&utm_medium=social")

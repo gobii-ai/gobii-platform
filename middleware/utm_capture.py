@@ -53,7 +53,11 @@ class UTMTrackingMiddleware:
     def __call__(self, request):
         should_set_mini_mode_cookie = False
         if request.method == "GET":
-            self.capture_referrer_context(request)
+            has_attribution_params = self.has_attribution_params(request.GET)
+            self.capture_referrer_context(
+                request,
+                has_attribution_params=has_attribution_params,
+            )
             should_set_mini_mode_cookie = self._capture_params(request)
 
         response = self.get_response(request)
@@ -64,7 +68,26 @@ class UTMTrackingMiddleware:
     def _capture_params(self, request) -> bool:
         return self.capture_params(request, request.GET)
 
-    def capture_referrer_context(self, request) -> bool:
+    def has_attribution_params(self, params) -> bool:
+        if not params:
+            return False
+        if self._clean_params(params, self.UTM_PARAMS):
+            return True
+        if self._clean_params(params, self.CLICK_ID_PARAMS):
+            return True
+        if (params.get("rdt_click_id") or "").strip():
+            return True
+        if (params.get("fbclid") or "").strip():
+            return True
+        if (params.get("ref") or "").strip():
+            return True
+        return False
+
+    def capture_referrer_context(self, request, *, has_attribution_params: bool = False) -> bool:
+        referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
+        if not referrer and not has_attribution_params:
+            return False
+
         session = request.session
         modified = False
 
@@ -77,7 +100,6 @@ class UTMTrackingMiddleware:
                 session[self.SESSION_LAST_PATH] = current_path
                 modified = True
 
-        referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
         if referrer:
             if not session.get(self.SESSION_FIRST_REFERRER):
                 session[self.SESSION_FIRST_REFERRER] = referrer
