@@ -1056,7 +1056,9 @@ class LinkShortenerRedirectView(View):
             )
 
         link.increment_hits()
-        return HttpResponseRedirect(url)
+        response = HttpResponseRedirect(url)
+        response["X-Robots-Tag"] = "noindex, nofollow"
+        return response
 
 
 class PipedreamConnectRedirectView(View):

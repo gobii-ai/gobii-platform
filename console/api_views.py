@@ -4520,7 +4520,9 @@ class SignedAgentFsNodeDownloadAPIView(View):
             )
         except Exception:
             logger.debug("Failed to emit signed download analytics for node %s", getattr(node, "id", None), exc_info=True)
-        return _build_filespace_download_response(node)
+        response = _build_filespace_download_response(node)
+        response["X-Robots-Tag"] = "noindex, nofollow"
+        return response
 
 
 def _serialize_agent_fs_node(node: AgentFsNode) -> dict[str, Any]:

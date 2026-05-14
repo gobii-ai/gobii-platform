@@ -1242,6 +1242,9 @@ class RobotsTxtTests(TestCase):
         self.assertContains(response, "Sitemap:")
         lines = [line.strip() for line in response.content.decode().splitlines() if line.strip()]
         self.assertIn("Disallow: /console/agents/", lines)
+        self.assertIn("Disallow: /accounts/modal/", lines)
+        self.assertIn("Disallow: /d/", lines)
+        self.assertIn("Disallow: /m/", lines)
         self.assertNotIn("Disallow: /", lines)
 
     @tag("batch_pages")
@@ -3686,6 +3689,14 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("lock_email"), ["1"])
         self.assertEqual(params.get("step"), ["password"])
         self.assertEqual(params.get("next"), ["/pricing/"])
+
+    @tag("batch_pages")
+    def test_auth_modal_fragments_are_noindex(self):
+        for route_name in ("account_signup_modal", "account_login_modal"):
+            response = self.client.get(reverse(route_name))
+
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow")
 
     @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
