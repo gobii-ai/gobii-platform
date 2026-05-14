@@ -5,6 +5,7 @@ import hashlib
 import logging
 from typing import Tuple
 
+from api.agent.eval_agents import is_eval_agent
 from api.models import PersistentAgent
 
 logger = logging.getLogger(__name__)
@@ -114,6 +115,9 @@ def maybe_schedule_short_description(
 
     Returns True when a task was enqueued, False otherwise.
     """
+    if is_eval_agent(agent):
+        return False
+
     charter = (agent.charter or "").strip()
     if not charter:
         return False
@@ -164,6 +168,9 @@ def maybe_schedule_mini_description(
         agent: The agent to generate a mini description for.
         routing_profile_id: Optional routing profile ID to use for LLM calls.
     """
+    if is_eval_agent(agent):
+        return False
+
     charter = (agent.charter or "").strip()
     if not charter:
         return False

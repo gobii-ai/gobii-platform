@@ -31,12 +31,18 @@ class AgentShortDescriptionTests(TestCase):
         )
         self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
 
-    def _create_agent(self, charter: str = "Help with operations") -> PersistentAgent:
+    def _create_agent(
+        self,
+        charter: str = "Help with operations",
+        *,
+        execution_environment: str | None = None,
+    ) -> PersistentAgent:
         return PersistentAgent.objects.create(
             user=self.user,
             name="Test Persistent Agent",
             charter=charter,
             browser_use_agent=self.browser_agent,
+            **({"execution_environment": execution_environment} if execution_environment else {}),
         )
 
     def test_maybe_schedule_short_description_skips_without_charter(self) -> None:
@@ -57,6 +63,16 @@ class AgentShortDescriptionTests(TestCase):
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.short_description_requested_hash, expected_hash)
         mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+
+    def test_maybe_schedule_short_description_skips_eval_agent(self) -> None:
+        agent = self._create_agent(execution_environment="eval")
+        with patch("api.agent.tasks.short_description.generate_agent_short_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_short_description(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(agent.short_description_requested_hash, "")
 
     def test_generate_short_description_updates_fields(self) -> None:
         agent = self._create_agent()
@@ -95,6 +111,20 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(agent.short_description_charter_hash, "")
         self.assertEqual(agent.short_description_requested_hash, "")
 
+    def test_generate_short_description_skips_eval_agent_and_clears_request(self) -> None:
+        agent = self._create_agent(execution_environment="eval")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.short_description_requested_hash = charter_hash
+        agent.save(update_fields=["short_description_requested_hash"])
+
+        with patch("api.agent.tasks.short_description._generate_via_llm") as mocked_generate:
+            generate_agent_short_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.short_description, "")
+        self.assertEqual(agent.short_description_requested_hash, "")
+        mocked_generate.assert_not_called()
+
     def test_maybe_schedule_mini_description_skips_without_charter(self) -> None:
         agent = self._create_agent(charter="  ")
         with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
@@ -113,6 +143,16 @@ class AgentShortDescriptionTests(TestCase):
         expected_hash = compute_charter_hash(agent.charter)
         self.assertEqual(agent.mini_description_requested_hash, expected_hash)
         mocked_delay.assert_called_once_with(str(agent.id), expected_hash, None)
+
+    def test_maybe_schedule_mini_description_skips_eval_agent(self) -> None:
+        agent = self._create_agent(execution_environment="eval")
+        with patch("api.agent.tasks.mini_description.generate_agent_mini_description_task.delay") as mocked_delay:
+            scheduled = maybe_schedule_mini_description(agent)
+
+        self.assertFalse(scheduled)
+        mocked_delay.assert_not_called()
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description_requested_hash, "")
 
     def test_generate_mini_description_updates_fields(self) -> None:
         agent = self._create_agent()
@@ -184,6 +224,20 @@ class AgentShortDescriptionTests(TestCase):
         self.assertEqual(agent.mini_description, "")
         self.assertEqual(agent.mini_description_charter_hash, "")
         self.assertEqual(agent.mini_description_requested_hash, "")
+
+    def test_generate_mini_description_skips_eval_agent_and_clears_request(self) -> None:
+        agent = self._create_agent(execution_environment="eval")
+        charter_hash = compute_charter_hash(agent.charter)
+        agent.mini_description_requested_hash = charter_hash
+        agent.save(update_fields=["mini_description_requested_hash"])
+
+        with patch("api.agent.tasks.mini_description._generate_via_llm") as mocked_generate:
+            generate_agent_mini_description_task.run(str(agent.id), charter_hash)
+
+        agent.refresh_from_db()
+        self.assertEqual(agent.mini_description, "")
+        self.assertEqual(agent.mini_description_requested_hash, "")
+        mocked_generate.assert_not_called()
 
     def test_build_mini_description_uses_mini_when_available(self) -> None:
         agent = self._create_agent()

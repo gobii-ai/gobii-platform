@@ -10,6 +10,7 @@ from django.db import DatabaseError
 from api.agent.core.llm_config import get_summarization_llm_config
 from api.agent.core.llm_utils import run_completion
 from api.agent.core.token_usage import log_agent_completion
+from api.agent.eval_agents import is_eval_agent
 from api.agent.short_description import (
     compute_charter_hash,
     prepare_short_description,
@@ -87,6 +88,10 @@ def generate_agent_short_description_task(
         agent = PersistentAgent.objects.get(id=persistent_agent_id)
     except PersistentAgent.DoesNotExist:
         logger.info("Skipping short description generation; agent %s no longer exists", persistent_agent_id)
+        return
+    if is_eval_agent(agent):
+        _clear_requested_hash(agent.id, charter_hash)
+        logger.debug("Skipping short description generation for eval agent %s", agent.id)
         return
 
     # Look up routing profile if provided
