@@ -1,10 +1,14 @@
 from dataclasses import dataclass, field
-import re
 
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
+from api.evals.stop_policy import (
+    sqlite_batch_is_only_planning_state_mutation,
+    sqlite_batch_mutates_agent_config_field,
+    sqlite_batch_mutates_planning_state,
+)
 from api.models import (
     EvalRunTask,
     PersistentAgent,
@@ -43,6 +47,10 @@ class CommonUseCaseEvalDefinition:
     plan_expected: bool
     forbidden_tools: tuple[str, ...] = field(default_factory=tuple)
     expected_params: dict[str, object] = field(default_factory=dict)
+    allowed_preamble_tools: tuple[str, ...] = field(default_factory=tuple)
+    ignored_tools: tuple[str, ...] = field(default_factory=tuple)
+    accepted_tool_alternatives: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    stop_after_success: bool = True
 
     @classmethod
     def from_mapping(cls, value):
@@ -52,6 +60,16 @@ class CommonUseCaseEvalDefinition:
         if not isinstance(plan_expected, bool):
             raise ValueError(f"{value.get('slug') or 'Common use case eval'} plan_expected must be a boolean.")
 
+        stop_after_success = value.get("stop_after_success", True)
+        if not isinstance(stop_after_success, bool):
+            raise ValueError(f"{value.get('slug') or 'Common use case eval'} stop_after_success must be a boolean.")
+
+        raw_alternatives = value.get("accepted_tool_alternatives") or {}
+        accepted_tool_alternatives = {
+            str(tool_name): tuple(alternatives or ())
+            for tool_name, alternatives in raw_alternatives.items()
+        }
+
         definition = cls(
             slug=str(value.get("slug") or "").strip(),
             category=str(value.get("category") or "").strip(),
@@ -60,6 +78,10 @@ class CommonUseCaseEvalDefinition:
             plan_expected=plan_expected,
             forbidden_tools=tuple(value.get("forbidden_tools") or ()),
             expected_params=dict(value.get("expected_params") or {}),
+            allowed_preamble_tools=tuple(value.get("allowed_preamble_tools") or ()),
+            ignored_tools=tuple(value.get("ignored_tools") or ()),
+            accepted_tool_alternatives=accepted_tool_alternatives,
+            stop_after_success=stop_after_success,
         )
         definition.validate()
         return definition
@@ -85,6 +107,18 @@ class CommonUseCaseEvalDefinition:
 
     def forbidden_tool_names(self):
         return list(self.forbidden_tools)
+
+    def ignored_tool_names(self):
+        return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.ignored_tools]))
+
+    def allowed_preamble_tool_names(self):
+        return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.allowed_preamble_tools]))
+
+    def expected_tool_alternatives(self, tool_name):
+        return list(self.accepted_tool_alternatives.get(tool_name, ()))
+
+    def accepted_tool_names_for_expected_tool(self, tool_name):
+        return [tool_name, *self.expected_tool_alternatives(tool_name)]
 
 
 COMMON_USE_CASE_RAW_EVAL_CASES = [
@@ -148,16 +182,16 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test a three-sentence summary of today's pipeline changes.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "plan_expected": False},
-    {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "plan_expected": False},
-    {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "plan_expected": False},
-    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test a three-sentence summary of today's pipeline changes.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Ask permission before texting +15555550123 about the urgent outage.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "plan_expected": False},
-    {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "forbidden_tools": ["send_chat_message"], "plan_expected": False},
-    {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Request the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "forbidden_tools": ["send_chat_message"], "plan_expected": False},
+    {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
+    {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Request the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_072_create_jobs_csv", "category": "files", "prompt": "Create /exports/jobs.csv with columns title,company,url and three rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_073_create_status_pdf", "category": "files", "prompt": "Create a one-page PDF at /exports/status.pdf with wins, risks, and next steps.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
@@ -178,16 +212,16 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_enable_database", "category": "database", "prompt": "Enable the database so you can store a lead tracker for this agent.", "expected_tools": ["enable_database"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "plan_expected": False},
     {"slug": "common_use_case_090_sqlite_summarize_messages", "category": "database", "prompt": "Query SQLite message history and summarize the last five user requests.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
-    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
-    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor the support status page.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
-    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
-    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "plan_expected": True},
+    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor the support status page.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": True},
     {"slug": "common_use_case_095_request_research_scope", "category": "human_input", "prompt": "Ask me which target account segment to research before starting the work.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
-    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check the borough permit page for updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
-    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "plan_expected": True},
+    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check the borough permit page for updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": True},
     {"slug": "common_use_case_099_request_monitoring_scope", "category": "human_input", "prompt": "Ask which competitors and update types matter before setting up monitoring.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily schedule to prepare a concise email digest of market news.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "plan_expected": True},
+    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily schedule to prepare a concise email digest of market news.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -248,13 +282,6 @@ PLANNING_ALLOWED_FIRST_ACTION_TOOL_NAMES = {
     "end_planning",
 }
 
-PLANNING_STATE_TABLE_NAMES = {
-    "__agent_config",
-}
-
-SQL_MUTATION_RE = re.compile(r"\b(insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
-
-
 def get_tool_calls_for_run(run_id, *, after=None, tool_names=None):
     queryset = PersistentAgentToolCall.objects.filter(step__eval_run_id=run_id)
     if after is not None:
@@ -283,19 +310,6 @@ def get_forbidden_calls_before_end_planning(run_id, *, after=None, forbidden_too
     return calls
 
 
-def sqlite_batch_mutates_planning_state(tool_call):
-    if tool_call.tool_name != "sqlite_batch":
-        return False
-    params = tool_call.tool_params or {}
-    sql = str(params.get("sql") or "")
-    if not sql:
-        return False
-    lowered = sql.lower()
-    if not any(table in lowered for table in PLANNING_STATE_TABLE_NAMES):
-        return False
-    return bool(SQL_MUTATION_RE.search(sql))
-
-
 def tool_call_is_plan_activity(tool_call):
     return tool_call.tool_name == UPDATE_PLAN_TOOL_NAME
 
@@ -312,7 +326,7 @@ def get_common_use_case_tool_calls_for_run(run_id, *, after=None, tool_names=Non
     return [
         call
         for call in get_tool_calls_for_run(run_id, after=after, tool_names=tool_names)
-        if not sqlite_batch_mutates_planning_state(call)
+        if not sqlite_batch_is_only_planning_state_mutation(call)
     ]
 
 
@@ -1058,7 +1072,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         case = self.case
         expected_tools = case.expected_tool_names()
         forbidden_tools = case.forbidden_tool_names()
-        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in expected_tools}
+        accepted_tools = self._accepted_expected_tool_names()
+        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in accepted_tools}
         for tool_name in forbidden_tools:
             mock_config[tool_name] = {
                 "status": "error",
@@ -1066,40 +1081,76 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             }
         return mock_config
 
+    def _accepted_expected_tool_names(self):
+        accepted = []
+        for tool_name in self.case.expected_tool_names():
+            accepted.extend(self.case.accepted_tool_names_for_expected_tool(tool_name))
+        return list(dict.fromkeys(accepted))
+
+    @staticmethod
+    def _agent_config_field_for_expected_tool(tool_name):
+        if tool_name == "update_schedule":
+            return "schedule"
+        if tool_name == "update_charter":
+            return "charter"
+        return None
+
+    def _accepts_sqlite_config_update(self):
+        return any(
+            "sqlite_batch" in self.case.expected_tool_alternatives(tool_name)
+            and self._agent_config_field_for_expected_tool(tool_name)
+            for tool_name in self.case.expected_tool_names()
+        )
+
+    def _expected_tool_condition(self, tool_name):
+        condition = {"tool_name": tool_name}
+        alternatives = self.case.expected_tool_alternatives(tool_name)
+        if alternatives:
+            condition["alternatives"] = alternatives
+        config_field = self._agent_config_field_for_expected_tool(tool_name)
+        if config_field:
+            condition["agent_config_field"] = config_field
+        if self.case.expected_params and len(self.case.expected_tools) == 1:
+            condition["params"] = self.case.expected_params
+        return condition
+
     def _build_eval_stop_policy(self):
         case = self.case
         expected_conditions = []
         if case.plan_expected:
             expected_conditions.append({"tool_name": UPDATE_PLAN_TOOL_NAME})
         for tool_name in case.expected_tool_names():
-            condition = {"tool_name": tool_name}
-            if case.expected_params and len(case.expected_tools) == 1:
-                condition["params"] = case.expected_params
-            expected_conditions.append(condition)
+            expected_conditions.append(self._expected_tool_condition(tool_name))
 
         stop_on_tool_names = list(case.forbidden_tool_names())
         if not case.plan_expected:
             stop_on_tool_names.append(UPDATE_PLAN_TOOL_NAME)
 
-        allowed_tool_names = set(case.expected_tool_names())
+        allowed_tool_names = set(self._accepted_expected_tool_names())
         if case.plan_expected:
             allowed_tool_names.add(UPDATE_PLAN_TOOL_NAME)
-
-        return {
-            "ignore_sqlite_agent_config_mutations": True,
-            "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+        allowed_tool_names.update(case.allowed_preamble_tool_names())
+        policy = {
+            "ignore_sqlite_agent_config_mutations": not self._accepts_sqlite_config_update(),
+            "ignored_tool_names": case.ignored_tool_names(),
             "allowed_tool_names": list(allowed_tool_names),
+            "accepted_tool_alternatives": {
+                tool_name: list(alternatives)
+                for tool_name, alternatives in case.accepted_tool_alternatives.items()
+            },
             "stop_on_tool_names": stop_on_tool_names,
             "stop_on_unexpected_relevant_tool": True,
-            "stop_when_all_seen": expected_conditions,
         }
+        if case.stop_after_success:
+            policy["stop_when_all_seen"] = expected_conditions
+        return policy
 
     def run(self, run_id, agent_id):
         case = self.case
         expected_tools = case.expected_tool_names()
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
-        self._enable_builtin_tools(agent_id, [*expected_tools, *forbidden_tools])
+        self._enable_builtin_tools(agent_id, [*self._accepted_expected_tool_names(), *forbidden_tools])
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):
@@ -1169,13 +1220,22 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             EvalRunTask.Status.RUNNING,
             task_name="verify_expected_tool_usage",
         )
-        expected_calls = get_common_use_case_tool_calls_for_run(
-            run_id,
-            after=inbound.timestamp,
-            tool_names=expected_tools,
+        candidate_calls = (
+            get_tool_calls_for_run(run_id, after=inbound.timestamp)
+            if self._accepts_sqlite_config_update()
+            else get_common_use_case_tool_calls_for_run(run_id, after=inbound.timestamp)
         )
-        expected_params = case.expected_params
-        if expected_calls and self._calls_match_expected_params(expected_calls, expected_params):
+        expected_calls = [
+            call
+            for call in candidate_calls
+            if call.tool_name in self._accepted_expected_tool_names()
+        ]
+        missing_expected_tools = [
+            tool_name
+            for tool_name in expected_tools
+            if not any(self._call_satisfies_expected_tool(call, tool_name) for call in expected_calls)
+        ]
+        if not missing_expected_tools:
             seen_tools = [call.tool_name for call in expected_calls]
             self.record_task_result(
                 run_id,
@@ -1193,7 +1253,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.FAILED,
                 task_name="verify_expected_tool_usage",
                 observed_summary=(
-                    f"Expected tool(s) {expected_tools} with params {expected_params or '{}'}; "
+                    f"Missing expected tool(s) {missing_expected_tools}; accepted tool(s) "
+                    f"{self._accepted_expected_tool_names()} with params {case.expected_params or '{}'}; "
                     f"saw {seen_tools}."
                 ),
                 artifacts={"step": expected_calls[0].step} if expected_calls else {},
@@ -1238,6 +1299,20 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             if all(params.get(key) == value for key, value in expected_params.items()):
                 return True
         return False
+
+    def _call_satisfies_expected_tool(self, call, expected_tool_name):
+        if call.tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool_name):
+            return False
+        if (
+            self.case.expected_params
+            and len(self.case.expected_tools) == 1
+            and not self._calls_match_expected_params([call], self.case.expected_params)
+        ):
+            return False
+        config_field = self._agent_config_field_for_expected_tool(expected_tool_name)
+        if config_field and call.tool_name == "sqlite_batch":
+            return sqlite_batch_mutates_agent_config_field(call, config_field)
+        return True
 
 
 def _common_use_case_scenario_class(case):

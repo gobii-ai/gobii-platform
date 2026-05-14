@@ -75,6 +75,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             self.assertNotIn("update_plan", case.forbidden_tools)
             self.assertIsInstance(case.plan_expected, bool)
             self.assertIn(case.update_plan_policy, UPDATE_PLAN_POLICIES)
+            self.assertIsInstance(case.allowed_preamble_tools, tuple)
+            self.assertIsInstance(case.ignored_tools, tuple)
+            self.assertIsInstance(case.accepted_tool_alternatives, dict)
+            self.assertIsInstance(case.stop_after_success, bool)
             self.assertEqual(
                 case.update_plan_policy,
                 UPDATE_PLAN_POLICY_EXPECT if case.plan_expected else UPDATE_PLAN_POLICY_FORBID,
@@ -92,8 +96,17 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
+        self.assertEqual(
+            by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
+            {"send_email": ("request_contact_permission",)},
+        )
+        self.assertEqual(by_slug["common_use_case_069_secure_api_key_request"].forbidden_tools, ())
         self.assertTrue(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
         self.assertTrue(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
+        self.assertEqual(
+            by_slug["common_use_case_091_schedule_daily_digest"].accepted_tool_alternatives,
+            {"update_schedule": ("sqlite_batch",)},
+        )
 
 
 @tag("batch_eval_fingerprint")
@@ -246,6 +259,22 @@ class BehaviorMicroHelperTests(TestCase):
         )
         self.assertNotIn(config_update, get_common_use_case_tool_calls_for_run(self.run.id))
 
+    def test_common_use_case_tool_calls_keep_mixed_sqlite_config_and_domain_work(self):
+        mixed_batch = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config SET charter = 'Manage leads'; "
+                    "CREATE TABLE leads (company TEXT, email TEXT)"
+                )
+            },
+        )
+
+        self.assertEqual(
+            get_common_use_case_tool_calls_for_run(self.run.id, tool_names=["sqlite_batch"]),
+            [mixed_batch],
+        )
+
     def test_first_common_use_case_tool_call_ignores_chat_and_config_mutation(self):
         self._add_tool_call("send_chat_message")
         self._add_tool_call(
@@ -314,6 +343,46 @@ class BehaviorMicroHelperTests(TestCase):
             str(self.run.id),
             {"stop_when_all_seen": [{"tool_name": "sqlite_batch"}]},
         )
+        self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_counts_mixed_config_and_domain_sqlite_batch(self):
+        self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config SET charter = 'Fetch inventory'; "
+                    "CREATE TABLE leads (company TEXT)"
+                )
+            },
+        )
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_when_all_seen": [{"tool_name": "sqlite_batch"}]},
+        )
+
+        self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_accepts_sqlite_schedule_alternative(self):
+        self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET schedule = '0 9 * * *' WHERE id = 1"},
+        )
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "update_schedule",
+                        "alternatives": ["sqlite_batch"],
+                        "agent_config_field": "schedule",
+                    }
+                ],
+            },
+        )
+
         self.assertTrue(should_stop)
 
     def test_eval_stop_policy_can_stop_on_sqlite_config_mutation(self):

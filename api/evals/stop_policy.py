@@ -1,6 +1,8 @@
 import re
 from typing import Any
 
+import sqlparse
+
 from api.models import PersistentAgentHumanInputRequest, PersistentAgentToolCall
 
 
@@ -8,19 +10,75 @@ SQL_MUTATION_RE = re.compile(r"\b(insert|update|delete|replace|alter|drop|create
 PLANNING_STATE_TABLE_NAMES = {
     "__agent_config",
 }
+AGENT_CONFIG_FIELD_PATTERNS = {
+    "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
+    "schedule": re.compile(r"\bschedule\b", re.IGNORECASE),
+}
+
+
+def split_sql_statements(sql: str) -> list[str]:
+    return [statement.strip() for statement in sqlparse.split(sql or "") if statement.strip()]
+
+
+def sql_mentions_planning_state(statement: str) -> bool:
+    lowered = statement.lower()
+    return any(table in lowered for table in PLANNING_STATE_TABLE_NAMES)
+
+
+def sql_mutates(statement: str) -> bool:
+    return bool(SQL_MUTATION_RE.search(statement or ""))
+
+
+def sql_mutates_planning_state(statement: str) -> bool:
+    return sql_mentions_planning_state(statement) and sql_mutates(statement)
+
+
+def sqlite_batch_sql(tool_call) -> str:
+    if tool_call.tool_name != "sqlite_batch":
+        return ""
+    params = tool_call.tool_params or {}
+    return str(params.get("sql") or "")
 
 
 def sqlite_batch_mutates_planning_state(tool_call) -> bool:
-    if tool_call.tool_name != "sqlite_batch":
-        return False
-    params = tool_call.tool_params or {}
-    sql = str(params.get("sql") or "")
+    sql = sqlite_batch_sql(tool_call)
     if not sql:
         return False
-    lowered = sql.lower()
-    if not any(table in lowered for table in PLANNING_STATE_TABLE_NAMES):
+    return any(sql_mutates_planning_state(statement) for statement in split_sql_statements(sql))
+
+
+def sqlite_batch_is_only_planning_state_mutation(tool_call) -> bool:
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
         return False
-    return bool(SQL_MUTATION_RE.search(sql))
+
+    statements = split_sql_statements(sql)
+    if not statements:
+        return False
+
+    mutating_config_statements = [
+        statement for statement in statements if sql_mutates_planning_state(statement)
+    ]
+    if not mutating_config_statements:
+        return False
+
+    # A batch like "UPDATE __agent_config...; CREATE TABLE leads..." must still
+    # count as real SQLite work for tool-choice evals. Only pure config mutation
+    # batches are ignored as eval bookkeeping noise.
+    return all(sql_mentions_planning_state(statement) for statement in statements)
+
+
+def sqlite_batch_mutates_agent_config_field(tool_call, field_name: str) -> bool:
+    pattern = AGENT_CONFIG_FIELD_PATTERNS.get(field_name)
+    if not pattern:
+        return False
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
+        return False
+    return any(
+        sql_mutates_planning_state(statement) and pattern.search(statement)
+        for statement in split_sql_statements(sql)
+    )
 
 
 def _params_match(actual_params: dict[str, Any], expected_params: dict[str, Any]) -> bool:
@@ -31,8 +89,35 @@ def _is_relevant_call(tool_call, policy: dict[str, Any]) -> bool:
     ignored_tool_names = set(policy.get("ignored_tool_names") or ())
     if tool_call.tool_name in ignored_tool_names:
         return False
-    if policy.get("ignore_sqlite_agent_config_mutations", True) and sqlite_batch_mutates_planning_state(tool_call):
+    if (
+        policy.get("ignore_sqlite_agent_config_mutations", True)
+        and sqlite_batch_is_only_planning_state_mutation(tool_call)
+    ):
         return False
+    return True
+
+
+def _expected_condition_matches_call(
+    tool_call,
+    condition: dict[str, Any],
+    policy: dict[str, Any],
+) -> bool:
+    tool_name = condition.get("tool_name")
+    expected_params = condition.get("params") or {}
+    candidate_tool_names = {tool_name, *condition.get("alternatives", [])}
+
+    tool_alternatives = policy.get("accepted_tool_alternatives") or {}
+    candidate_tool_names.update(tool_alternatives.get(tool_name) or [])
+
+    if tool_call.tool_name not in candidate_tool_names:
+        return False
+    if expected_params and not _params_match(tool_call.tool_params or {}, expected_params):
+        return False
+
+    config_field = condition.get("agent_config_field")
+    if config_field and tool_call.tool_name == "sqlite_batch":
+        return sqlite_batch_mutates_agent_config_field(tool_call, config_field)
+
     return True
 
 
@@ -85,12 +170,10 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
     if expected_calls:
         for expected in expected_calls:
             tool_name = expected.get("tool_name")
-            expected_params = expected.get("params") or {}
             if not tool_name:
                 return False, ""
             if not any(
-                call.tool_name == tool_name
-                and _params_match(call.tool_params or {}, expected_params)
+                _expected_condition_matches_call(call, expected, policy)
                 for call in calls
             ):
                 return False, ""
