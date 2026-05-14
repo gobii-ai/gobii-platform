@@ -50,6 +50,17 @@
   <link rel="manifest" href="{% url 'pages:web_manifest' %}">
   <meta name="theme-color" content="#0ea5e9">
 
+  <!-- Connection hints for common third-party script origins -->
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <link rel="preconnect" href="https://js.stripe.com">
+  {% endif %}
+  {% if settings.GA_MEASUREMENT_ID and not debug %}
+  <link rel="preconnect" href="https://www.googletagmanager.com">
+  {% endif %}
+
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
   {% if settings.GOBII_PROPRIETARY_MODE %}
   <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
