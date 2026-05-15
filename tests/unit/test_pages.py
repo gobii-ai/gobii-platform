@@ -88,6 +88,10 @@ class HomePageTests(TestCase):
         """Basic smoke test for home page."""
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        main_landmarks = soup.find_all("main")
+        self.assertEqual(len(main_landmarks), 1)
+        self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @tag("batch_pages")
