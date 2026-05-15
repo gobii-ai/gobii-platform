@@ -30,6 +30,7 @@ def _iter_nested_dicts(value: Any):
 
 
 def _extract_http_status_code(payload: Any) -> Optional[int]:
+    fallback_status = None
     for node in _iter_nested_dicts(payload):
         for key in ("status", "statusCode", "code"):
             raw_value = node.get(key)
@@ -40,8 +41,11 @@ def _extract_http_status_code(payload: Any) -> Optional[int]:
             except (TypeError, ValueError):
                 continue
             if 100 <= value <= 599:
-                return value
-    return None
+                if value >= 400:
+                    return value
+                if fallback_status is None:
+                    fallback_status = value
+    return fallback_status
 
 
 def _google_client_retried_request(payload: Any) -> bool:

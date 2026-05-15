@@ -135,8 +135,8 @@ def get_update_plan_tool() -> dict[str, Any]:
                                 "message_id": {
                                     "type": "string",
                                     "description": (
-                                        "Exact UUID returned as message_id by a user-facing send tool; never use placeholders, "
-                                        "SQL snippets, URLs, or peer-agent message references."
+                                        "Exact UUID returned by the send tool as message_id from a user-facing delivery; "
+                                        "never use placeholders, SQL snippets, URLs, or peer-agent message references."
                                     ),
                                 },
                                 "label": {

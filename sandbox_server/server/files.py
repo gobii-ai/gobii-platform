@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from sandbox_server.workspace import _ensure_capacity, _guess_mime_type, _normalize_workspace_path
+from util.text_sanitizer import decode_unicode_escapes
 
 logger = logging.getLogger(__name__)
 
@@ -68,52 +69,6 @@ def _blocked_html_assets(html: str) -> bool:
 
 
 _TOKEN_PATTERN = re.compile(r"\$\[([^\]]+)\]")
-_UNICODE_ESCAPE_RE = re.compile(r"\\u([0-9a-fA-F]{4})")
-_UNICODE_ESCAPE_LONG_RE = re.compile(r"\\U([0-9a-fA-F]{8})")
-
-
-def _decode_long_escape(match: re.Match) -> str:
-    try:
-        return chr(int(match.group(1), 16))
-    except (ValueError, OverflowError):
-        return match.group(0)
-
-
-def _decode_unicode_escapes(value: str) -> str:
-    text = _UNICODE_ESCAPE_LONG_RE.sub(_decode_long_escape, value)
-
-    result = []
-    i = 0
-    while i < len(text):
-        match = _UNICODE_ESCAPE_RE.match(text, i)
-        if not match:
-            result.append(text[i])
-            i += 1
-            continue
-
-        code_point = int(match.group(1), 16)
-        if 0xD800 <= code_point <= 0xDBFF:
-            next_match = _UNICODE_ESCAPE_RE.match(text, match.end())
-            if next_match:
-                next_code = int(next_match.group(1), 16)
-                if 0xDC00 <= next_code <= 0xDFFF:
-                    combined = 0x10000 + (
-                        ((code_point - 0xD800) << 10) | (next_code - 0xDC00)
-                    )
-                    try:
-                        result.append(chr(combined))
-                        i = next_match.end()
-                        continue
-                    except (ValueError, OverflowError):
-                        pass
-
-        try:
-            result.append(chr(code_point))
-        except (ValueError, OverflowError):
-            result.append(match.group(0))
-        i = match.end()
-
-    return "".join(result)
 
 
 def _substitute_workspace_tokens(html: str, agent_root: Path) -> str:
@@ -145,7 +100,7 @@ def _handle_create_pdf(agent_root: Path, payload: Dict[str, Any]) -> Dict[str, A
         file_path = f"{file_path}.pdf"
     overwrite = payload.get("overwrite") is True
 
-    html = _decode_unicode_escapes(html)
+    html = decode_unicode_escapes(html)
     html = _substitute_workspace_tokens(html, agent_root)
 
     if _blocked_html_assets(html):

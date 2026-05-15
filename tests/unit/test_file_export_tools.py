@@ -508,6 +508,61 @@ class FileExportToolTests(TestCase):
         self.assertNotIn(r"\u2615", captured["html"])
         self.assertNotIn(r"\ud83d\udca1", captured["html"])
 
+    @override_settings(MAX_FILE_SIZE=10000)
+    def test_create_pdf_preserves_lone_surrogate_escape_before_size_check(self):
+        captured = {}
+
+        class CapturingWeasyPrintHTML:
+            def __init__(self, *args, **kwargs):
+                captured["html"] = kwargs["string"]
+
+            def write_pdf(self):
+                return b"%PDF-1.4 test"
+
+        mock_weasyprint = MagicMock()
+        mock_weasyprint.HTML = CapturingWeasyPrintHTML
+        mock_weasyprint.default_url_fetcher = MagicMock()
+
+        with patch.dict(sys.modules, {"weasyprint": mock_weasyprint}):
+            result = execute_create_pdf(
+                self.agent,
+                {
+                    "html": r"<p>Broken emoji \ud83d stays literal</p>",
+                    "file_path": "/exports/lone-surrogate.pdf",
+                },
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn(r"\ud83d", captured["html"])
+        captured["html"].encode("utf-8")
+
+    def test_create_pdf_preserves_escaped_backslash_unicode_escape(self):
+        captured = {}
+
+        class CapturingWeasyPrintHTML:
+            def __init__(self, *args, **kwargs):
+                captured["html"] = kwargs["string"]
+
+            def write_pdf(self):
+                return b"%PDF-1.4 test"
+
+        mock_weasyprint = MagicMock()
+        mock_weasyprint.HTML = CapturingWeasyPrintHTML
+        mock_weasyprint.default_url_fetcher = MagicMock()
+
+        with patch.dict(sys.modules, {"weasyprint": mock_weasyprint}):
+            result = execute_create_pdf(
+                self.agent,
+                {
+                    "html": r"<p>Literal escape \\u2615</p>",
+                    "file_path": "/exports/escaped-backslash.pdf",
+                },
+            )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIn(r"\u2615", captured["html"])
+        self.assertNotIn("☕", captured["html"])
+
     @patch.dict(sys.modules, {"weasyprint": _mock_weasyprint})
     def test_create_pdf_path_dedupes_when_overwrite_false(self):
         first = execute_create_pdf(

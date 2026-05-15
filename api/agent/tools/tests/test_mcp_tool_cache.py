@@ -458,3 +458,31 @@ class MCPToolErrorNormalizationTests(SimpleTestCase):
         self.assertEqual(result["status_code"], 403)
         self.assertEqual(result["retryable"], False)
         self.assertIn("authorization failed", result["message"])
+
+    def test_pipedream_google_sheets_error_status_takes_priority_over_wrapper_status(self):
+        manager = MCPToolManager()
+        raw_error = json.dumps(
+            {
+                "status": 200,
+                "os": [
+                    {
+                        "k": "error",
+                        "err": {
+                            "response": {"status": 403},
+                            "message": "The caller does not have permission",
+                        },
+                    }
+                ],
+            }
+        )
+
+        result = manager._finalize_mcp_result(
+            "pipedream",
+            "google_sheets-read-rows",
+            self._tool_error_result(raw_error),
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["status_code"], 403)
+        self.assertEqual(result["retryable"], False)
+        self.assertIn("authorization failed", result["message"])

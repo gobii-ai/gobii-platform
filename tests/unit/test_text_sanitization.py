@@ -89,11 +89,35 @@ class DecodeUnicodeEscapesTests(TestCase):
         result = decode_unicode_escapes(text)
         self.assertEqual(result, "Hello 😀 world")
 
+    def test_decode_preserves_lone_surrogate_escape(self):
+        text = "Broken emoji \\uD83D remains literal"
+
+        result = decode_unicode_escapes(text)
+
+        self.assertEqual(result, r"Broken emoji \uD83D remains literal")
+        result.encode("utf-8")
+
+    def test_decode_preserves_escaped_backslash_unicode_escape(self):
+        text = r"Literal escape: \\u2615"
+
+        result = decode_unicode_escapes(text)
+
+        self.assertEqual(result, r"Literal escape: \u2615")
+        self.assertNotIn("☕", result)
+
     def test_decode_long_form_emoji(self):
         """\\UXXXXXXXX format should decode correctly."""
         text = "Hello \\U0001F600 world"
         result = decode_unicode_escapes(text)
         self.assertEqual(result, "Hello 😀 world")
+
+    def test_decode_long_form_surrogate_remains_literal(self):
+        text = "Broken long surrogate \\U0000D83D"
+
+        result = decode_unicode_escapes(text)
+
+        self.assertEqual(result, r"Broken long surrogate \U0000D83D")
+        result.encode("utf-8")
 
     def test_decode_mixed_escapes_and_real_characters(self):
         """Mix of escaped and real characters should work."""
