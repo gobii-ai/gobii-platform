@@ -1,4 +1,4 @@
-"""Direct internal tools for manager Gobiis that create and manage Gobii teams."""
+"""Direct internal tools for Meta Gobii control-plane work."""
 
 import base64
 import binascii
@@ -60,6 +60,7 @@ from console.agent_chat.timeline import (
 from pages.account_info_cache import invalidate_account_info_cache
 
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_SYSTEM_SKILL_KEYS, META_GOBII_TOOL_NAMES
+from .spawn_agent import execute_spawn_agent
 
 
 WAIT_DEFAULT_TIMEOUT_SECONDS = 10
@@ -337,6 +338,48 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
         "output": _output_object(
             {"status": {"type": "string"}, "agent": _AGENT_OUTPUT, **_confirmation_output_schema()},
+            required=("status",),
+        ),
+    },
+    "meta_gobii_request_agent_creation": {
+        "description": (
+            "Request creation of a specialist Gobii through the existing human Create/Decline approval flow. "
+            "This creates an AgentSpawnRequest only; it does not create the Gobii until a human approves it. "
+            "Use this as the Meta Gobii-gated replacement for legacy spawn_agent handoffs."
+        ),
+        "parameters": _object(
+            {
+                "charter": {
+                    "type": "string",
+                    "description": "Full charter/instructions for the requested specialist Gobii.",
+                },
+                "handoff_message": {
+                    "type": "string",
+                    "description": "Initial task handoff sent to the requested Gobii after approval.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Why this request needs a specialist Gobii rather than the invoking Gobii.",
+                },
+                "will_continue_work": {
+                    "type": "boolean",
+                    "description": "true = continue with more work now; false = done after creating the approval request.",
+                },
+            },
+            required=("charter", "handoff_message", "will_continue_work"),
+        ),
+        "output": _output_object(
+            {
+                "status": {"type": "string"},
+                "request_status": {"type": "string"},
+                "message": {"type": "string"},
+                "created_count": {"type": "integer"},
+                "already_pending_count": {"type": "integer"},
+                "spawn_request_id": _UUID,
+                "approval_url": _STRING_OR_NULL,
+                "decision_api_url": _STRING_OR_NULL,
+                "auto_sleep_ok": {"type": "boolean"},
+            },
             required=("status",),
         ),
     },
@@ -915,6 +958,10 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
 
     transaction.on_commit(_queue_initial_processing)
     return {"status": "ok", "agent": _serialize_agent(agent)}
+
+
+def _tool_request_agent_creation(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
+    return execute_spawn_agent(invoking_agent, params, invoked_via_meta_gobii=True)
 
 
 def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
@@ -2151,6 +2198,7 @@ _HANDLERS: dict[str, Callable[[PersistentAgent, dict[str, Any]], dict[str, Any]]
     "meta_gobii_list_agents": _tool_list_agents,
     "meta_gobii_get_agent": _tool_get_agent,
     "meta_gobii_create_agent": _tool_create_agent,
+    "meta_gobii_request_agent_creation": _tool_request_agent_creation,
     "meta_gobii_update_agent": _tool_update_agent,
     "meta_gobii_archive_agent": _tool_archive_agent,
     "meta_gobii_get_agent_config_options": _tool_get_agent_config_options,

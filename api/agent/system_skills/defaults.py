@@ -309,6 +309,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     tool_names=META_GOBII_TOOL_NAMES,
     enables=(
         "list, inspect, create, update, and archive persistent Gobiis",
+        "request Gobii creation through the existing human Create/Decline approval flow",
         "configure name, charter, schedule, active state, intelligence tier, daily credit limits, whitelist policy, and proactive opt-in",
         "create, list, update, and remove peer-agent links with message-window limits",
         "send briefings to Gobiis and read or wait on their timelines",
@@ -317,7 +318,10 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     use_when=(
         "the user asks to create a team of Gobiis",
+        "the user asks to deploy Gobiis or request a specialist Gobii",
+        "the user asks to create, manage, configure, supervise, or restructure Gobiis",
         "the user asks to build or restructure an agent graph",
+        "the user asks to manage the Gobii graph or control plane",
         "the user asks a Gobii to manage other Gobiis or act as a manager Gobii",
         "the user asks to link Gobiis together and brief them",
         "the user asks to manage persistent Gobii settings, schedules, contacts, allowlists, resource limits, or peer links",
@@ -332,10 +336,16 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "agent team",
         "agent graph",
         "gobii graph",
+        "gobii control plane",
+        "control plane",
         "create agents",
         "manage agents",
+        "configure gobiis",
+        "supervise gobiis",
         "link agents",
         "brief agents",
+        "deploy gobiis",
+        "request gobii creation",
         "restructure gobiis",
         "spawn gobiis",
     ),
@@ -355,6 +365,9 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "scope and wait for higher-level confirmation.\n"
         "For team creation, first inspect config options and existing agents when useful, then create the requested "
         "Gobiis, link them, and send each one a concise briefing with its role and handoff context after approval.\n"
+        "For specialist handoffs that should use the existing Create/Decline approval request flow, use "
+        "meta_gobii_request_agent_creation. Do not call legacy spawn_agent directly; it is only a hidden compatibility "
+        "path after Meta Gobii is enabled.\n"
         "Use contact tools only for contacts the human supplied, approved, or that are already known internal team contacts. "
         "Grant can_configure only to owner-approved contacts. Prefer manual allowlist semantics for explicit contacts.\n"
         "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "

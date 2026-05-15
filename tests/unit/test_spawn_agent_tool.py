@@ -7,8 +7,11 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
-from api.agent.core.prompt_context import get_agent_tools
+from api.agent.core.prompt_context import _get_system_instruction, get_agent_tools
+from api.agent.tools.meta_gobii import execute_meta_gobii_tool
+from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY
 from api.agent.tools.spawn_agent import execute_spawn_agent
+from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.models import (
     AgentSpawnRequest,
     BrowserUseAgent,
@@ -16,6 +19,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentSystemSkillState,
 )
 
 
@@ -62,31 +66,47 @@ class SpawnAgentToolTests(TestCase):
             browser_use_agent=cls.org_browser,
         )
 
-    def test_get_agent_tools_includes_spawn_agent_when_capacity_exists(self):
-        with patch("api.agent.core.prompt_context.AgentService.get_agents_available", return_value=2):
-            tools = get_agent_tools(self.personal_agent)
-
-        tool_names = [entry.get("function", {}).get("name") for entry in tools if isinstance(entry, dict)]
-        self.assertIn("spawn_agent", tool_names)
-        spawn_tool = next(
-            entry for entry in tools
-            if isinstance(entry, dict) and entry.get("function", {}).get("name") == "spawn_agent"
+    def _enable_meta_gobii(self, agent):
+        PersistentAgentSystemSkillState.objects.update_or_create(
+            agent=agent,
+            skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+            defaults={"is_enabled": True},
         )
-        spawn_properties = spawn_tool.get("function", {}).get("parameters", {}).get("properties", {})
-        self.assertNotIn("name", spawn_properties)
 
-    def test_get_agent_tools_hides_spawn_agent_without_capacity(self):
-        with patch("api.agent.core.prompt_context.AgentService.get_agents_available", return_value=0):
+    def test_get_agent_tools_does_not_include_spawn_agent_when_capacity_exists(self):
+        with patch("agents.services.AgentService.get_agents_available", return_value=2):
             tools = get_agent_tools(self.personal_agent)
-
-        tool_names = [
-            entry.get("function", {}).get("name")
-            for entry in tools
-            if isinstance(entry, dict)
-        ]
+        tool_names = [entry.get("function", {}).get("name") for entry in tools if isinstance(entry, dict)]
         self.assertNotIn("spawn_agent", tool_names)
 
-    def test_execute_spawn_agent_creates_pending_request_with_org_context_urls(self):
+    def test_base_prompt_does_not_advertise_spawn_agent_when_meta_gobii_is_disabled(self):
+        prompt = _get_system_instruction(self.personal_agent, is_first_run=False)
+
+        self.assertNotIn("spawn_agent", prompt)
+        self.assertNotIn("specialist peer", prompt)
+        self.assertNotIn("team of Gobiis", prompt)
+
+    def test_stale_spawn_agent_runtime_call_requires_meta_gobii_without_creating_request(self):
+        params = {
+            "charter": "Own contract review and summarize legal risk.",
+            "handoff_message": "Review attached SOW and return redlines.",
+            "reason": "Contract law review is outside my normal scope.",
+            "will_continue_work": False,
+        }
+
+        result, updated_tools = execute_runtime_tool_call(
+            self.personal_agent,
+            tool_name="spawn_agent",
+            exec_params=params,
+        )
+
+        self.assertIsNone(updated_tools)
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("Meta Gobii", result.get("message", ""))
+        self.assertFalse(AgentSpawnRequest.objects.filter(agent=self.personal_agent).exists())
+
+    def test_meta_gobii_request_agent_creation_creates_pending_request_with_org_context_urls(self):
+        self._enable_meta_gobii(self.org_agent)
         params = {
             "charter": "Own contract review and summarize legal risk.",
             "handoff_message": "Review attached SOW and return redlines.",
@@ -95,7 +115,7 @@ class SpawnAgentToolTests(TestCase):
         }
 
         with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
-            result = execute_spawn_agent(self.org_agent, params)
+            result = execute_meta_gobii_tool(self.org_agent, "meta_gobii_request_agent_creation", params)
 
         self.assertEqual(result.get("status"), "ok")
         self.assertEqual(result.get("request_status"), AgentSpawnRequest.RequestStatus.PENDING)
@@ -121,7 +141,8 @@ class SpawnAgentToolTests(TestCase):
             "Own contract review and summarize legal risk.",
         )
 
-    def test_execute_spawn_agent_reuses_matching_pending_request(self):
+    def test_meta_gobii_request_agent_creation_reuses_matching_pending_request(self):
+        self._enable_meta_gobii(self.personal_agent)
         params = {
             "charter": "Own outbound vendor coordination and contract follow-ups.",
             "handoff_message": "Pick up vendor renewals this week and report blockers.",
@@ -130,8 +151,8 @@ class SpawnAgentToolTests(TestCase):
         }
 
         with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
-            first = execute_spawn_agent(self.personal_agent, params)
-            second = execute_spawn_agent(self.personal_agent, params)
+            first = execute_meta_gobii_tool(self.personal_agent, "meta_gobii_request_agent_creation", params)
+            second = execute_meta_gobii_tool(self.personal_agent, "meta_gobii_request_agent_creation", params)
 
         self.assertEqual(first.get("status"), "ok")
         self.assertEqual(first.get("created_count"), 1)
@@ -145,7 +166,8 @@ class SpawnAgentToolTests(TestCase):
             1,
         )
 
-    def test_execute_spawn_agent_after_decline_creates_new_request(self):
+    def test_meta_gobii_request_agent_creation_after_decline_creates_new_request(self):
+        self._enable_meta_gobii(self.personal_agent)
         params = {
             "charter": "Own outbound vendor coordination and contract follow-ups.",
             "handoff_message": "Pick up vendor renewals this week and report blockers.",
@@ -154,10 +176,10 @@ class SpawnAgentToolTests(TestCase):
         }
 
         with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
-            first = execute_spawn_agent(self.personal_agent, params)
+            first = execute_meta_gobii_tool(self.personal_agent, "meta_gobii_request_agent_creation", params)
             first_request = AgentSpawnRequest.objects.get(id=first["spawn_request_id"])
             first_request.reject(self.user)
-            second = execute_spawn_agent(self.personal_agent, params)
+            second = execute_meta_gobii_tool(self.personal_agent, "meta_gobii_request_agent_creation", params)
 
         self.assertEqual(first.get("created_count"), 1)
         self.assertEqual(second.get("created_count"), 1)
@@ -167,7 +189,8 @@ class SpawnAgentToolTests(TestCase):
             2,
         )
 
-    def test_execute_spawn_agent_after_pending_request_expires_creates_new_request(self):
+    def test_meta_gobii_request_agent_creation_after_pending_request_expires_creates_new_request(self):
+        self._enable_meta_gobii(self.personal_agent)
         params = {
             "charter": "Own outbound vendor coordination and contract follow-ups.",
             "handoff_message": "Pick up vendor renewals this week and report blockers.",
@@ -183,7 +206,7 @@ class SpawnAgentToolTests(TestCase):
         )
 
         with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
-            result = execute_spawn_agent(self.personal_agent, params)
+            result = execute_meta_gobii_tool(self.personal_agent, "meta_gobii_request_agent_creation", params)
 
         expired_request.refresh_from_db()
         self.assertEqual(expired_request.status, AgentSpawnRequest.RequestStatus.EXPIRED)
@@ -196,6 +219,21 @@ class SpawnAgentToolTests(TestCase):
             AgentSpawnRequest.objects.filter(agent=self.personal_agent).count(),
             2,
         )
+
+    def test_legacy_spawn_agent_alias_still_works_after_meta_gobii_is_enabled(self):
+        self._enable_meta_gobii(self.personal_agent)
+        params = {
+            "charter": "Own outbound vendor coordination and contract follow-ups.",
+            "handoff_message": "Pick up vendor renewals this week and report blockers.",
+            "reason": "Vendor operations are outside my charter.",
+            "will_continue_work": True,
+        }
+
+        with patch("api.agent.tools.spawn_agent.AgentService.has_agents_available", return_value=True):
+            result = execute_spawn_agent(self.personal_agent, params)
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertEqual(result.get("request_status"), AgentSpawnRequest.RequestStatus.PENDING)
 
     @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
     def test_spawn_request_approve_creates_peer_link_and_handoff(self):

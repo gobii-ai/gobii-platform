@@ -8,6 +8,7 @@ META_GOBII_TOOL_NAMES = (
     "meta_gobii_list_agents",
     "meta_gobii_get_agent",
     "meta_gobii_create_agent",
+    "meta_gobii_request_agent_creation",
     "meta_gobii_update_agent",
     "meta_gobii_archive_agent",
     "meta_gobii_get_agent_config_options",

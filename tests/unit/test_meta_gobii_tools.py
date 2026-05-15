@@ -85,21 +85,23 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertIn("user_confirmed=true", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
 
-        matches = shortlist_system_skills(
+        for query in [
             "help me create a team of Gobiis, link them, and brief them",
-            available_tool_names=set(META_GOBII_TOOL_NAMES),
-        )
-        self.assertEqual([match.skill_key for match in matches], [META_GOBII_SYSTEM_SKILL_KEY])
+            "deploy Gobiis that supervise my sales and support graph",
+            "configure a manager Gobii to restructure my Gobii control plane",
+        ]:
+            matches = shortlist_system_skills(query, available_tool_names=set(META_GOBII_TOOL_NAMES))
+            self.assertEqual([match.skill_key for match in matches], [META_GOBII_SYSTEM_SKILL_KEY])
 
-        negative_matches = shortlist_system_skills(
+        for query in [
             "write a customer support reply that mentions Gobii",
-            available_tool_names=set(META_GOBII_TOOL_NAMES),
-        )
-        self.assertEqual(negative_matches, [])
+            "summarize Gobii pricing for a normal content task",
+        ]:
+            negative_matches = shortlist_system_skills(query, available_tool_names=set(META_GOBII_TOOL_NAMES))
+            self.assertEqual(negative_matches, [])
 
     @patch("api.agent.tools.tool_manager.get_mcp_manager")
-    @patch("api.agent.tools.static_tools.AgentService.get_agents_available", return_value=0)
-    def test_meta_tools_are_hidden_until_system_skill_is_enabled(self, _mock_capacity, mock_get_manager):
+    def test_meta_tools_are_hidden_until_system_skill_is_enabled(self, mock_get_manager):
         mock_get_manager.return_value = _mock_mcp_manager()
 
         before_names = _tool_names(get_agent_tools(self.agent))
@@ -111,6 +113,16 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertEqual(result["enabled"], [META_GOBII_SYSTEM_SKILL_KEY])
         after_names = _tool_names(get_agent_tools(self.agent))
         self.assertTrue(set(META_GOBII_TOOL_NAMES).issubset(after_names))
+        self.assertTrue(
+            {
+                "meta_gobii_create_agent",
+                "meta_gobii_request_agent_creation",
+                "meta_gobii_link_agents",
+                "meta_gobii_send_agent_message",
+                "meta_gobii_wait_for_agent_event",
+            }.issubset(after_names)
+        )
+        self.assertNotIn("spawn_agent", after_names)
 
     def test_direct_tool_execution_requires_skill_state(self):
         result = execute_meta_gobii_tool(self.agent, "meta_gobii_list_agents", {})
@@ -130,8 +142,7 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertEqual(result["status"], "ok")
 
     @patch("api.agent.tools.tool_manager.get_mcp_manager")
-    @patch("api.agent.tools.static_tools.AgentService.get_agents_available", return_value=0)
-    def test_legacy_skill_key_enables_primary_meta_gobii_skill(self, _mock_capacity, mock_get_manager):
+    def test_legacy_skill_key_enables_primary_meta_gobii_skill(self, mock_get_manager):
         mock_get_manager.return_value = _mock_mcp_manager()
 
         result = enable_system_skills(self.agent, [META_GOBII_LEGACY_SYSTEM_SKILL_KEY])

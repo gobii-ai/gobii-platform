@@ -4,7 +4,6 @@ from typing import Dict, List, Optional, Set
 
 from django.db.models import Q
 
-from agents.services import AgentService
 from api.models import AgentPeerLink, PersistentAgent
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.tool_blacklist import get_agent_tool_blacklist
@@ -76,7 +75,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     from .search_tools import get_search_tools_tool
     from .secure_credentials_request import get_secure_credentials_request_tool
     from .sms_sender import get_send_sms_tool
-    from .spawn_agent import get_spawn_agent_tool
     from .spawn_web_task import get_spawn_web_task_tool
     from .web_chat_sender import get_send_chat_tool
     from .webhook_sender import get_send_webhook_tool
@@ -106,11 +104,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
 
     if sandbox_compute_enabled_for_agent(agent):
         static_tools.append(get_create_custom_tool_tool())
-
-    owner = agent.organization if agent.organization_id else agent.user
-    spawn_capacity = max(int(AgentService.get_agents_available(owner)), 0)
-    if spawn_capacity > 0:
-        static_tools.append(get_spawn_agent_tool(agent, available_capacity=spawn_capacity))
 
     if agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

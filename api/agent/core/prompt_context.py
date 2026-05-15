@@ -25,11 +25,8 @@ from litellm import token_counter
 from opentelemetry import trace
 
 from billing.addons import AddonEntitlementService
-from agents.services import AgentService
 from config import settings
 from config.plans import PLAN_CONFIG
-from tasks.services import TaskCreditService
-from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import get_owner_plan
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
 
@@ -41,7 +38,6 @@ from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.user_timezone import is_offpeak_hour, resolve_user_local_time
 
 from ...models import (
-    AgentAllowlistInvite,
     AgentCommPeerState,
     AgentFileSpaceAccess,
     AgentFsNode,
@@ -304,7 +300,9 @@ def _get_recent_prompt_history_steps(
             break
         current_reasoning_streak.append(step)
 
-    sort_key = lambda step: (step.created_at, str(step.id))
+    def sort_key(step):
+        return step.created_at, str(step.id)
+
     if len(current_reasoning_streak) >= visible_limit:
         return sorted(current_reasoning_streak, key=sort_key, reverse=True)[:visible_limit]
 
@@ -2993,13 +2991,6 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
         allowed_lines.append("External contacts are unavailable until your owner verifies their email address.")
         allowed_lines.append("You can communicate with users via web chat only.")
 
-    owner = agent.organization if agent.organization_id else agent.user
-    if AgentService.has_agents_available(owner):
-        allowed_lines.append(
-            "If work is truly outside your charter/scope, use spawn_agent to request a specialist peer. "
-            "It requires explicit human Create/Decline approval."
-        )
-
     contacts_group.section_text(
         "allowed_contacts",
         "\n".join(allowed_lines),
@@ -3888,7 +3879,7 @@ def _get_planning_mode_prompt_block() -> str:
         "## Behavior Rules\n\n"
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only "
         "until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; "
-        "execution and setup tools such as update_plan, spawn_agent, request_contact_permission, create_custom_tool, "
+        "execution and setup tools such as update_plan, request_contact_permission, create_custom_tool, "
         "and file_str_replace are unavailable while Planning Mode is active. Read-only research is allowed and often "
         "useful during planning: use search, web, file-reading, and other non-mutating tools when they help you "
         "understand the domain, options, constraints, risks, or likely plan. Do not do substantive task execution "
@@ -4173,12 +4164,12 @@ def _get_system_instruction(
     stop_examples_schedule = (
         ""
         if planning_mode_active
-        else f"- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
+        else "- 'make it weekly' → sqlite_batch(UPDATE schedule='0 9 * * 1', will_continue_work=false) + reply → STOP.\n"
     )
     mid_conversation_schedule_examples = (
         ""
         if planning_mode_active
-        else f"- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
+        else "- 'check every hour' → sqlite_batch(UPDATE schedule='0 * * * *', will_continue_work=false) + reply → STOP.\n"
     )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
