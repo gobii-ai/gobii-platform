@@ -436,6 +436,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             'preferred_contact_endpoint_id',
             'preferred_contact_endpoint',
             'preferred_llm_tier',
+            'daily_credit_limit',
             'proactive_opt_in',
             'proactive_last_trigger_at',
             'template_code',
@@ -636,7 +637,7 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             # If incoming payload explicitly provided fields that differ from defaults,
             # ensure they are persisted after provisioning.
             post_create_updates = {}
-            for field in ('charter', 'schedule', 'is_active', 'life_state', 'whitelist_policy'):
+            for field in ('charter', 'schedule', 'is_active', 'life_state', 'whitelist_policy', 'daily_credit_limit'):
                 if field in validated_data and getattr(agent, field) != validated_data[field]:
                     setattr(agent, field, validated_data[field])
                     post_create_updates[field] = validated_data[field]
