@@ -21,6 +21,7 @@ from api.agent.tools.sqlite_batch import (
     _fix_dialect_functions,
     _fix_dialect_syntax,
     _fix_escaped_quotes,
+    _get_error_hint,
     _fix_unescaped_single_quote_runs,
     _fix_json_key_vs_alias,
     _fix_python_operators,
@@ -1045,6 +1046,47 @@ class SqliteBatchToolTests(TestCase):
         fixed, fix = _fix_escaped_quotes(sql)
         self.assertEqual(fixed, "SELECT * FROM t WHERE name = 'John'")
         self.assertIsNotNone(fix)
+
+    def test_fix_escaped_quotes_preserves_double_quotes_inside_sql_literal(self):
+        r"""Inside SQL string literals, \" should become a literal double quote."""
+        sql = (
+            r"INSERT INTO search_queries (query, role_id) VALUES "
+            r"('site:linkedin.com/in/ \"AI Engineer\" \"New York\" Harvard', 1)"
+        )
+        fixed, fix = _fix_escaped_quotes(sql)
+        self.assertEqual(
+            fixed,
+            (
+                "INSERT INTO search_queries (query, role_id) VALUES "
+                "('site:linkedin.com/in/ \"AI Engineer\" \"New York\" Harvard', 1)"
+            ),
+        )
+        self.assertIsNotNone(fix)
+
+    def test_escaped_double_quotes_inside_sql_literal_execute(self):
+        with self._with_temp_db():
+            sql = (
+                "CREATE TABLE search_queries (query TEXT, role_id INTEGER);"
+                r"INSERT INTO search_queries (query, role_id) VALUES "
+                r"('site:linkedin.com/in/ \"AI Engineer\" \"New York\" Harvard', 1);"
+                "SELECT query, role_id FROM search_queries;"
+            )
+            out = execute_sqlite_batch(self.agent, {"sql": sql})
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(
+                out["results"][-1]["result"],
+                [{"query": 'site:linkedin.com/in/ "AI Engineer" "New York" Harvard', "role_id": 1}],
+            )
+
+    def test_error_hint_explains_backslash_quote_escape(self):
+        hint = _get_error_hint(
+            'unrecognized token: "\\"',
+            r"INSERT INTO t (query) VALUES ('site:linkedin.com/in/ \"AI Engineer\"')",
+        )
+
+        self.assertIn("SQLite string literals do not use backslash escaping", hint)
+        self.assertIn('"AI Engineer"', hint)
+        self.assertIn("O''Brien", hint)
 
     def test_fix_unescaped_single_quote_runs(self):
         """Balances odd-length runs of single quotes."""

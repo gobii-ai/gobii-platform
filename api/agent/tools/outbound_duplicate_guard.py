@@ -9,10 +9,12 @@ import logging
 import math
 import os
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Dict, Optional, Sequence
 from uuid import UUID
 
 from django.db.models import Prefetch, Q
+from django.utils import timezone
 
 from ...encryption import SecretsEncryption
 from ...llm.utils import normalize_model_name
@@ -34,6 +36,7 @@ import litellm
 logger = logging.getLogger(__name__)
 
 DEFAULT_SIMILARITY_THRESHOLD = DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD
+DEFAULT_DUPLICATE_LOOKBACK = timedelta(hours=1)
 
 
 @dataclass
@@ -324,6 +327,7 @@ def detect_recent_duplicate_message(
         owner_agent=agent,
         is_outbound=True,
         from_endpoint__channel=channel,
+        timestamp__gte=timezone.now() - DEFAULT_DUPLICATE_LOOKBACK,
     )
 
     if conversation_id and to_address:

@@ -25,6 +25,12 @@ PLAN_STATUSES = {
     PersistentAgentKanbanCard.Status.DONE,
 }
 _WHITESPACE_RE = re.compile(r"\s+")
+MESSAGE_DELIVERABLE_GUIDANCE = (
+    "Use messages only for final user-facing deliveries from send_email, send_sms, or send_chat_message. "
+    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now, "
+    "send it first with will_continue_work=true, then call update_plan after the send tool returns. "
+    "Do not include peer messages from send_agent_message."
+)
 
 
 @dataclass(frozen=True)
@@ -120,15 +126,18 @@ def get_update_plan_tool() -> dict[str, Any]:
                         "description": (
                             "Optional final message deliverables associated with the work. Use this after sending a final "
                             "report, answer, or important user-facing summary so the completed plan links to that delivered "
-                            "message. Include the complete current message deliverable list on every update; do not add routine "
-                            "progress updates, greetings, or internal/status messages."
+                            f"message. {MESSAGE_DELIVERABLE_GUIDANCE} Include the complete current message deliverable list "
+                            "on every update; do not add routine progress updates, greetings, or internal/status messages."
                         ),
                         "items": {
                             "type": "object",
                             "properties": {
                                 "message_id": {
                                     "type": "string",
-                                    "description": "ID returned by the send tool for the delivered user-facing message.",
+                                    "description": (
+                                        "Exact UUID returned by the send tool as message_id from a user-facing delivery; "
+                                        "never use placeholders, SQL snippets, URLs, or peer-agent message references."
+                                    ),
                                 },
                                 "label": {
                                     "type": "string",
@@ -168,7 +177,7 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     if validation["errors"]:
         return {
             "status": "error",
-            "message": "Plan update rejected.",
+            "message": _format_plan_validation_message(validation["errors"]),
             "errors": validation["errors"],
         }
 
@@ -407,6 +416,16 @@ def _validate_update_plan_params(agent, params: dict[str, Any]) -> dict[str, Any
     file_items = _validate_file_deliverables(params.get("files"), errors)
     message_items = _validate_message_deliverables(agent, params.get("messages"), errors)
     return {"errors": errors, "plan": plan_items, "files": file_items, "messages": message_items}
+
+
+def _format_plan_validation_message(errors: list[str]) -> str:
+    if not errors:
+        return "Plan update rejected."
+    first_error = errors[0]
+    message = f"Plan update rejected: {first_error}"
+    if any(error.startswith("messages") for error in errors):
+        message = f"{message} {MESSAGE_DELIVERABLE_GUIDANCE}"
+    return message
 
 
 def _validate_file_deliverables(raw_files: Any, errors: list[str]) -> list[dict[str, str]]:

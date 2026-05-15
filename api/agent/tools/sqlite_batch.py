@@ -249,13 +249,53 @@ def _fix_escaped_quotes(sql: str) -> tuple[str, str | None]:
     Example: 'WHERE name = \"John\"' -> "WHERE name = 'John'"
     """
     original = sql
-    # Replace \" with ' (JSON-style escaping used for SQL strings)
-    sql = sql.replace('\\"', "'")
-    # Replace \' with '' (SQL-style escape)
-    sql = sql.replace("\\'", "''")
+    result: list[str] = []
+    in_single_quote = False
+    i = 0
+    while i < len(sql):
+        char = sql[i]
+        next_char = sql[i + 1] if i + 1 < len(sql) else ""
+        if char == "\\" and next_char == '"':
+            result.append('"' if in_single_quote else "'")
+            i += 2
+            continue
+        if char == "\\" and next_char == "'":
+            result.append("''")
+            i += 2
+            continue
+        if char == "'":
+            result.append(char)
+            if next_char == "'":
+                result.append(next_char)
+                i += 2
+                continue
+            in_single_quote = not in_single_quote
+            i += 1
+            continue
+        result.append(char)
+        i += 1
+    sql = "".join(result)
     if sql != original:
         return sql, "fixed escaped quotes"
     return sql, None
+
+
+def _has_backslash_quote_issue(error_msg: str, sql: str) -> bool:
+    error_lower = error_msg.lower()
+    return (
+        '\\"' in sql
+        or "\\'" in sql
+        or ("unrecognized token" in error_lower and "\\" in error_msg)
+    )
+
+
+def _sqlite_quote_escape_hint() -> str:
+    return (
+        " FIX: SQLite string literals do not use backslash escaping. "
+        "Inside single-quoted SQL values, write embedded double quotes directly "
+        "(example: ('site:linkedin.com/in/ \"AI Engineer\"', 1)). "
+        "Escape embedded single quotes as two single quotes: O''Brien, not O\\'Brien."
+    )
 
 
 def _fix_unescaped_single_quote_runs(sql: str) -> tuple[str, str | None]:
@@ -1376,6 +1416,8 @@ def _execute_with_autocorrections(
 def _get_error_hint(error_msg: str, sql: str = "") -> str:
     """Return a helpful hint for common SQLite errors."""
     error_lower = error_msg.lower()
+    if _has_backslash_quote_issue(error_msg, sql):
+        return _sqlite_quote_escape_hint()
     if "union" in error_lower and "column" in error_lower:
         return " FIX: All SELECTs in UNION/UNION ALL must have the same number of columns."
     if "no column named" in error_lower or "no such column" in error_lower:

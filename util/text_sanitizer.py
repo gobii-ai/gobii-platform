@@ -4,11 +4,6 @@ import html
 import re
 import unicodedata
 
-import markdown
-from inscriptis import get_text
-from inscriptis.css_profiles import CSS_PROFILES
-from inscriptis.model.config import ParserConfig
-
 __all__ = [
     "strip_control_chars",
     "strip_markdown_for_sms",
@@ -73,11 +68,21 @@ _NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE = re.compile(
     r"\\[nr]\s*(?=(?:[*+\-\u2022]|\d+[.)]|#{1,6}\s))"
 )
 _NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS = ["extra", "sane_lists"]
-_NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG = ParserConfig(
-    css=CSS_PROFILES["strict"].copy(),
-    display_links=False,
-    display_anchors=False,
-)
+
+
+def _render_markdown_preview_to_text(value: str) -> str:
+    import markdown
+    from inscriptis import get_text
+    from inscriptis.css_profiles import CSS_PROFILES
+    from inscriptis.model.config import ParserConfig
+
+    rendered = markdown.markdown(value, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
+    config = ParserConfig(
+        css=CSS_PROFILES["strict"].copy(),
+        display_links=False,
+        display_anchors=False,
+    )
+    return get_text(rendered, config)
 
 
 def strip_markdown_for_sms(value: str | None) -> str:
@@ -152,8 +157,7 @@ def sanitize_notification_preview_text(value: str | None) -> str:
     text = html.unescape(text)
     text = _NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE.sub("\n", text)
     text = strip_control_chars(text)
-    rendered = markdown.markdown(text, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
-    text = get_text(rendered, _NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG)
+    text = _render_markdown_preview_to_text(text)
     text = _MARKDOWN_LINK_RE.sub(r"\1", text)
     text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
     text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
@@ -274,23 +278,23 @@ _HEX_ESCAPE_RE = re.compile(r"\\x([0-9a-fA-F]{2})")
 # Common string escape sequences that LLMs might output literally
 # Mapping from escaped sequence to its actual character
 _COMMON_ESCAPES_MAP = {
-    "\\\\": "\\",   # Escaped backslash
     "\\n": "\n",    # Newline
     "\\r": "\r",    # Carriage return
     "\\t": "\t",    # Tab
     '\\"': '"',     # Escaped double quote
     "\\'": "'",     # Escaped single quote
 }
+_ESCAPED_BACKSLASH_SENTINEL = "\uE000GOBII_BACKSLASH\uE000"
 
-# Single regex pattern matching all common escapes (order by length desc in alternation)
-# This ensures we match \\  before \n when we have \\n in the text
-_COMMON_ESCAPES_RE = re.compile(r"\\\\|\\n|\\r|\\t|\\\"|\\'")
+_COMMON_ESCAPES_RE = re.compile(r"\\n|\\r|\\t|\\\"|\\'")
 
 
 def _decode_long_escape(match: re.Match[str]) -> str:
     """Decode a single \\UXXXXXXXX escape sequence to its character."""
     try:
         code_point = int(match.group(1), 16)
+        if 0xD800 <= code_point <= 0xDFFF:
+            return match.group(0)
         return chr(code_point)
     except (ValueError, OverflowError):
         # Return original if invalid
@@ -332,8 +336,11 @@ def decode_unicode_escapes(value: str | None) -> str:
 
     text = value
 
-    # First handle common string escapes in a SINGLE pass using regex
-    # This is critical to avoid collisions (e.g., \\name becoming \<newline>ame)
+    text = text.replace("\\\\", _ESCAPED_BACKSLASH_SENTINEL)
+
+    # Then handle common string escapes in a SINGLE pass using regex.
+    # Escaped backslashes stay hidden until Unicode decoding is complete, so
+    # "\\u2615" remains a literal "\u2615" instead of becoming a coffee symbol.
     text = _COMMON_ESCAPES_RE.sub(lambda m: _COMMON_ESCAPES_MAP[m.group(0)], text)
 
     # Handle 8-digit unicode escapes (less common but more specific)
@@ -368,6 +375,11 @@ def decode_unicode_escapes(value: str | None) -> str:
                             continue
                         except (ValueError, OverflowError):
                             pass
+            if 0xD800 <= code_point <= 0xDFFF:
+                result.append(match.group(0))
+                i = match.end()
+                continue
+
             # Not a surrogate pair or failed to combine, just decode normally
             try:
                 result.append(chr(code_point))
@@ -378,7 +390,7 @@ def decode_unicode_escapes(value: str | None) -> str:
             result.append(text[i])
             i += 1
 
-    return "".join(result)
+    return "".join(result).replace(_ESCAPED_BACKSLASH_SENTINEL, "\\")
 
 
 # Patterns for stripping LLM reasoning/tool call artifacts that leak into output

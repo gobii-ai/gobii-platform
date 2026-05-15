@@ -1,8 +1,10 @@
+from datetime import timedelta
 from unittest.mock import patch
 
 from allauth.account.models import EmailAddress
 from django.contrib.auth import get_user_model
 from django.test import TransactionTestCase, tag
+from django.utils import timezone
 
 from api.agent.tools.email_sender import execute_send_email
 from api.agent.tools.sms_sender import execute_send_sms
@@ -151,7 +153,8 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         final_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count()
         self.assertEqual(final_count, initial_count + 1)
 
-    def test_duplicate_allowed_after_different_message(self, mock_close_old_connections):
+    @patch("api.agent.tools.email_sender.deliver_agent_email")
+    def test_duplicate_allowed_after_different_message(self, mock_deliver_email, mock_close_old_connections):
         params = {
             "to_address": self.email_address,
             "subject": "Windowed Update",
@@ -172,6 +175,7 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         # Original content should be allowed after a different message was sent in between.
         second = execute_send_email(self.agent, params)
         self.assertEqual(second.get("status"), "ok")
+        self.assertEqual(mock_deliver_email.call_count, 3)
 
     @patch("api.agent.tools.email_sender.deliver_agent_email")
     def test_duplicate_allows_nonconsecutive_match(self, mock_deliver_email, mock_close_old_connections):
@@ -196,6 +200,62 @@ class OutboundDuplicateGuardTests(TransactionTestCase):
         self.assertEqual(third.get("status"), "ok")
         self.assertFalse(third.get("duplicate_detected"))
         self.assertEqual(mock_deliver_email.call_count, 3)
+
+    def test_duplicate_detection_ignores_messages_older_than_one_hour(self, mock_close_old_connections):
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=self.email_address,
+            defaults={"owner_agent": None},
+        )
+        old_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.email_from,
+            to_endpoint=to_endpoint,
+            is_outbound=True,
+            body="Daily report body",
+            raw_payload={"subject": "Daily Report"},
+        )
+        PersistentAgentMessage.objects.filter(id=old_message.id).update(
+            timestamp=timezone.now() - timedelta(hours=1, minutes=1),
+        )
+
+        result = detect_recent_duplicate_message(
+            self.agent,
+            channel=CommsChannel.EMAIL,
+            body="Daily report body",
+            to_address=self.email_address,
+        )
+
+        self.assertIsNone(result)
+
+    def test_duplicate_detection_blocks_messages_within_one_hour(self, mock_close_old_connections):
+        to_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.EMAIL,
+            address=self.email_address,
+            defaults={"owner_agent": None},
+        )
+        recent_message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.email_from,
+            to_endpoint=to_endpoint,
+            is_outbound=True,
+            body="Daily report body",
+            raw_payload={"subject": "Daily Report"},
+        )
+        PersistentAgentMessage.objects.filter(id=recent_message.id).update(
+            timestamp=timezone.now() - timedelta(minutes=59),
+        )
+
+        result = detect_recent_duplicate_message(
+            self.agent,
+            channel=CommsChannel.EMAIL,
+            body="Daily report body",
+            to_address=self.email_address,
+        )
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.reason, "exact")
 
     @patch("api.agent.tools.outbound_duplicate_guard._compute_levenshtein_ratio")
     @patch("api.agent.tools.outbound_duplicate_guard._embedding_similarity", return_value=0.985)

@@ -4057,6 +4057,24 @@ def _get_planning_first_run_welcome_instruction(
     )
 
 
+def _get_continuation_mode_prompt_block() -> str:
+    return (
+        "## Continuation Mode\n\n"
+        "You are continuing an existing work thread, not starting a new task. "
+        "The recent unified history, step summary, tool results, and user messages already contain the active task state.\n\n"
+        "Before acting, identify the next unfinished action from that context:\n"
+        "- What has already been completed\n"
+        "- The latest successful tool result\n"
+        "- The latest failed or blocked action\n"
+        "- The next concrete action that moves the work forward\n\n"
+        "Do not restart from the charter, recreate existing artifacts, repeat completed setup, "
+        "or re-solve already-solved parts of the task. If you need to verify state, verify only "
+        "the smallest fact needed for the next action. Prefer one direct next tool call over broad "
+        "reassessment. If prior context shows a specific failure, change strategy instead of retrying "
+        "the same failed approach.\n\n"
+    )
+
+
 def _get_system_instruction(
     agent: PersistentAgent,
     *,
@@ -4071,6 +4089,7 @@ def _get_system_instruction(
 
     planning_mode_active = agent.planning_state == PersistentAgent.PlanningState.PLANNING
     implied_send_active = implied_send_context is not None
+    continuation_mode_block = "" if is_first_run else _get_continuation_mode_prompt_block()
 
     if implied_send_active:
         display_name = implied_send_context.get("display_name") if implied_send_context else "active web chat user"
@@ -4262,6 +4281,7 @@ def _get_system_instruction(
         f"You are a persistent AI agent."
         "Use your tools to fulfill the user's request completely."
         "\n\n"
+        f"{continuation_mode_block}"
         "## CRITICAL: Tool Call Format — READ THIS FIRST\n\n"
         "**You MUST use the API's native tool_calls mechanism.** Tool calls are a SEPARATE FIELD in the API response structure, NOT text in your message content.\n\n"
         "**NEVER output tool calls as text.** The following formats DO NOT WORK and will cause your task to FAIL:\n\n"

@@ -31,7 +31,7 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
         "Every `update_plan` call overwrites all current steps, so include the complete current plan each time.\n"
         "The tool also accepts optional top-level `files` and `messages` deliverables. Deliverables are associated with the whole current plan, not individual steps.\n"
         "Use `files` for final user-visible artifacts created during the work, such as reports, CSV exports, PDFs, charts, or generated documents. Do not include scratch files or temporary downloads.\n"
-        "Use `messages` after sending a final report, answer, or important user-facing summary. Use the message_id returned by the send tool. Do not include routine progress updates, greetings, or status messages.\n"
+        "Use `messages` only after sending a final user-facing report, answer, or summary through send_email, send_sms, or send_chat_message. Use the exact returned message_id UUID, or omit `messages`. If you are sending the final message in this turn, call the send tool first with will_continue_work=true, then call update_plan after the send tool returns. Do not include routine progress updates, peer agent messages from send_agent_message, placeholders, SQL snippets, URLs, or invented IDs.\n"
         "If finishing or updating a plan after producing final files or sending final user-facing messages, include those deliverables in the same `update_plan` call using `files` and/or `messages`.\n"
         "Because deliverables are replaced on every call, preserve any still-relevant previous `files` and `messages` when later updating the plan.\n"
         "After calling `update_plan`, do not repeat the whole plan in chat because the harness displays it.\n"

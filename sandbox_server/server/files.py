@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from sandbox_server.workspace import _ensure_capacity, _guess_mime_type, _normalize_workspace_path
+from util.text_sanitizer import decode_unicode_escapes
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +100,7 @@ def _handle_create_pdf(agent_root: Path, payload: Dict[str, Any]) -> Dict[str, A
         file_path = f"{file_path}.pdf"
     overwrite = payload.get("overwrite") is True
 
+    html = decode_unicode_escapes(html)
     html = _substitute_workspace_tokens(html, agent_root)
 
     if _blocked_html_assets(html):
