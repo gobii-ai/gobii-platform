@@ -439,6 +439,7 @@
         credentials: "same-origin",
         headers: {
           "X-Requested-With": "XMLHttpRequest",
+          "X-Gobii-Auth-Modal": "1",
           "Accept": "application/json",
         },
       });

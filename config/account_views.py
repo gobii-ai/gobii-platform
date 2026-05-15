@@ -20,6 +20,8 @@ from util.urls import append_query_params
 
 PASSWORD_RESET_BRIDGE_SESSION_KEY = "_password_reset_bridge"
 PASSWORD_RESET_BRIDGE_INVALID_SENTINEL = "invalid"
+AUTH_MODAL_REQUEST_HEADER = "X-Gobii-Auth-Modal"
+AUTH_MODAL_ROBOTS_HEADER = "noindex, nofollow, noarchive"
 _UID_RE = re.compile(r"^[0-9A-Za-z]+$")
 
 
@@ -141,8 +143,13 @@ class ModalAuthViewMixin:
 
 class ModalAuthNoIndexMixin:
     def dispatch(self, request, *args, **kwargs):
+        if request.headers.get(AUTH_MODAL_REQUEST_HEADER) != "1":
+            response = HttpResponse(status=404)
+            response["X-Robots-Tag"] = AUTH_MODAL_ROBOTS_HEADER
+            return response
+
         response = super().dispatch(request, *args, **kwargs)
-        response["X-Robots-Tag"] = "noindex, nofollow"
+        response["X-Robots-Tag"] = AUTH_MODAL_ROBOTS_HEADER
         return response
 
 

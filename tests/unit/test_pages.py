@@ -3578,6 +3578,8 @@ class ProprietaryPricingTrialCopyTests(TestCase):
 
 @tag("batch_pages")
 class AuthLinkTests(TestCase):
+    MODAL_REQUEST_HEADER = {"HTTP_X_GOBII_AUTH_MODAL": "1"}
+
     @staticmethod
     def _create_social_app(provider: str) -> SocialApp:
         app_kwargs = {
@@ -3786,7 +3788,11 @@ class AuthLinkTests(TestCase):
             self._create_social_app(provider)
 
         next_url = "/app/agents/new?spawn=1"
-        response = self.client.get(reverse("account_signup_modal"), {"next": next_url})
+        response = self.client.get(
+            reverse("account_signup_modal"),
+            {"next": next_url},
+            **self.MODAL_REQUEST_HEADER,
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'data-auth-mode="modal"')
@@ -3832,6 +3838,7 @@ class AuthLinkTests(TestCase):
                 "next": "/pricing/",
             },
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            **self.MODAL_REQUEST_HEADER,
             HTTP_ACCEPT="application/json",
         )
 
@@ -3854,6 +3861,7 @@ class AuthLinkTests(TestCase):
                 "next": "/pricing/",
             },
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            **self.MODAL_REQUEST_HEADER,
             HTTP_ACCEPT="application/json",
         )
 
@@ -3870,10 +3878,18 @@ class AuthLinkTests(TestCase):
     @tag("batch_pages")
     def test_auth_modal_fragments_are_noindex(self):
         for route_name in ("account_signup_modal", "account_login_modal"):
-            response = self.client.get(reverse(route_name))
+            response = self.client.get(reverse(route_name), **self.MODAL_REQUEST_HEADER)
 
             self.assertEqual(response.status_code, 200)
-            self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow")
+            self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow, noarchive")
+
+    @tag("batch_pages")
+    def test_auth_modal_fragments_require_modal_header(self):
+        for route_name in ("account_signup_modal", "account_login_modal"):
+            response = self.client.get(reverse(route_name))
+
+            self.assertEqual(response.status_code, 404)
+            self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow, noarchive")
 
     @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
@@ -3888,6 +3904,7 @@ class AuthLinkTests(TestCase):
         login_response = self.client.get(
             reverse("account_login_modal"),
             {"email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+            **self.MODAL_REQUEST_HEADER,
         )
         self.assertEqual(login_response.status_code, 200)
         self.assertContains(login_response, "cf-turnstile")
@@ -3920,6 +3937,7 @@ class AuthLinkTests(TestCase):
         signup_response = self.client.get(
             reverse("account_signup_modal"),
             {"step": "password", "email": "saved@example.com", "lock_email": "1", "next": "/pricing/"},
+            **self.MODAL_REQUEST_HEADER,
         )
         self.assertEqual(signup_response.status_code, 200)
         self.assertContains(signup_response, "cf-turnstile")
@@ -3965,6 +3983,7 @@ class AuthLinkTests(TestCase):
                 "next": next_url,
             },
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            **self.MODAL_REQUEST_HEADER,
             HTTP_ACCEPT="application/json",
         )
 
@@ -3994,6 +4013,7 @@ class AuthLinkTests(TestCase):
                 "next": checkout_url,
             },
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            **self.MODAL_REQUEST_HEADER,
             HTTP_ACCEPT="application/json",
         )
 
@@ -4015,6 +4035,7 @@ class AuthLinkTests(TestCase):
                 "next": checkout_url,
             },
             HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+            **self.MODAL_REQUEST_HEADER,
             HTTP_ACCEPT="application/json",
         )
 
