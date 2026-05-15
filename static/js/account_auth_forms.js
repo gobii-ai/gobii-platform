@@ -197,6 +197,26 @@
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   }
 
+  function getModalNavFallbackUrl(rawUrl) {
+    if (!rawUrl) {
+      return "/";
+    }
+    try {
+      const parsed = new URL(rawUrl, window.location.origin);
+      if (parsed.origin !== window.location.origin) {
+        return "/";
+      }
+      if (parsed.pathname === "/accounts/modal/signup/") {
+        parsed.pathname = "/accounts/signup/";
+      } else if (parsed.pathname === "/accounts/modal/login/") {
+        parsed.pathname = "/accounts/login/";
+      }
+      return `${parsed.pathname}${parsed.search}${parsed.hash}` || "/";
+    } catch (_error) {
+      return "/";
+    }
+  }
+
   function storePopupSession(state, targetUrl) {
     try {
       window.localStorage.setItem(
@@ -675,7 +695,7 @@
           window.GobiiCtaSignupModal.open(modalUrl);
           return;
         }
-        window.location.assign(modalUrl);
+        window.location.assign(getModalNavFallbackUrl(modalUrl));
       });
     });
   }

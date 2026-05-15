@@ -4180,6 +4180,18 @@ class LoginTurnstilePageTests(TestCase):
         self.assertIn("Complete the verification, then sign in.", script)
 
     @tag("batch_pages")
+    def test_modal_auth_navigation_fallback_uses_full_auth_pages(self):
+        with open("static/js/account_auth_forms.js", encoding="utf-8") as js_file:
+            script = js_file.read()
+
+        self.assertIn('parsed.pathname === "/accounts/modal/signup/"', script)
+        self.assertIn('parsed.pathname = "/accounts/signup/"', script)
+        self.assertIn('parsed.pathname === "/accounts/modal/login/"', script)
+        self.assertIn('parsed.pathname = "/accounts/login/"', script)
+        self.assertIn("window.location.assign(getModalNavFallbackUrl(modalUrl));", script)
+        self.assertNotIn("window.location.assign(modalUrl);", script)
+
+    @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
         TURNSTILE_ENABLED=True,
