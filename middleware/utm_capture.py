@@ -7,7 +7,11 @@ from pages.mini_mode import (
     set_mini_mode_cookie,
     set_request_mini_mode,
 )
-from util.attribution_referrers import clean_acquisition_referrer
+from util.attribution_referrers import (
+    clean_acquisition_referrer,
+    is_internal_referrer,
+    referrer_hostname,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +87,26 @@ class UTMTrackingMiddleware:
             return True
         return False
 
-    def capture_referrer_context(self, request, *, has_attribution_params: bool = False) -> bool:
+    def _is_same_host_referrer(self, request, referrer: str) -> bool:
+        hostname = referrer_hostname(referrer)
+        if not hostname:
+            return False
+
+        request_host = (request.get_host() or "").split(":", 1)[0].strip().lower().rstrip(".")
+        return bool(request_host and hostname == request_host)
+
+    def _external_acquisition_referrer(self, request) -> str:
         referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
+        if not referrer:
+            return ""
+        if self._is_same_host_referrer(request, referrer):
+            return ""
+        if is_internal_referrer(referrer):
+            return ""
+        return referrer
+
+    def capture_referrer_context(self, request, *, has_attribution_params: bool = False) -> bool:
+        referrer = self._external_acquisition_referrer(request)
         if not referrer and not has_attribution_params:
             return False
 

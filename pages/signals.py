@@ -2172,14 +2172,16 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         )
         first_referrer_cookie = _decode_cookie_if_present("first_referrer")
         last_referrer_cookie = _decode_cookie_if_present("last_referrer")
+        cleaned_first_referrer_cookie = clean_acquisition_referrer(first_referrer_cookie)
+        cleaned_last_referrer_cookie = clean_acquisition_referrer(last_referrer_cookie)
         session_first_referrer = clean_acquisition_referrer(request.session.get("first_referrer"))
         session_last_referrer = clean_acquisition_referrer(request.session.get("last_referrer"))
         http_referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
 
         if existing_first_referrer:
             first_referrer = existing_first_referrer
-        elif clean_acquisition_referrer(first_referrer_cookie):
-            first_referrer = clean_acquisition_referrer(first_referrer_cookie)
+        elif cleaned_first_referrer_cookie:
+            first_referrer = cleaned_first_referrer_cookie
         elif session_first_referrer:
             first_referrer = session_first_referrer
         elif first_referrer_cookie is None:
@@ -2187,8 +2189,8 @@ def handle_user_signed_up(sender, request, user, **kwargs):
         else:
             first_referrer = ""
 
-        if clean_acquisition_referrer(last_referrer_cookie):
-            last_referrer = clean_acquisition_referrer(last_referrer_cookie)
+        if cleaned_last_referrer_cookie:
+            last_referrer = cleaned_last_referrer_cookie
         elif session_last_referrer:
             last_referrer = session_last_referrer
         elif last_referrer_cookie is None:

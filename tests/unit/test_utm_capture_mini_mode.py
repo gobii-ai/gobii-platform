@@ -144,6 +144,34 @@ class UTMCaptureMiniModeTests(TestCase):
         self.assertEqual(request.session.get("first_path"), "/pricing/")
         self.assertEqual(request.session.get("last_path"), "/pricing/")
 
+    def test_referrer_context_ignores_same_host_referrers(self):
+        request = self._build_request("/pricing/")
+        request.META["HTTP_HOST"] = "www.gobii.ai"
+        request.META["HTTP_REFERER"] = "https://www.gobii.ai/"
+        request.session.modified = False
+
+        self.middleware(request)
+
+        self.assertFalse(request.session.modified)
+        self.assertNotIn("first_referrer", request.session)
+        self.assertNotIn("last_referrer", request.session)
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
+    def test_referrer_context_ignores_internal_root_domain_referrers(self):
+        request = self._build_request("/pricing/")
+        request.META["HTTP_HOST"] = "www.gobii.ai"
+        request.META["HTTP_REFERER"] = "https://app.gobii.ai/agents/"
+        request.session.modified = False
+
+        self.middleware(request)
+
+        self.assertFalse(request.session.modified)
+        self.assertNotIn("first_referrer", request.session)
+        self.assertNotIn("last_referrer", request.session)
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
     def test_referrer_context_ignores_auth_provider_referrers(self):
         request = self._build_request("/accounts/google/login/callback/")
         request.META["HTTP_REFERER"] = "https://accounts.google.com/"
