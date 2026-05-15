@@ -28,7 +28,8 @@ def get_request_contact_permission_tool() -> dict:
         "function": {
             "name": "request_contact_permission",
             "description": (
-                "Request permission to contact someone via email or SMS who is not in your allowlist. "
+                "Request user approval before emailing or texting a specific contact not in your allowlist. "
+                "Use this instead of request_human_input for email/SMS contact approval. "
                 "Creates a request that the user must approve before you can contact them. "
                 "Returns a URL that you MUST send to the user so they can approve the contact. "
                 "Check if contact already exists before requesting. If the user just gave you a specific email "
