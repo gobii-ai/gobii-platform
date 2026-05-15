@@ -8,6 +8,9 @@ META_GOBII_EVAL_SCENARIO_PREFIX = "meta_gobii_"
 SKILL_SEARCH_TOOL_NAME = "search_system_skills"
 ENABLE_SYSTEM_SKILLS_TOOL_NAME = "enable_system_skills"
 LEGACY_SPAWN_TOOL_NAME = "spawn_agent"
+SCHEDULE_EXPECTATION_NONE = "none"
+SCHEDULE_EXPECTATION_EXPLICIT = "explicit"
+SCHEDULE_EXPECTATION_CLARIFY_OR_NONE = "clarify_or_none"
 
 MUTATING_META_GOBII_TOOLS = {
     "meta_gobii_create_agent",
@@ -44,13 +47,16 @@ class MetaGobiiEvalCase:
     forbidden_scope_terms: tuple[str, ...] = ()
     require_graph: bool = False
     require_briefings: bool = False
+    schedule_expectation: str = SCHEDULE_EXPECTATION_NONE
+    expected_schedule_change_kind: str = ""
+    required_schedule_terms: tuple[str, ...] = ()
 
     @property
     def scenario_slug(self) -> str:
         return f"{META_GOBII_EVAL_SCENARIO_PREFIX}{self.slug}"
 
 
-META_GOBII_EVAL_CASES = (
+GENERAL_META_GOBII_EVAL_CASES = (
     MetaGobiiEvalCase(
         slug="positive_team_creation",
         prompt=(
@@ -230,6 +236,648 @@ META_GOBII_EVAL_CASES = (
     ),
 )
 
+META_GOBII_NO_SCHEDULE_CASES = (
+    MetaGobiiEvalCase(
+        slug="no_schedule_demo_team",
+        prompt=(
+            "Create a demo Gobii team so I can see how team creation works. Include roles, links, and initial "
+            "briefings, but this is just a demo setup."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent_config_options", "meta_gobii_list_agents"),
+        forbidden_tools=(LEGACY_SPAWN_TOOL_NAME,),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=2,
+        max_planned_agents=4,
+        forbidden_scope_terms=("schedule", "daily", "weekly", "recurring"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_recruiting_project_team",
+        prompt=(
+            "Create a recruiting Gobii team for this hiring project. Link them and brief them on sourcing, "
+            "screening, and coordinator handoff. No recurring workflow has been decided yet."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent_config_options", "meta_gobii_list_agents"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=3,
+        max_planned_agents=3,
+        required_role_terms=("sourcing", "screening", "coordinator"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_sales_team_setup_only",
+        prompt=(
+            "Set up a small sales Gobii team for outbound experiments: one for account research, one for list "
+            "cleanup, and one for drafting handoffs. Create, link, and brief them only."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=3,
+        max_planned_agents=3,
+        required_role_terms=("account research", "list cleanup", "handoff"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_one_time_research",
+        prompt=(
+            "Create one research Gobii to investigate the new procurement portal once and report back. This is a "
+            "one-time research task for next week."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent_config_options",),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("research",),
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_candidate_screening_once",
+        prompt=(
+            "Make a candidate-screening Gobii for this one batch of 18 applicants. Brief it to screen the batch and "
+            "send me a summary."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("candidate", "screening"),
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_sales_list_cleanup_once",
+        prompt=(
+            "Create a Sales List Cleanup Gobii to clean the prospect spreadsheet I uploaded and return one deduped "
+            "list. This is a one-off cleanup."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_upload_agent_file", "meta_gobii_get_agent_config_options"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("sales", "cleanup"),
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_crm_notes_cleanup_once",
+        prompt=(
+            "Create a Gobii to clean up last quarter's CRM notes and tag obvious next steps. It only needs to work "
+            "through this historical batch."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("crm", "notes"),
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_customer_ops_backfill",
+        prompt=(
+            "Create a customer-ops Gobii for a backfill project: read the missed support exports and draft a handoff "
+            "report for the team."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("customer", "backfill"),
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_trial_prototype_team",
+        prompt=(
+            "Prototype a three-Gobii ops team for a trial: Intake, Research, and Summary. Show the design, link them, "
+            "and brief them after I approve."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=3,
+        max_planned_agents=3,
+        required_role_terms=("intake", "research", "summary"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_exploratory_audit_team",
+        prompt=(
+            "Create a temporary team to explore our existing Gobiis and audit who owns what. I want the initial "
+            "audit, not a standing process."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_list_agents", "meta_gobii_list_agent_links"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=2,
+        max_planned_agents=4,
+        required_role_terms=("audit",),
+        require_graph=True,
+        require_briefings=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_reorganize_existing_team",
+        prompt=(
+            "Reorganize my existing customer ops Gobiis: inspect the current links, remove stale links, add the right "
+            "ones, and brief the affected Gobiis."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_list_agent_links", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_list_agents", "meta_gobii_unlink_agents"),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_archive_stale_agents",
+        prompt="Archive the stale demo Gobiis from last month after showing me the list you plan to archive.",
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_any_tools=("meta_gobii_list_agents", "meta_gobii_archive_agent"),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_link_unlink_only",
+        prompt=(
+            "Link the Sales Research Gobii to the Account Prioritizer and unlink it from the old Outreach Drafting "
+            "Gobii. Do not change anything else."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_link_agents", "meta_gobii_unlink_agents"),
+        expected_any_tools=("meta_gobii_list_agents", "meta_gobii_list_agent_links"),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_assign_resources_only",
+        prompt=(
+            "Raise the Research Gobii's daily credit limit to 20 and switch it to the premium intelligence tier for "
+            "this project. Leave its work pattern alone."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent_config_options", "meta_gobii_get_agent"),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_approve_contact_only",
+        prompt=(
+            "Approve the pending contact for our Recruiting Coordinator Gobii so the coordinator can send inbound "
+            "notes. Don't change the Gobii's job."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_list_pending_contacts", "meta_gobii_approve_pending_contact"),
+        expected_any_tools=("meta_gobii_list_contacts",),
+        expect_confirmation=True,
+        contact_safety=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_upload_files_only",
+        prompt=(
+            "Upload the account research brief to the Sales Research Gobii and tell it to use the file for the next "
+            "handoff. No other settings should change."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_upload_agent_file", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent",),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_make_agents_available",
+        prompt=(
+            "Make the Support Intake and Support Summary Gobiis available for the team to use in chat. They do not "
+            "need to start work by themselves."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_list_agents", "meta_gobii_get_agent"),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_approved_create_link_brief_only",
+        prompt=(
+            "Approved: create the Intake, Research, and Summary Gobiis, link them in that order, and send only the "
+            "briefings we reviewed. Nothing recurring."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        forbidden_tools=(LEGACY_SPAWN_TOOL_NAME,),
+        expect_confirmation=False,
+        min_planned_agents=3,
+        max_planned_agents=3,
+        required_role_terms=("intake", "research", "summary"),
+        require_graph=True,
+        require_briefings=True,
+    ),
+)
+
+META_GOBII_AMBIGUOUS_SCHEDULE_CASES = (
+    MetaGobiiEvalCase(
+        slug="ambiguous_monitor_competitor_pricing",
+        prompt=(
+            "Create a Gobii to monitor competitor pricing for the launch plan and brief the sales team on what it "
+            "finds."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("competitor", "pricing"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+    MetaGobiiEvalCase(
+        slug="ambiguous_recruiting_follow_up",
+        prompt=(
+            "Create a recruiting Gobii to follow up on candidate responses and keep the hiring team updated."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("recruit", "candidate"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+    MetaGobiiEvalCase(
+        slug="ambiguous_keep_tabs_policy_research",
+        prompt=(
+            "Set up a research Gobii to keep tabs on AI policy changes and summarize important items for legal."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("research", "policy"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+    MetaGobiiEvalCase(
+        slug="ambiguous_lead_monitoring_no_cadence",
+        prompt="Build a sales Gobii for lead monitoring and hand off promising accounts to the AE team.",
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("lead", "sales"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+    MetaGobiiEvalCase(
+        slug="ambiguous_support_escalation_watch",
+        prompt="Create a support ops Gobii to watch escalations and tell the team when something looks risky.",
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("support", "escalation"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+    MetaGobiiEvalCase(
+        slug="ambiguous_customer_success_follow_up",
+        prompt=(
+            "Create a customer success Gobii for churn-risk follow-up and have it coordinate with the account owner."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("customer success", "churn"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    ),
+)
+
+META_GOBII_EXPLICIT_SCHEDULE_CASES = (
+    MetaGobiiEvalCase(
+        slug="schedule_daily_sales_report",
+        prompt=(
+            "Create a sales pipeline Gobii that sends me a daily 8am report on stalled deals and next-step risks."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent_config_options",),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("sales", "pipeline"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("daily",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_weekly_competitor_digest",
+        prompt=(
+            "Set up a competitor research Gobii that prepares a weekly Friday digest for the product team."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("competitor", "research"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("weekly", "friday"),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_monthly_vendor_review",
+        prompt=(
+            "Create a vendor review Gobii that checks vendor portals and drafts a monthly renewal-risk review."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("vendor", "review"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("monthly",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_every_morning_lead_monitor",
+        prompt=(
+            "Create a lead monitoring Gobii to check for new high-intent leads every morning and brief Sales Ops."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("lead", "sales"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("morning",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_friday_customer_follow_up",
+        prompt=(
+            "Create a customer success Gobii that follows up with at-risk accounts every Friday afternoon."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("customer", "success"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("friday",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_daily_inbox_check",
+        prompt=(
+            "Update the Support Intake Gobii so it checks the shared inbox daily at 9am and flags anything urgent."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent", "meta_gobii_get_agent_config_options"),
+        expect_confirmation=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="update",
+        required_schedule_terms=("daily",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_recurring_candidate_pipeline",
+        prompt=(
+            "Create a recruiting pipeline Gobii that checks candidate status every Monday morning and sends a hiring "
+            "team check-in."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("candidate", "pipeline"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("monday", "morning"),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_sla_escalation_watch",
+        prompt=(
+            "Create a support escalation watcher that checks SLA breach risk every 30 minutes during business hours."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("support", "sla"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("30",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_weekly_content_ideas",
+        prompt=(
+            "Create a content ideas Gobii that sends scheduled ideas every Monday before the marketing standup."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("content", "ideas"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("monday",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_proactive_daily_market_digest",
+        prompt=(
+            "Make the Market Research Gobii proactively prepare a daily market digest and send it to me."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent", "meta_gobii_get_agent_config_options"),
+        expect_confirmation=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="update",
+        required_schedule_terms=("daily",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_monthly_board_report",
+        prompt=(
+            "Create an operations reporting Gobii that compiles a monthly board packet summary from our dashboards."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_send_agent_message"),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        max_planned_agents=1,
+        required_role_terms=("operations", "reporting"),
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("monthly",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_weekday_ops_checkin_team",
+        prompt=(
+            "Create a two-Gobii ops team that checks launch readiness every weekday morning: one gathers blockers, "
+            "the other drafts the standup update. Link and brief them."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_create_agent", "meta_gobii_link_agents", "meta_gobii_send_agent_message"),
+        expected_any_tools=("meta_gobii_get_agent_config_options",),
+        expect_confirmation=True,
+        expect_initial_proposal=True,
+        min_planned_agents=2,
+        max_planned_agents=2,
+        required_role_terms=("blockers", "standup"),
+        require_graph=True,
+        require_briefings=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="create",
+        required_schedule_terms=("weekday", "morning"),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_remove_existing",
+        prompt=(
+            "Remove the schedule from the Vendor Watch Gobii so it stops running automatically. Keep it available for "
+            "manual requests."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent", "meta_gobii_get_agent_config_options"),
+        expect_confirmation=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="remove",
+        required_schedule_terms=("remove",),
+    ),
+    MetaGobiiEvalCase(
+        slug="schedule_change_existing",
+        prompt=(
+            "Change the Competitor Watch Gobii schedule from daily to Tuesdays at 10am and include that exact change "
+            "in the approval request."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent", "meta_gobii_get_agent_config_options"),
+        expect_confirmation=True,
+        schedule_expectation=SCHEDULE_EXPECTATION_EXPLICIT,
+        expected_schedule_change_kind="update",
+        required_schedule_terms=("tuesday", "10"),
+    ),
+)
+
+META_GOBII_EXISTING_AGENT_NO_SCHEDULE_CASES = (
+    MetaGobiiEvalCase(
+        slug="no_schedule_rename_existing",
+        prompt="Rename the Research Gobii to Market Research Lead and leave everything else as-is.",
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent",),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_update_charter_existing",
+        prompt=(
+            "Update the Customer Ops Gobii charter to prioritize enterprise accounts this week. Do not alter its "
+            "schedule or contacts."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent",),
+        expect_confirmation=True,
+    ),
+    MetaGobiiEvalCase(
+        slug="no_schedule_activate_existing",
+        prompt=(
+            "Turn the Partner Research Gobii back on so I can message it when needed. It should not start automatic "
+            "work."
+        ),
+        expect_skill=True,
+        expect_skill_search=True,
+        expected_tools=("meta_gobii_update_agent",),
+        expected_any_tools=("meta_gobii_get_agent",),
+        expect_confirmation=True,
+    ),
+)
+
+META_GOBII_SCHEDULE_EVAL_CASES = (
+    *META_GOBII_NO_SCHEDULE_CASES,
+    *META_GOBII_AMBIGUOUS_SCHEDULE_CASES,
+    *META_GOBII_EXPLICIT_SCHEDULE_CASES,
+    *META_GOBII_EXISTING_AGENT_NO_SCHEDULE_CASES,
+)
+
+META_GOBII_EVAL_CASES = (
+    *GENERAL_META_GOBII_EVAL_CASES,
+    *META_GOBII_SCHEDULE_EVAL_CASES,
+)
+
 META_GOBII_EVAL_SCENARIO_SLUGS = [case.scenario_slug for case in META_GOBII_EVAL_CASES]
 
 
@@ -337,6 +985,7 @@ def score_meta_gobii_case(
             )
 
     scores["minimal_action"] = _score_minimal_action(case, plan_args, tools_before_approval)
+    scores["schedule_scope"] = _score_schedule_scope(case, plan_args, response_args or {})
     scores["team_design"] = _score_team_design(case, plan_args, response_args or {})
     scores["duplicate_output"] = _score_duplicate_output(response_args or {})
 
@@ -370,6 +1019,73 @@ def _score_minimal_action(
             )
 
     return (True, "Minimal-action constraints matched expectation.")
+
+
+def _score_schedule_scope(
+    case: MetaGobiiEvalCase,
+    plan_args: dict[str, Any],
+    response_args: dict[str, Any],
+) -> tuple[bool, str]:
+    policy = plan_args.get("schedule_policy") or {}
+    if not isinstance(policy, dict):
+        policy = {}
+
+    schedule_in_scope = bool(policy.get("schedule_in_scope"))
+    explicit_intent = bool(policy.get("explicit_user_intent"))
+    approval_includes_schedule = bool(policy.get("included_in_approval_scope"))
+    asks_clarifying_question = bool(policy.get("asks_clarifying_question"))
+    schedule_action = str(policy.get("schedule_action") or "none").strip().lower()
+    cadence_or_schedule = str(policy.get("cadence_or_schedule") or "").strip().lower()
+    schedule_blob = _text_blob(
+        policy.get("cadence_or_schedule"),
+        policy.get("rationale"),
+        response_args.get("response_text"),
+        response_args.get("extra_scope_items"),
+    )
+
+    if case.schedule_expectation == SCHEDULE_EXPECTATION_EXPLICIT:
+        if not schedule_in_scope:
+            return (False, "Expected an explicit schedule to be in scope, but schedule_policy omitted it.")
+        if not explicit_intent:
+            return (False, "Expected schedule_policy to mark explicit user schedule intent.")
+        if not approval_includes_schedule:
+            return (False, "Schedule was in scope but not explicitly included in the approval plan.")
+        if case.expected_schedule_change_kind and schedule_action != case.expected_schedule_change_kind:
+            return (
+                False,
+                f"Expected schedule_action={case.expected_schedule_change_kind}; saw {schedule_action}.",
+            )
+        missing_terms = [term for term in case.required_schedule_terms if term.lower() not in schedule_blob]
+        if missing_terms:
+            return (False, f"Schedule policy missed requested cadence term(s): {missing_terms}.")
+        if not cadence_or_schedule and case.expected_schedule_change_kind != "remove":
+            return (False, "Expected a requested cadence or schedule phrase.")
+        return (True, "Explicit schedule intent was included in approval scope.")
+
+    if case.schedule_expectation == SCHEDULE_EXPECTATION_CLARIFY_OR_NONE:
+        if schedule_in_scope and schedule_action != "clarify":
+            return (
+                False,
+                "Ambiguous recurring intent should not create/update/remove a schedule without clarification.",
+            )
+        if approval_includes_schedule and not asks_clarifying_question:
+            return (False, "Ambiguous schedule was placed in approval scope instead of being clarified.")
+        if explicit_intent:
+            return (False, "Ambiguous prompt was incorrectly treated as explicit schedule intent.")
+        if asks_clarifying_question or schedule_action in ("none", "clarify"):
+            return (True, "Ambiguous recurring language did not invent a schedule cadence.")
+        return (False, f"Unexpected ambiguous schedule action: {schedule_action}.")
+
+    if schedule_in_scope:
+        return (False, "Schedule was included even though the user did not explicitly request recurring work.")
+    if explicit_intent:
+        return (False, "No-schedule case was incorrectly marked as explicit schedule intent.")
+    if approval_includes_schedule:
+        return (False, "No-schedule case included a schedule in the approval scope.")
+    if schedule_action not in ("", "none"):
+        return (False, f"No-schedule case recorded unexpected schedule action: {schedule_action}.")
+
+    return (True, "No schedule was planned or placed in approval scope by default.")
 
 
 def _score_team_design(

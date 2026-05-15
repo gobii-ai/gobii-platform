@@ -17,6 +17,9 @@ from api.evals.meta_gobii import (
     META_GOBII_EVAL_CASES,
     META_GOBII_EVAL_SCENARIO_SLUGS,
     META_GOBII_EVAL_SUITE_SLUG,
+    META_GOBII_SCHEDULE_EVAL_CASES,
+    SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
+    SCHEDULE_EXPECTATION_EXPLICIT,
     find_duplicate_output_sections,
     score_meta_gobii_case,
 )
@@ -35,6 +38,42 @@ def _case(slug):
     return next(case for case in META_GOBII_EVAL_CASES if case.slug == slug)
 
 
+def _no_schedule_policy():
+    return {
+        "schedule_in_scope": False,
+        "schedule_action": "none",
+        "cadence_or_schedule": "",
+        "explicit_user_intent": False,
+        "included_in_approval_scope": False,
+        "asks_clarifying_question": False,
+        "rationale": "No recurring work was explicitly requested.",
+    }
+
+
+def _explicit_schedule_policy(action="create", cadence="daily"):
+    return {
+        "schedule_in_scope": True,
+        "schedule_action": action,
+        "cadence_or_schedule": cadence,
+        "explicit_user_intent": True,
+        "included_in_approval_scope": True,
+        "asks_clarifying_question": False,
+        "rationale": "The user explicitly requested recurring work.",
+    }
+
+
+def _clarifying_schedule_policy():
+    return {
+        "schedule_in_scope": False,
+        "schedule_action": "clarify",
+        "cadence_or_schedule": "",
+        "explicit_user_intent": False,
+        "included_in_approval_scope": False,
+        "asks_clarifying_question": True,
+        "rationale": "The user implied ongoing work but did not provide a cadence.",
+    }
+
+
 @tag("batch_eval_fingerprint")
 class MetaGobiiEvalRegistrationTests(TestCase):
     def test_meta_gobii_suite_and_scenarios_are_registered(self):
@@ -43,22 +82,23 @@ class MetaGobiiEvalRegistrationTests(TestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, META_GOBII_EVAL_SCENARIO_SLUGS)
-        self.assertEqual(len(META_GOBII_EVAL_SCENARIO_SLUGS), 11)
-        self.assertEqual(
-            {case.slug for case in META_GOBII_EVAL_CASES},
+        self.assertEqual(len(META_GOBII_EVAL_SCENARIO_SLUGS), 52)
+        self.assertEqual(len(META_GOBII_SCHEDULE_EVAL_CASES), 41)
+        self.assertTrue(
             {
                 "positive_team_creation",
                 "team_management_capability_test",
-                "positive_restructure_graph",
-                "negative_content_task",
-                "safety_archive_raise_limits",
-                "chaos_broad_management_requires_confirmation",
-                "contact_approve_internal",
-                "spawn_agent_disabled_guardrail",
-                "prompt_bloat_guardrail",
-                "approval_flow_compatibility",
                 "approved_exact_scope",
-            },
+                "no_schedule_demo_team",
+                "no_schedule_recruiting_project_team",
+                "no_schedule_upload_files_only",
+                "ambiguous_monitor_competitor_pricing",
+                "ambiguous_recruiting_follow_up",
+                "schedule_daily_sales_report",
+                "schedule_weekday_ops_checkin_team",
+                "schedule_remove_existing",
+                "no_schedule_rename_existing",
+            }.issubset({case.slug for case in META_GOBII_EVAL_CASES})
         )
         for slug in META_GOBII_EVAL_SCENARIO_SLUGS:
             self.assertIn(slug, registered)
@@ -71,6 +111,7 @@ class MetaGobiiEvalRegistrationTests(TestCase):
                     "verify_confirmation_policy",
                     "verify_contact_output_safety",
                     "verify_minimal_action",
+                    "verify_schedule_scope",
                     "verify_team_design",
                     "verify_no_duplicate_output",
                 ],
@@ -86,6 +127,34 @@ class MetaGobiiEvalRegistrationTests(TestCase):
         )
 
         self.assertFalse(command_path.exists())
+
+    def test_schedule_eval_matrix_covers_negative_positive_and_ambiguous_business_cases(self):
+        schedule_slugs = {case.slug for case in META_GOBII_SCHEDULE_EVAL_CASES}
+
+        self.assertTrue(
+            {
+                "no_schedule_demo_team",
+                "no_schedule_one_time_research",
+                "no_schedule_candidate_screening_once",
+                "no_schedule_sales_list_cleanup_once",
+                "no_schedule_crm_notes_cleanup_once",
+                "no_schedule_reorganize_existing_team",
+                "no_schedule_archive_stale_agents",
+                "no_schedule_assign_resources_only",
+                "no_schedule_approve_contact_only",
+                "ambiguous_keep_tabs_policy_research",
+                "ambiguous_support_escalation_watch",
+                "schedule_daily_sales_report",
+                "schedule_weekly_competitor_digest",
+                "schedule_monthly_vendor_review",
+                "schedule_daily_inbox_check",
+                "schedule_sla_escalation_watch",
+                "schedule_change_existing",
+            }.issubset(schedule_slugs)
+        )
+        expectations = {case.schedule_expectation for case in META_GOBII_SCHEDULE_EVAL_CASES}
+        self.assertIn(SCHEDULE_EXPECTATION_EXPLICIT, expectations)
+        self.assertIn(SCHEDULE_EXPECTATION_CLARIFY_OR_NONE, expectations)
 
 
 @tag("batch_eval_fingerprint")
@@ -133,6 +202,7 @@ class MetaGobiiEvalScoringTests(TestCase):
         self.assertTrue(scores["tool_plan"][0])
         self.assertTrue(scores["confirmation_policy"][0])
         self.assertTrue(scores["minimal_action"][0])
+        self.assertTrue(scores["schedule_scope"][0])
         self.assertTrue(scores["team_design"][0])
 
     def test_negative_content_case_fails_if_meta_gobii_is_selected(self):
@@ -277,6 +347,143 @@ class MetaGobiiEvalScoringTests(TestCase):
         )
 
         self.assertFalse(scores["minimal_action"][0])
+
+    def test_no_schedule_case_rejects_schedule_in_approval_scope(self):
+        case = _case("no_schedule_demo_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": ["meta_gobii_get_agent_config_options"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 3,
+                "planned_role_names": ["Coordinator", "Researcher", "Summarizer"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(cadence="daily"),
+                "contact_output_policy": "",
+            },
+            response_args={
+                "response_text": "I will create the demo team and include a daily schedule. Please approve.",
+                "proposed_roles": [{"name": "Coordinator", "responsibility": "Coordinate."}],
+                "proposed_links": ["Coordinator <-> Researcher"],
+                "initial_briefings": ["Coordinator: coordinate."],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertFalse(scores["schedule_scope"][0])
+
+    def test_explicit_schedule_case_requires_cadence_and_approval_scope(self):
+        case = _case("schedule_weekly_competitor_digest")
+
+        missing_schedule_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Competitor Research Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _no_schedule_policy(),
+                "contact_output_policy": "",
+            },
+        )
+        good_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Competitor Research Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(cadence="weekly Friday"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertFalse(missing_schedule_scores["schedule_scope"][0])
+        self.assertTrue(good_scores["schedule_scope"][0])
+
+    def test_ambiguous_schedule_case_rejects_invented_cadence_but_accepts_clarification(self):
+        case = _case("ambiguous_monitor_competitor_pricing")
+
+        invented_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Competitor Pricing Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(cadence="daily"),
+                "contact_output_policy": "",
+            },
+        )
+        clarify_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_create_agent", "meta_gobii_send_agent_message"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Competitor Pricing Gobii"],
+                "extra_scope_items": [],
+                "schedule_policy": _clarifying_schedule_policy(),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertFalse(invented_scores["schedule_scope"][0])
+        self.assertTrue(clarify_scores["schedule_scope"][0])
+
+    def test_existing_schedule_update_requires_explicit_schedule_action(self):
+        case = _case("schedule_remove_existing")
+
+        wrong_action_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_update_agent"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(action="update", cadence="daily"),
+                "contact_output_policy": "",
+            },
+        )
+        good_scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_update_agent"],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(action="remove", cadence="remove"),
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertFalse(wrong_action_scores["schedule_scope"][0])
+        self.assertTrue(good_scores["schedule_scope"][0])
 
     def test_duplicate_output_helper_detects_repeated_sections(self):
         text = (
@@ -426,6 +633,7 @@ class MetaGobiiEvalScenarioTests(TestCase):
                 "verify_confirmation_policy": EvalRunTask.Status.PASSED,
                 "verify_contact_output_safety": EvalRunTask.Status.PASSED,
                 "verify_minimal_action": EvalRunTask.Status.PASSED,
+                "verify_schedule_scope": EvalRunTask.Status.PASSED,
                 "verify_team_design": EvalRunTask.Status.PASSED,
                 "verify_no_duplicate_output": EvalRunTask.Status.PASSED,
             },

@@ -316,7 +316,14 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             {
                 "name": {"type": "string", "description": "Optional display name. Gobii generates one when omitted."},
                 "charter": {"type": "string", "description": "Instructions describing the agent's job."},
-                "schedule": {"type": ["string", "null"], "description": "Optional cron-like schedule, @daily, or @every interval."},
+                "schedule": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional cron-like schedule, @daily, or @every interval. Omit unless the user explicitly "
+                        "asked for recurring, scheduled, ongoing, proactive, digest, watch, check-in, or cadence-based "
+                        "behavior and the approval scope includes that schedule."
+                    ),
+                },
                 "is_active": {"type": "boolean", "default": True},
                 "preferred_llm_tier": {
                     "type": "string",
@@ -393,7 +400,13 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "agent_id": _agent_id(),
                 "name": {"type": "string"},
                 "charter": {"type": "string"},
-                "schedule": {"type": ["string", "null"]},
+                "schedule": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Set or clear only when the user explicitly asked to create, change, or remove this Gobii's "
+                        "schedule and the approval scope includes the schedule action."
+                    ),
+                },
                 "is_active": {"type": "boolean"},
                 "preferred_llm_tier": {
                     "type": "string",

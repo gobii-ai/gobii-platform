@@ -40,6 +40,7 @@ const sidebars = {
       items: [
         'console-guides/overview',
         'console-guides/live-chat-guide',
+        'console-guides/meta-gobii',
         'console-guides/agent-settings',
         'console-guides/organizations-and-seats',
         'console-guides/billing-usage-and-tasks',
