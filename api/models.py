@@ -6582,7 +6582,7 @@ class PersistentAgent(models.Model):
         super().clean()
         if self.organization_id:
             self._validate_org_seats()
-        if self.schedule:
+        if self.schedule and not getattr(self, "_skip_unchanged_schedule_validation", False):
             try:
                 # Use the same parser that's used for task scheduling to ensure consistency.
                 from api.agent.core.schedule_parser import ScheduleParser

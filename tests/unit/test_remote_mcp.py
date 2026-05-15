@@ -225,6 +225,93 @@ class RemoteMCPViewTests(TestCase):
         created_agent.refresh_from_db()
         self.assertTrue(created_agent.is_deleted)
 
+    def test_update_unscheduled_agent_config_without_schedule(self):
+        agent = self._create_agent(self.user, "Unscheduled Config Update")
+        self.assertIsNone(agent.schedule)
+
+        response = self._call_tool(
+            "gobii_update_agent",
+            {
+                "agent_id": str(agent.id),
+                "preferred_llm_tier": "premium",
+                "daily_credit_limit": 11,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.schedule)
+        self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
+        self.assertEqual(agent.daily_credit_limit, 11)
+
+    def test_update_unscheduled_agent_with_explicit_null_schedule(self):
+        agent = self._create_agent(self.user, "Explicit Null Schedule Update")
+        PersistentAgent.objects.filter(id=agent.id).update(schedule="@daily")
+
+        response = self._call_tool(
+            "gobii_update_agent",
+            {
+                "agent_id": str(agent.id),
+                "schedule": None,
+                "preferred_llm_tier": "premium",
+                "daily_credit_limit": 13,
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.schedule)
+        self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
+        self.assertEqual(agent.daily_credit_limit, 13)
+
+    def test_update_agent_invalid_schedule_returns_structured_tool_error(self):
+        agent = self._create_agent(self.user, "Invalid Schedule Update")
+
+        response = self._call_tool(
+            "gobii_update_agent",
+            {
+                "agent_id": str(agent.id),
+                "schedule": "not a cron schedule",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        self.assertTrue(response.json()["result"]["isError"])
+        self.assertEqual(content["status"], "error")
+        self.assertIn("details", content)
+        self.assertIn("schedule", content["details"])
+
+        list_response = self._call_tool("gobii_list_agents")
+        self.assertEqual(list_response.status_code, 200)
+        self.assertFalse(list_response.json()["result"]["isError"])
+
+    def test_update_agent_omitted_schedule_does_not_revalidate_existing_schedule(self):
+        agent = self._create_agent(self.user, "Omitted Schedule Update")
+        PersistentAgent.objects.filter(id=agent.id).update(schedule="0 9 * * *")
+
+        with patch(
+            "api.agent.core.schedule_parser.ScheduleParser.parse",
+            side_effect=AssertionError("schedule was revalidated"),
+        ):
+            response = self._call_tool(
+                "gobii_update_agent",
+                {
+                    "agent_id": str(agent.id),
+                    "preferred_llm_tier": "premium",
+                    "daily_credit_limit": 17,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertEqual(agent.schedule, "0 9 * * *")
+        self.assertEqual(agent.preferred_llm_tier, self.premium_tier)
+        self.assertEqual(agent.daily_credit_limit, 17)
+
     def test_create_agent_accepts_null_schedule_and_returns_structured_validation_errors(self):
         with (
             patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),

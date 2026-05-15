@@ -703,10 +703,18 @@ class PersistentAgentSerializer(serializers.ModelSerializer):
             instance.preferred_contact_endpoint = preferred_endpoint
             dirty_fields.add('preferred_contact_endpoint')
 
+        skip_unchanged_schedule_validation = self.partial and 'schedule' not in dirty_fields
+        if skip_unchanged_schedule_validation:
+            # Partial updates must not fail because an untouched persisted schedule
+            # cannot currently be parsed. Explicit schedule updates still validate.
+            instance._skip_unchanged_schedule_validation = True
         try:
             instance.full_clean()
         except DjangoValidationError as exc:
             raise serializers.ValidationError(exc.message_dict if hasattr(exc, 'message_dict') else exc.messages) from exc
+        finally:
+            if skip_unchanged_schedule_validation:
+                delattr(instance, '_skip_unchanged_schedule_validation')
 
         update_fields = list(dirty_fields)
         instance.save(update_fields=update_fields or None)
