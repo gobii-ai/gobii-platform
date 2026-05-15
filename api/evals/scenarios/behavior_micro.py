@@ -261,16 +261,16 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_enable_database", "category": "database", "prompt": "Enable the database so you can store a lead tracker for this agent.", "expected_tools": ["enable_database"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "accepted_tool_alternatives": {"enable_database": ["sqlite_batch"]}, "plan_expected": False},
     {"slug": "common_use_case_090_sqlite_summarize_messages", "category": "database", "prompt": "Query SQLite message history and summarize the last five user requests.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
-    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
-    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor https://status.example.test/support and report support status changes.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
-    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am ET schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
-    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor https://status.example.test/support and report support status changes.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am ET schedule for a weekly pipeline report.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_095_request_research_scope", "category": "human_input", "prompt": "Ask me which target account segment to research before starting the work.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC-USD price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
-    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
-    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC-USD price and alert only if it moves 5 percent.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
+    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_099_request_monitoring_scope", "category": "human_input", "prompt": "Ask which competitors and update types matter before setting up monitoring.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily 7am ET schedule to prepare a concise email digest of market news for ops@example.test; do not send the first digest now.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily 7am ET schedule to prepare a concise email digest of market news for ops@example.test; do not send the first digest now.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -1364,10 +1364,18 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             return "charter"
         return None
 
+    def _agent_config_field_for_expected_call(self, tool_name):
+        config_field = self._agent_config_field_for_expected_tool(tool_name)
+        if config_field:
+            return config_field
+        if self.case.category == "monitoring" and tool_name == "sqlite_batch":
+            return "charter" if "charter" in self.case.slug else "schedule"
+        return None
+
     def _accepts_sqlite_config_update(self):
         return any(
-            "sqlite_batch" in self.case.expected_tool_alternatives(tool_name)
-            and self._agent_config_field_for_expected_tool(tool_name)
+            "sqlite_batch" in self.case.accepted_tool_names_for_expected_tool(tool_name)
+            and self._agent_config_field_for_expected_call(tool_name)
             for tool_name in self.case.expected_tool_names()
         )
 
@@ -1382,7 +1390,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         alternatives = self.case.expected_tool_alternatives(tool_name)
         if alternatives:
             condition["alternatives"] = alternatives
-        config_field = self._agent_config_field_for_expected_tool(tool_name)
+        config_field = self._agent_config_field_for_expected_call(tool_name)
         if config_field:
             condition["agent_config_field"] = config_field
         if self.case.expected_params and len(self.case.expected_tools) == 1:
@@ -1598,7 +1606,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             and not self._calls_match_expected_params([call], self.case.expected_params)
         ):
             return False
-        config_field = self._agent_config_field_for_expected_tool(expected_tool_name)
+        config_field = self._agent_config_field_for_expected_call(expected_tool_name)
         if config_field and call.tool_name == "sqlite_batch":
             return sqlite_batch_mutates_agent_config_field(call, config_field)
         return True

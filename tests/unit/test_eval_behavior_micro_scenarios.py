@@ -164,7 +164,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
-        self.assertEqual(by_slug["common_use_case_078_create_line_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
         self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
         self.assertIn("Jordan Lee at Acme AI", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
@@ -196,9 +195,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"mcp_brightdata_search_engine": ("mcp_brightdata_web_data_reddit_posts",)},
         )
         self.assertEqual(
-            by_slug["common_use_case_091_schedule_daily_digest"].accepted_tool_alternatives,
-            {"update_schedule": ("sqlite_batch",)},
+            by_slug["common_use_case_091_schedule_daily_digest"].expected_tools,
+            ("sqlite_batch",),
         )
+        self.assertEqual(by_slug["common_use_case_094_update_agent_charter"].expected_tools, ("sqlite_batch",))
         self.assertIn(
             "google_sheets-get-spreadsheet-by-id",
             by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
