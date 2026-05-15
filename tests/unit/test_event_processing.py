@@ -996,7 +996,7 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
 
         self.assertIn(
-            "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata.",
+            "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata.",
             content,
         )
         self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)
