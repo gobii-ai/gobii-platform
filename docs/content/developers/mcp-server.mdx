@@ -106,8 +106,8 @@ Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients se
 | `gobii_remove_agent_contact` | Remove an allowlist contact by contact id or safe channel/address match. |
 | `gobii_list_pending_agent_contacts` | List pending contact approval requests created by an agent. |
 | `gobii_approve_pending_agent_contact` | Approve a pending contact request and add or reactivate the allowlist contact. |
-| `gobii_list_agent_contact_endpoints` | List agent-owned and preferred contact endpoints. |
-| `gobii_set_agent_preferred_contact_endpoint` | Set or clear the preferred contact endpoint using an endpoint id or active contact id. |
+| `gobii_list_agent_contact_endpoints` | List agent-owned endpoints, owner/user contact routes, and the current preferred contact endpoint. |
+| `gobii_set_agent_preferred_contact_endpoint` | Set or clear the preferred contact endpoint using an owner/user contact route endpoint id or matching active contact id. |
 | `gobii_list_agent_links` | List peer-agent links. |
 | `gobii_link_agents` | Create or enable a peer-agent link. |
 | `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
@@ -144,7 +144,7 @@ Gobii contact MCP tools use the same production models as the console:
 
 `gobii_approve_pending_agent_contact` approves a pending contact request directly into the manual allowlist. It does not create a separate invitation in the MCP flow. Expired or already-responded requests return an MCP tool error with structured details.
 
-`gobii_set_agent_preferred_contact_endpoint` accepts either an accessible endpoint id or an active allowlist contact id. When passed a contact id, Gobii resolves or creates the matching endpoint. Endpoint ids must be safe for the agent: agent-owned endpoints, the current preferred endpoint, or unowned endpoints for active manual allowlist contacts.
+`gobii_set_agent_preferred_contact_endpoint` sets the endpoint Gobii uses to reach the agent owner/user by default. MCP only accepts unowned owner/user contact routes, such as the personal owner's email/SMS/web route or an owner/admin/billing user route for organization agents. Agent-owned sender endpoints and arbitrary manual allowlist contacts are rejected. A current preferred endpoint may still be listed for compatibility and can always be cleared with `clear: true`; `can_be_preferred` shows whether an endpoint is eligible for selection.
 
 Active allowlist entries do not currently store labels or display names, so contact list results return `label` and `name` as `null`. Pending contact requests may include a requested `name`, `reason`, and `purpose`.
 

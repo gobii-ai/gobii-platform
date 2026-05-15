@@ -459,14 +459,42 @@ class RemoteMCPViewTests(TestCase):
         self.assertTrue(reactivate_content["reactivated"])
         self.assertEqual(reactivate_content["contact"]["status"], "allowed")
 
-        set_preferred_response = self._call_tool(
+        external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="friend@example.com",
+        )
+        set_external_contact_response = self._call_tool(
             "gobii_set_agent_preferred_contact_endpoint",
             {"agent_id": str(agent.id), "contact_id": contact_id},
         )
+        self.assertEqual(set_external_contact_response.status_code, 200)
+        self.assertTrue(set_external_contact_response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+        set_external_endpoint_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "endpoint_id": str(external_endpoint.id)},
+        )
+        self.assertEqual(set_external_endpoint_response.status_code, 200)
+        self.assertTrue(set_external_endpoint_response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+        owner_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address=self.user.email,
+        )
+        set_preferred_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "endpoint_id": str(owner_endpoint.id)},
+        )
         self.assertEqual(set_preferred_response.status_code, 200)
         preferred_content = self._structured_content(set_preferred_response)
+        self.assertFalse(set_preferred_response.json()["result"]["isError"])
         self.assertTrue(preferred_content["changed"])
         endpoint_id = preferred_content["preferred_contact_endpoint"]["endpoint_id"]
+        self.assertEqual(endpoint_id, str(owner_endpoint.id))
         agent.refresh_from_db()
         self.assertEqual(str(agent.preferred_contact_endpoint_id), endpoint_id)
 
@@ -479,13 +507,15 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(len(endpoints), 1)
         self.assertEqual(endpoints[0]["endpoint_id"], endpoint_id)
         self.assertTrue(endpoints[0]["is_preferred_contact"])
-        self.assertIn("manual_allowlist_contact", endpoints[0]["roles"])
+        self.assertTrue(endpoints[0]["can_be_preferred"])
+        self.assertIn("owner_user_contact", endpoints[0]["roles"])
+        self.assertNotEqual(endpoints[0]["endpoint_id"], str(external_endpoint.id))
 
         contacts_response = self._call_tool("gobii_list_agent_contacts", {"agent_id": str(agent.id)})
         self.assertEqual(contacts_response.status_code, 200)
         contacts = self._structured_content(contacts_response)["contacts"]
         self.assertEqual(len(contacts), 1)
-        self.assertTrue(contacts[0]["is_preferred"])
+        self.assertFalse(contacts[0]["is_preferred"])
 
         remove_response = self._call_tool(
             "gobii_remove_agent_contact",
@@ -498,8 +528,20 @@ class RemoteMCPViewTests(TestCase):
         self.assertEqual(remove_response.status_code, 200)
         remove_content = self._structured_content(remove_response)
         self.assertTrue(remove_content["removed"])
-        self.assertTrue(remove_content["cleared_preferred_contact_endpoint"])
+        self.assertFalse(remove_content["cleared_preferred_contact_endpoint"])
         self.assertFalse(CommsAllowlistEntry.objects.filter(id=contact_id).exists())
+        agent.refresh_from_db()
+        self.assertEqual(agent.preferred_contact_endpoint_id, owner_endpoint.id)
+
+        clear_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "clear": True},
+        )
+        self.assertEqual(clear_response.status_code, 200)
+        clear_content = self._structured_content(clear_response)
+        self.assertFalse(clear_response.json()["result"]["isError"])
+        self.assertEqual(clear_content["status"], "cleared")
+        self.assertTrue(clear_content["changed"])
         agent.refresh_from_db()
         self.assertIsNone(agent.preferred_contact_endpoint_id)
 
@@ -584,6 +626,20 @@ class RemoteMCPViewTests(TestCase):
             CommsAllowlistEntry.objects.filter(agent=other_agent, address="blocked@example.com").exists()
         )
 
+        agent_owned_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="agent-sender@example.com",
+        )
+        agent_owned_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "endpoint_id": str(agent_owned_endpoint.id)},
+        )
+        self.assertEqual(agent_owned_response.status_code, 200)
+        self.assertTrue(agent_owned_response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
         other_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=other_agent,
             channel=CommsChannel.EMAIL,
@@ -597,6 +653,34 @@ class RemoteMCPViewTests(TestCase):
         self.assertTrue(set_response.json()["result"]["isError"])
         agent.refresh_from_db()
         self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+        legacy_preferred = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.EMAIL,
+            address="legacy-preferred@example.com",
+        )
+        agent.preferred_contact_endpoint = legacy_preferred
+        agent.save(update_fields=["preferred_contact_endpoint"])
+
+        keep_current_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "endpoint_id": str(legacy_preferred.id)},
+        )
+        self.assertEqual(keep_current_response.status_code, 200)
+        self.assertFalse(keep_current_response.json()["result"]["isError"])
+        self.assertFalse(self._structured_content(keep_current_response)["changed"])
+
+        legacy_endpoints_response = self._call_tool(
+            "gobii_list_agent_contact_endpoints",
+            {"agent_id": str(agent.id)},
+        )
+        self.assertEqual(legacy_endpoints_response.status_code, 200)
+        legacy_endpoints = {
+            endpoint["endpoint_id"]: endpoint
+            for endpoint in self._structured_content(legacy_endpoints_response)["endpoints"]
+        }
+        self.assertFalse(legacy_endpoints[str(agent_owned_endpoint.id)]["can_be_preferred"])
+        self.assertTrue(legacy_endpoints[str(legacy_preferred.id)]["is_preferred_contact"])
+        self.assertFalse(legacy_endpoints[str(legacy_preferred.id)]["can_be_preferred"])
 
     def test_contact_tools_return_structured_validation_errors(self):
         agent = self._create_agent(self.user, "Validation Contact MCP Agent")

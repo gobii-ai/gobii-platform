@@ -40,8 +40,10 @@ from api.models import (
     CommsChannel,
     CommsAllowlistEntry,
     CommsAllowlistRequest,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
+    UserPhoneNumber,
     build_web_user_address,
 )
 from api.serializers import PersistentAgentSerializer
@@ -629,7 +631,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "gobii_list_agent_contact_endpoints",
         "title": "List Agent Contact Endpoints",
-        "description": "List communication endpoints relevant to an accessible persistent Gobii agent, including agent-owned endpoints and the current preferred contact endpoint.",
+        "description": "List communication endpoints relevant to an accessible persistent Gobii agent, including agent-owned endpoints, owner/user contact routes, and the current preferred contact endpoint.",
         "inputSchema": {
             "type": "object",
             "properties": {"agent_id": _agent_schema("Persistent agent UUID.")},
@@ -650,7 +652,7 @@ TOOL_DEFINITIONS = [
     {
         "name": "gobii_set_agent_preferred_contact_endpoint",
         "title": "Set Preferred Contact Endpoint",
-        "description": "Set or clear the preferred contact endpoint for an accessible persistent Gobii agent using an accessible endpoint id or active allowlist contact id.",
+        "description": "Set or clear the preferred contact endpoint for an accessible persistent Gobii agent using an owner/user contact route endpoint id or matching active contact id.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -663,7 +665,7 @@ TOOL_DEFINITIONS = [
                 "contact_id": {
                     "type": "string",
                     "format": "uuid",
-                    "description": "Active manual allowlist contact UUID. Gobii will resolve or create the matching endpoint.",
+                    "description": "Active manual allowlist contact UUID. Accepted only when the contact matches an owner/user contact route.",
                 },
                 "clear": {
                     "type": "boolean",
@@ -2005,9 +2007,7 @@ def _contact_endpoint_queryset(agent):
     if agent.preferred_contact_endpoint_id:
         query |= Q(id=agent.preferred_contact_endpoint_id)
 
-    active_contacts = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).only("channel", "address")
-    for contact in active_contacts:
-        query |= Q(owner_agent__isnull=True, channel=contact.channel, address__iexact=contact.address)
+    query |= _owner_user_preferred_endpoint_query(agent)
 
     return (
         PersistentAgentCommsEndpoint.objects.filter(query)
@@ -2018,35 +2018,102 @@ def _contact_endpoint_queryset(agent):
 
 def _resolve_preferred_endpoint_by_id(agent, endpoint_id):
     parsed_id = _parse_uuid(endpoint_id, "endpoint_id")
-    endpoint = _contact_endpoint_queryset(agent).filter(id=parsed_id).first()
+    endpoint = PersistentAgentCommsEndpoint.objects.filter(id=parsed_id).first()
     if endpoint is None:
         raise MCPToolError("Contact endpoint not found or inaccessible.")
+    if agent.preferred_contact_endpoint_id == endpoint.id:
+        return endpoint
     if not _endpoint_can_be_preferred(agent, endpoint):
         raise MCPToolError("Contact endpoint not found or inaccessible for this agent.")
     return endpoint
 
 
 def _resolve_endpoint_for_contact_preference(agent, contact):
+    if not _is_owner_user_preferred_address(agent, contact.channel, contact.address):
+        raise MCPToolError("Preferred contact endpoint must be an owner/user contact route.")
+
     endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
         channel=contact.channel,
         address=contact.address,
         defaults={"owner_agent": None},
     )
-    if endpoint.owner_agent_id and endpoint.owner_agent_id != agent.id:
-        raise MCPToolError("Contact endpoint belongs to a different agent.")
+    if not _endpoint_can_be_preferred(agent, endpoint):
+        raise MCPToolError("Preferred contact endpoint must be an owner/user contact route.")
     return endpoint
 
 
 def _endpoint_can_be_preferred(agent, endpoint):
-    if endpoint.owner_agent_id == agent.id:
-        return True
-    if agent.preferred_contact_endpoint_id == endpoint.id:
-        return True
-    if endpoint.owner_agent_id:
+    if endpoint.owner_agent_id is not None:
         return False
     if endpoint.channel not in PREFERRED_ENDPOINT_CHANNELS:
         return False
-    return agent.is_recipient_whitelisted(endpoint.channel, endpoint.address)
+    return _is_owner_user_preferred_address(agent, endpoint.channel, endpoint.address)
+
+
+def _owner_user_preferred_endpoint_query(agent):
+    query = Q(pk__in=[])
+    for channel, address in _owner_user_preferred_endpoint_addresses(agent):
+        query |= Q(owner_agent__isnull=True, channel=channel, address__iexact=address)
+    return query
+
+
+def _owner_user_preferred_endpoint_addresses(agent):
+    addresses = set()
+
+    def add(channel, address):
+        channel = channel.value if isinstance(channel, CommsChannel) else channel
+        normalized = PersistentAgentCommsEndpoint.normalize_address(channel, address)
+        if normalized:
+            addresses.add((channel, normalized))
+
+    if agent.user_id:
+        owner_email = (getattr(agent.user, "email", "") or "").strip().lower()
+        add(CommsChannel.EMAIL, owner_email)
+        add(CommsChannel.WEB, build_web_user_address(agent.user_id, agent.id))
+
+        owner_phones = UserPhoneNumber.objects.filter(
+            user_id=agent.user_id,
+            is_verified=True,
+        ).values_list("phone_number", flat=True)
+        for phone_number in owner_phones:
+            add(CommsChannel.SMS, phone_number)
+
+    if agent.organization_id:
+        org_contact_roles = (
+            OrganizationMembership.OrgRole.OWNER,
+            OrganizationMembership.OrgRole.ADMIN,
+            OrganizationMembership.OrgRole.BILLING,
+        )
+        memberships = (
+            OrganizationMembership.objects.filter(
+                org_id=agent.organization_id,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+                role__in=org_contact_roles,
+            )
+            .select_related("user")
+            .only("user__id", "user__email")
+        )
+        for membership in memberships:
+            member = membership.user
+            add(CommsChannel.EMAIL, (getattr(member, "email", "") or "").strip().lower())
+            add(CommsChannel.WEB, build_web_user_address(member.id, agent.id))
+
+        member_phones = UserPhoneNumber.objects.filter(
+            user__organizationmembership__org_id=agent.organization_id,
+            user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
+            user__organizationmembership__role__in=org_contact_roles,
+            is_verified=True,
+        ).values_list("phone_number", flat=True)
+        for phone_number in member_phones:
+            add(CommsChannel.SMS, phone_number)
+
+    return addresses
+
+
+def _is_owner_user_preferred_address(agent, channel, address):
+    channel = channel.value if isinstance(channel, CommsChannel) else channel
+    normalized = PersistentAgentCommsEndpoint.normalize_address(channel, address)
+    return (channel, normalized) in _owner_user_preferred_endpoint_addresses(agent)
 
 
 def _preferred_endpoint_matches_contact(agent, contact):
@@ -2066,6 +2133,8 @@ def _endpoint_roles(endpoint, agent):
         roles.append("agent_owned")
     if agent.preferred_contact_endpoint_id == endpoint.id:
         roles.append("preferred_contact")
+    if _endpoint_can_be_preferred(agent, endpoint):
+        roles.append("owner_user_contact")
     if endpoint.owner_agent_id is None and CommsAllowlistEntry.objects.filter(
         agent=agent,
         channel=endpoint.channel,
