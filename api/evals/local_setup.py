@@ -1,4 +1,5 @@
 """Local setup helpers for canonical eval runs."""
+from dataclasses import dataclass
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -22,12 +23,92 @@ def ensure_eval_local_database(stdout=None) -> bool:
     return True
 
 
-def ensure_openrouter_deepseek_v4_flash_profile(stdout=None):
-    """
-    Seed the minimal routing profile used by local live Meta Gobii evals.
+@dataclass(frozen=True)
+class EvalLocalRoutingProfileSeed:
+    profile_name: str
+    display_name: str
+    description: str
+    provider_key: str
+    provider_display_name: str
+    provider_env_var_name: str
+    provider_model_prefix: str
+    provider_browser_backend: str
+    endpoint_key: str
+    litellm_model: str
+    api_base: str = ""
 
-    The profile stores the provider's env var name only. It never reads, stores,
-    or prints the raw OPENROUTER_API_KEY value.
+
+def get_eval_local_routing_profile_seeds() -> tuple[EvalLocalRoutingProfileSeed, ...]:
+    seeds = [
+        EvalLocalRoutingProfileSeed(
+            profile_name=settings.EVAL_LOCAL_OPENROUTER_PROFILE_NAME,
+            display_name="OpenRouter DeepSeek V4 Flash",
+            description=(
+                "Local eval profile seeded by run_evals for DeepSeek V4 Flash through OpenRouter."
+            ),
+            provider_key="openrouter",
+            provider_display_name="OpenRouter",
+            provider_env_var_name="OPENROUTER_API_KEY",
+            provider_model_prefix="openrouter/",
+            provider_browser_backend="OPENAI_COMPAT",
+            endpoint_key=settings.EVAL_LOCAL_OPENROUTER_ENDPOINT_KEY,
+            litellm_model=settings.EVAL_LOCAL_OPENROUTER_MODEL,
+        ),
+        EvalLocalRoutingProfileSeed(
+            profile_name=settings.EVAL_LOCAL_OPENROUTER_QWEN_PROFILE_NAME,
+            display_name="OpenRouter Qwen",
+            description="Local eval profile seeded by run_evals for Qwen through OpenRouter.",
+            provider_key="openrouter",
+            provider_display_name="OpenRouter",
+            provider_env_var_name="OPENROUTER_API_KEY",
+            provider_model_prefix="openrouter/",
+            provider_browser_backend="OPENAI_COMPAT",
+            endpoint_key=settings.EVAL_LOCAL_OPENROUTER_QWEN_ENDPOINT_KEY,
+            litellm_model=settings.EVAL_LOCAL_OPENROUTER_QWEN_MODEL,
+        ),
+        EvalLocalRoutingProfileSeed(
+            profile_name=settings.EVAL_LOCAL_OPENAI_PROFILE_NAME,
+            display_name="OpenAI GPT-4.1 Mini",
+            description="Local eval profile seeded by run_evals for OpenAI tool-calling checks.",
+            provider_key="openai",
+            provider_display_name="OpenAI",
+            provider_env_var_name="OPENAI_API_KEY",
+            provider_model_prefix="",
+            provider_browser_backend="OPENAI",
+            endpoint_key=settings.EVAL_LOCAL_OPENAI_ENDPOINT_KEY,
+            litellm_model=settings.EVAL_LOCAL_OPENAI_MODEL,
+        ),
+    ]
+
+    custom_model = settings.EVAL_LOCAL_CUSTOM_MODEL.strip()
+    if custom_model:
+        seeds.append(
+            EvalLocalRoutingProfileSeed(
+                profile_name=settings.EVAL_LOCAL_CUSTOM_PROFILE_NAME,
+                display_name=settings.EVAL_LOCAL_CUSTOM_PROVIDER_DISPLAY_NAME,
+                description=(
+                    "Local eval profile seeded by run_evals from EVAL_LOCAL_CUSTOM_MODEL."
+                ),
+                provider_key=settings.EVAL_LOCAL_CUSTOM_PROVIDER_KEY,
+                provider_display_name=settings.EVAL_LOCAL_CUSTOM_PROVIDER_DISPLAY_NAME,
+                provider_env_var_name=settings.EVAL_LOCAL_CUSTOM_API_KEY_ENV_VAR,
+                provider_model_prefix="",
+                provider_browser_backend="OPENAI_COMPAT",
+                endpoint_key=settings.EVAL_LOCAL_CUSTOM_ENDPOINT_KEY,
+                litellm_model=custom_model,
+                api_base=settings.EVAL_LOCAL_CUSTOM_API_BASE.strip(),
+            )
+        )
+
+    return tuple(seeds)
+
+
+def ensure_eval_local_routing_profile(seed: EvalLocalRoutingProfileSeed, stdout=None):
+    """
+    Seed one minimal routing profile for local evals.
+
+    The profile stores the provider env var name only. It never reads, stores,
+    or prints the raw key value.
     """
     from api.models import (
         IntelligenceTier,
@@ -49,23 +130,23 @@ def ensure_openrouter_deepseek_v4_flash_profile(stdout=None):
     )
 
     provider, _ = LLMProvider.objects.update_or_create(
-        key="openrouter",
+        key=seed.provider_key,
         defaults={
-            "display_name": "OpenRouter",
+            "display_name": seed.provider_display_name,
             "enabled": True,
-            "env_var_name": "OPENROUTER_API_KEY",
-            "model_prefix": "openrouter/",
-            "browser_backend": LLMProvider.BrowserBackend.OPENAI_COMPAT,
+            "env_var_name": seed.provider_env_var_name,
+            "model_prefix": seed.provider_model_prefix,
+            "browser_backend": seed.provider_browser_backend,
         },
     )
 
     endpoint, _ = PersistentModelEndpoint.objects.update_or_create(
-        key=settings.EVAL_LOCAL_OPENROUTER_ENDPOINT_KEY,
+        key=seed.endpoint_key,
         defaults={
             "provider": provider,
             "enabled": True,
             "low_latency": True,
-            "litellm_model": settings.EVAL_LOCAL_OPENROUTER_MODEL,
+            "litellm_model": seed.litellm_model,
             "temperature_override": 0.0,
             "supports_temperature": True,
             "supports_tool_choice": True,
@@ -73,16 +154,16 @@ def ensure_openrouter_deepseek_v4_flash_profile(stdout=None):
             "allow_implied_send": False,
             "supports_vision": False,
             "supports_reasoning": False,
+            "api_base": seed.api_base,
         },
     )
 
     profile, _ = LLMRoutingProfile.objects.update_or_create(
-        name=settings.EVAL_LOCAL_OPENROUTER_PROFILE_NAME,
+        name=seed.profile_name,
         defaults={
-            "display_name": "OpenRouter DeepSeek V4 Flash",
+            "display_name": seed.display_name,
             "description": (
-                "Local eval profile seeded by run_evals. Uses OPENROUTER_API_KEY "
-                "from the environment at runtime."
+                f"{seed.description} Uses {seed.provider_env_var_name} from the environment at runtime."
             ),
             "is_active": False,
             "is_eval_snapshot": False,
@@ -111,16 +192,28 @@ def ensure_openrouter_deepseek_v4_flash_profile(stdout=None):
     ProfilePersistentTierEndpoint.objects.filter(tier=tier).exclude(endpoint=endpoint).delete()
 
     if stdout:
-        key_status = "present" if os.environ.get("OPENROUTER_API_KEY") else "not set"
+        key_status = "present" if os.environ.get(seed.provider_env_var_name) else "not set"
         stdout.write(
             "Seeded local eval routing profile "
-            f"'{profile.name}' using env var OPENROUTER_API_KEY ({key_status})."
+            f"'{profile.name}' for {seed.litellm_model} using env var "
+            f"{seed.provider_env_var_name} ({key_status})."
         )
 
     return profile
 
 
+def ensure_openrouter_deepseek_v4_flash_profile(stdout=None):
+    seed = get_eval_local_routing_profile_seeds()[0]
+    return ensure_eval_local_routing_profile(seed, stdout=stdout)
+
+
+def ensure_eval_local_routing_profiles(stdout=None):
+    profiles = []
+    for seed in get_eval_local_routing_profile_seeds():
+        profiles.append(ensure_eval_local_routing_profile(seed, stdout=stdout))
+    return profiles
+
+
 def ensure_eval_local_setup(stdout=None):
     ensure_eval_local_database(stdout=stdout)
-    return ensure_openrouter_deepseek_v4_flash_profile(stdout=stdout)
-
+    return ensure_eval_local_routing_profiles(stdout=stdout)

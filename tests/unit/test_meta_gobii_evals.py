@@ -4,10 +4,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from django.core.management import call_command
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
-from api.evals.local_setup import ensure_openrouter_deepseek_v4_flash_profile
+from api.evals.local_setup import (
+    ensure_eval_local_routing_profiles,
+    ensure_openrouter_deepseek_v4_flash_profile,
+)
 from api.evals.meta_gobii import (
     ENABLE_SYSTEM_SKILLS_TOOL_NAME,
     SKILL_SEARCH_TOOL_NAME,
@@ -19,7 +22,13 @@ from api.evals.meta_gobii import (
 )
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
-from api.models import EvalRunTask, EvalSuiteRun, LLMProvider, ProfilePersistentTierEndpoint
+from api.models import (
+    EvalRunTask,
+    EvalSuiteRun,
+    LLMProvider,
+    PersistentModelEndpoint,
+    ProfilePersistentTierEndpoint,
+)
 
 
 def _case(slug):
@@ -456,6 +465,82 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             1,
         )
 
+    @override_settings(
+        EVAL_LOCAL_CUSTOM_MODEL="anthropic/example-model",
+        EVAL_LOCAL_CUSTOM_API_KEY_ENV_VAR="ANTHROPIC_API_KEY",
+        EVAL_LOCAL_CUSTOM_PROFILE_NAME="custom-litellm",
+        EVAL_LOCAL_CUSTOM_ENDPOINT_KEY="custom_litellm",
+        EVAL_LOCAL_CUSTOM_PROVIDER_KEY="custom-litellm",
+        EVAL_LOCAL_CUSTOM_PROVIDER_DISPLAY_NAME="Custom LiteLLM",
+        EVAL_LOCAL_CUSTOM_API_BASE="",
+    )
+    def test_local_eval_setup_seeds_common_model_profiles_without_secret_output(self):
+        stdout = StringIO()
+        fake_values = {
+            "OPENROUTER_API_KEY": "openrouter-secret-value",
+            "OPENAI_API_KEY": "openai-secret-value",
+            "ANTHROPIC_API_KEY": "anthropic-secret-value",
+        }
+
+        with patch.dict(os.environ, fake_values):
+            profiles = ensure_eval_local_routing_profiles(stdout=stdout)
+
+        profile_names = {profile.name for profile in profiles}
+        self.assertIn("openrouter-deepseek-v4-flash", profile_names)
+        self.assertIn("openrouter-qwen", profile_names)
+        self.assertIn("openai-gpt-4-1-mini", profile_names)
+        self.assertIn("custom-litellm", profile_names)
+
+        self.assertEqual(LLMProvider.objects.get(key="openrouter").env_var_name, "OPENROUTER_API_KEY")
+        self.assertEqual(LLMProvider.objects.get(key="openai").env_var_name, "OPENAI_API_KEY")
+        self.assertEqual(
+            LLMProvider.objects.get(key="custom-litellm").env_var_name,
+            "ANTHROPIC_API_KEY",
+        )
+        self.assertTrue(
+            PersistentModelEndpoint.objects.filter(
+                key="openrouter_qwen",
+                litellm_model="qwen/qwen3.6-flash",
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentModelEndpoint.objects.filter(
+                key="openai_gpt_4_1_mini",
+                litellm_model="gpt-4.1-mini",
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentModelEndpoint.objects.filter(
+                key="custom_litellm",
+                litellm_model="anthropic/example-model",
+            ).exists()
+        )
+        for secret_value in fake_values.values():
+            self.assertNotIn(secret_value, stdout.getvalue())
+
+    def test_run_evals_lists_registered_suites_and_scenarios(self):
+        stdout = StringIO()
+
+        call_command("run_evals", "--list", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("Available eval suites", output)
+        self.assertIn("meta_gobii", output)
+        self.assertIn("meta_gobii_positive_team_creation", output)
+        self.assertIn("openrouter-deepseek-v4-flash", output)
+
+    def test_run_evals_lists_seeded_routing_profiles(self):
+        stdout = StringIO()
+
+        ensure_eval_local_routing_profiles()
+        call_command("run_evals", "--list-routing-profiles", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("Available LLM routing profiles", output)
+        self.assertIn("openrouter-deepseek-v4-flash", output)
+        self.assertIn("openrouter-qwen", output)
+        self.assertIn("openai-gpt-4-1-mini", output)
+
     def test_simulated_meta_gobii_run_uses_canonical_run_evals_path(self):
         stdout = StringIO()
 
@@ -480,3 +565,28 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             .exists()
         )
         self.assertIn("SIMULATED mode", stdout.getvalue())
+
+    def test_simulated_single_meta_gobii_scenario_uses_canonical_run_evals_path(self):
+        stdout = StringIO()
+
+        call_command(
+            "run_evals",
+            "--scenario",
+            "meta_gobii_negative_content_task",
+            "--sync",
+            "--n-runs",
+            "1",
+            "--simulated",
+            stdout=stdout,
+        )
+
+        suite_run = EvalSuiteRun.objects.latest("created_at")
+        self.assertEqual(suite_run.suite_slug, "single::meta_gobii_negative_content_task")
+        self.assertEqual(suite_run.launch_config, {"mode": "simulated"})
+        self.assertEqual(suite_run.runs.count(), 1)
+        self.assertEqual(suite_run.runs.first().scenario_slug, "meta_gobii_negative_content_task")
+        self.assertFalse(
+            EvalRunTask.objects.filter(run__suite_run=suite_run)
+            .exclude(status=EvalRunTask.Status.PASSED)
+            .exists()
+        )

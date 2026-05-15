@@ -1,3 +1,4 @@
+import argparse
 import time
 import uuid
 
@@ -6,32 +7,48 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
-from api.evals.local_setup import ensure_eval_local_setup
+import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
+from api.evals.local_setup import ensure_eval_local_setup, get_eval_local_routing_profile_seeds
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
-from api.evals.meta_gobii import META_GOBII_EVAL_SUITE_SLUG
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
 class Command(BaseCommand):
     help = (
-        "Runs one or more eval suites. Local Meta Gobii live evals can run with "
-        "--suite meta_gobii --sync --n-runs 1 --routing-profile openrouter-deepseek-v4-flash "
-        "--settings=config.eval_local_settings."
+        "Run canonical Gobii eval scenarios and suites through EvalRunner. Use "
+        "--settings=config.eval_local_settings for explicit local SQLite setup."
     )
 
     def add_arguments(self, parser):
+        parser.formatter_class = argparse.RawDescriptionHelpFormatter
         parser.epilog = (
-            "Local Meta Gobii examples:\n"
+            "Examples:\n"
+            "  uv run python manage.py run_evals --list\n"
             "  uv run python manage.py run_evals --suite meta_gobii --sync --n-runs 1 "
             "--simulated --settings=config.eval_local_settings\n"
+            "  uv run python manage.py run_evals --scenario meta_gobii_negative_content_task --sync "
+            "--n-runs 1 --simulated --settings=config.eval_local_settings\n"
             "  set -a; source /Users/andrew/.env-openrouter >/dev/null; set +a\n"
             "  uv run python manage.py run_evals --suite meta_gobii --sync --n-runs 1 "
             "--routing-profile openrouter-deepseek-v4-flash --settings=config.eval_local_settings\n"
             "Simulated runs are deterministic local checks and are not live model evals."
+        )
+        parser.add_argument(
+            "--list",
+            action="store_true",
+            help="List registered canonical eval suites and scenarios, then exit.",
+        )
+        parser.add_argument(
+            "--list-routing-profiles",
+            action="store_true",
+            help=(
+                "List non-snapshot LLM routing profiles available in the database, then exit. "
+                "With config.eval_local_settings this also creates the local SQLite schema and seeds local profiles."
+            ),
         )
         parser.add_argument(
             "--suite",
@@ -42,7 +59,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--scenario",
             type=str,
-            help="(Deprecated) Run a single scenario by slug. Prefer --suite.",
+            help="Run one scenario by slug as a one-off suite.",
         )
         parser.add_argument(
             "--agent-id",
@@ -92,7 +109,7 @@ class Command(BaseCommand):
             type=str,
             help=(
                 "LLM routing profile name or UUID to snapshot onto the eval suite run. "
-                "config.eval_local_settings seeds openrouter-deepseek-v4-flash."
+                "config.eval_local_settings seeds OpenRouter, OpenAI, and optional custom LiteLLM profiles."
             ),
         )
         parser.add_argument(
@@ -100,7 +117,7 @@ class Command(BaseCommand):
             action="store_true",
             help=(
                 "Run scenario-provided deterministic simulations through the canonical runner. "
-                "Currently supported for the meta_gobii suite; this is not a live model eval."
+                "This is not a live model eval."
             ),
         )
         parser.add_argument(
@@ -110,7 +127,68 @@ class Command(BaseCommand):
             help="Optional sleep between scenario runs/submissions for local live evals against rate-limited providers.",
         )
 
+    def _print_eval_catalog(self) -> None:
+        suites = SuiteRegistry.list_all()
+        scenarios = ScenarioRegistry.list_all()
+        scenario_to_suites: dict[str, list[str]] = {}
+        for suite_slug, suite in suites.items():
+            if suite_slug == "all":
+                continue
+            for scenario_slug in suite.scenario_slugs:
+                scenario_to_suites.setdefault(scenario_slug, []).append(suite_slug)
+
+        self.stdout.write("Available eval suites:")
+        for suite_slug, suite in sorted(suites.items(), key=lambda item: (item[0] == "all", item[0])):
+            self.stdout.write(
+                f"  {suite_slug} ({len(suite.scenario_slugs)} scenarios) - {suite.description}"
+            )
+
+        self.stdout.write("\nAvailable eval scenarios:")
+        for scenario_slug, scenario in sorted(scenarios.items()):
+            suites_text = ", ".join(sorted(scenario_to_suites.get(scenario_slug, []))) or "ad-hoc only"
+            simulated_text = " simulated" if getattr(scenario, "supports_simulation", False) else ""
+            self.stdout.write(
+                f"  {scenario_slug} [{suites_text}{simulated_text}] - {scenario.description}"
+            )
+
+        local_profiles = get_eval_local_routing_profile_seeds()
+        if local_profiles:
+            self.stdout.write("\nLocal eval settings can seed these routing profiles:")
+            for seed in local_profiles:
+                self.stdout.write(
+                    f"  {seed.profile_name} -> {seed.litellm_model} via {seed.provider_env_var_name}"
+                )
+
+        self.stdout.write("\nRun `uv run python manage.py run_evals --help` for command examples.")
+
+    def _print_routing_profiles(self) -> None:
+        profiles = (
+            LLMRoutingProfile.objects.filter(is_eval_snapshot=False)
+            .prefetch_related(
+                "persistent_token_ranges__tiers__tier_endpoints__endpoint__provider"
+            )
+            .order_by("name")
+        )
+        if not profiles:
+            self.stdout.write("No non-snapshot LLM routing profiles found.")
+            return
+
+        self.stdout.write("Available LLM routing profiles:")
+        for profile in profiles:
+            models = []
+            for token_range in profile.persistent_token_ranges.all():
+                for tier in token_range.tiers.all():
+                    for tier_endpoint in tier.tier_endpoints.all():
+                        endpoint = tier_endpoint.endpoint
+                        label = f"{endpoint.provider.key}:{endpoint.litellm_model}"
+                        if label not in models:
+                            models.append(label)
+            model_text = ", ".join(models) if models else "no persistent endpoints"
+            self.stdout.write(f"  {profile.name} - {profile.display_name} ({model_text})")
+
     def handle(self, *args, **options):
+        list_catalog = bool(options["list"])
+        list_routing_profiles = bool(options["list_routing_profiles"])
         suites_requested = options["suites"] or []
         scenario_slug = options["scenario"]
         agent_id = options["agent_id"]
@@ -122,8 +200,22 @@ class Command(BaseCommand):
         routing_profile_ref = (options.get("routing_profile") or "").strip()
         simulated = bool(options.get("simulated"))
         delay_between_runs = max(0, float(options.get("delay_between_runs_seconds") or 0))
-        base_site_url = (getattr(settings, "PUBLIC_SITE_URL", "http://localhost:8000") or "http://localhost:8000").rstrip("/")
+        base_site_url = (settings.PUBLIC_SITE_URL or "http://localhost:8000").rstrip("/")
         printed_audit_agents: set[str] = set()
+
+        if list_catalog:
+            self._print_eval_catalog()
+
+        if list_routing_profiles and settings.EVAL_LOCAL_SETUP_ENABLED:
+            ensure_eval_local_setup(stdout=self.stdout)
+
+        if list_routing_profiles:
+            if list_catalog:
+                self.stdout.write("")
+            self._print_routing_profiles()
+
+        if list_catalog or list_routing_profiles:
+            return
 
         if sync_mode:
             settings.CELERY_TASK_ALWAYS_EAGER = True
@@ -136,7 +228,6 @@ class Command(BaseCommand):
         # Resolve suites
         suite_slugs: list[str] = suites_requested[:]
         if scenario_slug:
-            self.stdout.write(self.style.WARNING("`--scenario` is deprecated; creating a one-off suite for it."))
             suite_slugs.append(f"single::{scenario_slug}")
 
         if not suite_slugs:
@@ -163,8 +254,18 @@ class Command(BaseCommand):
                 raise CommandError(f"Suite '{slug}' not found.")
             suites.append((suite_obj.slug, list(suite_obj.scenario_slugs), suite_obj.description))
 
-        if simulated and any(suite_slug != META_GOBII_EVAL_SUITE_SLUG for suite_slug, _slugs, _description in suites):
-            raise CommandError("--simulated is currently supported only for the meta_gobii suite.")
+        if simulated:
+            unsupported = []
+            for _suite_slug, scenario_slugs, _description in suites:
+                for slug in scenario_slugs:
+                    scenario = ScenarioRegistry.get(slug)
+                    if not scenario or not getattr(scenario, "supports_simulation", False):
+                        unsupported.append(slug)
+            if unsupported:
+                raise CommandError(
+                    "--simulated is only available for scenarios that declare simulation support. "
+                    f"Unsupported scenario(s): {', '.join(sorted(unsupported))}"
+                )
 
         if simulated:
             self.stdout.write(self.style.WARNING("Running in SIMULATED mode. No live model calls will be made."))
@@ -211,6 +312,14 @@ class Command(BaseCommand):
 
             self.stdout.write(
                 f"Using routing profile {source_routing_profile.name} ({source_routing_profile.id})"
+            )
+        elif not simulated:
+            self.stdout.write(
+                self.style.WARNING(
+                    "No --routing-profile supplied; live runs will use the active database LLM routing profile. "
+                    "Local eval runs usually should pass --settings=config.eval_local_settings and an explicit "
+                    "--routing-profile."
+                )
             )
 
         # Base user attribution

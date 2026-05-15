@@ -236,6 +236,7 @@ def _record_response_tool() -> dict[str, Any]:
 
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
     description = "Evaluates Meta Gobii system-skill selection, tool planning, and approval policy."
+    supports_simulation = True
     tasks = [
         ScenarioTask(name="discover_system_skill", assertion_type="tool_call"),
         ScenarioTask(name="select_system_skill", assertion_type="tool_call"),
