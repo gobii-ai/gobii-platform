@@ -59,13 +59,16 @@ const AUTH_REFERRER_DOMAINS = new Set([
   'accounts.google.com',
   'login.microsoftonline.com'
 ]);
+const INTERNAL_REFERRER_ROOT_DOMAINS = new Set([
+  'gobii.ai'
+]);
 
 const LANDING_PARAM = 'g';
 
 function isAuthProviderReferrer(referrer) {
   if (!referrer) return false;
   try {
-    const hostname = new URL(referrer).hostname.toLowerCase().replace(/\.$/, '');
+    const hostname = referrerHostname(referrer);
     for (const domain of AUTH_REFERRER_DOMAINS) {
       if (hostname === domain || hostname.endsWith(`.${domain}`)) {
         return true;
@@ -75,6 +78,41 @@ function isAuthProviderReferrer(referrer) {
   } catch (e) {
     return false;
   }
+}
+
+function referrerHostname(referrer) {
+  if (!referrer) return '';
+  try {
+    return new URL(referrer).hostname.toLowerCase().replace(/\.$/, '');
+  } catch (e) {
+    return '';
+  }
+}
+
+function isInternalReferrer(referrer) {
+  const hostname = referrerHostname(referrer);
+  if (!hostname) return false;
+  for (const domain of INTERNAL_REFERRER_ROOT_DOMAINS) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSameHostReferrer(referrer) {
+  const hostname = referrerHostname(referrer);
+  const currentHostname = (window.location.hostname || '').toLowerCase().replace(/\.$/, '');
+  return Boolean(hostname && currentHostname && hostname === currentHostname);
+}
+
+function isExternalAcquisitionReferrer(referrer) {
+  return Boolean(
+    referrer
+    && !isAuthProviderReferrer(referrer)
+    && !isSameHostReferrer(referrer)
+    && !isInternalReferrer(referrer)
+  );
 }
 
 (function() {
@@ -152,13 +190,13 @@ function isAuthProviderReferrer(referrer) {
 
   const currentPath = window.location.pathname + window.location.search;
   const rawReferrer = document.referrer || '';
-  const isAuthReferrer = isAuthProviderReferrer(rawReferrer);
-  const referrer = isAuthReferrer ? '' : rawReferrer;
+  const isExternalReferrer = isExternalAcquisitionReferrer(rawReferrer);
+  const referrer = isExternalReferrer ? rawReferrer : '';
 
   if (!document.cookie.includes('first_referrer=')) {
     document.cookie = `first_referrer=${encodeURIComponent(referrer)}${attrs}`;
   }
-  if (!isAuthReferrer) {
+  if (isExternalReferrer) {
     document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
   }
 
