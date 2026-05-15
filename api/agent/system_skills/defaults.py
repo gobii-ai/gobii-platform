@@ -1,5 +1,7 @@
 """Default code-defined system skill definitions."""
 
+from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
@@ -298,9 +300,70 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     ),
 )
 
+META_GOBII_TEAM_MANAGER_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+    name="Meta Gobii Team Manager",
+    search_summary=(
+        "Create, configure, link, brief, and manage teams or graphs of persistent Gobiis inside the same owner scope."
+    ),
+    tool_names=META_GOBII_TOOL_NAMES,
+    enables=(
+        "list, inspect, create, update, and archive persistent Gobiis",
+        "configure name, charter, schedule, active state, intelligence tier, daily credit limits, whitelist policy, and proactive opt-in",
+        "create, list, update, and remove peer-agent links with message-window limits",
+        "send briefings to Gobiis and read or wait on their timelines",
+        "upload and list files in a Gobii filespace",
+        "manage contacts, allowlists, pending contact requests, contact endpoints, and preferred owner-safe endpoints",
+    ),
+    use_when=(
+        "the user asks to create a team of Gobiis",
+        "the user asks to build or restructure an agent graph",
+        "the user asks a Gobii to manage other Gobiis or act as a manager Gobii",
+        "the user asks to link Gobiis together and brief them",
+        "the user asks to manage persistent Gobii settings, schedules, contacts, allowlists, resource limits, or peer links",
+        "the task is explicitly about coordinating multiple Gobiis or maintaining a Gobii team",
+    ),
+    query_aliases=(
+        "meta gobii",
+        "manager gobii",
+        "team of gobiis",
+        "gobii team",
+        "agent team",
+        "agent graph",
+        "gobii graph",
+        "create agents",
+        "manage agents",
+        "link agents",
+        "brief agents",
+        "restructure gobiis",
+        "spawn gobiis",
+    ),
+    prompt_instructions=(
+        "Use these tools only when the user is asking you to create, configure, link, brief, or maintain persistent "
+        "Gobiis in this same owner or organization scope. Do not use them for ordinary research, writing, support, "
+        "or content tasks that merely mention Gobii.\n"
+        "Authorization boundary: every tool is scoped to the invoking Gobii's personal owner scope or organization. "
+        "Never attempt to manage agents outside that accessible scope.\n"
+        "For team creation, first inspect config options and existing agents when useful, then create the requested "
+        "Gobiis, link them, and send each one a concise briefing with its role and handoff context.\n"
+        "Ask for human confirmation before archiving agents, unlinking broad graph sections, removing contacts, "
+        "raising intelligence tier, raising daily credit/resource limits, or making broad graph rewrites unless the "
+        "human explicitly requested the exact change.\n"
+        "Use contact tools only for contacts the human supplied, approved, or that are already known internal team contacts. "
+        "Grant can_configure only to owner-approved contacts. Prefer manual allowlist semantics for explicit contacts.\n"
+        "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "
+        "the exact value; prefer names, channels, or masked contact values.\n"
+        "Use file tools only with files the human provided or artifacts you created for these agents. Uploads accept small "
+        "base64 files; do not fetch arbitrary remote URLs through these tools.\n"
+        "Known unsupported MCP-equivalent surfaces in this direct skill: arbitrary URL file fetch, ad hoc runtime sessions, "
+        "and separate task/run abstractions."
+    ),
+)
+
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
+    META_GOBII_TEAM_MANAGER_SYSTEM_SKILL.skill_key: META_GOBII_TEAM_MANAGER_SYSTEM_SKILL,
 }

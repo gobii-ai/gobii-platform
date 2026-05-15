@@ -68,6 +68,12 @@ from .pipedream_trigger_subscriptions import (
     get_pipedream_trigger_subscriptions_tool,
     execute_pipedream_trigger_subscriptions,
 )
+from .meta_gobii import (
+    execute_meta_gobii_tool,
+    get_meta_gobii_tool_definition,
+    is_meta_gobii_available_for_agent,
+)
+from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names
@@ -296,6 +302,16 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_pipedream_trigger_subscriptions,
         "search_hidden": True,
         "system_skill_key": "connected_app_channels",
+    },
+    **{
+        tool_name: {
+            "definition": lambda tool_name=tool_name: get_meta_gobii_tool_definition(tool_name),
+            "executor": lambda agent, params, tool_name=tool_name: execute_meta_gobii_tool(agent, tool_name, params),
+            "is_available": is_meta_gobii_available_for_agent,
+            "search_hidden": True,
+            "system_skill_key": META_GOBII_SYSTEM_SKILL_KEY,
+        }
+        for tool_name in META_GOBII_TOOL_NAMES
     },
 }
 
