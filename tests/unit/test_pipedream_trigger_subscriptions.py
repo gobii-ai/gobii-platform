@@ -8,11 +8,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
-from console.agent_chat.timeline import CursorPayload, MessageEnvelope, _serialize_message
 from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
-from api.agent.tools.pipedream_trigger_subscriptions import execute_pipedream_trigger_subscriptions
-from api.agent.tools.tool_manager import ToolCatalogEntry, _record_pipedream_tool_side_effects
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -21,8 +18,8 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentMessage,
+    PersistentAgentMessageAttachment,
     PersistentAgentPipedreamTriggerSubscription,
-    PipedreamAppSelection,
 )
 from api.services.pipedream_trigger_subscriptions import (
     DISCORD_MESSAGE_EVENT_TYPE,
@@ -31,16 +28,17 @@ from api.services.pipedream_trigger_subscriptions import (
     discover_targets,
     ensure_subscriptions,
     process_discord_inbound_debounce,
-    record_discord_outbound_send,
     schedule_discord_inbound_processing,
 )
 
 
-def _response(payload=None, status_code=200):
+def _response(payload=None, status_code=200, content=b"", headers=None):
     response = MagicMock()
     response.status_code = status_code
     response.json.return_value = payload or {}
     response.raise_for_status.return_value = None
+    response.content = content
+    response.headers = headers or {}
     return response
 
 
@@ -190,19 +188,16 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
         mock_get.return_value = _response({"data": []})
         mock_create_connect_session.return_value = (MagicMock(), "https://connect.example/discord")
 
-        result = execute_pipedream_trigger_subscriptions(
+        results = ensure_subscriptions(
             self.agent,
-            {
-                "action": "ensure",
-                "app_slug": "discord",
-                "event_type": DISCORD_MESSAGE_EVENT_TYPE,
-                "channel_ids": ["1492138162066034751"],
-                "will_continue_work": True,
-            },
+            app_slug="discord",
+            event_type=DISCORD_MESSAGE_EVENT_TYPE,
+            channel_ids=["1492138162066034751"],
         )
 
-        self.assertEqual(result["status"], "action_required")
-        self.assertEqual(result["connect_url"], "https://connect.example/discord")
+        self.assertEqual(len(results), 1)
+        self.assertTrue(results[0].action_required)
+        self.assertEqual(results[0].connect_url, "https://connect.example/discord")
 
     @tag("batch_agent_webhooks")
     @patch("api.services.pipedream_trigger_subscriptions.requests.post")
@@ -267,57 +262,6 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
         self.assertEqual(mock_post.call_args.kwargs["json"]["prop_name"], "channels")
 
     @tag("batch_agent_webhooks")
-    @patch("api.services.pipedream_trigger_subscriptions.requests.post")
-    @patch("api.services.pipedream_trigger_subscriptions.requests.get")
-    @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
-    def test_discover_targets_tool_action_returns_channel_choices(self, mock_get_manager, mock_get, mock_post):
-        self._patch_token(mock_get_manager)
-        mock_get.side_effect = [
-            _response(
-                {
-                    "data": [
-                        {
-                            "id": "apn_123",
-                            "healthy": True,
-                            "dead": False,
-                            "app": {"name_slug": "discord"},
-                        }
-                    ]
-                }
-            ),
-            _response(
-                {
-                    "data": {
-                        "configurable_props": [
-                            {"name": "discord", "type": "app", "app": "discord"},
-                            {"name": "channels", "type": "string[]", "remoteOptions": True},
-                        ],
-                    }
-                }
-            ),
-        ]
-        mock_post.return_value = _response(
-            {"options": [{"label": "#general", "value": "1492138162066034751"}]}
-        )
-
-        result = execute_pipedream_trigger_subscriptions(
-            self.agent,
-            {
-                "action": "discover_targets",
-                "app_slug": "discord",
-                "event_type": DISCORD_MESSAGE_EVENT_TYPE,
-                "will_continue_work": True,
-            },
-        )
-
-        self.assertEqual(result["status"], "success")
-        self.assertEqual(result["target_type"], "channel")
-        self.assertEqual(
-            result["targets"],
-            [{"label": "#general", "value": "1492138162066034751"}],
-        )
-
-    @tag("batch_agent_webhooks")
     @patch("api.services.pipedream_trigger_subscriptions.create_connect_session")
     @patch("api.services.pipedream_trigger_subscriptions.requests.get")
     @patch("api.services.pipedream_trigger_subscriptions.get_mcp_manager")
@@ -331,19 +275,15 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
         mock_get.return_value = _response({"data": []})
         mock_create_connect_session.return_value = (MagicMock(), "https://connect.example/discord")
 
-        result = execute_pipedream_trigger_subscriptions(
+        result = discover_targets(
             self.agent,
-            {
-                "action": "discover_targets",
-                "app_slug": "discord",
-                "event_type": DISCORD_MESSAGE_EVENT_TYPE,
-                "will_continue_work": True,
-            },
+            app_slug="discord",
+            event_type=DISCORD_MESSAGE_EVENT_TYPE,
         )
 
-        self.assertEqual(result["status"], "action_required")
-        self.assertEqual(result["connect_url"], "https://connect.example/discord")
-        self.assertEqual(result["targets"], [])
+        self.assertTrue(result.action_required)
+        self.assertEqual(result.connect_url, "https://connect.example/discord")
+        self.assertEqual(result.targets, [])
 
     @tag("batch_agent_webhooks")
     def test_ensure_rejects_placeholder_channel_ids(self):
@@ -376,7 +316,7 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
             trigger_version="1.0.3",
             external_user_id=str(self.agent.id),
             deployed_trigger_id="dc_trigger_123",
-            configured_props={"channels": ["12345"]},
+            configured_props={"discord": {"authProvisionId": "apn_discord"}, "channels": ["12345"]},
         )
         subscription.signing_key = "signing-secret"
         subscription.save()
@@ -393,7 +333,7 @@ class PipedreamTriggerSubscriptionServiceTests(TestCase):
 @override_settings(
     PIPEDREAM_PROJECT_ID="proj_test",
     PIPEDREAM_ENVIRONMENT="development",
-    PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=0,
+    DISCORD_INBOUND_DEBOUNCE_SECONDS=0,
 )
 class PipedreamTriggerSubscriptionWebhookTests(TestCase):
     @classmethod
@@ -423,7 +363,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             trigger_version="1.0.3",
             external_user_id=str(self.agent.id),
             deployed_trigger_id="dc_trigger_123",
-            configured_props={"channels": ["12345"]},
+            configured_props={"discord": {"authProvisionId": "apn_discord"}, "channels": ["12345"]},
         )
         self.subscription.signing_key = "signing-secret"
         self.subscription.save()
@@ -474,8 +414,16 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertIn("does not match", self.subscription.last_error)
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
+    @patch("api.agent.comms.message_service.requests.get")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_webhook_accepts_discord_message_event(self, mock_delay):
+    def test_webhook_accepts_discord_message_event(
+        self,
+        mock_delay,
+        mock_get,
+        mock_max_file_size,
+    ):
+        mock_get.return_value = _response(content=b"file-bytes", headers={"Content-Type": "image/png"})
         body = json.dumps(
             {
                 "event": {
@@ -516,11 +464,20 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.raw_payload["source_label"], "matt in #general")
         self.assertEqual(message.raw_payload["discord_author_id"], "u1")
         self.assertEqual(message.raw_payload["discord_attachments"], [{"url": "https://cdn.example/file.png"}])
+        mock_max_file_size.assert_called()
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.comms.message_service.get_max_file_size", return_value=None)
+    @patch("api.agent.comms.message_service.requests.get")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_webhook_accepts_attachment_only_discord_message_event(self, mock_delay):
+    def test_webhook_accepts_attachment_only_discord_message_event(
+        self,
+        mock_delay,
+        mock_get,
+        mock_max_file_size,
+    ):
+        mock_get.return_value = _response(content=b"image-bytes", headers={"Content-Type": "image/png"})
         body = json.dumps(
             {
                 "event": {
@@ -535,6 +492,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
                             "id": "a1",
                             "url": "https://cdn.example/photo.png",
                             "filename": "photo.png",
+                            "contentType": "image/png",
                         }
                     ],
                 }
@@ -556,15 +514,68 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(message.body, "")
         self.assertEqual(
             message.raw_payload["discord_attachments"],
-            [{"id": "a1", "url": "https://cdn.example/photo.png", "filename": "photo.png"}],
+            [
+                {
+                    "id": "a1",
+                    "url": "https://cdn.example/photo.png",
+                    "filename": "photo.png",
+                    "contentType": "image/png",
+                }
+            ],
         )
+        attachment = PersistentAgentMessageAttachment.objects.get(message=message)
+        self.assertEqual(attachment.filename, "photo.png")
+        self.assertEqual(attachment.content_type, "image/png")
+        self.assertEqual(attachment.file_size, len(b"image-bytes"))
+        mock_get.assert_called_once_with(
+            "https://cdn.example/photo.png",
+            timeout=30,
+            allow_redirects=True,
+            auth=None,
+        )
+        mock_max_file_size.assert_called()
         mock_delay.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
-    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.agent.comms.message_service.requests.get")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_webhook_records_id_only_discord_attachments_without_download(self, mock_delay, mock_get):
+        body = json.dumps(
+            {
+                "id": "1504906483899568298",
+                "guildID": "g1",
+                "channelID": "12345",
+                "channel": "general",
+                "content": "can you see this file",
+                "author": "_the_juicer_",
+                "authorID": "177593384389705729",
+                "attachments": ["1504906484096696551"],
+            }
+        ).encode("utf-8")
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        payload = response.json()
+        message = PersistentAgentMessage.objects.get(id=payload["messageId"])
+        self.assertEqual(message.body, "can you see this file")
+        self.assertEqual(message.raw_payload["discord_attachments"], ["1504906484096696551"])
+        self.assertFalse(PersistentAgentMessageAttachment.objects.filter(message=message).exists())
+        mock_get.assert_not_called()
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
-    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    @patch("api.services.discord_messages.get_redis_client")
     def test_webhook_debounces_discord_message_processing_when_enabled(
         self,
         mock_get_redis_client,
@@ -604,9 +615,9 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id)], countdown=15)
 
     @tag("batch_agent_webhooks")
-    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
-    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_scheduler_coalesces_burst(
         self,
         mock_get_redis_client,
@@ -615,7 +626,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         fake_redis = FakeRedis()
         mock_get_redis_client.return_value = fake_redis
 
-        with patch("api.services.pipedream_trigger_subscriptions.time.time", side_effect=[100.0, 105.0]):
+        with patch("api.services.discord_messages.time.time", side_effect=[100.0, 105.0]):
             first = schedule_discord_inbound_processing(str(self.agent.id))
             second = schedule_discord_inbound_processing(str(self.agent.id))
 
@@ -632,10 +643,10 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(deadline_values, ["120.000000"])
 
     @tag("batch_agent_webhooks")
-    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
-    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_task_requeues_until_quiet(
         self,
         mock_get_redis_client,
@@ -645,21 +656,21 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         fake_redis = FakeRedis()
         mock_get_redis_client.return_value = fake_redis
 
-        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=100.0):
+        with patch("api.services.discord_messages.time.time", return_value=100.0):
             schedule_discord_inbound_processing(str(self.agent.id))
         mock_debounce_apply_async.reset_mock()
 
-        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=110.0):
+        with patch("api.services.discord_messages.time.time", return_value=110.0):
             process_discord_inbound_debounce(str(self.agent.id))
 
         mock_debounce_apply_async.assert_called_once_with(args=[str(self.agent.id)], countdown=5)
         mock_process_delay.assert_not_called()
 
     @tag("batch_agent_webhooks")
-    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_agent_events_task.delay")
     @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
-    @patch("api.services.pipedream_trigger_subscriptions.get_redis_client")
+    @patch("api.services.discord_messages.get_redis_client")
     def test_discord_inbound_debounce_task_wakes_agent_after_quiet_period(
         self,
         mock_get_redis_client,
@@ -669,11 +680,11 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         fake_redis = FakeRedis()
         mock_get_redis_client.return_value = fake_redis
 
-        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=100.0):
+        with patch("api.services.discord_messages.time.time", return_value=100.0):
             schedule_discord_inbound_processing(str(self.agent.id))
         mock_debounce_apply_async.reset_mock()
 
-        with patch("api.services.pipedream_trigger_subscriptions.time.time", return_value=116.0):
+        with patch("api.services.discord_messages.time.time", return_value=116.0):
             process_discord_inbound_debounce(str(self.agent.id))
 
         mock_debounce_apply_async.assert_not_called()
@@ -784,82 +795,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(mock_delay.call_count, 2)
 
     @tag("batch_agent_webhooks")
-    def test_record_discord_outbound_send_creates_visible_outbound_message(self):
-        PersistentAgentPipedreamTriggerSubscription.objects.create(
-            agent=self.agent,
-            app_slug="discord",
-            event_type=DISCORD_MESSAGE_EVENT_TYPE,
-            platform_channel="1492138162066034751",
-            platform_channel_name="general",
-            trigger_key="discord-new-message",
-            trigger_version="1.0.3",
-            external_user_id=str(self.agent.id),
-            deployed_trigger_id="dc_trigger_outbound",
-            configured_props={"channels": ["1492138162066034751"]},
-        )
-        message = record_discord_outbound_send(
-            self.agent,
-            tool_name="discord-send-message",
-            params={
-                "channel": "1492138162066034751",
-                "message": "hello from the agent",
-                "username": self.agent.name,
-            },
-            result={"status": "success"},
-        )
-
-        self.assertIsNotNone(message)
-        self.assertTrue(message.is_outbound)
-        self.assertEqual(message.body, "hello from the agent")
-        self.assertEqual(message.conversation.channel, CommsChannel.DISCORD)
-        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
-        self.assertEqual(message.raw_payload["discord_channel_id"], "1492138162066034751")
-        self.assertEqual(message.raw_payload["discord_channel_name"], "general")
-        self.assertEqual(message.raw_payload["source_label"], "#general")
-
-        serialized = _serialize_message(
-            MessageEnvelope(
-                sort_key=(1, "message", str(message.id)),
-                cursor=CursorPayload(1, "message", str(message.id)),
-                message=message,
-            )
-        )["message"]
-        self.assertEqual(serialized["channel"], "discord")
-        self.assertEqual(serialized["sourceLabel"], "#general")
-
-    @tag("batch_agent_webhooks")
-    def test_pipedream_mcp_success_hook_records_discord_outbound_message(self):
-        entry = ToolCatalogEntry(
-            provider="mcp",
-            full_name="discord-send-message",
-            description="Send Discord message",
-            parameters={},
-            tool_server="pipedream",
-            tool_name="discord-send-message",
-        )
-
-        _record_pipedream_tool_side_effects(
-            self.agent,
-            entry,
-            {
-                "channel": "1492138162066034751",
-                "message": "hello from the provider hook",
-                "username": self.agent.name,
-            },
-            {"status": "success"},
-        )
-
-        message = PersistentAgentMessage.objects.get(
-            owner_agent=self.agent,
-            is_outbound=True,
-            conversation__channel=CommsChannel.DISCORD,
-        )
-        self.assertEqual(message.body, "hello from the provider hook")
-        self.assertEqual(message.raw_payload["source"], "pipedream_tool")
-        self.assertEqual(message.raw_payload["pipedream_tool_name"], "discord-send-message")
-
-    @tag("batch_agent_webhooks")
-    @override_settings(PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS=15)
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15)
     @patch("api.services.pipedream_trigger_subscriptions.schedule_discord_inbound_processing")
     @patch("api.agent.tasks.process_agent_events_task.delay")
     def test_webhook_self_echo_updates_outbound_message_without_reprocessing(self, mock_delay, mock_schedule_debounce):
@@ -932,9 +868,7 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
 
 class ConnectedAppChannelsSystemSkillTests(TestCase):
     @tag("batch_agent_tools")
-    @override_settings(PIPEDREAM_PREFETCH_APPS="")
-    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
-    def test_system_skill_search_and_enablement(self, mock_get_mcp_manager):
+    def test_system_skill_search_and_enablement(self):
         user_model = get_user_model()
         user = user_model.objects.create_user(
             username="connected-app-skill",
@@ -951,32 +885,41 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
 
         matches = shortlist_system_skills(
             "listen to discord channel messages",
-            available_tool_names={"pipedream_trigger_subscriptions"},
+            available_tool_names={
+                "discord_channel_subscriptions",
+                "discord_send_message",
+            },
         )
         self.assertEqual([match.skill_key for match in matches], ["connected_app_channels"])
         integration_matches = shortlist_system_skills(
             "discord integration, discord bot, discord webhook, pipedream discord",
-            available_tool_names={"pipedream_trigger_subscriptions"},
+            available_tool_names={
+                "discord_channel_subscriptions",
+                "discord_send_message",
+            },
         )
         self.assertEqual([match.skill_key for match in integration_matches], ["connected_app_channels"])
 
         result = enable_system_skills(agent, ["connected_app_channels"], available_skills=matches)
         self.assertEqual(result["status"], "success")
-        self.assertEqual(result["pipedream_apps"]["enabled"], ["discord"])
+        self.assertEqual(result["pipedream_apps"]["enabled"], [])
         self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name="discord_channel_subscriptions",
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name="discord_send_message",
+            ).exists()
+        )
+        self.assertFalse(
             PersistentAgentEnabledTool.objects.filter(
                 agent=agent,
                 tool_full_name="pipedream_trigger_subscriptions",
             ).exists()
-        )
-        selection = PipedreamAppSelection.objects.get(user=user)
-        self.assertEqual(selection.selected_app_slugs, ["discord"])
-        manager = mock_get_mcp_manager.return_value
-        manager.invalidate_pipedream_owner_cache.assert_called_once_with("user", str(user.id))
-        manager.prewarm_pipedream_owner_cache.assert_called_once_with(
-            "user",
-            str(user.id),
-            app_slugs=["discord"],
         )
 
     @tag("batch_agent_tools")
@@ -987,19 +930,16 @@ class ConnectedAppChannelsSystemSkillTests(TestCase):
         self.assertNotIn("secure_credentials_request", instructions)
         self.assertNotIn("DISCORD_SERVER_ID", instructions)
         self.assertNotIn("DISCORD_CHANNEL_ID", instructions)
-        self.assertIn("action=\"discover_targets\"", instructions)
+        self.assertIn("action=\"discover_channels\"", instructions)
         self.assertIn("ask the user to choose by channel name", instructions)
-        self.assertIn("Do not treat Discord channel setup as complete after discovery or outbound sending", instructions)
-        self.assertIn("call `ensure` so future channel messages wake this agent", instructions)
-        self.assertIn("Skip `ensure` only when the user clearly asks for a one-time outbound-only Discord post", instructions)
-        self.assertIn("If outbound sending succeeds but `ensure` has not succeeded", instructions)
-        self.assertIn("prefer this tool over Pipedream `retrieve_options` or `configure_component`", instructions)
+        self.assertIn("call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name`", instructions)
+        self.assertIn("Use `discord_send_message` for outbound Discord replies", instructions)
+        self.assertIn("Use the native Gobii Discord bot tools", instructions)
+        self.assertNotIn("legacy fallback", instructions)
+        self.assertNotIn("pipedream_trigger_subscriptions", instructions)
         self.assertIn("Do not request Discord server IDs or channel IDs as secrets.", instructions)
-        self.assertIn("Server ID is not required for v1 setup.", instructions)
-        self.assertIn("When calling Discord send-message tools, pass the selected Discord channel ID as `channel`", instructions)
-        self.assertIn("the text as `message`", instructions)
-        self.assertIn("backend supplies default Discord presentation fields", instructions)
-        self.assertIn("explicitly override", instructions)
+        self.assertIn("Pass `channel_id`, `message`, and the correct `will_continue_work` value.", instructions)
+        self.assertIn("using the agent's name and avatar", instructions)
         self.assertNotIn("avatarURL=\"https://gobii.ai/static/images/gobii_fish.png\"", instructions)
         self.assertNotIn("`username` = this agent's name", instructions)
         self.assertNotIn("includeSentViaPipedream=false", instructions)

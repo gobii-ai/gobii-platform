@@ -1595,10 +1595,21 @@ PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
 
-PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS = env.int(
-    "PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS",
-    default=15,
+# ────────── Native Discord Bot ──────────
+DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
+DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")
+DISCORD_BOT_TOKEN = env("DISCORD_BOT_TOKEN", default="")
+DISCORD_OAUTH_REDIRECT_URI = env(
+    "DISCORD_OAUTH_REDIRECT_URI",
+    default=f"{PUBLIC_SITE_URL.rstrip('/')}/console/api/discord/oauth/callback/",
 )
+DISCORD_BOT_ENABLED = env.bool("DISCORD_BOT_ENABLED", default=False)
+DISCORD_BOT_INVITE_PERMISSIONS = env.int("DISCORD_BOT_INVITE_PERMISSIONS", default=536939520)
+DISCORD_INBOUND_DEBOUNCE_SECONDS = env.int(
+    "DISCORD_INBOUND_DEBOUNCE_SECONDS",
+    default=env.int("PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS", default=15),
+)
+PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS = DISCORD_INBOUND_DEBOUNCE_SECONDS
 
 # Pipedream Connect GC (batch cleanup)
 PIPEDREAM_GC_ENABLED = env.bool(

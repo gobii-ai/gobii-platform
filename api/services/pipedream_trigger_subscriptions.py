@@ -4,15 +4,12 @@ import hashlib
 import hmac
 import json
 import logging
-import math
 import re
 import secrets
 import time
 from dataclasses import dataclass
-from datetime import timedelta
 from typing import Iterable, Mapping
 
-import redis
 import requests
 from django.conf import settings
 from django.db import transaction
@@ -22,17 +19,28 @@ from django.utils import timezone
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message
 from api.agent.tools.mcp_manager import get_mcp_manager
-from config.redis_client import get_redis_client
 from api.integrations.pipedream_connect import create_connect_session
 from api.models import (
     CommsChannel,
     DeliveryStatus,
     PersistentAgent,
-    PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
-    PersistentAgentConversationParticipant,
     PersistentAgentMessage,
     PersistentAgentPipedreamTriggerSubscription,
+)
+from api.services.discord_messages import (
+    create_discord_outbound_message as _create_discord_outbound_message,
+    discord_agent_address as _discord_agent_address,
+    discord_channel_address as _discord_channel_address,
+    discord_channel_source_label as _discord_channel_source_label,
+    discord_conversation_address as _discord_conversation_address,
+    display_name_for_channel as _display_name_for_channel,
+    ensure_discord_agent_endpoint as _ensure_discord_agent_endpoint,
+    ensure_discord_conversation_participants as _ensure_discord_conversation_participants,
+    find_recent_discord_outbound,
+    get_or_create_discord_conversation as _get_or_create_discord_conversation,
+    process_discord_inbound_debounce,
+    schedule_discord_inbound_processing,
 )
 
 PIPEDREAM_API_BASE = "https://api.pipedream.com/v1"
@@ -40,15 +48,11 @@ DISCORD_APP_SLUG = "discord"
 DISCORD_MESSAGE_EVENT_TYPE = "message.created"
 DISCORD_MESSAGE_TRIGGER_KEY = "discord-new-message"
 DISCORD_MESSAGE_TRIGGER_VERSION = "1.0.3"
-DISCORD_SEND_TOOL_NAMES = {
-    "discord-send-message",
-    "discord-send-message-advanced",
-    "discord-send-message-with-file",
-}
 SIGNATURE_TOLERANCE_SECONDS = 300
 DISCORD_SNOWFLAKE_RE = re.compile(r"^\d{17,20}$")
-DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:discord-inbound-debounce:{agent_id}:deadline"
-DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:discord-inbound-debounce:{agent_id}:scheduled"
+DISCORD_ATTACHMENT_URL_KEYS = ("url", "downloadUrl", "download_url", "proxyURL", "proxyUrl", "proxy_url", "media_url")
+DISCORD_ATTACHMENT_FILENAME_KEYS = ("filename", "fileName", "name")
+DISCORD_ATTACHMENT_CONTENT_TYPE_KEYS = ("contentType", "content_type", "mimeType", "mime_type")
 
 logger = logging.getLogger(__name__)
 
@@ -716,245 +720,17 @@ def _discord_author(event: Mapping[str, object]) -> tuple[str, str]:
     return _event_value(event, "authorID", "authorId", "author_id", "userID", "userId", "user_id"), author_name
 
 
-def _discord_channel_address(guild_id: str, channel_id: str) -> str:
-    guild_part = guild_id or "unknown"
-    return f"discord://guild/{guild_part}/channel/{channel_id}"
-
-
-def _discord_conversation_address(agent_id: object, guild_id: str, channel_id: str) -> str:
-    guild_part = guild_id or "unknown"
-    return f"discord://agent/{agent_id}/guild/{guild_part}/channel/{channel_id}"
-
-
-def _discord_agent_address(agent_id: object) -> str:
-    return f"discord://agent/{agent_id}"
-
-
-def _ensure_discord_agent_endpoint(agent: PersistentAgent) -> PersistentAgentCommsEndpoint:
-    endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
-        channel=CommsChannel.DISCORD,
-        address=_discord_agent_address(agent.id),
-        defaults={"owner_agent": agent, "is_primary": True},
-    )
-    updates = []
-    if endpoint.owner_agent_id != agent.id:
-        endpoint.owner_agent = agent
-        updates.append("owner_agent")
-    if not endpoint.is_primary:
-        endpoint.is_primary = True
-        updates.append("is_primary")
-    if updates:
-        endpoint.save(update_fields=updates)
-    return endpoint
-
-
-def _ensure_conversation_participant(
-    conversation: PersistentAgentConversation,
-    endpoint: PersistentAgentCommsEndpoint,
-    role: str,
-) -> None:
-    PersistentAgentConversationParticipant.objects.get_or_create(
-        conversation=conversation,
-        endpoint=endpoint,
-        defaults={"role": role},
-    )
-
-
-def _display_name_for_channel(channel_id: str, channel_name: str = "") -> str:
-    return f"#{channel_name.lstrip('#')}" if channel_name else f"Discord {channel_id}"
-
-
-def _discord_channel_source_label(channel_id: str, channel_name: str = "") -> str:
-    return _display_name_for_channel(channel_id, channel_name)
-
-
-def _discord_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
-    existing = (
-        PersistentAgentConversation.objects
-        .filter(
-            owner_agent=agent,
-            channel=CommsChannel.DISCORD,
-            address__startswith=f"discord://agent/{agent.id}/",
-            address__endswith=f"/channel/{channel_id}",
-        )
-        .order_by("-id")
-        .first()
-    )
-    if existing:
-        return existing.address
-    return _discord_conversation_address(agent.id, "unknown", channel_id)
-
-
-def _get_or_create_discord_conversation(
-    agent: PersistentAgent,
-    *,
-    address: str,
-    channel_id: str,
-    channel_name: str = "",
-) -> PersistentAgentConversation:
-    display_name = _display_name_for_channel(channel_id, channel_name)
-    conversation, created = PersistentAgentConversation.objects.get_or_create(
-        channel=CommsChannel.DISCORD,
-        address=address,
-        defaults={"owner_agent": agent, "display_name": display_name},
-    )
-    updates = []
-    if conversation.owner_agent_id is None:
-        conversation.owner_agent = agent
-        updates.append("owner_agent")
-    if display_name and conversation.display_name != display_name:
-        conversation.display_name = display_name
-        updates.append("display_name")
-    if updates and not created:
-        conversation.save(update_fields=updates)
-    return conversation
-
-
-def _discord_channel_endpoint(address: str) -> PersistentAgentCommsEndpoint:
-    endpoint, _created = PersistentAgentCommsEndpoint.objects.get_or_create(
-        channel=CommsChannel.DISCORD,
-        address=address,
-        defaults={"owner_agent": None},
-    )
-    return endpoint
-
-
-def _ensure_discord_conversation_participants(
-    agent: PersistentAgent,
-    conversation: PersistentAgentConversation,
-    *,
-    platform_channel_address: str,
-) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
-    from_endpoint = _ensure_discord_agent_endpoint(agent)
-    channel_endpoint = _discord_channel_endpoint(platform_channel_address)
-    _ensure_conversation_participant(
-        conversation,
-        from_endpoint,
-        PersistentAgentConversationParticipant.ParticipantRole.AGENT,
-    )
-    _ensure_conversation_participant(
-        conversation,
-        channel_endpoint,
-        PersistentAgentConversationParticipant.ParticipantRole.EXTERNAL,
-    )
-    return from_endpoint, channel_endpoint
-
-
 def _find_recent_discord_outbound(
     agent: PersistentAgent,
     *,
     channel_id: str,
     body: str,
 ) -> PersistentAgentMessage | None:
-    cutoff = timezone.now() - timedelta(minutes=10)
-    return (
-        PersistentAgentMessage.objects
-        .select_related("conversation")
-        .filter(
-            owner_agent=agent,
-            is_outbound=True,
-            conversation__channel=CommsChannel.DISCORD,
-            body=body,
-            timestamp__gte=cutoff,
-            raw_payload__discord_channel_id=channel_id,
-            raw_payload__source="pipedream_tool",
-        )
-        .order_by("-timestamp")
-        .first()
-    )
-
-
-def _create_discord_outbound_message(
-    agent: PersistentAgent,
-    *,
-    channel_id: str,
-    body: str,
-    conversation_address: str,
-    platform_channel_address: str = "",
-    channel_name: str = "",
-    raw_payload: Mapping[str, object] | None = None,
-) -> PersistentAgentMessage:
-    conversation = _get_or_create_discord_conversation(
-        agent,
-        address=conversation_address,
-        channel_id=channel_id,
-        channel_name=channel_name,
-    )
-    from_endpoint, channel_endpoint = _ensure_discord_conversation_participants(
-        agent,
-        conversation,
-        platform_channel_address=platform_channel_address or _discord_channel_address("", channel_id),
-    )
-    now = timezone.now()
-    payload = dict(raw_payload or {})
-    payload.setdefault("source", "pipedream_tool")
-    payload.setdefault("source_kind", "discord")
-    payload.setdefault("app_slug", DISCORD_APP_SLUG)
-    payload.setdefault("event_type", DISCORD_MESSAGE_EVENT_TYPE)
-    payload.setdefault("discord_channel_id", channel_id)
-    payload.setdefault("discord_channel_name", channel_name)
-    payload.setdefault("discord_platform_channel_address", channel_endpoint.address)
-    payload.setdefault("discord_conversation_address", conversation.address)
-    payload.setdefault("source_label", _discord_channel_source_label(channel_id, channel_name))
-    return PersistentAgentMessage.objects.create(
-        owner_agent=agent,
-        from_endpoint=from_endpoint,
-        conversation=conversation,
-        is_outbound=True,
-        body=body,
-        raw_payload=payload,
-        latest_status=DeliveryStatus.SENT,
-        latest_sent_at=now,
-    )
-
-
-def record_discord_outbound_send(
-    agent: PersistentAgent,
-    *,
-    tool_name: str,
-    params: Mapping[str, object],
-    result: Mapping[str, object] | None = None,
-) -> PersistentAgentMessage | None:
-    if tool_name not in DISCORD_SEND_TOOL_NAMES:
-        return None
-    channel_id = _event_value(params, "channel", "channelId", "channel_id")
-    body = _event_value(params, "message", "content", "text", "body")
-    if not channel_id or not DISCORD_SNOWFLAKE_RE.fullmatch(channel_id) or not body:
-        return None
-    existing = _find_recent_discord_outbound(agent, channel_id=channel_id, body=body)
-    if existing:
-        return existing
-    subscription = (
-        agent.pipedream_trigger_subscriptions
-        .filter(
-            app_slug=DISCORD_APP_SLUG,
-            event_type=DISCORD_MESSAGE_EVENT_TYPE,
-            platform_channel=channel_id,
-            status=PersistentAgentPipedreamTriggerSubscription.Status.ACTIVE,
-        )
-        .order_by("-updated_at")
-        .first()
-    )
-    channel_name = subscription.platform_channel_name if subscription else ""
-    raw_payload = {
-        "source": "pipedream_tool",
-        "source_kind": "discord",
-        "app_slug": DISCORD_APP_SLUG,
-        "event_type": DISCORD_MESSAGE_EVENT_TYPE,
-        "discord_channel_id": channel_id,
-        "discord_channel_name": channel_name,
-        "source_label": _discord_channel_source_label(channel_id, channel_name),
-        "pipedream_tool_name": tool_name,
-        "pipedream_tool_params": dict(params),
-        "pipedream_tool_result": dict(result or {}),
-    }
-    return _create_discord_outbound_message(
+    return find_recent_discord_outbound(
         agent,
         channel_id=channel_id,
         body=body,
-        conversation_address=_discord_conversation_address_for_channel(agent, channel_id),
-        channel_name=channel_name,
-        raw_payload=raw_payload,
+        source="pipedream_tool",
     )
 
 
@@ -967,6 +743,42 @@ def _event_list(event: Mapping[str, object], key: str) -> list[object]:
     return value if isinstance(value, list) else []
 
 
+def _discord_attachment_items(event: Mapping[str, object]) -> list[object]:
+    value = event.get("attachments")
+    if isinstance(value, list):
+        return value
+    if isinstance(value, Mapping):
+        if _event_value(value, *DISCORD_ATTACHMENT_URL_KEYS):
+            return [value]
+        return list(value.values())
+    return []
+
+
+def _discord_attachment_downloads(attachments: Iterable[object]) -> list[dict[str, str]]:
+    downloads: list[dict[str, str]] = []
+    for attachment in attachments:
+        if isinstance(attachment, str):
+            url = attachment.strip()
+            if url.startswith(("http://", "https://")):
+                downloads.append({"url": url})
+            continue
+        if not isinstance(attachment, Mapping):
+            continue
+
+        url = _event_value(attachment, *DISCORD_ATTACHMENT_URL_KEYS)
+        if not url:
+            continue
+        item = {"url": url}
+        filename = _event_value(attachment, *DISCORD_ATTACHMENT_FILENAME_KEYS)
+        if filename:
+            item["filename"] = filename
+        content_type = _event_value(attachment, *DISCORD_ATTACHMENT_CONTENT_TYPE_KEYS)
+        if content_type:
+            item["content_type"] = content_type
+        downloads.append(item)
+    return downloads
+
+
 def _normalize_discord_event(
     subscription: PersistentAgentPipedreamTriggerSubscription,
     payload: Mapping[str, object],
@@ -977,7 +789,7 @@ def _normalize_discord_event(
     if channel_id != subscription.platform_channel:
         raise ValueError("Discord event channel does not match this subscription.")
     body = _discord_message_body(event)
-    attachments = _event_list(event, "attachments")
+    attachments = _discord_attachment_items(event)
     embeds = _event_list(event, "embeds")
     if not message_id or (not body and not attachments and not embeds):
         raise ValueError("Discord message event is missing a message id, content, attachments, or embeds.")
@@ -1021,7 +833,7 @@ def _normalize_discord_event(
         recipient=_discord_agent_address(subscription.agent_id),
         subject=None,
         body=body,
-        attachments=[],
+        attachments=_discord_attachment_downloads(attachments),
         raw_payload=normalized_payload,
         msg_channel=CommsChannel.DISCORD.value,
         conversation_address=conversation_address,
@@ -1143,134 +955,6 @@ def _upsert_discord_outbound_echo(
         channel_name=channel_name,
         raw_payload=outbound_payload,
     )
-
-
-def _discord_inbound_debounce_seconds() -> int:
-    return max(0, int(settings.PIPEDREAM_DISCORD_INBOUND_DEBOUNCE_SECONDS))
-
-
-def _discord_inbound_debounce_keys(agent_id: str) -> tuple[str, str]:
-    return (
-        DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY.format(agent_id=agent_id),
-        DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY.format(agent_id=agent_id),
-    )
-
-
-def _discord_inbound_debounce_ttl(delay_seconds: int) -> int:
-    return max(60, delay_seconds * 6)
-
-
-def _process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int = 0) -> None:
-    from api.agent.tasks import process_agent_events_task
-
-    if countdown > 0:
-        process_agent_events_task.apply_async(args=[agent_id], countdown=countdown)
-    else:
-        process_agent_events_task.delay(agent_id)
-
-
-def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
-    debounce_seconds = _discord_inbound_debounce_seconds()
-    if debounce_seconds <= 0:
-        _process_agent_events_after_discord_debounce(str(agent_id))
-        return {"debounced": False, "debounce_seconds": 0, "scheduled": True}
-
-    normalized_agent_id = str(agent_id)
-    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
-    deadline = time.time() + debounce_seconds
-    ttl = _discord_inbound_debounce_ttl(debounce_seconds)
-
-    try:
-        redis_client = get_redis_client()
-        redis_client.set(deadline_key, f"{deadline:.6f}", ex=ttl)
-        scheduled = bool(redis_client.set(scheduled_key, "1", ex=ttl, nx=True))
-    except redis.exceptions.RedisError:
-        logger.exception(
-            "Failed scheduling Discord inbound debounce for agent %s; falling back to delayed processing.",
-            normalized_agent_id,
-        )
-        _process_agent_events_after_discord_debounce(normalized_agent_id, countdown=debounce_seconds)
-        return {
-            "debounced": False,
-            "debounce_seconds": debounce_seconds,
-            "scheduled": True,
-            "fallback": True,
-        }
-
-    if scheduled:
-        if settings.CELERY_TASK_ALWAYS_EAGER:
-            redis_client.delete(deadline_key, scheduled_key)
-            _process_agent_events_after_discord_debounce(normalized_agent_id)
-            return {
-                "debounced": False,
-                "debounce_seconds": debounce_seconds,
-                "scheduled": True,
-                "eager": True,
-            }
-
-        from api.agent.tasks.process_events import process_discord_inbound_debounce_task
-        process_discord_inbound_debounce_task.apply_async(
-            args=[normalized_agent_id],
-            countdown=debounce_seconds,
-        )
-
-    return {
-        "debounced": True,
-        "debounce_seconds": debounce_seconds,
-        "scheduled": scheduled,
-    }
-
-
-def _coerce_redis_float(value: object) -> float | None:
-    if value is None:
-        return None
-    if isinstance(value, (bytes, bytearray)):
-        value = value.decode("utf-8", "ignore")
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def process_discord_inbound_debounce(agent_id: str) -> None:
-    debounce_seconds = _discord_inbound_debounce_seconds()
-    normalized_agent_id = str(agent_id)
-    if debounce_seconds <= 0:
-        _process_agent_events_after_discord_debounce(normalized_agent_id)
-        return
-
-    deadline_key, scheduled_key = _discord_inbound_debounce_keys(normalized_agent_id)
-    now = time.time()
-
-    try:
-        redis_client = get_redis_client()
-        deadline = _coerce_redis_float(redis_client.get(deadline_key))
-        if deadline is not None and deadline > now:
-            if settings.CELERY_TASK_ALWAYS_EAGER:
-                redis_client.delete(deadline_key, scheduled_key)
-                _process_agent_events_after_discord_debounce(normalized_agent_id)
-                return
-
-            countdown = max(1, math.ceil(deadline - now))
-            ttl = _discord_inbound_debounce_ttl(max(debounce_seconds, countdown))
-            redis_client.expire(deadline_key, ttl)
-            redis_client.expire(scheduled_key, ttl)
-            from api.agent.tasks.process_events import process_discord_inbound_debounce_task
-
-            process_discord_inbound_debounce_task.apply_async(
-                args=[normalized_agent_id],
-                countdown=countdown,
-            )
-            return
-
-        redis_client.delete(deadline_key, scheduled_key)
-    except redis.exceptions.RedisError:
-        logger.exception(
-            "Failed processing Discord inbound debounce for agent %s; falling back to immediate processing.",
-            normalized_agent_id,
-        )
-
-    _process_agent_events_after_discord_debounce(normalized_agent_id)
 
 
 def ingest_trigger_delivery(

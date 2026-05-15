@@ -9382,6 +9382,233 @@ class PersistentAgentPipedreamTriggerSubscription(models.Model):
         return f"PipedreamTrigger<{self.app_slug}:{self.event_type}:{self.platform_channel}>"
 
 
+class PersistentAgentDiscordOAuthSession(models.Model):
+    """Short-lived Discord OAuth state for claiming guilds for an agent owner."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    state = models.CharField(max_length=128, unique=True)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="discord_oauth_sessions",
+    )
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="discord_oauth_sessions",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="discord_oauth_sessions",
+    )
+    initiated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="initiated_discord_oauth_sessions",
+    )
+    expires_at = models.DateTimeField()
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["state"], name="pa_discord_oauth_state_idx"),
+            models.Index(fields=["agent", "expires_at"], name="pa_discord_oauth_agent_idx"),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_discord_oauth_one_owner",
+            ),
+        ]
+
+    def is_expired(self) -> bool:
+        return timezone.now() >= self.expires_at
+
+
+class PersistentAgentDiscordGuild(models.Model):
+    """Discord guild claimed by a Gobii user or organization through OAuth."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    guild_id = models.CharField(max_length=32)
+    name = models.CharField(max_length=255)
+    icon_hash = models.CharField(max_length=128, blank=True)
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="discord_guild_claims",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="discord_guild_claims",
+    )
+    claimed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="claimed_discord_guilds",
+    )
+    is_active = models.BooleanField(default=True, db_index=True)
+    last_synced_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["guild_id"],
+                condition=Q(is_active=True),
+                name="uniq_active_discord_guild_claim",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="pa_discord_guild_one_owner",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["owner_user", "is_active"], name="pa_discord_guild_user_idx"),
+            models.Index(fields=["organization", "is_active"], name="pa_discord_guild_org_idx"),
+            models.Index(fields=["guild_id"], name="pa_discord_guild_id_idx"),
+        ]
+        ordering = ["name", "guild_id"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"DiscordGuild<{self.name}:{self.guild_id}>"
+
+
+class PersistentAgentDiscordChannelSubscription(models.Model):
+    """Agent subscription to one Discord guild/channel pair."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        DISABLED = "disabled", "Disabled"
+        ERROR = "error", "Error"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="discord_channel_subscriptions",
+    )
+    guild = models.ForeignKey(
+        PersistentAgentDiscordGuild,
+        on_delete=models.CASCADE,
+        related_name="channel_subscriptions",
+    )
+    channel_id = models.CharField(max_length=32)
+    channel_name = models.CharField(max_length=255, blank=True)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE, db_index=True)
+    last_message_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["guild", "channel_id"],
+                condition=Q(status="active"),
+                name="uniq_active_discord_channel_sub",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status"], name="pa_discord_sub_agent_idx"),
+            models.Index(fields=["guild", "channel_id"], name="pa_discord_sub_channel_idx"),
+        ]
+        ordering = ["guild__name", "channel_name", "channel_id"]
+
+    def record_message(self) -> None:
+        self.last_message_at = timezone.now()
+        self.last_error = ""
+        self.save(update_fields=["last_message_at", "last_error", "updated_at"])
+
+    def record_error(self, message: str) -> None:
+        self.last_error = (message or "")[:2000]
+        self.status = self.Status.ERROR
+        self.save(update_fields=["last_error", "status", "updated_at"])
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        label = self.channel_name or self.channel_id
+        return f"DiscordSubscription<{self.guild_id}:{label}:{self.agent_id}>"
+
+
+class PersistentAgentDiscordWebhook(models.Model):
+    """Discord channel webhook reused for native bot outbound messages."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    guild = models.ForeignKey(
+        PersistentAgentDiscordGuild,
+        on_delete=models.CASCADE,
+        related_name="channel_webhooks",
+    )
+    channel_id = models.CharField(max_length=32)
+    webhook_id = models.CharField(max_length=32)
+    webhook_token_encrypted = models.BinaryField(blank=True, null=True)
+    name = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["guild", "channel_id"], name="uniq_discord_webhook_channel"),
+        ]
+        indexes = [
+            models.Index(fields=["guild", "channel_id"], name="pa_discord_wh_channel_idx"),
+            models.Index(fields=["webhook_id"], name="pa_discord_wh_id_idx"),
+        ]
+        ordering = ["guild__name", "channel_id"]
+
+    @staticmethod
+    def _encrypt_text(value: Optional[str]) -> Optional[bytes]:
+        if not value:
+            return None
+        from .encryption import SecretsEncryption
+
+        return SecretsEncryption.encrypt_value(value)
+
+    @staticmethod
+    def _decrypt_text(payload: Optional[bytes]) -> str:
+        if not payload:
+            return ""
+        from .encryption import SecretsEncryption
+
+        try:
+            return SecretsEncryption.decrypt_value(payload)
+        except ValueError:
+            logger.exception("Failed to decrypt Discord webhook token")
+            return ""
+
+    @property
+    def webhook_token(self) -> str:
+        return self._decrypt_text(self.webhook_token_encrypted)
+
+    @webhook_token.setter
+    def webhook_token(self, value: Optional[str]) -> None:
+        self.webhook_token_encrypted = self._encrypt_text(value)
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"DiscordWebhook<{self.guild_id}:{self.channel_id}>"
+
+
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 

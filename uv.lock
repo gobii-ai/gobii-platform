@@ -1044,6 +1044,19 @@ wheels = [
 ]
 
 [[package]]
+name = "discord-py"
+version = "2.7.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiohttp" },
+    { name = "audioop-lts", marker = "python_full_version >= '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ef/57/9a2d9abdabdc9db8ef28ce0cf4129669e1c8717ba28d607b5ba357c4de3b/discord_py-2.7.1.tar.gz", hash = "sha256:24d5e6a45535152e4b98148a9dd6b550d25dc2c9fb41b6d670319411641249da", size = 1106326, upload-time = "2026-03-03T18:40:46.24Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f7/a7/17208c3b3f92319e7fad259f1c6d5a5baf8fd0654c54846ced329f83c3eb/discord_py-2.7.1-py3-none-any.whl", hash = "sha256:849dca2c63b171146f3a7f3f8acc04248098e9e6203412ce3cf2745f284f7439", size = 1227550, upload-time = "2026-03-03T18:40:44.492Z" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1528,6 +1541,7 @@ dependencies = [
     { name = "cron-descriptor" },
     { name = "cryptography" },
     { name = "daphne" },
+    { name = "discord-py" },
     { name = "dj-stripe" },
     { name = "django" },
     { name = "django-allauth" },
@@ -1661,6 +1675,7 @@ requires-dist = [
     { name = "cron-descriptor", specifier = ">=2.0.6" },
     { name = "cryptography", specifier = "~=44.0.3" },
     { name = "daphne", specifier = ">=4.2.1" },
+    { name = "discord-py", specifier = ">=2.4.0,<3.0" },
     { name = "dj-stripe", specifier = "~=2.9.1" },
     { name = "django", specifier = "==6.0" },
     { name = "django-allauth", specifier = "~=65.14.1" },

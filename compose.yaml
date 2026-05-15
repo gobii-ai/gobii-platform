@@ -196,6 +196,31 @@ services:
     restart: unless-stopped
     profiles: ["email"]
 
+  discord-bot:
+    platform: linux/amd64
+    build:
+      context: .
+      dockerfile: ./docker/Dockerfile
+    environment:
+      <<: *app-sandbox-env
+    depends_on:
+      bootstrap-env:
+        condition: service_completed_successfully
+      migrate:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    command: >-
+      bash -lc "set -a && source /config/django.env && export DISCORD_BOT_ENABLED=true && exec python manage.py run_discord_bot"
+    volumes:
+      - runtime-config:/config:ro
+      - media-data:/app/mediafiles
+      - static-data:/app/staticfiles
+    restart: unless-stopped
+    profiles: ["discord"]
+
   flower:
     image: mher/flower:2.0
     depends_on:
