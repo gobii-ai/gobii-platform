@@ -4192,7 +4192,7 @@ def _get_system_instruction(
         "file tools return result.attach = \"$[/exports/file.csv]\"\n"
         "RIGHT: send_email(..., attachments=[result.attach])\n"
         "WRONG: say 'attached' when attachments=[] or omitted\n"
-        "Prior sends: verify via __messages.attachment_count or unified history attachment labels\n"
+        "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count or unified history attachment labels\n"
         "If an inbound __messages.rejected_attachments_json is non-empty, explicitly tell the user the attachment was attempted but unavailable because it exceeded platform limits.\n"
         "```\n\n"
 
@@ -4315,8 +4315,8 @@ def _get_system_instruction(
         "Never ask for passwords or 2FA codes for OAuth services. Avoid 2FA/MFA unless the user explicitly asks for it, because those flows may hit system limitations; prefer non-2FA paths when available. "
         "When requesting credential domains, think broadly: *.google.com covers more than just one subdomain. "
 
-        "`search_tools` is your gateway—it discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
-        "Use it before broad web search when the task may map to a known site/platform/domain tool, and whenever you're unsure which tool family fits best. "
+        "`search_tools` discovers tools and unlocks integrations (Instagram, LinkedIn, Reddit, and more). "
+        "Use an already enabled fitting tool directly; use search_tools when no enabled tool clearly fits or before broad web search for a new site/platform/domain. "
 
         f"{delivery_instructions}"
         f"{_get_formatting_guidance()}\n\n"

@@ -104,7 +104,6 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             self.assertIsInstance(case.ignored_tools, tuple)
             self.assertIsInstance(case.accepted_tool_alternatives, dict)
             self.assertIsInstance(case.eval_synthetic_tools, tuple)
-            self.assertIsInstance(case.tool_mocks, dict)
             self.assertIsInstance(case.stop_after_success, bool)
             self.assertEqual(
                 case.update_plan_policy,
@@ -138,6 +137,8 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
+        self.assertTrue(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
@@ -166,15 +167,15 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(by_slug["common_use_case_078_create_line_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
         self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
-        self.assertIn("https://www.linkedin.com/in/", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
-        self.assertIn("https://www.linkedin.com/company/", by_slug["common_use_case_032_linkedin_company_profile"].prompt)
-        self.assertIn("LinkedIn people search data", by_slug["common_use_case_034_linkedin_people_search"].prompt)
-        self.assertIn("win onboarding shipped", by_slug["common_use_case_073_create_status_pdf"].prompt)
+        self.assertIn("Jordan Lee at Acme AI", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
+        self.assertIn("Acme AI", by_slug["common_use_case_032_linkedin_company_profile"].prompt)
+        self.assertIn("Search LinkedIn", by_slug["common_use_case_034_linkedin_people_search"].prompt)
+        self.assertIn("beta launched", by_slug["common_use_case_073_create_status_pdf"].prompt)
         self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
-        self.assertIn("rows", by_slug["common_use_case_086_sqlite_export_query_csv"].tool_mocks["sqlite_batch"]["content"])
-        self.assertIn("https://support.example.test/status", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
-        self.assertIn("https://prices.example.test/api/btc-usd.json", by_slug["common_use_case_096_schedule_price_alert"].prompt)
-        self.assertIn("https://borough.example.test/permits/updates", by_slug["common_use_case_097_schedule_permit_check"].prompt)
+        self.assertIn("Run a SQLite query", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
+        self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
+        self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
+        self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
         self.assertEqual(
             by_slug["common_use_case_089_enable_database"].accepted_tool_alternatives,
             {"enable_database": ("sqlite_batch",)},
@@ -413,6 +414,51 @@ class BehaviorMicroHelperTests(TestCase):
         for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+    @patch("api.agent.tools.tool_manager._get_manager")
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_eval_synthetic_tool_definition_overrides_same_named_mcp_tool(
+        self,
+        _mock_sandbox_compute_enabled,
+        mock_get_manager,
+    ):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        tool_name = "google_sheets-get-values-in-range"
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_name,
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=tool_name,
+        )
+        mock_manager = MagicMock()
+        mock_manager.get_enabled_tools_definitions.return_value = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Real integration schema requiring worksheet IDs.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"worksheetId": {"type": "integer"}},
+                        "required": ["worksheetId"],
+                    },
+                },
+            }
+        ]
+        mock_get_manager.return_value = mock_manager
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        matching = [
+            definition["function"]
+            for definition in definitions
+            if definition["function"]["name"] == tool_name
+        ]
+
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["description"], EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+        self.assertEqual(matching[0]["parameters"].get("required", []), [])
+        self.assertEqual(matching[0]["parameters"]["properties"]["worksheetId"]["type"], "string")
 
     def test_seed_completed_process_run_disables_first_run_once(self):
         scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")

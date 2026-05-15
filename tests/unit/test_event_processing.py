@@ -1167,7 +1167,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("# Attachment pre-flight", content)
         self.assertIn("RIGHT: send_email(..., attachments=[result.attach])", content)
-        self.assertIn("Prior sends: verify via __messages.attachment_count", content)
+        self.assertIn("For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count", content)
         self.assertIn("__messages.rejected_attachments_json", content)
 
     def test_prompt_does_not_add_attachment_suffix_to_inbound_messages(self):

@@ -1041,10 +1041,22 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
     """Return tool definitions for all enabled tools (MCP, built-ins, custom)."""
     manager = _get_manager()
     blacklisted_tools = get_agent_tool_blacklist(agent)
+    enabled_eval_tool_names = list(
+        PersistentAgentEnabledTool.objects
+        .filter(
+            agent=agent,
+            tool_full_name__in=list(EVAL_SYNTHETIC_TOOL_DEFINITIONS.keys()),
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+        )
+        .exclude(tool_full_name__in=list(blacklisted_tools))
+        .values_list("tool_full_name", flat=True)
+    )
+    eval_tool_name_set = set(enabled_eval_tool_names)
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
         for definition in manager.get_enabled_tools_definitions(agent)
         if _tool_definition_name(definition) not in blacklisted_tools
+        and _tool_definition_name(definition) not in eval_tool_name_set
     ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)
@@ -1082,16 +1094,6 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
             )
             existing_names.add(tool.tool_name)
 
-    enabled_eval_tool_names = (
-        PersistentAgentEnabledTool.objects
-        .filter(
-            agent=agent,
-            tool_full_name__in=list(EVAL_SYNTHETIC_TOOL_DEFINITIONS.keys()),
-            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
-        )
-        .exclude(tool_full_name__in=list(blacklisted_tools))
-        .values_list("tool_full_name", flat=True)
-    )
     for tool_name in enabled_eval_tool_names:
         if tool_name in existing_names:
             continue
