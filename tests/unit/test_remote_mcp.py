@@ -8,10 +8,15 @@ from django.test import TestCase, tag
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
+    CommsChannel,
     IntelligenceTier,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
     PersistentAgentMessage,
     UserQuota,
+    build_web_agent_address,
+    build_web_user_address,
 )
 from api.models import DEFAULT_INTELLIGENCE_TIER_KEY
 from api.models import ApiKey
@@ -497,6 +502,126 @@ class RemoteMCPViewTests(TestCase):
         )
         self.assertEqual(unsupported_filter_response.status_code, 200)
         self.assertTrue(unsupported_filter_response.json()["result"]["isError"])
+
+    def test_wait_after_cursor_is_strict_for_message_id_filter(self):
+        agent = self._create_agent(self.user, "Strict Cursor MCP Agent")
+
+        with (
+            patch("api.agent.tasks.process_agent_events_task.delay"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            send_response = self._call_tool(
+                "gobii_send_agent_message",
+                {
+                    "agent_id": str(agent.id),
+                    "body": "This message owns the cursor.",
+                    "trigger_processing": False,
+                },
+            )
+        self.assertEqual(send_response.status_code, 200)
+        send_content = self._structured_content(send_response)
+
+        wait_response = self._call_tool(
+            "gobii_wait_for_agent_event",
+            {
+                "agent_id": str(agent.id),
+                "after_cursor": send_content["cursor"],
+                "timeout_seconds": 0,
+                "event_types": ["message"],
+                "filters": {"message_id": send_content["message_id"]},
+            },
+        )
+
+        self.assertEqual(wait_response.status_code, 200)
+        wait_content = self._structured_content(wait_response)
+        self.assertFalse(wait_content["matched"])
+        self.assertTrue(wait_content["timed_out"])
+        self.assertEqual(wait_content["events"], [])
+
+    def test_wait_matches_agent_owned_outbound_message_filters(self):
+        agent = self._create_agent(self.user, "Outbound Wait MCP Agent")
+
+        initial_response = self._call_tool("gobii_get_agent_timeline", {"agent_id": str(agent.id), "limit": 5})
+        self.assertEqual(initial_response.status_code, 200)
+        initial_cursor = self._structured_content(initial_response)["latest_cursor"]
+
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(agent.id),
+            defaults={"owner_agent": agent},
+        )
+        if agent_endpoint.owner_agent_id != agent.id:
+            agent_endpoint.owner_agent = agent
+            agent_endpoint.save(update_fields=["owner_agent"])
+        user_address = build_web_user_address(self.user.id, agent.id)
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        conversation, _ = PersistentAgentConversation.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+            defaults={"owner_agent": agent, "display_name": self.user.email},
+        )
+        if conversation.owner_agent_id != agent.id:
+            conversation.owner_agent = agent
+            conversation.save(update_fields=["owner_agent"])
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            conversation=conversation,
+            is_outbound=True,
+            body="Agent reply visible through timeline.",
+            raw_payload={"source": "unit_test"},
+        )
+
+        timeline_response = self._call_tool(
+            "gobii_get_agent_timeline",
+            {"agent_id": str(agent.id), "after_cursor": initial_cursor, "limit": 5},
+        )
+        self.assertEqual(timeline_response.status_code, 200)
+        timeline_content = self._structured_content(timeline_response)
+        self.assertEqual(timeline_content["events"][-1]["message"]["id"], str(message.id))
+
+        wait_response = self._call_tool(
+            "gobii_wait_for_agent_event",
+            {
+                "agent_id": str(agent.id),
+                "after_cursor": initial_cursor,
+                "timeout_seconds": 0,
+                "event_types": ["message"],
+                "filters": {
+                    "from_actor_type": "agent",
+                    "from_agent_id": str(agent.id),
+                    "message_id": str(message.id),
+                    "channel": "web",
+                },
+            },
+        )
+        self.assertEqual(wait_response.status_code, 200)
+        wait_content = self._structured_content(wait_response)
+        self.assertTrue(wait_content["matched"])
+        self.assertFalse(wait_content["timed_out"])
+        self.assertEqual(wait_content["events"][0]["message"]["id"], str(message.id))
+
+        outbound_to_agent_response = self._call_tool(
+            "gobii_wait_for_agent_event",
+            {
+                "agent_id": str(agent.id),
+                "after_cursor": initial_cursor,
+                "timeout_seconds": 0,
+                "event_types": ["message"],
+                "filters": {
+                    "to_agent_id": str(agent.id),
+                    "message_id": str(message.id),
+                },
+            },
+        )
+        self.assertEqual(outbound_to_agent_response.status_code, 200)
+        outbound_to_agent_content = self._structured_content(outbound_to_agent_response)
+        self.assertFalse(outbound_to_agent_content["matched"])
+        self.assertTrue(outbound_to_agent_content["timed_out"])
 
     def test_origin_validation_rejects_untrusted_browser_origins(self):
         response = self._post_mcp(

@@ -502,7 +502,10 @@ TOOL_DEFINITIONS = [
                 "agent_id": _agent_schema("Persistent agent UUID."),
                 "after_cursor": {
                     "type": ["string", "null"],
-                    "description": "Return events newer than this durable timeline cursor. Preferred for V1 clients.",
+                    "description": (
+                        "Return events strictly newer than this durable timeline cursor. "
+                        "The event with this exact cursor is excluded."
+                    ),
                 },
                 "cursor": {"type": ["string", "null"], "description": "Cursor from a previous timeline result."},
                 "direction": {"type": "string", "enum": ["initial", "older", "newer"], "default": "initial"},
@@ -538,7 +541,10 @@ TOOL_DEFINITIONS = [
                 "agent_id": _agent_schema("Persistent agent UUID."),
                 "after_cursor": {
                     "type": ["string", "null"],
-                    "description": "Only consider timeline events newer than this cursor.",
+                    "description": (
+                        "Only consider timeline events strictly newer than this cursor. The event with this exact cursor "
+                        "is excluded, even when filters.message_id references it."
+                    ),
                 },
                 "timeout_seconds": {
                     "type": "integer",
@@ -555,12 +561,38 @@ TOOL_DEFINITIONS = [
                 "filters": {
                     "type": "object",
                     "properties": {
-                        "from_actor_type": {"type": "string", "enum": ["agent", "human_user", "external", "system"]},
-                        "from_agent_id": _agent_schema("Peer/source agent UUID for peer-agent message events."),
-                        "to_agent_id": _agent_schema("Target agent UUID for message events."),
-                        "message_id": {"type": "string", "format": "uuid"},
-                        "peer_link_id": {"type": "string", "format": "uuid"},
-                        "channel": {"type": "string"},
+                        "from_actor_type": {
+                            "type": "string",
+                            "enum": ["agent", "human_user", "external", "system"],
+                            "description": (
+                                "Actor source derived from the serialized timeline event: agent for outbound or peer "
+                                "messages, human_user for inbound web user messages, external for other inbound "
+                                "messages, and system for steps/thinking/plan events."
+                            ),
+                        },
+                        "from_agent_id": _agent_schema(
+                            "Source agent UUID for message events: the owner agent on non-peer outbound messages, "
+                            "or the peer agent on inbound peer messages."
+                        ),
+                        "to_agent_id": _agent_schema(
+                            "Target agent UUID for message events: the owner agent on non-peer inbound messages, "
+                            "or the peer agent on outbound peer messages. Ordinary agent-to-human/external replies "
+                            "do not have a to_agent_id."
+                        ),
+                        "message_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Timeline message UUID. Cursor strictness still applies.",
+                        },
+                        "peer_link_id": {
+                            "type": "string",
+                            "format": "uuid",
+                            "description": "Peer-link UUID for peer message events.",
+                        },
+                        "channel": {
+                            "type": "string",
+                            "description": "Message channel from the serialized timeline event, such as web, email, or sms.",
+                        },
                         "status": {"type": "string", "description": "Tool-call status for steps events."},
                         "tool_name": {"type": "string", "description": "Tool name for steps events."},
                     },

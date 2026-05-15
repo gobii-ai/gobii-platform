@@ -129,13 +129,14 @@ Unsupported fields are not ignored. A tool call with unsupported arguments retur
 
 `gobii_send_agent_message` appends a web-chat message to the agent's unified timeline. It returns `message_id`, `agent_id`, `cursor`, `latest_cursor`, `created_at`, `accepted_state`, actor metadata, and the serialized timeline event.
 
-`gobii_get_agent_timeline` reads the unified timeline. Use `after_cursor` for events newer than a cursor, or `cursor` plus `direction` (`initial`, `older`, `newer`) for scroll-style reads. Results include `events`, `next_cursor`, `latest_cursor`, `oldest_cursor`, `newest_cursor`, `has_more`, and processing state. Events can include messages, tool/step clusters, thinking entries, and plan updates when those exist in the agent timeline.
+`gobii_get_agent_timeline` reads the unified timeline. Use `after_cursor` for events strictly newer than a cursor, or `cursor` plus `direction` (`initial`, `older`, `newer`) for scroll-style reads. The event with the exact `after_cursor` is excluded. Results include `events`, `next_cursor`, `latest_cursor`, `oldest_cursor`, `newest_cursor`, `has_more`, and processing state. Events can include messages, tool/step clusters, thinking entries, and plan updates when those exist in the agent timeline.
 
 `gobii_wait_for_agent_event` is the v1 wait primitive. It polls the same timeline for up to `timeout_seconds` with a server cap. Inputs include `agent_id`, `after_cursor`, `event_types`, and supported filters:
 
-- `from_actor_type`: `agent`, `human_user`, `external`, or `system`
-- `from_agent_id` / `to_agent_id`: supported for peer-agent and agent-owned message events
-- `message_id`, `peer_link_id`, and `channel`: supported for message events
+- `from_actor_type`: `agent`, `human_user`, `external`, or `system`, derived from the serialized event. Outbound or peer messages are `agent`; inbound web user messages are `human_user`; other inbound messages are `external`; steps/thinking/plan events are `system`.
+- `from_agent_id`: supported for message events from an agent. For non-peer outbound messages this is the owner agent; for inbound peer-agent messages this is the peer agent.
+- `to_agent_id`: supported for message events addressed to an agent. For non-peer inbound messages this is the owner agent; for outbound peer-agent messages this is the peer agent. Ordinary agent-to-human/external replies do not have a `to_agent_id`.
+- `message_id`, `peer_link_id`, and `channel`: supported for message events. `message_id` does not override `after_cursor`; to wait for a known message, pass a cursor captured before that message or omit `after_cursor` and rely on the recent initial timeline window.
 - `status` and `tool_name`: supported for tool/step events
 
 The wait tool returns `matched`, `timed_out`, `events`, `next_cursor`, `latest_cursor`, and `waited_seconds`.
