@@ -26,6 +26,10 @@ from api.models import (
 )
 
 
+def _run_on_commit_immediately(callback, using=None, robust=False):
+    callback()
+
+
 @tag("batch_peer_dm")
 class PeerMessagingServiceTests(TestCase):
     @classmethod
@@ -85,7 +89,7 @@ class PeerMessagingServiceTests(TestCase):
 
     def test_send_message_creates_records_and_triggers_processing(self):
         with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
-            'api.agent.peer_comm.transaction.on_commit', lambda cb: cb()
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             result = self.service.send_message("Hello Beta")
@@ -130,7 +134,7 @@ class PeerMessagingServiceTests(TestCase):
             self.assertEqual(copied_nodes[0].name, "summary.txt")
 
         with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
-            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock(side_effect=assert_processing_after_copy)
             result = self.service.send_message("Hello Beta", attachments=attachments)
@@ -158,7 +162,7 @@ class PeerMessagingServiceTests(TestCase):
         )
 
         with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
-            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             self.service.send_message("Please review both reports", attachments=attachments)
@@ -187,7 +191,7 @@ class PeerMessagingServiceTests(TestCase):
 
         with patch(original_helper, side_effect=flaky_get_or_create_dir), patch(
             "api.agent.tasks.process_agent_events_task"
-        ) as task_mock, patch("api.agent.peer_comm.transaction.on_commit", lambda cb: cb()):
+        ) as task_mock, patch("api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately):
             task_mock.delay = MagicMock()
             result = self.service.send_message("Race-safe send", attachments=attachments)
 
@@ -200,7 +204,7 @@ class PeerMessagingServiceTests(TestCase):
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/long-name.txt"])
 
         with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
-            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             result = self.service.send_message("Long-name send", attachments=attachments)
@@ -228,7 +232,7 @@ class PeerMessagingServiceTests(TestCase):
             "_create_inbound_attachment_rows",
             side_effect=RuntimeError("boom after copy"),
         ), patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
-            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+            "api.agent.peer_comm.transaction.on_commit", _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             with self.assertRaises(RuntimeError):
@@ -285,7 +289,7 @@ class PeerMessagingServiceTests(TestCase):
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/loop.txt"])
 
         with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
-            'api.agent.peer_comm.transaction.on_commit', lambda cb: cb()
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             self.service.send_message("First message", attachments=attachments)
@@ -295,7 +299,7 @@ class PeerMessagingServiceTests(TestCase):
 
         with self.assertRaises(PeerMessagingError) as err_ctx, patch(
             'api.agent.tasks.process_agent_events_task'
-        ) as task_mock, patch('api.agent.peer_comm.transaction.on_commit', lambda cb: cb()):
+        ) as task_mock, patch('api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately):
             task_mock.delay = MagicMock()
             self.service.send_message("Too soon", attachments=attachments)
 
@@ -315,7 +319,7 @@ class PeerMessagingServiceTests(TestCase):
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/duplicate.txt"])
 
         with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
-            'api.agent.peer_comm.transaction.on_commit', lambda cb: cb()
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             self.service.send_message("Hello Beta", attachments=attachments)
@@ -328,7 +332,7 @@ class PeerMessagingServiceTests(TestCase):
 
         with self.assertRaises(PeerMessagingError) as err_ctx, patch(
             'api.agent.tasks.process_agent_events_task'
-        ) as task_mock, patch('api.agent.peer_comm.transaction.on_commit', lambda cb: cb()):
+        ) as task_mock, patch('api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately):
             task_mock.delay = MagicMock()
             self.service.send_message("Hello Beta", attachments=attachments)
 
@@ -365,7 +369,7 @@ class PeerMessagingServiceTests(TestCase):
         attachments = resolve_filespace_attachments(self.agent_a, ["/reports/throttle.txt"])
 
         with patch('api.agent.tasks.process_agent_events_task') as task_mock, patch(
-            'api.agent.peer_comm.transaction.on_commit', lambda cb: cb()
+            'api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately
         ):
             task_mock.delay = MagicMock()
             self.service.send_message("First", attachments=attachments)
@@ -380,7 +384,7 @@ class PeerMessagingServiceTests(TestCase):
         with patch('api.agent.tasks.process_agent_events_task') as task_mock:
             task_mock.delay = MagicMock()
             task_mock.apply_async = MagicMock()
-            with patch('api.agent.peer_comm.transaction.on_commit', lambda cb: cb()):
+            with patch('api.agent.peer_comm.transaction.on_commit', _run_on_commit_immediately):
                 with self.assertRaises(PeerMessagingError) as err_ctx:
                     self.service.send_message("Second", attachments=attachments)
 
@@ -505,7 +509,7 @@ class AgentPeerLinkSignalTests(TestCase):
         )
 
     def test_peer_link_creation_skips_intro_steps_and_processing(self):
-        def immediate_on_commit(func, using=None):
+        def immediate_on_commit(func, using=None, robust=False):
             func()
 
         with patch('django.db.transaction.on_commit', immediate_on_commit), patch(

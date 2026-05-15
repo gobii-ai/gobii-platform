@@ -1744,7 +1744,7 @@ class AgentChatAPITests(TestCase):
         attachments = resolve_filespace_attachments(self.agent, ["/handoffs/brief.txt"])
 
         with patch("api.agent.tasks.process_agent_events_task") as task_mock, patch(
-            "api.agent.peer_comm.transaction.on_commit", lambda cb: cb()
+            "api.agent.peer_comm.transaction.on_commit", lambda cb, **kwargs: cb()
         ):
             task_mock.delay = MagicMock()
             PeerMessagingService(self.agent, peer_agent).send_message(

@@ -197,7 +197,8 @@ class SpawnRequestService:
                         event=AnalyticsEvent.AGENT_SPAWN_APPROVED,
                         source=AnalyticsSource.WEB,
                         properties=approved_props.copy(),
-                    )
+                    ),
+                    robust=True,
                 )
                 transaction.on_commit(
                     lambda: Analytics.track_event(
@@ -205,7 +206,8 @@ class SpawnRequestService:
                         event=AnalyticsEvent.AGENT_SPAWN_AGENT_CREATED,
                         source=AnalyticsSource.WEB,
                         properties=approved_props.copy(),
-                    )
+                    ),
+                    robust=True,
                 )
 
                 return {
@@ -236,7 +238,8 @@ class SpawnRequestService:
                     event=AnalyticsEvent.AGENT_SPAWN_REJECTED,
                     source=AnalyticsSource.WEB,
                     properties=base_props.copy(),
-                )
+                ),
+                robust=True,
             )
 
             return {

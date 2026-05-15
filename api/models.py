@@ -10443,7 +10443,7 @@ class AgentSpawnRequest(models.Model):
                     exc_info=True,
                 )
 
-        transaction.on_commit(_send_spawn_handoff)
+        transaction.on_commit(_send_spawn_handoff, robust=True)
         return spawned_agent, link
 
     def reject(self, responded_by):
