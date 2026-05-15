@@ -4,7 +4,8 @@ Gobii settings – dev profile
 
 from pathlib import Path
 from datetime import timedelta
-import environ, os
+import environ
+import os
 from decimal import Decimal
 from typing import Any
 from urllib.parse import urlparse
@@ -90,6 +91,68 @@ DEFERRED_REFERRAL_CREDITS_ENABLED = env.bool("DEFERRED_REFERRAL_CREDITS_ENABLED"
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+# Local eval runner ergonomics. Production settings leave these disabled; the
+# config.eval_local_settings module enables them for clean local SQLite runs.
+EVAL_LOCAL_SETUP_ENABLED = env.bool("EVAL_LOCAL_SETUP_ENABLED", default=False)
+EVAL_LOCAL_AUTO_MIGRATE = env.bool("EVAL_LOCAL_AUTO_MIGRATE", default=False)
+EVAL_LOCAL_OPENROUTER_PROFILE_NAME = env(
+    "EVAL_LOCAL_OPENROUTER_PROFILE_NAME",
+    default="openrouter-deepseek-v4-flash",
+)
+EVAL_LOCAL_OPENROUTER_ENDPOINT_KEY = env(
+    "EVAL_LOCAL_OPENROUTER_ENDPOINT_KEY",
+    default="openrouter_deepseek_v4_flash",
+)
+EVAL_LOCAL_OPENROUTER_MODEL = env(
+    "EVAL_LOCAL_OPENROUTER_MODEL",
+    default="deepseek/deepseek-v4-flash",
+)
+EVAL_LOCAL_OPENROUTER_QWEN_PROFILE_NAME = env(
+    "EVAL_LOCAL_OPENROUTER_QWEN_PROFILE_NAME",
+    default="openrouter-qwen",
+)
+EVAL_LOCAL_OPENROUTER_QWEN_ENDPOINT_KEY = env(
+    "EVAL_LOCAL_OPENROUTER_QWEN_ENDPOINT_KEY",
+    default="openrouter_qwen",
+)
+EVAL_LOCAL_OPENROUTER_QWEN_MODEL = env(
+    "EVAL_LOCAL_OPENROUTER_QWEN_MODEL",
+    default="qwen/qwen3.6-flash",
+)
+EVAL_LOCAL_OPENAI_PROFILE_NAME = env(
+    "EVAL_LOCAL_OPENAI_PROFILE_NAME",
+    default="openai-gpt-4-1-mini",
+)
+EVAL_LOCAL_OPENAI_ENDPOINT_KEY = env(
+    "EVAL_LOCAL_OPENAI_ENDPOINT_KEY",
+    default="openai_gpt_4_1_mini",
+)
+EVAL_LOCAL_OPENAI_MODEL = env(
+    "EVAL_LOCAL_OPENAI_MODEL",
+    default="gpt-4.1-mini",
+)
+EVAL_LOCAL_CUSTOM_PROFILE_NAME = env(
+    "EVAL_LOCAL_CUSTOM_PROFILE_NAME",
+    default="custom-litellm",
+)
+EVAL_LOCAL_CUSTOM_ENDPOINT_KEY = env(
+    "EVAL_LOCAL_CUSTOM_ENDPOINT_KEY",
+    default="custom_litellm",
+)
+EVAL_LOCAL_CUSTOM_PROVIDER_KEY = env(
+    "EVAL_LOCAL_CUSTOM_PROVIDER_KEY",
+    default="custom-litellm",
+)
+EVAL_LOCAL_CUSTOM_PROVIDER_DISPLAY_NAME = env(
+    "EVAL_LOCAL_CUSTOM_PROVIDER_DISPLAY_NAME",
+    default="Custom LiteLLM",
+)
+EVAL_LOCAL_CUSTOM_API_KEY_ENV_VAR = env(
+    "EVAL_LOCAL_CUSTOM_API_KEY_ENV_VAR",
+    default="OPENAI_API_KEY",
+)
+EVAL_LOCAL_CUSTOM_MODEL = env("EVAL_LOCAL_CUSTOM_MODEL", default="")
+EVAL_LOCAL_CUSTOM_API_BASE = env("EVAL_LOCAL_CUSTOM_API_BASE", default="")
 # Enforce free-trial eligibility for personal agents and personal API keys.
 # Keep disabled until grandfathering/backfill is complete in production.
 PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED = env.bool(

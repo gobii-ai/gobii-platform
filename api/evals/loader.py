@@ -1,5 +1,5 @@
 
-from api.evals.registry import ScenarioRegistry, register_scenario
+from api.evals.registry import ScenarioRegistry
 # Import scenarios here to ensure they are registered when the registry is imported elsewhere
 from api.evals.scenarios import * # noqa
 from api.evals.scenarios.behavior_micro import (
@@ -7,6 +7,7 @@ from api.evals.scenarios.behavior_micro import (
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
+from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
 # Built-in suites (in addition to the dynamic "all" suite)
@@ -36,6 +37,11 @@ register_builtin_suites(
             slug="tool_choice_micro",
             description="Small deterministic obvious tool-choice behavior checks.",
             scenario_slugs=TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=META_GOBII_EVAL_SUITE_SLUG,
+            description="Meta Gobii system-skill selection, direct-tool planning, and approval-policy evals.",
+            scenario_slugs=META_GOBII_EVAL_SCENARIO_SLUGS,
         ),
     ]
 )

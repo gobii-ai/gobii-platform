@@ -1,5 +1,7 @@
 """Default code-defined system skill definitions."""
 
+from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
@@ -298,9 +300,104 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     ),
 )
 
+META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+    name="Meta Gobii",
+    search_summary=(
+        "Coordinate persistent Gobiis as a control-plane skill, including team management inside the same owner scope."
+    ),
+    tool_names=META_GOBII_TOOL_NAMES,
+    enables=(
+        "list, inspect, create, update, and archive persistent Gobiis",
+        "request Gobii creation through the existing human Create/Decline approval flow",
+        "configure name, charter, schedule, active state, intelligence tier, daily credit limits, whitelist policy, and proactive opt-in",
+        "create, list, update, and remove peer-agent links with message-window limits",
+        "send briefings to Gobiis and read or wait on their timelines",
+        "upload and list files in a Gobii filespace",
+        "manage contacts, allowlists, pending contact requests, contact endpoints, and preferred owner-safe endpoints",
+    ),
+    use_when=(
+        "the user asks to create a team of Gobiis",
+        "the user asks to deploy Gobiis or request a specialist Gobii",
+        "the user asks to create, manage, configure, supervise, or restructure Gobiis",
+        "the user asks to build or restructure an agent graph",
+        "the user asks to manage the Gobii graph or control plane",
+        "the user asks a Gobii to manage other Gobiis or act as a manager Gobii",
+        "the user asks to link Gobiis together and brief them",
+        "the user asks to manage persistent Gobii settings, schedules, contacts, allowlists, resource limits, or peer links",
+        "the task is explicitly about coordinating multiple Gobiis or maintaining a Gobii team",
+    ),
+    query_aliases=(
+        "meta gobii",
+        "meta gobii team manager",
+        "manager gobii",
+        "team of gobiis",
+        "gobii team",
+        "agent team",
+        "agent graph",
+        "gobii graph",
+        "gobii control plane",
+        "control plane",
+        "create agents",
+        "manage agents",
+        "configure gobiis",
+        "supervise gobiis",
+        "link agents",
+        "brief agents",
+        "deploy gobiis",
+        "request gobii creation",
+        "restructure gobiis",
+        "spawn gobiis",
+    ),
+    prompt_instructions=(
+        "Meta Gobii is the broader control-plane skill for coordinating persistent Gobiis. Team management is one "
+        "capability under Meta Gobii, not the skill identity.\n"
+        "Use these tools only when the user is asking you to create, configure, link, brief, or maintain persistent "
+        "Gobiis in this same owner or organization scope. Do not use them for ordinary research, writing, support, "
+        "or content tasks that merely mention Gobii.\n"
+        "Authorization boundary: every tool is scoped to the invoking Gobii's personal owner scope or organization. "
+        "Never attempt to manage agents outside that accessible scope.\n"
+        "Human approval boundary: before making any control-plane mutation, ask the human to approve a concise "
+        "summary of the proposed change. Mutations include creating, updating, archiving, linking, unlinking, "
+        "briefing or messaging Gobiis, uploading files, adding/removing/approving contacts, changing preferred "
+        "contact endpoints, and changing schedules, resources, or intelligence tiers. Pass user_confirmed=true "
+        "only after that explicit approval. For broad operations involving multiple Gobiis, first summarize the "
+        "scope and wait for higher-level confirmation.\n"
+        "For initial team creation or team-management capability tests, do not create, link, brief, schedule, or "
+        "message anything yet. First produce one concise, non-duplicated proposal with exactly the requested team "
+        "scope: role names, responsibilities, peer-link graph, and initial briefing text for each Gobii. Ask for "
+        "approval once with a clear question at the end of the response. After approval, execute only that approved "
+        "scope; do not add extra agents, domains, "
+        "schedules, contacts, files, or invented scenarios unless the human asks for them.\n"
+        "Schedule default: do not include schedules in new Gobii or team proposals unless the user explicitly asks "
+        "for recurring, scheduled, ongoing, proactive, digest, watch, check-in, or cadence-based behavior. One-off, "
+        "demo, setup-only, trial, prototype, exploratory, backfill, cleanup, research, candidate-screening, sales-list, "
+        "project-team, reorganize, link/unlink, archive, resource, contact, file, and make-available requests stay "
+        "unscheduled by default. If a schedule might help but the user did not request one, mention it only as an "
+        "optional follow-up outside the approval scope or ask a clarifying question; never invent a cadence.\n"
+        "Schedule approval scope: when creating, changing, or removing a schedule, include the exact schedule action "
+        "and cadence/removal in the approval summary. Existing-agent schedule changes require explicit user intent "
+        "and approval. If the user approved a scope that omitted schedules, keep schedules out of tool arguments.\n"
+        "For team creation after approval, inspect config options and existing agents when useful, then create the "
+        "requested Gobiis, link them, and send each one a concise briefing with its role and handoff context.\n"
+        "For specialist handoffs that should use the existing Create/Decline approval request flow, use "
+        "meta_gobii_request_agent_creation. Do not call legacy spawn_agent directly; it is only a hidden compatibility "
+        "path after Meta Gobii is enabled.\n"
+        "Use contact tools only for contacts the human supplied, approved, or that are already known internal team contacts. "
+        "Grant can_configure only to owner-approved contacts. Prefer manual allowlist semantics for explicit contacts.\n"
+        "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "
+        "the exact value; prefer names, channels, or masked contact values.\n"
+        "Use file tools only with files the human provided or artifacts you created for these agents. Uploads accept small "
+        "base64 files; do not fetch arbitrary remote URLs through these tools.\n"
+        "Known unsupported MCP-equivalent surfaces in this direct skill: arbitrary URL file fetch, ad hoc runtime sessions, "
+        "and separate task/run abstractions."
+    ),
+)
+
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
+    META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }

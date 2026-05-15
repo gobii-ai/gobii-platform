@@ -100,9 +100,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
-        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True), patch(
-            "api.agent.tools.static_tools.AgentService.get_agents_available", return_value=2
-        ):
+        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True):
             names = _tool_names(get_static_tool_definitions(self.agent))
 
         self.assertIn("end_planning", names)
@@ -219,7 +217,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("Planning Mode overrides normal execution-oriented instructions", prompt)
         self.assertIn("Stay in planning only until you call end_planning(full_plan=...)", prompt)
         self.assertIn("Only planning-safe tools are available", prompt)
-        self.assertIn("update_plan, spawn_agent, request_contact_permission", prompt)
+        self.assertIn("update_plan, request_contact_permission", prompt)
+        self.assertNotIn("spawn_agent", prompt)
         self.assertNotIn("Normal tools are available", prompt)
         self.assertIn("Read-only research is allowed and often useful during planning", prompt)
         self.assertIn("search, web, file-reading, and other non-mutating tools", prompt)

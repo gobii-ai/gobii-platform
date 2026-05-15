@@ -1,7 +1,5 @@
-from __future__ import annotations
 import logging
 from typing import Any, Iterable, Optional, Tuple, Dict
-from uuid import UUID
 import json
 import time
 import contextvars
@@ -17,7 +15,7 @@ from api.agent.comms.message_service import inject_internal_web_message
 from api.agent.core.llm_utils import run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
 from api.evals.realtime import broadcast_task_update, broadcast_run_update
-from api.evals.metrics import aggregate_task_metrics, aggregate_run_metrics
+from api.evals.metrics import aggregate_run_metrics
 from config.redis_client import get_redis_client
 from django.utils import timezone
 

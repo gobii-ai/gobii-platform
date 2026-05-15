@@ -1,3 +1,4 @@
+# ruff: noqa: F401
 from .echo_response import EchoResponseScenario
 from .monitor_pollution import MonitorPollutionScenario
 from .weather_lookup import WeatherLookupScenario
@@ -7,6 +8,7 @@ from .permit_followup_single_reply import PermitFollowupSingleReplyScenario
 from .linkedin_tool_preference import LinkedInToolPreferenceScenario
 from .job_listings_bundled_reply import JobListingsBundledReplyScenario
 from .global_skill_eval import GlobalSkillEvalScenario
+from .meta_gobii import MetaGobiiSystemSkillScenario
 from .behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,

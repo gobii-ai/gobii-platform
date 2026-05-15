@@ -240,7 +240,8 @@ class PeerMessagingService:
 
             # Wake the receiving agent to process the inbound message
             transaction.on_commit(
-                lambda: self._enqueue_processing(self.peer_agent.id)
+                lambda: self._enqueue_processing(self.peer_agent.id),
+                robust=True,
             )
 
             logger.info(
@@ -502,4 +503,4 @@ class PeerMessagingService:
 
             process_agent_events_task.apply_async((str(agent_id),), eta=eta_value)
 
-        transaction.on_commit(_enqueue)
+        transaction.on_commit(_enqueue, robust=True)

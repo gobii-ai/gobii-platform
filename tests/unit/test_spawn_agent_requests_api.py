@@ -1,17 +1,20 @@
 import json
-from types import SimpleNamespace
-from uuid import uuid4
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
 
+from api.agent.tools.spawn_agent import execute_spawn_agent
 from api.models import (
+    AgentPeerLink,
     AgentSpawnRequest,
     BrowserUseAgent,
+    CommsChannel,
     Organization,
     OrganizationMembership,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
 )
@@ -92,6 +95,20 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
             requested_charter="Own competitive pricing monitoring and weekly deltas.",
             handoff_message="Take over pricing analysis and send me the first summary.",
         )
+
+    def _create_meta_gobii_spawn_request(self) -> AgentSpawnRequest:
+        result = execute_spawn_agent(
+            self.agent,
+            {
+                "charter": "Own Meta Gobii team creation follow-up and role coordination.",
+                "handoff_message": "Take over the approved Meta Gobii team setup and send the first status update.",
+                "reason": "Meta Gobii team creation needs a specialist peer after human approval.",
+                "will_continue_work": True,
+            },
+            invoked_via_meta_gobii=True,
+        )
+        self.assertEqual(result.get("status"), "ok")
+        return AgentSpawnRequest.objects.get(id=result["spawn_request_id"])
 
     def test_org_member_cannot_resolve_spawn_request(self):
         spawn_request = self._create_spawn_request()
@@ -217,17 +234,23 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload.get("request_status"), AgentSpawnRequest.RequestStatus.REJECTED)
 
-    @patch("console.api_views.process_agent_events_task.delay")
-    @patch("api.models.AgentSpawnRequest.approve")
-    def test_org_owner_can_approve_spawn_request(self, approve_mock, delay_mock):
-        spawn_request = self._create_spawn_request()
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
+    @patch("api.services.persistent_agents.maybe_schedule_short_description", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_mini_description", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_agent_tags", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_agent_avatar", return_value=False)
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_org_owner_can_approve_spawn_request(
+        self,
+        delay_mock,
+        _avatar_mock,
+        _tags_mock,
+        _mini_description_mock,
+        _short_description_mock,
+    ):
+        spawn_request = self._create_meta_gobii_spawn_request()
         self.client.force_login(self.owner)
         self._set_org_context(self.client)
-
-        approve_mock.return_value = (
-            SimpleNamespace(id=uuid4(), name="Legal Specialist"),
-            SimpleNamespace(id=uuid4()),
-        )
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
@@ -239,9 +262,132 @@ class SpawnAgentRequestDecisionAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload.get("request_status"), AgentSpawnRequest.RequestStatus.APPROVED)
-        self.assertEqual(payload.get("spawned_agent_name"), "Legal Specialist")
+        self.assertIn("pending_action_requests", payload)
+
+        spawn_request.refresh_from_db()
+        spawned_agent = spawn_request.spawned_agent
+        self.assertIsNotNone(spawned_agent)
+        self.assertEqual(payload.get("spawned_agent_id"), str(spawned_agent.id))
+        self.assertEqual(spawned_agent.user_id, self.owner.id)
+        self.assertEqual(spawned_agent.organization_id, self.org.id)
+        self.assertEqual(spawned_agent.charter, spawn_request.requested_charter)
+        self.assertTrue(
+            PersistentAgentCommsEndpoint.objects.filter(
+                owner_agent=spawned_agent,
+                channel=CommsChannel.EMAIL,
+                is_primary=True,
+            ).exists()
+        )
+        self.assertTrue(
+            AgentPeerLink.objects.filter(
+                id=spawn_request.peer_link_id,
+                agent_a=self.agent,
+                agent_b=spawned_agent,
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                peer_agent=spawned_agent,
+                is_outbound=True,
+                body=spawn_request.handoff_message,
+            ).exists()
+        )
+        self.assertTrue(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=spawned_agent,
+                peer_agent=self.agent,
+                is_outbound=False,
+                body=spawn_request.handoff_message,
+            ).exists()
+        )
 
         step = PersistentAgentStep.objects.filter(agent=self.agent).order_by("-created_at").first()
         self.assertIsNotNone(step)
         self.assertIn("spawn request approved", step.description.lower())
-        delay_mock.assert_called_once_with(str(self.agent.id))
+        delay_mock.assert_any_call(str(spawned_agent.id))
+        delay_mock.assert_any_call(str(self.agent.id))
+
+        timeline_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?direction=initial&limit=100"
+        )
+        self.assertEqual(timeline_response.status_code, 200)
+        timeline_payload = timeline_response.json()
+        self.assertFalse(
+            any(
+                action.get("kind") == "spawn_request"
+                and action.get("requestId") == str(spawn_request.id)
+                for action in timeline_payload.get("pending_action_requests", [])
+            )
+        )
+
+        start_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({"is_visible": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(start_response.status_code, 200)
+        session_key = start_response.json()["session_key"]
+        heartbeat_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
+            data=json.dumps({"session_key": session_key, "is_visible": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(heartbeat_response.status_code, 200)
+
+    @override_settings(ENABLE_DEFAULT_AGENT_EMAIL=True, DEFAULT_AGENT_EMAIL_DOMAIN="agents.test")
+    @patch("api.services.persistent_agents.maybe_schedule_short_description", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_mini_description", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_agent_tags", return_value=False)
+    @patch("api.services.persistent_agents.maybe_schedule_agent_avatar", return_value=False)
+    @patch(
+        "api.agent.tasks.process_agent_events_task.delay",
+        side_effect=RuntimeError("processing broker unavailable"),
+    )
+    def test_approval_response_survives_post_commit_processing_failure(
+        self,
+        delay_mock,
+        _avatar_mock,
+        _tags_mock,
+        _mini_description_mock,
+        _short_description_mock,
+    ):
+        spawn_request = self._create_meta_gobii_spawn_request()
+        self.client.force_login(self.owner)
+        self._set_org_context(self.client)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/spawn-requests/{spawn_request.id}/decision/",
+                data=json.dumps({"decision": "approve"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        spawn_request.refresh_from_db()
+        self.assertEqual(spawn_request.status, AgentSpawnRequest.RequestStatus.APPROVED)
+        self.assertIsNotNone(spawn_request.spawned_agent_id)
+        delay_mock.assert_called()
+
+        timeline_response = self.client.get(
+            f"/console/api/agents/{self.agent.id}/timeline/?direction=initial&limit=100"
+        )
+        self.assertEqual(timeline_response.status_code, 200)
+
+        start_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/start/",
+            data=json.dumps({"is_visible": True}),
+            content_type="application/json",
+        )
+        self.assertEqual(start_response.status_code, 200)
+        heartbeat_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/web-sessions/heartbeat/",
+            data=json.dumps(
+                {
+                    "session_key": start_response.json()["session_key"],
+                    "is_visible": True,
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(heartbeat_response.status_code, 200)

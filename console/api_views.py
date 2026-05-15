@@ -3956,7 +3956,10 @@ class AgentSpawnRequestDecisionAPIView(ApiLoginRequiredMixin, View):
             message_text = exc.messages[0] if getattr(exc, "messages", None) else str(exc)
             return JsonResponse({"error": message_text}, status=400)
 
-        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
+        def _enqueue_parent_processing() -> None:
+            process_agent_events_task.delay(str(agent.pk))
+
+        transaction.on_commit(_enqueue_parent_processing, robust=True)
         return JsonResponse(
             {
                 **response_payload,

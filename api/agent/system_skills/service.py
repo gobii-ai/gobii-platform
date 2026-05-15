@@ -8,7 +8,12 @@ from django.utils import timezone
 from api.models import PersistentAgent, PersistentAgentEnabledTool, PersistentAgentSystemSkillState
 from api.services.pipedream_apps import enable_pipedream_apps_for_agent
 
-from .registry import SystemSkillDefinition, get_system_skill_definition
+from .registry import (
+    SystemSkillDefinition,
+    equivalent_system_skill_keys,
+    get_system_skill_definition,
+    normalize_system_skill_key,
+)
 from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
 
 
@@ -67,10 +72,13 @@ def refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, us
     ]
     if not matching_keys:
         return []
+    state_keys = []
+    for key in matching_keys:
+        state_keys.extend(equivalent_system_skill_keys(key))
 
     updated = PersistentAgentSystemSkillState.objects.filter(
         agent=agent,
-        skill_key__in=matching_keys,
+        skill_key__in=state_keys,
         is_enabled=True,
     ).update(
         last_used_at=used_at,
@@ -92,7 +100,7 @@ def enable_system_skills(
     for raw_key in skill_keys or []:
         if not isinstance(raw_key, str):
             continue
-        skill_key = raw_key.strip()
+        skill_key = normalize_system_skill_key(raw_key)
         if not skill_key or skill_key in seen:
             continue
         seen.add(skill_key)

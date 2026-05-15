@@ -16,7 +16,9 @@ from api.services.spawn_requests import SpawnRequestService
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from util.urls import append_context_query, append_query_params
 
-from ...models import AgentSpawnRequest, PersistentAgent
+from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_SYSTEM_SKILL_KEYS
+
+from ...models import AgentSpawnRequest, PersistentAgent, PersistentAgentSystemSkillState
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +33,14 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
 
 def _owner_for_agent(agent: PersistentAgent):
     return agent.organization if agent.organization_id else agent.user
+
+
+def _meta_gobii_enabled_for_agent(agent: PersistentAgent) -> bool:
+    return PersistentAgentSystemSkillState.objects.filter(
+        agent=agent,
+        skill_key__in=META_GOBII_SYSTEM_SKILL_KEYS,
+        is_enabled=True,
+    ).exists()
 
 
 def _build_urls(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> tuple[str | None, str]:
@@ -114,7 +124,22 @@ def get_spawn_agent_tool(
     }
 
 
-def execute_spawn_agent(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str, Any]:
+def execute_spawn_agent(
+    agent: PersistentAgent,
+    params: Dict[str, Any],
+    *,
+    invoked_via_meta_gobii: bool = False,
+) -> Dict[str, Any]:
+    if not invoked_via_meta_gobii and not _meta_gobii_enabled_for_agent(agent):
+        return {
+            "status": "error",
+            "message": (
+                "spawn_agent is available only through Meta Gobii. Enable the "
+                f"{META_GOBII_SYSTEM_SKILL_KEY} system skill and use Meta Gobii's "
+                "request Gobii creation capability."
+            ),
+        }
+
     charter = str(params.get("charter") or "").strip()
     handoff_message = str(params.get("handoff_message") or "").strip()
     request_reason = str(params.get("reason") or "").strip()
