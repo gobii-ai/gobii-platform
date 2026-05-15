@@ -104,6 +104,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             self.assertIsInstance(case.ignored_tools, tuple)
             self.assertIsInstance(case.accepted_tool_alternatives, dict)
             self.assertIsInstance(case.eval_synthetic_tools, tuple)
+            self.assertIsInstance(case.tool_mocks, dict)
             self.assertIsInstance(case.stop_after_success, bool)
             self.assertEqual(
                 case.update_plan_policy,
@@ -162,8 +163,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertIn("sheet-123", by_slug["common_use_case_051_sheets_update_row"].prompt)
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
+        self.assertEqual(by_slug["common_use_case_078_create_line_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
         self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
+        self.assertIn("https://www.linkedin.com/in/", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
+        self.assertIn("https://www.linkedin.com/company/", by_slug["common_use_case_032_linkedin_company_profile"].prompt)
+        self.assertIn("LinkedIn people search data", by_slug["common_use_case_034_linkedin_people_search"].prompt)
+        self.assertIn("win onboarding shipped", by_slug["common_use_case_073_create_status_pdf"].prompt)
+        self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
+        self.assertIn("rows", by_slug["common_use_case_086_sqlite_export_query_csv"].tool_mocks["sqlite_batch"]["content"])
+        self.assertIn("https://support.example.test/status", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
+        self.assertIn("https://prices.example.test/api/btc-usd.json", by_slug["common_use_case_096_schedule_price_alert"].prompt)
+        self.assertIn("https://borough.example.test/permits/updates", by_slug["common_use_case_097_schedule_permit_check"].prompt)
         self.assertEqual(
             by_slug["common_use_case_089_enable_database"].accepted_tool_alternatives,
             {"enable_database": ("sqlite_batch",)},
