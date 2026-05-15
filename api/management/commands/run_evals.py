@@ -6,18 +6,33 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
+from api.evals.local_setup import ensure_eval_local_setup
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
+from api.evals.meta_gobii import META_GOBII_EVAL_SUITE_SLUG
 from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
 class Command(BaseCommand):
-    help = "Runs one or more eval suites (each suite runs its scenarios concurrently)."
+    help = (
+        "Runs one or more eval suites. Local Meta Gobii live evals can run with "
+        "--suite meta_gobii --sync --n-runs 1 --routing-profile openrouter-deepseek-v4-flash "
+        "--settings=config.eval_local_settings."
+    )
 
     def add_arguments(self, parser):
+        parser.epilog = (
+            "Local Meta Gobii examples:\n"
+            "  uv run python manage.py run_evals --suite meta_gobii --sync --n-runs 1 "
+            "--simulated --settings=config.eval_local_settings\n"
+            "  set -a; source /Users/andrew/.env-openrouter >/dev/null; set +a\n"
+            "  uv run python manage.py run_evals --suite meta_gobii --sync --n-runs 1 "
+            "--routing-profile openrouter-deepseek-v4-flash --settings=config.eval_local_settings\n"
+            "Simulated runs are deterministic local checks and are not live model evals."
+        )
         parser.add_argument(
             "--suite",
             action="append",
@@ -75,7 +90,24 @@ class Command(BaseCommand):
             "--llm-routing-profile",
             dest="routing_profile",
             type=str,
-            help="LLM routing profile name or UUID to snapshot onto the eval suite run.",
+            help=(
+                "LLM routing profile name or UUID to snapshot onto the eval suite run. "
+                "config.eval_local_settings seeds openrouter-deepseek-v4-flash."
+            ),
+        )
+        parser.add_argument(
+            "--simulated",
+            action="store_true",
+            help=(
+                "Run scenario-provided deterministic simulations through the canonical runner. "
+                "Currently supported for the meta_gobii suite; this is not a live model eval."
+            ),
+        )
+        parser.add_argument(
+            "--delay-between-runs-seconds",
+            type=float,
+            default=0,
+            help="Optional sleep between scenario runs/submissions for local live evals against rate-limited providers.",
         )
 
     def handle(self, *args, **options):
@@ -88,6 +120,8 @@ class Command(BaseCommand):
         run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
         requested_runs = max(1, min(10, int(options.get("n_runs") or 1)))
         routing_profile_ref = (options.get("routing_profile") or "").strip()
+        simulated = bool(options.get("simulated"))
+        delay_between_runs = max(0, float(options.get("delay_between_runs_seconds") or 0))
         base_site_url = (getattr(settings, "PUBLIC_SITE_URL", "http://localhost:8000") or "http://localhost:8000").rstrip("/")
         printed_audit_agents: set[str] = set()
 
@@ -95,6 +129,9 @@ class Command(BaseCommand):
             settings.CELERY_TASK_ALWAYS_EAGER = True
             settings.CELERY_TASK_EAGER_PROPAGATES = True
             self.stdout.write("Running in SYNCHRONOUS mode.")
+
+        if settings.EVAL_LOCAL_SETUP_ENABLED:
+            ensure_eval_local_setup(stdout=self.stdout)
 
         # Resolve suites
         suite_slugs: list[str] = suites_requested[:]
@@ -125,6 +162,12 @@ class Command(BaseCommand):
             if not suite_obj:
                 raise CommandError(f"Suite '{slug}' not found.")
             suites.append((suite_obj.slug, list(suite_obj.scenario_slugs), suite_obj.description))
+
+        if simulated and any(suite_slug != META_GOBII_EVAL_SUITE_SLUG for suite_slug, _slugs, _description in suites):
+            raise CommandError("--simulated is currently supported only for the meta_gobii suite.")
+
+        if simulated:
+            self.stdout.write(self.style.WARNING("Running in SIMULATED mode. No live model calls will be made."))
 
         if not suites:
             self.stdout.write(self.style.WARNING("No suites found to run."))
@@ -216,6 +259,7 @@ class Command(BaseCommand):
             suite_run = EvalSuiteRun.objects.create(
                 id=suite_run_id,
                 suite_slug=suite_slug,
+                launch_config={"mode": "simulated"} if simulated else {},
                 initiated_by=user,
                 status=EvalSuiteRun.Status.RUNNING,
                 run_type=run_type,
@@ -256,6 +300,8 @@ class Command(BaseCommand):
                     run_eval_task.delay(str(run.id))
                     run_ids.append(run)
                     created_for_suite += 1
+                    if delay_between_runs:
+                        time.sleep(delay_between_runs)
 
             suite_runs.append(suite_run)
             if created_for_suite == 0:

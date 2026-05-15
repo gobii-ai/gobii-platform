@@ -83,6 +83,8 @@ class MetaGobiiSystemSkillTests(TestCase):
         self.assertIn("same owner or organization scope", definition.prompt_instructions)
         self.assertIn("Human approval boundary", definition.prompt_instructions)
         self.assertIn("user_confirmed=true", definition.prompt_instructions)
+        self.assertIn("non-duplicated proposal", definition.prompt_instructions)
+        self.assertIn("execute only that approved scope", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
 
         for query in [
