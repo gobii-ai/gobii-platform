@@ -9,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sites.models import Site
 from django.contrib.sessions.middleware import SessionMiddleware
+from django.http import HttpResponse
 from django.test import RequestFactory, TestCase, tag
 from django.urls import reverse
 from django.contrib.messages.storage.fallback import FallbackStorage
@@ -19,6 +20,7 @@ from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_CHARTER_COOKIE,
 )
+from middleware.utm_capture import UTMTrackingMiddleware
 
 PROVIDER_LOGIN_CASES = {
     "linkedin": ("openid_connect_login", "www.linkedin.com"),
@@ -157,6 +159,10 @@ class SocialAccountProviderTests(TestCase):
             "fbclid_first": "first-fbclid",
             "fbclid_last": "last-fbclid",
             "utm_querystring": "utm_source=meta&utm_campaign=retargeting&fbclid=last-fbclid",
+            "first_referrer": "https://agentic.ai/",
+            "last_referrer": "https://agentic.ai/pricing/",
+            "first_path": "/",
+            "last_path": "/pricing/",
         }
         request.COOKIES[OAUTH_ATTRIBUTION_COOKIE] = signing.dumps(stashed, compress=True)
 
@@ -174,6 +180,50 @@ class SocialAccountProviderTests(TestCase):
         self.assertEqual(request.session.get("fbclid_first"), stashed["fbclid_first"])
         self.assertEqual(request.session.get("fbclid_last"), stashed["fbclid_last"])
         self.assertEqual(request.session.get("utm_querystring"), stashed["utm_querystring"])
+        self.assertEqual(request.session.get("first_referrer"), stashed["first_referrer"])
+        self.assertEqual(request.session.get("last_referrer"), stashed["last_referrer"])
+        self.assertEqual(request.session.get("first_path"), stashed["first_path"])
+        self.assertEqual(request.session.get("last_path"), stashed["last_path"])
+
+    def test_oauth_callback_middleware_does_not_override_stashed_landing_paths(self) -> None:
+        request = RequestFactory().get("/accounts/google/login/callback/?code=abc&state=xyz")
+        request.META["HTTP_REFERER"] = "https://accounts.google.com/"
+        session_middleware = SessionMiddleware(lambda req: None)
+        session_middleware.process_request(request)
+        request.session.save()
+
+        user_model = get_user_model()
+        request.user = user_model.objects.create_user(
+            username="callback-oauth-user",
+            email="callback-oauth-user@example.com",
+            password="dummy-pass",
+        )
+
+        stashed = {
+            "first_referrer": "https://agentic.ai/",
+            "last_referrer": "https://agentic.ai/pricing/",
+            "first_path": "/",
+            "last_path": "/pricing/",
+        }
+        request.COOKIES[OAUTH_ATTRIBUTION_COOKIE] = signing.dumps(stashed, compress=True)
+
+        middleware = UTMTrackingMiddleware(lambda req: HttpResponse("ok"))
+        middleware(request)
+
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
+        sociallogin = SimpleNamespace(
+            account=SimpleNamespace(pk=True),
+            user=SimpleNamespace(email="callback-oauth-user@example.com"),
+        )
+        adapter = GobiiSocialAccountAdapter(request)
+        adapter.pre_social_login(request, sociallogin)
+
+        self.assertEqual(request.session.get("first_referrer"), stashed["first_referrer"])
+        self.assertEqual(request.session.get("last_referrer"), stashed["last_referrer"])
+        self.assertEqual(request.session.get("first_path"), stashed["first_path"])
+        self.assertEqual(request.session.get("last_path"), stashed["last_path"])
 
     def test_pre_social_login_restores_charter_keys_from_cookie(self) -> None:
         request = RequestFactory().get(reverse("google_login"))

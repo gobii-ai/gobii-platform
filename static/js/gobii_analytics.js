@@ -55,8 +55,65 @@ if (typeof window !== 'undefined') {
 
 const UTM_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term'];
 const CLICK_ID_PARAMS = ['gclid', 'wbraid', 'gbraid', 'msclkid', 'ttclid', 'rdt_cid', 'fbclid'];
+const AUTH_REFERRER_DOMAINS = new Set([
+  'accounts.google.com',
+  'login.microsoftonline.com'
+]);
+const INTERNAL_REFERRER_ROOT_DOMAINS = new Set([
+  'gobii.ai'
+]);
 
 const LANDING_PARAM = 'g';
+
+function isAuthProviderReferrer(referrer) {
+  if (!referrer) return false;
+  try {
+    const hostname = referrerHostname(referrer);
+    for (const domain of AUTH_REFERRER_DOMAINS) {
+      if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+        return true;
+      }
+    }
+    return false;
+  } catch (e) {
+    return false;
+  }
+}
+
+function referrerHostname(referrer) {
+  if (!referrer) return '';
+  try {
+    return new URL(referrer).hostname.toLowerCase().replace(/\.$/, '');
+  } catch (e) {
+    return '';
+  }
+}
+
+function isInternalReferrer(referrer) {
+  const hostname = referrerHostname(referrer);
+  if (!hostname) return false;
+  for (const domain of INTERNAL_REFERRER_ROOT_DOMAINS) {
+    if (hostname === domain || hostname.endsWith(`.${domain}`)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isSameHostReferrer(referrer) {
+  const hostname = referrerHostname(referrer);
+  const currentHostname = (window.location.hostname || '').toLowerCase().replace(/\.$/, '');
+  return Boolean(hostname && currentHostname && hostname === currentHostname);
+}
+
+function isExternalAcquisitionReferrer(referrer) {
+  return Boolean(
+    referrer
+    && !isAuthProviderReferrer(referrer)
+    && !isSameHostReferrer(referrer)
+    && !isInternalReferrer(referrer)
+  );
+}
 
 (function() {
   const params = new URLSearchParams(window.location.search);
@@ -132,12 +189,16 @@ const LANDING_PARAM = 'g';
   const attrs = `; expires=${expiry.toUTCString()}; path=/; SameSite=Lax; domain=${COOKIE_DOMAIN}`;
 
   const currentPath = window.location.pathname + window.location.search;
-  const referrer = document.referrer || '';
+  const rawReferrer = document.referrer || '';
+  const isExternalReferrer = isExternalAcquisitionReferrer(rawReferrer);
+  const referrer = isExternalReferrer ? rawReferrer : '';
 
   if (!document.cookie.includes('first_referrer=')) {
     document.cookie = `first_referrer=${encodeURIComponent(referrer)}${attrs}`;
   }
-  document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
+  if (isExternalReferrer) {
+    document.cookie = `last_referrer=${encodeURIComponent(referrer)}${attrs}`;
+  }
 
   if (!document.cookie.includes('first_path=')) {
     document.cookie = `first_path=${encodeURIComponent(currentPath)}${attrs}`;

@@ -108,6 +108,11 @@ from util.urls import (
     build_immersive_chat_url,
     normalize_return_to,
 )
+from util.attribution_referrers import (
+    ATTRIBUTION_REFERRER_SESSION_KEYS,
+    clean_acquisition_referrer,
+    decode_attribution_value,
+)
 from util.waffle_flags import is_waffle_flag_active
 from util.fish_collateral import build_web_manifest_payload, is_fish_collateral_enabled
 from api.services.pipedream_apps import (
@@ -510,7 +515,19 @@ def _build_oauth_attribution_cookie_payload(request) -> dict[str, str | dict]:
     payload: dict[str, str | dict] = {}
     for key in OAUTH_ATTRIBUTION_SESSION_KEYS:
         if key in request.session:
-            payload[key] = request.session.get(key)
+            value = request.session.get(key)
+        elif key in ATTRIBUTION_REFERRER_SESSION_KEYS and key in request.COOKIES:
+            value = request.COOKIES.get(key)
+        else:
+            continue
+
+        if key in {"first_referrer", "last_referrer"}:
+            value = clean_acquisition_referrer(value)
+        elif key in {"first_path", "last_path"}:
+            value = decode_attribution_value(value)
+
+        if value:
+            payload[key] = value
     return payload
 
 

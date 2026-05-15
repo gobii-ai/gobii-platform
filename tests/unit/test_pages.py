@@ -723,6 +723,10 @@ class HomePageTests(TestCase):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
         session.save()
+        self.client.cookies["first_referrer"] = "https://agentic.ai/"
+        self.client.cookies["last_referrer"] = "https://agentic.ai/pricing/"
+        self.client.cookies["first_path"] = "/"
+        self.client.cookies["last_path"] = "/pricing/"
 
         response = self.client.post(
             reverse("pages:home_agent_spawn"),
@@ -762,6 +766,10 @@ class HomePageTests(TestCase):
 
         attribution_payload = signing.loads(response.cookies[OAUTH_ATTRIBUTION_COOKIE].value, max_age=7200)
         self.assertEqual(attribution_payload.get("utm_querystring"), "utm_source=newsletter")
+        self.assertEqual(attribution_payload.get("first_referrer"), "https://agentic.ai/")
+        self.assertEqual(attribution_payload.get("last_referrer"), "https://agentic.ai/pricing/")
+        self.assertEqual(attribution_payload.get("first_path"), "/")
+        self.assertEqual(attribution_payload.get("last_path"), "/pricing/")
 
         user = get_user_model().objects.create_user(
             email="home-spawn-cookie@test.com",
