@@ -4,11 +4,6 @@ import html
 import re
 import unicodedata
 
-import markdown
-from inscriptis import get_text
-from inscriptis.css_profiles import CSS_PROFILES
-from inscriptis.model.config import ParserConfig
-
 __all__ = [
     "strip_control_chars",
     "strip_markdown_for_sms",
@@ -73,11 +68,21 @@ _NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE = re.compile(
     r"\\[nr]\s*(?=(?:[*+\-\u2022]|\d+[.)]|#{1,6}\s))"
 )
 _NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS = ["extra", "sane_lists"]
-_NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG = ParserConfig(
-    css=CSS_PROFILES["strict"].copy(),
-    display_links=False,
-    display_anchors=False,
-)
+
+
+def _render_markdown_preview_to_text(value: str) -> str:
+    import markdown
+    from inscriptis import get_text
+    from inscriptis.css_profiles import CSS_PROFILES
+    from inscriptis.model.config import ParserConfig
+
+    rendered = markdown.markdown(value, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
+    config = ParserConfig(
+        css=CSS_PROFILES["strict"].copy(),
+        display_links=False,
+        display_anchors=False,
+    )
+    return get_text(rendered, config)
 
 
 def strip_markdown_for_sms(value: str | None) -> str:
@@ -152,8 +157,7 @@ def sanitize_notification_preview_text(value: str | None) -> str:
     text = html.unescape(text)
     text = _NOTIFICATION_PREVIEW_FORMATTING_ESCAPE_RE.sub("\n", text)
     text = strip_control_chars(text)
-    rendered = markdown.markdown(text, extensions=_NOTIFICATION_PREVIEW_MARKDOWN_EXTENSIONS)
-    text = get_text(rendered, _NOTIFICATION_PREVIEW_INSCRIPTIS_CONFIG)
+    text = _render_markdown_preview_to_text(text)
     text = _MARKDOWN_LINK_RE.sub(r"\1", text)
     text = _MARKDOWN_BOLD_RE.sub(r"\1", text)
     text = _MARKDOWN_BOLD_UNDER_RE.sub(r"\1", text)
