@@ -5,6 +5,7 @@ _MODULE_NAMES = (
     "config",
     "workspace",
     "manifest",
+    "text_sanitizer",
     "files",
     "run",
     "tools",

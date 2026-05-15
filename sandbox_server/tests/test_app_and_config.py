@@ -132,15 +132,17 @@ import importlib.abc
 import sys
 
 
-class BlockApi(importlib.abc.MetaPathFinder):
+class BlockDjangoAppImports(importlib.abc.MetaPathFinder):
     def find_spec(self, fullname, path=None, target=None):
-        if fullname == "api" or fullname.startswith("api."):
-            raise ModuleNotFoundError("blocked api import")
+        if fullname in {"api", "util"} or fullname.startswith(("api.", "util.")):
+            raise ModuleNotFoundError(f"blocked Django app import: {fullname}")
         return None
 
 
-sys.meta_path.insert(0, BlockApi())
+sys.meta_path.insert(0, BlockDjangoAppImports())
 import sandbox_server
+import sandbox_server.files
+import sandbox_server.text_sanitizer
 print("ok")
 """
 

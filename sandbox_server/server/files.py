@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from sandbox_server.text_sanitizer import decode_unicode_escapes
 from sandbox_server.workspace import _ensure_capacity, _guess_mime_type, _normalize_workspace_path
-from util.text_sanitizer import decode_unicode_escapes
 
 logger = logging.getLogger(__name__)
 
