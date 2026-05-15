@@ -80,6 +80,16 @@ class UserSignedUpSignalTests(TestCase):
         )
         self.factory = RequestFactory()
 
+    def _request_with_session(self, path="/signup", *, cookies=None, referer=""):
+        request = self.factory.get(path)
+        if referer:
+            request.META["HTTP_REFERER"] = referer
+        middleware = SessionMiddleware(lambda req: None)
+        middleware.process_request(request)
+        request.session.save()
+        request.COOKIES = cookies or {}
+        return request
+
     @patch("pages.signals.Analytics.track")
     @patch("pages.signals.Analytics.identify")
     def test_first_touch_traits_preserved_across_visits(self, mock_identify, mock_track):
@@ -170,6 +180,88 @@ class UserSignedUpSignalTests(TestCase):
         self.assertEqual(properties["utm_source_last"], "last-source")
         self.assertEqual(context_campaign["source"], "last-source")
         self.assertEqual(request.session["signup_auth_method"], "email")
+
+    @tag("batch_pages_signals")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_signup_uses_pre_auth_referrer_over_google_callback(self, mock_identify, _mock_track):
+        request = self._request_with_session(
+            cookies={
+                "first_referrer": "https://agentic.ai/",
+                "last_referrer": "https://agentic.ai/pricing/",
+            },
+            referer="https://accounts.google.com/",
+        )
+        sociallogin = SimpleNamespace(account=SimpleNamespace(provider="google"))
+
+        handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.first_referrer, "https://agentic.ai/")
+        self.assertEqual(attribution.last_referrer, "https://agentic.ai/pricing/")
+        traits = mock_identify.call_args.kwargs["traits"]
+        self.assertEqual(traits["first_referrer"], "https://agentic.ai/")
+        self.assertEqual(traits["last_referrer"], "https://agentic.ai/pricing/")
+
+    @tag("batch_pages_signals")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_signup_keeps_utm_but_ignores_google_callback_referrer(self, _mock_identify, _mock_track):
+        request = self._request_with_session(
+            cookies={
+                "utm_source": "youtube",
+                "utm_medium": "social",
+            },
+            referer="https://accounts.google.com/",
+        )
+        sociallogin = SimpleNamespace(account=SimpleNamespace(provider="google"))
+
+        handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.utm_source_first, "youtube")
+        self.assertEqual(attribution.utm_medium_first, "social")
+        self.assertEqual(attribution.first_referrer, "")
+        self.assertEqual(attribution.last_referrer, "")
+
+    @tag("batch_pages_signals")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_signup_without_prior_attribution_ignores_google_callback_referrer(
+        self,
+        _mock_identify,
+        _mock_track,
+    ):
+        request = self._request_with_session(referer="https://accounts.google.com/")
+        sociallogin = SimpleNamespace(account=SimpleNamespace(provider="google"))
+
+        handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.first_referrer, "")
+        self.assertEqual(attribution.last_referrer, "")
+
+    @tag("batch_pages_signals")
+    @patch("pages.signals.Analytics.track")
+    @patch("pages.signals.Analytics.identify")
+    def test_social_signup_preserves_existing_referrer_when_callback_referrer_is_auth_provider(
+        self,
+        _mock_identify,
+        _mock_track,
+    ):
+        UserAttribution.objects.create(
+            user=self.user,
+            first_referrer="https://agentic.ai/",
+            last_referrer="https://agentic.ai/pricing/",
+        )
+        request = self._request_with_session(referer="https://accounts.google.com/")
+        sociallogin = SimpleNamespace(account=SimpleNamespace(provider="google"))
+
+        handle_user_signed_up(sender=None, request=request, user=self.user, sociallogin=sociallogin)
+
+        attribution = UserAttribution.objects.get(user=self.user)
+        self.assertEqual(attribution.first_referrer, "https://agentic.ai/")
+        self.assertEqual(attribution.last_referrer, "https://agentic.ai/pricing/")
 
     @patch("pages.signals.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=True))
     @patch("pages.signals.Analytics.track")

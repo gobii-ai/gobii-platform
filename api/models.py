@@ -71,6 +71,10 @@ from api.services.browser_settings import (
     DEFAULT_VISION_DETAIL_LEVEL,
 )
 from api.pipedream_app_utils import normalize_app_slugs as normalize_pipedream_app_slugs
+from util.attribution_referrers import (
+    first_meaningful_referrer_for_attribution,
+    signup_source_bucket_for_attribution,
+)
 from api.services.mcp_tool_cache import invalidate_mcp_tool_cache
 from api.services.tool_settings import (
     DEFAULT_MIN_CRON_SCHEDULE_MINUTES,
@@ -4750,6 +4754,14 @@ class UserAttribution(models.Model):
 
     def __str__(self):
         return f"Attribution for user {self.user_id}"
+
+    @property
+    def first_meaningful_referrer(self):
+        return first_meaningful_referrer_for_attribution(self)
+
+    @property
+    def signup_source_bucket(self):
+        return signup_source_bucket_for_attribution(self)
 
 
 class UserIdentitySignalTypeChoices(models.TextChoices):

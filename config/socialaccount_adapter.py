@@ -20,6 +20,7 @@ from util.onboarding import (
     TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
+from util.attribution_referrers import ATTRIBUTION_REFERRER_SESSION_KEYS
 
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ OAUTH_ATTRIBUTION_SESSION_KEYS = (
     "fbclid_first",
     "fbclid_last",
     "utm_querystring",
+    *ATTRIBUTION_REFERRER_SESSION_KEYS,
 )
 
 # Cookie name for stashing charter data during OAuth

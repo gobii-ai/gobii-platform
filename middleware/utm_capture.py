@@ -7,6 +7,11 @@ from pages.mini_mode import (
     set_mini_mode_cookie,
     set_request_mini_mode,
 )
+from util.attribution_referrers import (
+    clean_acquisition_referrer,
+    is_internal_referrer,
+    referrer_hostname,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +36,10 @@ class UTMTrackingMiddleware:
     SESSION_FBCLID_FIRST = "fbclid_first"
     SESSION_FBCLID_LAST = "fbclid_last"
     SESSION_QUERYSTRING = "utm_querystring"
+    SESSION_FIRST_REFERRER = "first_referrer"
+    SESSION_LAST_REFERRER = "last_referrer"
+    SESSION_FIRST_PATH = "first_path"
+    SESSION_LAST_PATH = "last_path"
 
     # Referral tracking session keys
     SESSION_REFERRER_CODE = "referrer_code"
@@ -48,6 +57,11 @@ class UTMTrackingMiddleware:
     def __call__(self, request):
         should_set_mini_mode_cookie = False
         if request.method == "GET":
+            has_attribution_params = self.has_attribution_params(request.GET)
+            self.capture_referrer_context(
+                request,
+                has_attribution_params=has_attribution_params,
+            )
             should_set_mini_mode_cookie = self._capture_params(request)
 
         response = self.get_response(request)
@@ -57,6 +71,68 @@ class UTMTrackingMiddleware:
 
     def _capture_params(self, request) -> bool:
         return self.capture_params(request, request.GET)
+
+    def has_attribution_params(self, params) -> bool:
+        if not params:
+            return False
+        if self._clean_params(params, self.UTM_PARAMS):
+            return True
+        if self._clean_params(params, self.CLICK_ID_PARAMS):
+            return True
+        if (params.get("rdt_click_id") or "").strip():
+            return True
+        if (params.get("fbclid") or "").strip():
+            return True
+        if (params.get("ref") or "").strip():
+            return True
+        return False
+
+    def _is_same_host_referrer(self, request, referrer: str) -> bool:
+        hostname = referrer_hostname(referrer)
+        if not hostname:
+            return False
+
+        request_host = (request.get_host() or "").split(":", 1)[0].strip().lower().rstrip(".")
+        return bool(request_host and hostname == request_host)
+
+    def _external_acquisition_referrer(self, request) -> str:
+        referrer = clean_acquisition_referrer(request.META.get("HTTP_REFERER"))
+        if not referrer:
+            return ""
+        if self._is_same_host_referrer(request, referrer):
+            return ""
+        if is_internal_referrer(referrer):
+            return ""
+        return referrer
+
+    def capture_referrer_context(self, request, *, has_attribution_params: bool = False) -> bool:
+        referrer = self._external_acquisition_referrer(request)
+        if not referrer and not has_attribution_params:
+            return False
+
+        session = request.session
+        modified = False
+
+        current_path = request.get_full_path()
+        if current_path:
+            if not session.get(self.SESSION_FIRST_PATH):
+                session[self.SESSION_FIRST_PATH] = current_path
+                modified = True
+            if session.get(self.SESSION_LAST_PATH) != current_path:
+                session[self.SESSION_LAST_PATH] = current_path
+                modified = True
+
+        if referrer:
+            if not session.get(self.SESSION_FIRST_REFERRER):
+                session[self.SESSION_FIRST_REFERRER] = referrer
+                modified = True
+            if session.get(self.SESSION_LAST_REFERRER) != referrer:
+                session[self.SESSION_LAST_REFERRER] = referrer
+                modified = True
+
+        if modified:
+            session.modified = True
+        return modified
 
     def capture_params(self, request, params) -> bool:
         if not params:
