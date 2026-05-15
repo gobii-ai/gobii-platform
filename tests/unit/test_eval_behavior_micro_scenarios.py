@@ -20,6 +20,7 @@ from api.evals.scenarios.behavior_micro import (
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
+    GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
@@ -59,6 +60,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
 
@@ -395,6 +397,24 @@ class BehaviorMicroHelperTests(TestCase):
         policy = scenario._build_eval_stop_policy()
 
         self.assertIn("search_tools", policy["allowed_tool_names"])
+
+    def test_google_sheets_eval_synthetic_tools_are_defined(self):
+        for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
+            self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
+            self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+    def test_seed_completed_process_run_disables_first_run_once(self):
+        scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
+
+        scenario._seed_completed_process_run(self.agent.id)
+        scenario._seed_completed_process_run(self.agent.id)
+
+        process_steps = PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            step__description="Process events",
+        )
+        self.assertEqual(process_steps.count(), 1)
 
     @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=False)
     @patch("api.agent.tools.search_tools.enable_tools")

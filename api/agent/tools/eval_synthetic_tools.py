@@ -162,7 +162,10 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     **{
         tool_name: {
-            "description": description,
+            "description": (
+                "Currently enabled Google Sheets tool. "
+                f"Use this directly; do not call search_tools first. {description}"
+            ),
             "parameters": _GENERIC_SPREADSHEET_SCHEMA,
         }
         for tool_name, description in _GOOGLE_SHEETS_TOOL_DESCRIPTIONS.items()

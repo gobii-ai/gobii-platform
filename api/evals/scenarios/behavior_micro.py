@@ -335,6 +335,24 @@ PLANNING_READ_ONLY_TOOL_NAMES = {
     "search_tools",
 }
 
+GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES = {
+    "google_sheets-get-values-in-range",
+    "google_sheets-find-row",
+    "google_sheets-add-single-row",
+    "google_sheets-add-multiple-rows",
+    "google_sheets-update-cell",
+    "google_sheets-update-row",
+    "google_sheets-update-multiple-rows",
+    "google_sheets-upsert-row",
+    "google_sheets-list-worksheets",
+    "google_sheets-get-spreadsheet-info",
+    "google_sheets-create-spreadsheet",
+    "google_sheets-read-rows",
+    "google_sheets-get-spreadsheet-by-id",
+    "google_sheets-get-current-user",
+    "google_sheets-add-rows",
+}
+
 PLANNING_ALLOWED_FIRST_ACTION_TOOL_NAMES = {
     "request_human_input",
     "end_planning",
@@ -456,6 +474,9 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
             step=prior_step,
             code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
         )
+
+    def _seed_completed_process_run(self, agent_id):
+        self._seed_prior_processing_run(agent_id)
 
     def _enable_builtin_tools(self, agent_id, tool_names):
         agent = PersistentAgent.objects.get(id=agent_id)
