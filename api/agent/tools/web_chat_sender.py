@@ -166,7 +166,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for non-blocking context, config changes, or findings. "
-                "For questions that block the task, prefer request_human_input so the question is tracked. "
+                "Do not use this for questions that block the task; use request_human_input so the question is tracked. "
                 "Do not narrate what you will do next after an acknowledgement, and do not send routine progress narration such as "
                 "tool sequencing, plan mechanics, or internal reasoning."
             ),
