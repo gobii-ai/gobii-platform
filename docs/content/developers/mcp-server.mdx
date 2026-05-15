@@ -101,6 +101,13 @@ Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients se
 | `gobii_update_agent` | Update mutable agent settings. |
 | `gobii_archive_agent` | Soft-delete/archive an agent. |
 | `gobii_get_agent_config_options` | Discover supported agent config fields and option limits. |
+| `gobii_list_agent_contacts` | List manual allowlist contacts for an agent. |
+| `gobii_add_agent_contact` | Add, reactivate, or update an email/SMS allowlist contact. |
+| `gobii_remove_agent_contact` | Remove an allowlist contact by contact id or safe channel/address match. |
+| `gobii_list_pending_agent_contacts` | List pending contact approval requests created by an agent. |
+| `gobii_approve_pending_agent_contact` | Approve a pending contact request and add or reactivate the allowlist contact. |
+| `gobii_list_agent_contact_endpoints` | List agent-owned and preferred contact endpoints. |
+| `gobii_set_agent_preferred_contact_endpoint` | Set or clear the preferred contact endpoint using an endpoint id or active contact id. |
 | `gobii_list_agent_links` | List peer-agent links. |
 | `gobii_link_agents` | Create or enable a peer-agent link. |
 | `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
@@ -124,6 +131,22 @@ Use `gobii_get_agent_config_options` before setting operational config. It retur
 - `whitelist_policy`, `is_active`, and `proactive_opt_in`: existing Gobii policy and lifecycle fields.
 
 Unsupported fields are not ignored. A tool call with unsupported arguments returns `isError: true` with `unsupported_fields` and `supported_fields`.
+
+## Agent Contacts
+
+Gobii contact MCP tools use the same production models as the console:
+
+- Active/manual contacts are `CommsAllowlistEntry` rows on the agent.
+- Pending approvals are `CommsAllowlistRequest` rows created when an agent asks the owner to approve a new contact.
+- Contact endpoints are `PersistentAgentCommsEndpoint` rows. They are distinct from allowlist contacts; the preferred contact endpoint is stored on the agent.
+
+`gobii_add_agent_contact` supports email and SMS allowlist contacts. It avoids duplicates by updating or reactivating an existing allowlist row for the same agent, channel, and address. `gobii_remove_agent_contact` deletes the manual allowlist row and clears `preferred_contact_endpoint` when the removed contact was the preferred endpoint.
+
+`gobii_approve_pending_agent_contact` approves a pending contact request directly into the manual allowlist. It does not create a separate invitation in the MCP flow. Expired or already-responded requests return an MCP tool error with structured details.
+
+`gobii_set_agent_preferred_contact_endpoint` accepts either an accessible endpoint id or an active allowlist contact id. When passed a contact id, Gobii resolves or creates the matching endpoint. Endpoint ids must be safe for the agent: agent-owned endpoints, the current preferred endpoint, or unowned endpoints for active manual allowlist contacts.
+
+Active allowlist entries do not currently store labels or display names, so contact list results return `label` and `name` as `null`. Pending contact requests may include a requested `name`, `reason`, and `purpose`.
 
 ## Timeline And Messaging
 
@@ -177,6 +200,13 @@ mcp_servers:
         - gobii_update_agent
         - gobii_archive_agent
         - gobii_get_agent_config_options
+        - gobii_list_agent_contacts
+        - gobii_add_agent_contact
+        - gobii_remove_agent_contact
+        - gobii_list_pending_agent_contacts
+        - gobii_approve_pending_agent_contact
+        - gobii_list_agent_contact_endpoints
+        - gobii_set_agent_preferred_contact_endpoint
         - gobii_list_agent_links
         - gobii_link_agents
         - gobii_unlink_agents
@@ -197,14 +227,19 @@ Use this flow for local dev, preview, or production smoke testing. Archive tempo
 2. `gobii_get_agent_config_options`
 3. `gobii_create_agent` twice without `schedule`
 4. `gobii_update_agent` on one agent with a supported `preferred_llm_tier` and `daily_credit_limit`
-5. `gobii_link_agents`
-6. `gobii_send_agent_message`
-7. `gobii_get_agent_timeline` and capture `latest_cursor`
-8. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
-9. `gobii_upload_agent_file`
-10. `gobii_list_agent_files`
-11. `gobii_unlink_agents`
-12. `gobii_archive_agent` for temporary agents
+5. `gobii_add_agent_contact`
+6. `gobii_list_agent_contacts`
+7. `gobii_set_agent_preferred_contact_endpoint`
+8. `gobii_list_agent_contact_endpoints`
+9. `gobii_remove_agent_contact`
+10. `gobii_link_agents`
+11. `gobii_send_agent_message`
+12. `gobii_get_agent_timeline` and capture `latest_cursor`
+13. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
+14. `gobii_upload_agent_file`
+15. `gobii_list_agent_files`
+16. `gobii_unlink_agents`
+17. `gobii_archive_agent` for temporary agents
 
 ## Limitations
 

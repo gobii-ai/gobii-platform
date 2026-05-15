@@ -1,14 +1,18 @@
 import base64
 import json
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
     CommsChannel,
+    CommsAllowlistEntry,
+    CommsAllowlistRequest,
     IntelligenceTier,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -134,6 +138,13 @@ class RemoteMCPViewTests(TestCase):
         self.assertIn("gobii_send_agent_message", tool_names)
         self.assertIn("gobii_wait_for_agent_event", tool_names)
         self.assertIn("gobii_upload_agent_file", tool_names)
+        self.assertIn("gobii_list_agent_contacts", tool_names)
+        self.assertIn("gobii_add_agent_contact", tool_names)
+        self.assertIn("gobii_remove_agent_contact", tool_names)
+        self.assertIn("gobii_list_pending_agent_contacts", tool_names)
+        self.assertIn("gobii_approve_pending_agent_contact", tool_names)
+        self.assertIn("gobii_list_agent_contact_endpoints", tool_names)
+        self.assertIn("gobii_set_agent_preferred_contact_endpoint", tool_names)
 
         list_response = self._call_tool("gobii_list_agents")
         self.assertEqual(list_response.status_code, 200)
@@ -379,6 +390,258 @@ class RemoteMCPViewTests(TestCase):
         credit_content = self._structured_content(credit_response)
         self.assertTrue(credit_response.json()["result"]["isError"])
         self.assertEqual(credit_content["details"]["field"], "daily_credit_limit")
+
+    def test_contact_tools_manage_allowlist_and_preferred_endpoint(self):
+        agent = self._create_agent(self.user, "Contact MCP Agent")
+
+        empty_response = self._call_tool("gobii_list_agent_contacts", {"agent_id": str(agent.id)})
+        self.assertEqual(empty_response.status_code, 200)
+        empty_content = self._structured_content(empty_response)
+        self.assertEqual(empty_content["contacts"], [])
+        self.assertEqual(empty_content["total"], 0)
+
+        add_response = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "Friend@Example.COM",
+                "allow_inbound": False,
+                "allow_outbound": True,
+                "can_configure": True,
+            },
+        )
+        self.assertEqual(add_response.status_code, 200)
+        add_content = self._structured_content(add_response)
+        self.assertFalse(add_response.json()["result"]["isError"])
+        self.assertTrue(add_content["created"])
+        self.assertEqual(add_content["contact"]["address"], "friend@example.com")
+        self.assertFalse(add_content["contact"]["allow_inbound"])
+        self.assertTrue(add_content["contact"]["allow_outbound"])
+        self.assertTrue(add_content["contact"]["can_configure"])
+
+        contact_id = add_content["contact"]["contact_id"]
+        duplicate_response = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "friend@example.com",
+                "allow_inbound": True,
+                "allow_outbound": False,
+                "can_configure": False,
+            },
+        )
+        self.assertEqual(duplicate_response.status_code, 200)
+        duplicate_content = self._structured_content(duplicate_response)
+        self.assertFalse(duplicate_content["created"])
+        self.assertTrue(duplicate_content["updated"])
+        self.assertEqual(
+            CommsAllowlistEntry.objects.filter(agent=agent, channel=CommsChannel.EMAIL, address="friend@example.com").count(),
+            1,
+        )
+
+        entry = CommsAllowlistEntry.objects.get(id=contact_id)
+        entry.is_active = False
+        entry.save(update_fields=["is_active"])
+
+        reactivate_response = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "friend@example.com",
+            },
+        )
+        self.assertEqual(reactivate_response.status_code, 200)
+        reactivate_content = self._structured_content(reactivate_response)
+        self.assertFalse(reactivate_content["created"])
+        self.assertTrue(reactivate_content["reactivated"])
+        self.assertEqual(reactivate_content["contact"]["status"], "allowed")
+
+        set_preferred_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "contact_id": contact_id},
+        )
+        self.assertEqual(set_preferred_response.status_code, 200)
+        preferred_content = self._structured_content(set_preferred_response)
+        self.assertTrue(preferred_content["changed"])
+        endpoint_id = preferred_content["preferred_contact_endpoint"]["endpoint_id"]
+        agent.refresh_from_db()
+        self.assertEqual(str(agent.preferred_contact_endpoint_id), endpoint_id)
+
+        endpoints_response = self._call_tool(
+            "gobii_list_agent_contact_endpoints",
+            {"agent_id": str(agent.id)},
+        )
+        self.assertEqual(endpoints_response.status_code, 200)
+        endpoints = self._structured_content(endpoints_response)["endpoints"]
+        self.assertEqual(len(endpoints), 1)
+        self.assertEqual(endpoints[0]["endpoint_id"], endpoint_id)
+        self.assertTrue(endpoints[0]["is_preferred_contact"])
+        self.assertIn("manual_allowlist_contact", endpoints[0]["roles"])
+
+        contacts_response = self._call_tool("gobii_list_agent_contacts", {"agent_id": str(agent.id)})
+        self.assertEqual(contacts_response.status_code, 200)
+        contacts = self._structured_content(contacts_response)["contacts"]
+        self.assertEqual(len(contacts), 1)
+        self.assertTrue(contacts[0]["is_preferred"])
+
+        remove_response = self._call_tool(
+            "gobii_remove_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "friend@example.com",
+            },
+        )
+        self.assertEqual(remove_response.status_code, 200)
+        remove_content = self._structured_content(remove_response)
+        self.assertTrue(remove_content["removed"])
+        self.assertTrue(remove_content["cleared_preferred_contact_endpoint"])
+        self.assertFalse(CommsAllowlistEntry.objects.filter(id=contact_id).exists())
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+    def test_pending_contact_tools_approve_and_reactivate_existing_entry(self):
+        agent = self._create_agent(self.user, "Pending Contact MCP Agent")
+        inactive = CommsAllowlistEntry.objects.create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="pending@example.com",
+            is_active=False,
+            allow_inbound=False,
+            allow_outbound=False,
+        )
+        pending = CommsAllowlistRequest.objects.create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="pending@example.com",
+            name="Pending Person",
+            reason="Need to coordinate",
+            purpose="Schedule meeting",
+            request_inbound=True,
+            request_outbound=True,
+            request_configure=True,
+            expires_at=timezone.now() + timedelta(days=1),
+        )
+
+        list_response = self._call_tool(
+            "gobii_list_pending_agent_contacts",
+            {"agent_id": str(agent.id)},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        pending_contacts = self._structured_content(list_response)["pending_contacts"]
+        self.assertEqual(len(pending_contacts), 1)
+        self.assertEqual(pending_contacts[0]["pending_contact_id"], str(pending.id))
+        self.assertTrue(pending_contacts[0]["can_approve"])
+
+        approve_response = self._call_tool(
+            "gobii_approve_pending_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "pending@example.com",
+            },
+        )
+        self.assertEqual(approve_response.status_code, 200)
+        approve_content = self._structured_content(approve_response)
+        self.assertFalse(approve_content["created"])
+        self.assertTrue(approve_content["updated"])
+        self.assertTrue(approve_content["reactivated"])
+        self.assertEqual(approve_content["pending_contact"]["status"], CommsAllowlistRequest.RequestStatus.APPROVED)
+
+        inactive.refresh_from_db()
+        self.assertTrue(inactive.is_active)
+        self.assertTrue(inactive.allow_inbound)
+        self.assertTrue(inactive.allow_outbound)
+        self.assertTrue(inactive.can_configure)
+        pending.refresh_from_db()
+        self.assertEqual(pending.status, CommsAllowlistRequest.RequestStatus.APPROVED)
+
+        second_approve_response = self._call_tool(
+            "gobii_approve_pending_agent_contact",
+            {"agent_id": str(agent.id), "pending_contact_id": str(pending.id)},
+        )
+        self.assertEqual(second_approve_response.status_code, 200)
+        self.assertTrue(second_approve_response.json()["result"]["isError"])
+
+    def test_contact_tools_enforce_agent_and_endpoint_access(self):
+        agent = self._create_agent(self.user, "Access Contact MCP Agent")
+        other_agent = self._create_agent(self.other_user, "Other Contact MCP Agent")
+
+        inaccessible_add = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(other_agent.id),
+                "channel": "email",
+                "address": "blocked@example.com",
+            },
+        )
+        self.assertEqual(inaccessible_add.status_code, 200)
+        self.assertTrue(inaccessible_add.json()["result"]["isError"])
+        self.assertFalse(
+            CommsAllowlistEntry.objects.filter(agent=other_agent, address="blocked@example.com").exists()
+        )
+
+        other_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=other_agent,
+            channel=CommsChannel.EMAIL,
+            address="other-agent@example.com",
+        )
+        set_response = self._call_tool(
+            "gobii_set_agent_preferred_contact_endpoint",
+            {"agent_id": str(agent.id), "endpoint_id": str(other_endpoint.id)},
+        )
+        self.assertEqual(set_response.status_code, 200)
+        self.assertTrue(set_response.json()["result"]["isError"])
+        agent.refresh_from_db()
+        self.assertIsNone(agent.preferred_contact_endpoint_id)
+
+    def test_contact_tools_return_structured_validation_errors(self):
+        agent = self._create_agent(self.user, "Validation Contact MCP Agent")
+
+        invalid_email_response = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "email",
+                "address": "not an email",
+            },
+        )
+        self.assertEqual(invalid_email_response.status_code, 200)
+        invalid_email_content = self._structured_content(invalid_email_response)
+        self.assertTrue(invalid_email_response.json()["result"]["isError"])
+        self.assertEqual(invalid_email_content["status"], "error")
+        self.assertIn("valid email", invalid_email_content["message"])
+
+        unsupported_channel_response = self._call_tool(
+            "gobii_add_agent_contact",
+            {
+                "agent_id": str(agent.id),
+                "channel": "slack",
+                "address": "person@example.com",
+            },
+        )
+        self.assertEqual(unsupported_channel_response.status_code, 200)
+        self.assertTrue(unsupported_channel_response.json()["result"]["isError"])
+
+        expired = CommsAllowlistRequest.objects.create(
+            agent=agent,
+            channel=CommsChannel.EMAIL,
+            address="expired@example.com",
+            reason="Expired request",
+            purpose="Test",
+            expires_at=timezone.now() - timedelta(hours=1),
+        )
+        expired_response = self._call_tool(
+            "gobii_approve_pending_agent_contact",
+            {"agent_id": str(agent.id), "pending_contact_id": str(expired.id)},
+        )
+        self.assertEqual(expired_response.status_code, 200)
+        expired_content = self._structured_content(expired_response)
+        self.assertTrue(expired_response.json()["result"]["isError"])
+        self.assertTrue(expired_content["details"]["is_expired"])
 
     def test_file_upload_and_message_attachment_path(self):
         agent = self._create_agent(self.user, "File MCP Agent")

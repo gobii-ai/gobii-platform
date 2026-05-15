@@ -6,11 +6,14 @@ import json
 import time
 import uuid
 from decimal import Decimal
+from email.utils import parseaddr
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.serializers.json import DjangoJSONEncoder
+from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
 from django.db.models import Q
+from django.utils import timezone
 
 from rest_framework.exceptions import ValidationError as DRFValidationError
 
@@ -35,7 +38,10 @@ from api.models import (
     AgentPeerLink,
     ApiKey,
     CommsChannel,
+    CommsAllowlistEntry,
+    CommsAllowlistRequest,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
     build_web_user_address,
 )
 from api.serializers import PersistentAgentSerializer
@@ -199,6 +205,76 @@ _FILE_NODE_OUTPUT = _object_output(
         "updated_at": _STRING_OR_NULL,
     },
     required=("id", "name", "path", "node_type"),
+)
+
+CONTACT_MANAGEMENT_CHANNELS = (CommsChannel.EMAIL.value, CommsChannel.SMS.value)
+PREFERRED_ENDPOINT_CHANNELS = (CommsChannel.EMAIL.value, CommsChannel.SMS.value, CommsChannel.WEB.value)
+
+_CONTACT_OUTPUT = _object_output(
+    {
+        "id": _UUID_OUTPUT,
+        "contact_id": _UUID_OUTPUT,
+        "agent_id": _UUID_OUTPUT,
+        "type": {"type": "string"},
+        "channel": {"type": "string"},
+        "address": {"type": "string"},
+        "label": _STRING_OR_NULL,
+        "name": _STRING_OR_NULL,
+        "status": {"type": "string"},
+        "approval_state": {"type": "string"},
+        "is_active": {"type": "boolean"},
+        "verified": {"type": "boolean"},
+        "allow_inbound": {"type": "boolean"},
+        "allow_outbound": {"type": "boolean"},
+        "can_configure": {"type": "boolean"},
+        "is_preferred": {"type": "boolean"},
+        "preferred_contact_endpoint_id": _STRING_OR_NULL,
+        "created_at": _STRING_OR_NULL,
+        "updated_at": _STRING_OR_NULL,
+    },
+    required=("id", "contact_id", "agent_id", "channel", "address", "status"),
+)
+
+_PENDING_CONTACT_OUTPUT = _object_output(
+    {
+        "id": _UUID_OUTPUT,
+        "pending_contact_id": _UUID_OUTPUT,
+        "agent_id": _UUID_OUTPUT,
+        "type": {"type": "string"},
+        "channel": {"type": "string"},
+        "address": {"type": "string"},
+        "name": _STRING_OR_NULL,
+        "reason": {"type": "string"},
+        "purpose": {"type": "string"},
+        "request_inbound": {"type": "boolean"},
+        "request_outbound": {"type": "boolean"},
+        "request_configure": {"type": "boolean"},
+        "status": {"type": "string"},
+        "approval_state": {"type": "string"},
+        "requested_at": _STRING_OR_NULL,
+        "responded_at": _STRING_OR_NULL,
+        "expires_at": _STRING_OR_NULL,
+        "is_expired": {"type": "boolean"},
+        "can_approve": {"type": "boolean"},
+    },
+    required=("id", "pending_contact_id", "agent_id", "channel", "address", "status"),
+)
+
+_CONTACT_ENDPOINT_OUTPUT = _object_output(
+    {
+        "id": _UUID_OUTPUT,
+        "endpoint_id": _UUID_OUTPUT,
+        "agent_id": _UUID_OUTPUT,
+        "owner_agent_id": _STRING_OR_NULL,
+        "type": {"type": "string"},
+        "channel": {"type": "string"},
+        "address": {"type": "string"},
+        "is_primary": {"type": "boolean"},
+        "is_preferred_contact": {"type": "boolean"},
+        "roles": _array_output({"type": "string"}),
+        "can_be_preferred": {"type": "boolean"},
+    },
+    required=("id", "endpoint_id", "agent_id", "channel", "address", "roles"),
 )
 
 
@@ -389,6 +465,225 @@ TOOL_DEFINITIONS = [
             required=("owner", "fields", "unsupported_remote_mcp_v1_fields"),
         ),
         "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "gobii_list_agent_contacts",
+        "title": "List Agent Contacts",
+        "description": "List manual allowlist contacts for an accessible persistent Gobii agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"agent_id": _agent_schema("Persistent agent UUID.")},
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "agent_id": _UUID_OUTPUT,
+                "contacts": _array_output(_CONTACT_OUTPUT),
+                "total": {"type": "integer"},
+                "whitelist_policy": {"type": "string"},
+                "preferred_contact_endpoint_id": _STRING_OR_NULL,
+            },
+            required=("agent_id", "contacts", "total", "whitelist_policy"),
+        ),
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "gobii_add_agent_contact",
+        "title": "Add Agent Contact",
+        "description": "Add, reactivate, or update an email/SMS manual allowlist contact for an accessible persistent Gobii agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": _agent_schema("Persistent agent UUID."),
+                "channel": {
+                    "type": "string",
+                    "enum": list(CONTACT_MANAGEMENT_CHANNELS),
+                    "description": "Contact channel to allow.",
+                },
+                "address": {"type": "string", "description": "Email address or SMS number."},
+                "allow_inbound": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether this contact can send messages to the agent.",
+                },
+                "allow_outbound": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Whether the agent can send messages to this contact.",
+                },
+                "can_configure": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Whether this contact may instruct the agent to update configuration.",
+                },
+            },
+            "required": ["agent_id", "channel", "address"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "status": {"type": "string"},
+                "created": {"type": "boolean"},
+                "updated": {"type": "boolean"},
+                "reactivated": {"type": "boolean"},
+                "contact": _CONTACT_OUTPUT,
+                "agent": _AGENT_OUTPUT,
+            },
+            required=("status", "created", "updated", "reactivated", "contact"),
+        ),
+        "annotations": {"destructiveHint": False},
+    },
+    {
+        "name": "gobii_remove_agent_contact",
+        "title": "Remove Agent Contact",
+        "description": "Remove a manual allowlist contact from an accessible persistent Gobii agent by contact id or safe channel/address match.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": _agent_schema("Persistent agent UUID."),
+                "contact_id": {"type": "string", "format": "uuid", "description": "Manual allowlist contact UUID."},
+                "channel": {
+                    "type": "string",
+                    "enum": list(CONTACT_MANAGEMENT_CHANNELS),
+                    "description": "Required when removing by address if multiple channels could match.",
+                },
+                "address": {"type": "string", "description": "Contact address to remove."},
+            },
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "status": {"type": "string"},
+                "removed": {"type": "boolean"},
+                "cleared_preferred_contact_endpoint": {"type": "boolean"},
+                "contact": _CONTACT_OUTPUT,
+            },
+            required=("status", "removed", "cleared_preferred_contact_endpoint", "contact"),
+        ),
+        "annotations": {"destructiveHint": True},
+    },
+    {
+        "name": "gobii_list_pending_agent_contacts",
+        "title": "List Pending Agent Contacts",
+        "description": "List pending contact-approval requests created by an accessible persistent Gobii agent.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"agent_id": _agent_schema("Persistent agent UUID.")},
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "agent_id": _UUID_OUTPUT,
+                "pending_contacts": _array_output(_PENDING_CONTACT_OUTPUT),
+                "total": {"type": "integer"},
+            },
+            required=("agent_id", "pending_contacts", "total"),
+        ),
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "gobii_approve_pending_agent_contact",
+        "title": "Approve Pending Agent Contact",
+        "description": "Approve a pending contact request for an accessible persistent Gobii agent and add or reactivate the allowlist contact.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": _agent_schema("Persistent agent UUID."),
+                "pending_contact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Pending contact request UUID.",
+                },
+                "contact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Alias for pending_contact_id when approving pending requests.",
+                },
+                "channel": {
+                    "type": "string",
+                    "enum": list(CONTACT_MANAGEMENT_CHANNELS),
+                    "description": "Channel for address-based matching.",
+                },
+                "address": {"type": "string", "description": "Pending contact address for safe matching."},
+            },
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "status": {"type": "string"},
+                "created": {"type": "boolean"},
+                "updated": {"type": "boolean"},
+                "reactivated": {"type": "boolean"},
+                "contact": _CONTACT_OUTPUT,
+                "pending_contact": _PENDING_CONTACT_OUTPUT,
+                "agent": _AGENT_OUTPUT,
+            },
+            required=("status", "created", "updated", "reactivated", "contact", "pending_contact"),
+        ),
+        "annotations": {"destructiveHint": False},
+    },
+    {
+        "name": "gobii_list_agent_contact_endpoints",
+        "title": "List Agent Contact Endpoints",
+        "description": "List communication endpoints relevant to an accessible persistent Gobii agent, including agent-owned endpoints and the current preferred contact endpoint.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {"agent_id": _agent_schema("Persistent agent UUID.")},
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "agent_id": _UUID_OUTPUT,
+                "endpoints": _array_output(_CONTACT_ENDPOINT_OUTPUT),
+                "total": {"type": "integer"},
+                "preferred_contact_endpoint_id": _STRING_OR_NULL,
+            },
+            required=("agent_id", "endpoints", "total"),
+        ),
+        "annotations": {"readOnlyHint": True},
+    },
+    {
+        "name": "gobii_set_agent_preferred_contact_endpoint",
+        "title": "Set Preferred Contact Endpoint",
+        "description": "Set or clear the preferred contact endpoint for an accessible persistent Gobii agent using an accessible endpoint id or active allowlist contact id.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": _agent_schema("Persistent agent UUID."),
+                "endpoint_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Communication endpoint UUID.",
+                },
+                "contact_id": {
+                    "type": "string",
+                    "format": "uuid",
+                    "description": "Active manual allowlist contact UUID. Gobii will resolve or create the matching endpoint.",
+                },
+                "clear": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": "Clear the agent's preferred contact endpoint.",
+                },
+            },
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _object_output(
+            {
+                "status": {"type": "string"},
+                "changed": {"type": "boolean"},
+                "agent": _AGENT_OUTPUT,
+                "preferred_contact_endpoint": {"anyOf": [_CONTACT_ENDPOINT_OUTPUT, {"type": "null"}]},
+            },
+            required=("status", "changed", "agent", "preferred_contact_endpoint"),
+        ),
+        "annotations": {"destructiveHint": False},
     },
     {
         "name": "gobii_list_agent_links",
@@ -702,6 +997,13 @@ def call_tool(request, name, arguments):
         "gobii_update_agent": _tool_update_agent,
         "gobii_archive_agent": _tool_archive_agent,
         "gobii_get_agent_config_options": _tool_get_agent_config_options,
+        "gobii_list_agent_contacts": _tool_list_agent_contacts,
+        "gobii_add_agent_contact": _tool_add_agent_contact,
+        "gobii_remove_agent_contact": _tool_remove_agent_contact,
+        "gobii_list_pending_agent_contacts": _tool_list_pending_agent_contacts,
+        "gobii_approve_pending_agent_contact": _tool_approve_pending_agent_contact,
+        "gobii_list_agent_contact_endpoints": _tool_list_agent_contact_endpoints,
+        "gobii_set_agent_preferred_contact_endpoint": _tool_set_agent_preferred_contact_endpoint,
         "gobii_list_agent_links": _tool_list_agent_links,
         "gobii_link_agents": _tool_link_agents,
         "gobii_unlink_agents": _tool_unlink_agents,
@@ -843,12 +1145,267 @@ def _tool_get_agent_config_options(request, arguments):
             },
             "is_active": {"type": "boolean"},
             "proactive_opt_in": {"type": "boolean", "mutable_on_update": True},
+            "contact_management": {
+                "type": "manual_allowlist",
+                "supported_contact_channels": list(CONTACT_MANAGEMENT_CHANNELS),
+                "pending_contact_requests": True,
+                "preferred_contact_endpoint": True,
+                "contact_labels": False,
+            },
         },
         "unsupported_remote_mcp_v1_fields": [
             "arbitrary_url_file_fetch",
             "ad_hoc_runtime_session",
             "separate_task_or_run_abstraction",
+            "contact_labels",
         ],
+    }
+
+
+def _tool_list_agent_contacts(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    contacts = (
+        CommsAllowlistEntry.objects.filter(agent=agent)
+        .order_by("channel", "address")
+    )
+    serialized = [_serialize_allowlist_contact(contact, agent) for contact in contacts]
+    return {
+        "agent_id": str(agent.id),
+        "contacts": serialized,
+        "total": len(serialized),
+        "whitelist_policy": agent.whitelist_policy,
+        "preferred_contact_endpoint_id": (
+            str(agent.preferred_contact_endpoint_id) if agent.preferred_contact_endpoint_id else None
+        ),
+    }
+
+
+def _tool_add_agent_contact(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    channel = _normalize_contact_channel(arguments.get("channel"), supported=CONTACT_MANAGEMENT_CHANNELS)
+    address = _normalize_contact_address(channel, arguments.get("address"))
+    allow_inbound = _bool_argument(arguments, "allow_inbound", default=True)
+    allow_outbound = _bool_argument(arguments, "allow_outbound", default=True)
+    can_configure = _bool_argument(arguments, "can_configure", default=False)
+
+    with transaction.atomic():
+        contact = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            channel=channel,
+            address__iexact=address,
+        ).first()
+        created = contact is None
+        reactivated = False
+        updated = False
+
+        if contact is None:
+            contact = CommsAllowlistEntry(
+                agent=agent,
+                channel=channel,
+                address=address,
+                is_active=True,
+                allow_inbound=allow_inbound,
+                allow_outbound=allow_outbound,
+                can_configure=can_configure,
+            )
+        else:
+            if not contact.is_active:
+                contact.is_active = True
+                reactivated = True
+                updated = True
+            for field, value in (
+                ("allow_inbound", allow_inbound),
+                ("allow_outbound", allow_outbound),
+                ("can_configure", can_configure),
+            ):
+                if getattr(contact, field) != value:
+                    setattr(contact, field, value)
+                    updated = True
+
+        try:
+            contact.save()
+        except (DjangoValidationError, IntegrityError) as exc:
+            raise MCPToolError("Agent contact could not be saved.", _format_validation_error(exc)) from exc
+
+        if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+            agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+            agent.save(update_fields=["whitelist_policy"])
+
+    contact.refresh_from_db()
+    agent.refresh_from_db()
+    return {
+        "status": "created" if created else "updated" if updated else "existing",
+        "created": created,
+        "updated": updated,
+        "reactivated": reactivated,
+        "contact": _serialize_allowlist_contact(contact, agent),
+        "agent": _serialize_agent(agent),
+    }
+
+
+def _tool_remove_agent_contact(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    contact = _resolve_allowlist_contact(agent, arguments)
+    payload = _serialize_allowlist_contact(contact, agent)
+    clear_preferred = _preferred_endpoint_matches_contact(agent, contact)
+    with transaction.atomic():
+        if clear_preferred:
+            PersistentAgent.objects.filter(id=agent.id).update(preferred_contact_endpoint=None)
+            agent.preferred_contact_endpoint = None
+            agent.preferred_contact_endpoint_id = None
+        contact.delete()
+    return {
+        "status": "removed",
+        "removed": True,
+        "cleared_preferred_contact_endpoint": clear_preferred,
+        "contact": payload,
+    }
+
+
+def _tool_list_pending_agent_contacts(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    pending = (
+        CommsAllowlistRequest.objects.filter(
+            agent=agent,
+            status=CommsAllowlistRequest.RequestStatus.PENDING,
+        )
+        .filter(Q(expires_at__isnull=True) | Q(expires_at__gt=timezone.now()))
+        .order_by("-requested_at")
+    )
+    serialized = [_serialize_pending_contact_request(item) for item in pending]
+    return {
+        "agent_id": str(agent.id),
+        "pending_contacts": serialized,
+        "total": len(serialized),
+    }
+
+
+def _tool_approve_pending_agent_contact(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    pending = _resolve_pending_contact_request(agent, arguments)
+    pending_before = _serialize_pending_contact_request(pending)
+
+    with transaction.atomic():
+        if not pending.can_be_approved():
+            raise MCPToolError(
+                "Pending contact cannot be approved.",
+                {"status": pending.status, "is_expired": pending.is_expired()},
+            )
+
+        contact = CommsAllowlistEntry.objects.filter(
+            agent=agent,
+            channel=pending.channel,
+            address__iexact=pending.address,
+        ).first()
+        created = contact is None
+        reactivated = False
+        updated = False
+
+        if contact is None:
+            contact = CommsAllowlistEntry(
+                agent=agent,
+                channel=pending.channel,
+                address=pending.address,
+                is_active=True,
+                allow_inbound=pending.request_inbound,
+                allow_outbound=pending.request_outbound,
+                can_configure=pending.request_configure,
+            )
+        else:
+            if not contact.is_active:
+                contact.is_active = True
+                reactivated = True
+                updated = True
+            for field, value in (
+                ("allow_inbound", pending.request_inbound),
+                ("allow_outbound", pending.request_outbound),
+                ("can_configure", pending.request_configure),
+            ):
+                if getattr(contact, field) != value:
+                    setattr(contact, field, value)
+                    updated = True
+
+        try:
+            contact.save()
+        except (DjangoValidationError, IntegrityError) as exc:
+            raise MCPToolError("Pending contact could not be approved.", _format_validation_error(exc)) from exc
+
+        pending.status = CommsAllowlistRequest.RequestStatus.APPROVED
+        pending.responded_at = timezone.now()
+        pending.save(update_fields=["status", "responded_at"])
+
+        if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
+            agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
+            agent.save(update_fields=["whitelist_policy"])
+
+    contact.refresh_from_db()
+    pending.refresh_from_db()
+    agent.refresh_from_db()
+    return {
+        "status": "approved",
+        "created": created,
+        "updated": updated,
+        "reactivated": reactivated,
+        "contact": _serialize_allowlist_contact(contact, agent),
+        "pending_contact": _serialize_pending_contact_request(pending),
+        "previous_pending_contact": pending_before,
+        "agent": _serialize_agent(agent),
+    }
+
+
+def _tool_list_agent_contact_endpoints(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    endpoints = list(_contact_endpoint_queryset(agent))
+    return {
+        "agent_id": str(agent.id),
+        "endpoints": [_serialize_contact_endpoint(endpoint, agent) for endpoint in endpoints],
+        "total": len(endpoints),
+        "preferred_contact_endpoint_id": (
+            str(agent.preferred_contact_endpoint_id) if agent.preferred_contact_endpoint_id else None
+        ),
+    }
+
+
+def _tool_set_agent_preferred_contact_endpoint(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    clear = _bool_argument(arguments, "clear", default=False)
+    endpoint_id = arguments.get("endpoint_id")
+    contact_id = arguments.get("contact_id")
+    selectors = sum(1 for value in (endpoint_id, contact_id) if value) + (1 if clear else 0)
+    if selectors != 1:
+        raise MCPToolError("Provide exactly one of endpoint_id, contact_id, or clear=true.")
+
+    if clear:
+        changed = bool(agent.preferred_contact_endpoint_id)
+        if changed:
+            agent.preferred_contact_endpoint = None
+            agent.save(update_fields=["preferred_contact_endpoint"])
+        agent.refresh_from_db()
+        return {
+            "status": "cleared",
+            "changed": changed,
+            "agent": _serialize_agent(agent),
+            "preferred_contact_endpoint": None,
+        }
+
+    if endpoint_id:
+        endpoint = _resolve_preferred_endpoint_by_id(agent, endpoint_id)
+    else:
+        contact = _resolve_allowlist_contact(agent, {"contact_id": contact_id})
+        if not contact.is_active:
+            raise MCPToolError("Only active contacts can be used as preferred contact endpoints.")
+        endpoint = _resolve_endpoint_for_contact_preference(agent, contact)
+
+    changed = agent.preferred_contact_endpoint_id != endpoint.id
+    if changed:
+        agent.preferred_contact_endpoint = endpoint
+        agent.save(update_fields=["preferred_contact_endpoint"])
+    agent.refresh_from_db()
+    return {
+        "status": "set",
+        "changed": changed,
+        "agent": _serialize_agent(agent),
+        "preferred_contact_endpoint": _serialize_contact_endpoint(endpoint, agent),
     }
 
 
@@ -1319,6 +1876,274 @@ def _resolve_peer_link(request, arguments):
     if link is None:
         raise MCPToolError("Peer link not found or inaccessible.")
     return link
+
+
+def _normalize_contact_channel(value, *, supported):
+    if not isinstance(value, str) or not value.strip():
+        raise MCPToolError("channel must be a supported contact channel.", {"supported_channels": list(supported)})
+    channel = value.strip().lower()
+    if channel not in {choice.value for choice in CommsChannel}:
+        raise MCPToolError("channel must be a supported contact channel.", {"supported_channels": list(supported)})
+    if channel not in set(supported):
+        raise MCPToolError(
+            "channel is not supported for this contact operation.",
+            {"supported_channels": list(supported), "requested": channel},
+        )
+    return channel
+
+
+def _normalize_contact_address(channel, value):
+    if not isinstance(value, str) or not value.strip():
+        raise MCPToolError("address must be a non-empty string.", {"field": "address"})
+    address = value.strip()
+    if channel == CommsChannel.EMAIL.value:
+        address = (parseaddr(address)[1] or address).strip().lower()
+        try:
+            validate_email(address)
+        except DjangoValidationError as exc:
+            raise MCPToolError("address must be a valid email address.", _format_validation_error(exc)) from exc
+    else:
+        address = PersistentAgentCommsEndpoint.normalize_address(channel, address)
+        if not address:
+            raise MCPToolError("address must be a non-empty string.", {"field": "address"})
+    return address
+
+
+def _bool_argument(arguments, key, *, default):
+    if key not in arguments:
+        return default
+    return _optional_bool(arguments.get(key), key)
+
+
+def _resolve_allowlist_contact(agent, arguments):
+    contact_id = arguments.get("contact_id")
+    if contact_id:
+        parsed_id = _parse_uuid(contact_id, "contact_id")
+        contact = CommsAllowlistEntry.objects.filter(agent=agent, id=parsed_id).first()
+        if contact is None:
+            raise MCPToolError("Contact not found or inaccessible.")
+        return contact
+
+    address = arguments.get("address")
+    if not address:
+        raise MCPToolError("Provide contact_id or address to identify the contact.")
+
+    queryset = CommsAllowlistEntry.objects.filter(agent=agent)
+    channel = arguments.get("channel")
+    if channel:
+        channel = _normalize_contact_channel(channel, supported=CONTACT_MANAGEMENT_CHANNELS)
+        normalized_address = _normalize_contact_address(channel, address)
+        queryset = queryset.filter(channel=channel, address__iexact=normalized_address)
+    else:
+        channel_filter = Q()
+        for supported_channel, normalized_address in _normalized_contact_address_candidates(address):
+            channel_filter |= Q(channel=supported_channel, address__iexact=normalized_address)
+        queryset = queryset.filter(channel_filter)
+
+    contacts = list(queryset.order_by("channel", "address")[:2])
+    if not contacts:
+        raise MCPToolError("Contact not found or inaccessible.")
+    if len(contacts) > 1:
+        raise MCPToolError("Address matched multiple contacts; provide channel for an exact match.")
+    return contacts[0]
+
+
+def _resolve_pending_contact_request(agent, arguments):
+    request_id = arguments.get("pending_contact_id") or arguments.get("contact_id")
+    if request_id:
+        parsed_id = _parse_uuid(request_id, "pending_contact_id")
+        pending = CommsAllowlistRequest.objects.filter(agent=agent, id=parsed_id).first()
+        if pending is None:
+            raise MCPToolError("Pending contact not found or inaccessible.")
+        return pending
+
+    address = arguments.get("address")
+    if not address:
+        raise MCPToolError("Provide pending_contact_id, contact_id, or address to identify the pending contact.")
+
+    queryset = CommsAllowlistRequest.objects.filter(
+        agent=agent,
+        status=CommsAllowlistRequest.RequestStatus.PENDING,
+    )
+    channel = arguments.get("channel")
+    if channel:
+        channel = _normalize_contact_channel(channel, supported=CONTACT_MANAGEMENT_CHANNELS)
+        normalized_address = _normalize_contact_address(channel, address)
+        queryset = queryset.filter(channel=channel, address__iexact=normalized_address)
+    else:
+        channel_filter = Q()
+        for supported_channel, normalized_address in _normalized_contact_address_candidates(address):
+            channel_filter |= Q(channel=supported_channel, address__iexact=normalized_address)
+        queryset = queryset.filter(channel_filter)
+
+    pending_contacts = list(queryset.order_by("-requested_at")[:2])
+    if not pending_contacts:
+        raise MCPToolError("Pending contact not found or inaccessible.")
+    if len(pending_contacts) > 1:
+        raise MCPToolError("Address matched multiple pending contacts; provide channel for an exact match.")
+    return pending_contacts[0]
+
+
+def _normalized_contact_address_candidates(address):
+    candidates = []
+    errors = []
+    for supported_channel in CONTACT_MANAGEMENT_CHANNELS:
+        try:
+            candidates.append((supported_channel, _normalize_contact_address(supported_channel, address)))
+        except MCPToolError as exc:
+            errors.append(str(exc))
+    if not candidates:
+        raise MCPToolError(
+            "address could not be normalized for any supported contact channel.",
+            {"supported_channels": list(CONTACT_MANAGEMENT_CHANNELS), "errors": errors},
+        )
+    return candidates
+
+
+def _contact_endpoint_queryset(agent):
+    query = Q(owner_agent=agent)
+    if agent.preferred_contact_endpoint_id:
+        query |= Q(id=agent.preferred_contact_endpoint_id)
+
+    active_contacts = CommsAllowlistEntry.objects.filter(agent=agent, is_active=True).only("channel", "address")
+    for contact in active_contacts:
+        query |= Q(owner_agent__isnull=True, channel=contact.channel, address__iexact=contact.address)
+
+    return (
+        PersistentAgentCommsEndpoint.objects.filter(query)
+        .distinct()
+        .order_by("channel", "address", "id")
+    )
+
+
+def _resolve_preferred_endpoint_by_id(agent, endpoint_id):
+    parsed_id = _parse_uuid(endpoint_id, "endpoint_id")
+    endpoint = _contact_endpoint_queryset(agent).filter(id=parsed_id).first()
+    if endpoint is None:
+        raise MCPToolError("Contact endpoint not found or inaccessible.")
+    if not _endpoint_can_be_preferred(agent, endpoint):
+        raise MCPToolError("Contact endpoint not found or inaccessible for this agent.")
+    return endpoint
+
+
+def _resolve_endpoint_for_contact_preference(agent, contact):
+    endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+        channel=contact.channel,
+        address=contact.address,
+        defaults={"owner_agent": None},
+    )
+    if endpoint.owner_agent_id and endpoint.owner_agent_id != agent.id:
+        raise MCPToolError("Contact endpoint belongs to a different agent.")
+    return endpoint
+
+
+def _endpoint_can_be_preferred(agent, endpoint):
+    if endpoint.owner_agent_id == agent.id:
+        return True
+    if agent.preferred_contact_endpoint_id == endpoint.id:
+        return True
+    if endpoint.owner_agent_id:
+        return False
+    if endpoint.channel not in PREFERRED_ENDPOINT_CHANNELS:
+        return False
+    return agent.is_recipient_whitelisted(endpoint.channel, endpoint.address)
+
+
+def _preferred_endpoint_matches_contact(agent, contact):
+    endpoint = getattr(agent, "preferred_contact_endpoint", None)
+    if endpoint is None:
+        return False
+    return (
+        endpoint.channel == contact.channel
+        and PersistentAgentCommsEndpoint.normalize_address(endpoint.channel, endpoint.address)
+        == PersistentAgentCommsEndpoint.normalize_address(contact.channel, contact.address)
+    )
+
+
+def _endpoint_roles(endpoint, agent):
+    roles = []
+    if endpoint.owner_agent_id == agent.id:
+        roles.append("agent_owned")
+    if agent.preferred_contact_endpoint_id == endpoint.id:
+        roles.append("preferred_contact")
+    if endpoint.owner_agent_id is None and CommsAllowlistEntry.objects.filter(
+        agent=agent,
+        channel=endpoint.channel,
+        address__iexact=endpoint.address,
+        is_active=True,
+    ).exists():
+        roles.append("manual_allowlist_contact")
+    return roles or ["contact_endpoint"]
+
+
+def _serialize_allowlist_contact(contact, agent):
+    is_preferred = _preferred_endpoint_matches_contact(agent, contact)
+    preferred_endpoint_id = str(agent.preferred_contact_endpoint_id) if is_preferred else None
+    return {
+        "id": str(contact.id),
+        "contact_id": str(contact.id),
+        "agent_id": str(contact.agent_id),
+        "type": contact.channel,
+        "channel": contact.channel,
+        "address": contact.address,
+        "label": None,
+        "name": None,
+        "status": "allowed" if contact.is_active else "inactive",
+        "approval_state": "allowed" if contact.is_active else "inactive",
+        "is_active": contact.is_active,
+        "verified": contact.verified,
+        "allow_inbound": contact.allow_inbound,
+        "allow_outbound": contact.allow_outbound,
+        "can_configure": contact.can_configure,
+        "is_preferred": is_preferred,
+        "preferred_contact_endpoint_id": preferred_endpoint_id,
+        "created_at": _iso(contact.created_at),
+        "updated_at": _iso(contact.updated_at),
+    }
+
+
+def _serialize_pending_contact_request(contact_request):
+    is_expired = contact_request.is_expired()
+    can_approve = contact_request.can_be_approved()
+    return {
+        "id": str(contact_request.id),
+        "pending_contact_id": str(contact_request.id),
+        "agent_id": str(contact_request.agent_id),
+        "type": contact_request.channel,
+        "channel": contact_request.channel,
+        "address": contact_request.address,
+        "name": contact_request.name or None,
+        "reason": contact_request.reason,
+        "purpose": contact_request.purpose,
+        "request_inbound": contact_request.request_inbound,
+        "request_outbound": contact_request.request_outbound,
+        "request_configure": contact_request.request_configure,
+        "status": contact_request.status,
+        "approval_state": "pending_approval" if can_approve else contact_request.status,
+        "requested_at": _iso(contact_request.requested_at),
+        "responded_at": _iso(contact_request.responded_at),
+        "expires_at": _iso(contact_request.expires_at),
+        "is_expired": is_expired,
+        "can_approve": can_approve,
+    }
+
+
+def _serialize_contact_endpoint(endpoint, agent):
+    roles = _endpoint_roles(endpoint, agent)
+    owner_agent_id = str(endpoint.owner_agent_id) if endpoint.owner_agent_id == agent.id else None
+    return {
+        "id": str(endpoint.id),
+        "endpoint_id": str(endpoint.id),
+        "agent_id": str(agent.id),
+        "owner_agent_id": owner_agent_id,
+        "type": endpoint.channel,
+        "channel": endpoint.channel,
+        "address": endpoint.address,
+        "is_primary": endpoint.is_primary,
+        "is_preferred_contact": agent.preferred_contact_endpoint_id == endpoint.id,
+        "roles": roles,
+        "can_be_preferred": _endpoint_can_be_preferred(agent, endpoint),
+    }
 
 
 def _serialize_agent(agent):
