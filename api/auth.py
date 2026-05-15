@@ -13,11 +13,16 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
     keyword = "X-Api-Key"
 
     def authenticate(self, request):
-        with traced("API Authenticate") as span:
-            raw_key = request.headers.get(self.keyword)
-            if not raw_key:
-                return None  # let other auth methods try (Session for admin)
+        raw_key = self.get_api_key(request)
+        if not raw_key:
+            return None  # let other auth methods try (Session for admin)
+        return self.authenticate_raw_key(request, raw_key)
 
+    def get_api_key(self, request):
+        return request.headers.get(self.keyword)
+
+    def authenticate_raw_key(self, request, raw_key):
+        with traced("API Authenticate") as span:
             prefix = raw_key[:8]
             with traced("API Key Lookup") as span:
                 try:
@@ -103,3 +108,18 @@ class APIKeyAuthentication(authentication.BaseAuthentication):
             raise exceptions.AuthenticationFailed(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
 
         return api_key.user
+
+
+class MCPAPIKeyAuthentication(APIKeyAuthentication):
+    """Authenticate remote MCP clients with existing Gobii API keys."""
+
+    def get_api_key(self, request):
+        raw_key = request.headers.get(self.keyword)
+        if raw_key:
+            return raw_key
+
+        authorization = request.headers.get("Authorization", "")
+        scheme, separator, token = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer" and token.strip():
+            return token.strip()
+        return None

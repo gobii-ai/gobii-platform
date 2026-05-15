@@ -1,0 +1,217 @@
+---
+title: "Remote MCP Server"
+sidebarTitle: "Remote MCP Server"
+description: "Connect an MCP client to Gobii over HTTPS and use Gobii as agent infrastructure."
+---
+
+Gobii exposes a remote Model Context Protocol (MCP) endpoint so external AI tools can create, manage, coordinate, message, wait on, and attach files to Gobii agents through your existing Gobii API key.
+
+Gobii MCP is a conversational agent-timeline API, not a task API. Each Gobii agent is a long-lived AI employee with one unified timeline, history, and context. MCP clients append messages to that timeline, read timeline events with durable cursors, and wait for matching timeline events. The MCP server does not create a separate task, run, conversation, or session abstraction for agent work.
+
+## Endpoint
+
+Use the Streamable HTTP endpoint:
+
+- Production: `https://gobii.ai/api/v1/mcp/`
+- Self-hosted/local: `http://localhost:8000/api/v1/mcp/`
+
+Gobii implements the MCP `2025-11-25` JSON-RPC flow over Streamable HTTP. Each request is a new `POST` with one JSON-RPC object. The endpoint returns `application/json` for requests and `202 Accepted` for notifications/responses. Gobii does not open a standalone GET SSE stream in v1, so `GET /api/v1/mcp/` returns `405 Method Not Allowed`.
+
+References:
+
+- MCP Streamable HTTP transport: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports
+- MCP tools protocol and structured tool results: https://modelcontextprotocol.io/specification/2025-11-25/server/tools
+- MCP schema reference: https://modelcontextprotocol.io/specification/2025-11-25/schema
+- MCP HTTP authorization guidance: https://modelcontextprotocol.io/specification/2025-11-25/basic/authorization
+
+## Authentication
+
+Use an existing Gobii API key. Send it on every request with either header:
+
+```http
+X-Api-Key: $GOBII_API_KEY
+```
+
+or:
+
+```http
+Authorization: Bearer $GOBII_API_KEY
+```
+
+Do not put API keys in query strings. Organization API keys scope tools to organization-owned agents; personal API keys scope tools to agents accessible to that user.
+
+## Client Request Shape
+
+Initialize:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "init-1",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2025-11-25",
+      "capabilities": {},
+      "clientInfo": {"name": "example-client", "version": "1.0.0"}
+    }
+  }'
+```
+
+List tools:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{"jsonrpc":"2.0","id":"tools-1","method":"tools/list","params":{}}'
+```
+
+Call a tool:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/mcp/ \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Authorization: Bearer $GOBII_API_KEY" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": "call-1",
+    "method": "tools/call",
+    "params": {
+      "name": "gobii_list_agents",
+      "arguments": {"page_size": 10}
+    }
+  }'
+```
+
+Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients send them.
+
+## Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `gobii_list_agents` | List accessible persistent agents. |
+| `gobii_get_agent` | Retrieve one agent. |
+| `gobii_create_agent` | Create an agent through Gobii's normal provisioning path. |
+| `gobii_update_agent` | Update mutable agent settings. |
+| `gobii_archive_agent` | Soft-delete/archive an agent. |
+| `gobii_get_agent_config_options` | Discover supported agent config fields and option limits. |
+| `gobii_list_agent_links` | List peer-agent links. |
+| `gobii_link_agents` | Create or enable a peer-agent link. |
+| `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
+| `gobii_send_agent_message` | Send a web-chat message to an agent, optionally with existing filespace attachments. |
+| `gobii_get_agent_timeline` | Fetch timeline events and processing state using durable cursors. |
+| `gobii_wait_for_agent_event` | Bounded long-poll for matching timeline events after a cursor. |
+| `gobii_list_agent_files` | List an agent's default filespace. |
+| `gobii_upload_agent_file` | Upload a small base64 file into the agent filespace. |
+
+Gobii does not expose MCP resources or prompts in v1. The current product capabilities map more cleanly to MCP tools.
+
+## Agent Config
+
+Use `gobii_get_agent_config_options` before setting operational config. It returns the current owner scope, supported fields, intelligence tiers, daily credit settings, schedule semantics, and policy options for the API key.
+
+`gobii_create_agent`, `gobii_update_agent`, and `gobii_get_agent` expose these real platform fields:
+
+- `preferred_llm_tier`: the agent's preferred intelligence level. Values are the configured Gobii intelligence tier keys, commonly `standard`, `premium`, `max`, `ultra`, and `ultra_max`. Plan and quota limits are enforced.
+- `daily_credit_limit`: the soft daily credit target. `null` means unlimited. Gobii derives and enforces the hard runtime stop from the configured hard-limit multiplier.
+- `schedule`: optional cron-like schedule, `@daily`, or `@every` interval. Omitted, empty, or `null` means unscheduled. Invalid schedules return an MCP tool result with `isError: true` and field details.
+- `whitelist_policy`, `is_active`, and `proactive_opt_in`: existing Gobii policy and lifecycle fields.
+
+Unsupported fields are not ignored. A tool call with unsupported arguments returns `isError: true` with `unsupported_fields` and `supported_fields`.
+
+## Timeline And Messaging
+
+`gobii_send_agent_message` appends a web-chat message to the agent's unified timeline. It returns `message_id`, `agent_id`, `cursor`, `latest_cursor`, `created_at`, `accepted_state`, actor metadata, and the serialized timeline event.
+
+`gobii_get_agent_timeline` reads the unified timeline. Use `after_cursor` for events strictly newer than a cursor, or `cursor` plus `direction` (`initial`, `older`, `newer`) for scroll-style reads. The event with the exact `after_cursor` is excluded. Results include `events`, `next_cursor`, `latest_cursor`, `oldest_cursor`, `newest_cursor`, `has_more`, and processing state. Events can include messages, tool/step clusters, thinking entries, and plan updates when those exist in the agent timeline.
+
+`gobii_wait_for_agent_event` is the v1 wait primitive. It polls the same timeline for up to `timeout_seconds` with a server cap. Inputs include `agent_id`, `after_cursor`, `event_types`, and supported filters:
+
+- `from_actor_type`: `agent`, `human_user`, `external`, or `system`, derived from the serialized event. Outbound or peer messages are `agent`; inbound web user messages are `human_user`; other inbound messages are `external`; steps/thinking/plan events are `system`.
+- `from_agent_id`: supported for message events from an agent. For non-peer outbound messages this is the owner agent; for inbound peer-agent messages this is the peer agent.
+- `to_agent_id`: supported for message events addressed to an agent. For non-peer inbound messages this is the owner agent; for outbound peer-agent messages this is the peer agent. Ordinary agent-to-human/external replies do not have a `to_agent_id`.
+- `message_id`, `peer_link_id`, and `channel`: supported for message events. `message_id` does not override `after_cursor`; to wait for a known message, pass a cursor captured before that message or omit `after_cursor` and rely on the recent initial timeline window.
+- `status` and `tool_name`: supported for tool/step events
+
+The wait tool returns `matched`, `timed_out`, `events`, `next_cursor`, `latest_cursor`, and `waited_seconds`.
+
+## Agent Links
+
+Agent links are symmetric peer-agent messaging links backed by Gobii's `AgentPeerLink` model. `gobii_link_agents` creates or re-enables a link between two accessible agents that share an owner or organization. The link enforces a rolling message quota with `messages_per_window` and `window_hours`.
+
+Linked-agent messages appear as peer direct-message events in each participating agent's unified timeline. The sender's timeline receives an outbound peer message and the recipient's timeline receives an inbound peer message. `gobii_unlink_agents` removes the link while preserving historical conversations and messages.
+
+## Files And Attachments
+
+Preferred flow:
+
+1. Upload a small file with `gobii_upload_agent_file`, or create/upload the file in the Gobii agent filespace through the product.
+2. Send a message with `gobii_send_agent_message`.
+3. Pass filespace paths in `attachment_file_paths`, for example `["/uploads/brief.pdf"]`.
+
+This keeps message calls small and uses Gobii's existing filespace and attachment models. Arbitrary URL fetching is intentionally not exposed through the MCP server v1. Very large files should be added to the agent filespace outside MCP, then referenced by path.
+
+## Hermes Example
+
+For Hermes, configure Gobii as a Streamable HTTP MCP server in the profile's `config.yaml`. Store the API key in the profile environment and reference it by variable name; do not paste keys into shared config or docs.
+
+```yaml
+mcp_servers:
+  gobii-local:
+    url: "http://localhost:8000/api/v1/mcp/"
+    headers:
+      Authorization: "Bearer ${GOBII_API_KEY}"
+    timeout: 60
+    connect_timeout: 10
+    tools:
+      include:
+        - gobii_list_agents
+        - gobii_get_agent
+        - gobii_create_agent
+        - gobii_update_agent
+        - gobii_archive_agent
+        - gobii_get_agent_config_options
+        - gobii_list_agent_links
+        - gobii_link_agents
+        - gobii_unlink_agents
+        - gobii_send_agent_message
+        - gobii_get_agent_timeline
+        - gobii_wait_for_agent_event
+        - gobii_list_agent_files
+        - gobii_upload_agent_file
+```
+
+For production, use `https://gobii.ai/api/v1/mcp/`. For preview deployments, create or request a fresh API key for the current preview database snapshot before testing; keys from older preview deployments may not exist in the new ephemeral database.
+
+## Smoke Test Flow
+
+Use this flow for local dev, preview, or production smoke testing. Archive temporary agents at the end when safe.
+
+1. `gobii_list_agents`
+2. `gobii_get_agent_config_options`
+3. `gobii_create_agent` twice without `schedule`
+4. `gobii_update_agent` on one agent with a supported `preferred_llm_tier` and `daily_credit_limit`
+5. `gobii_link_agents`
+6. `gobii_send_agent_message`
+7. `gobii_get_agent_timeline` and capture `latest_cursor`
+8. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
+9. `gobii_upload_agent_file`
+10. `gobii_list_agent_files`
+11. `gobii_unlink_agents`
+12. `gobii_archive_agent` for temporary agents
+
+## Limitations
+
+- The endpoint is stateless and does not issue `Mcp-Session-Id` values.
+- Standalone GET SSE streams are not exposed in v1.
+- V1 does not implement MCP task augmentation, progress streams, or a fake Gobii task/run abstraction.
+- V2 may add resumable SSE/session support if it can map cleanly onto Gobii's durable timeline/event model.
+- Tool results include both MCP text content and `structuredContent`.
+- All tool calls run with the permissions of the provided Gobii API key.
+- Origin headers are validated for browser-originated requests to reduce DNS rebinding risk.

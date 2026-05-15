@@ -8,6 +8,7 @@ from .views import (
     BrowserUseAgentTaskViewSet,
     PersistentAgentViewSet,
 )
+from .mcp_views import GobiiMCPView
 from .custom_tool_bridge import custom_tool_bridge_execute
 from .webhooks import (
     inbound_agent_webhook,
@@ -32,6 +33,7 @@ router.register(r'agents', PersistentAgentViewSet, basename='persistentagent')
 urlpatterns = [
     # Utility endpoints
     path("ping/", ping, name="ping"),
+    path("mcp/", GobiiMCPView.as_view(), name="remote-mcp"),
     path("custom-tools/bridge/execute/", custom_tool_bridge_execute, name="custom-tool-bridge-execute"),
     
     # Include the router URLs for agents
