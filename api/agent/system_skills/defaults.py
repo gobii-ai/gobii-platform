@@ -300,11 +300,11 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     ),
 )
 
-META_GOBII_TEAM_MANAGER_SYSTEM_SKILL = SystemSkillDefinition(
+META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=META_GOBII_SYSTEM_SKILL_KEY,
-    name="Meta Gobii Team Manager",
+    name="Meta Gobii",
     search_summary=(
-        "Create, configure, link, brief, and manage teams or graphs of persistent Gobiis inside the same owner scope."
+        "Coordinate persistent Gobiis as a control-plane skill, including team management inside the same owner scope."
     ),
     tool_names=META_GOBII_TOOL_NAMES,
     enables=(
@@ -325,6 +325,7 @@ META_GOBII_TEAM_MANAGER_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     query_aliases=(
         "meta gobii",
+        "meta gobii team manager",
         "manager gobii",
         "team of gobiis",
         "gobii team",
@@ -339,16 +340,21 @@ META_GOBII_TEAM_MANAGER_SYSTEM_SKILL = SystemSkillDefinition(
         "spawn gobiis",
     ),
     prompt_instructions=(
+        "Meta Gobii is the broader control-plane skill for coordinating persistent Gobiis. Team management is one "
+        "capability under Meta Gobii, not the skill identity.\n"
         "Use these tools only when the user is asking you to create, configure, link, brief, or maintain persistent "
         "Gobiis in this same owner or organization scope. Do not use them for ordinary research, writing, support, "
         "or content tasks that merely mention Gobii.\n"
         "Authorization boundary: every tool is scoped to the invoking Gobii's personal owner scope or organization. "
         "Never attempt to manage agents outside that accessible scope.\n"
+        "Human approval boundary: before making any control-plane mutation, ask the human to approve a concise "
+        "summary of the proposed change. Mutations include creating, updating, archiving, linking, unlinking, "
+        "briefing or messaging Gobiis, uploading files, adding/removing/approving contacts, changing preferred "
+        "contact endpoints, and changing schedules, resources, or intelligence tiers. Pass user_confirmed=true "
+        "only after that explicit approval. For broad operations involving multiple Gobiis, first summarize the "
+        "scope and wait for higher-level confirmation.\n"
         "For team creation, first inspect config options and existing agents when useful, then create the requested "
-        "Gobiis, link them, and send each one a concise briefing with its role and handoff context.\n"
-        "Ask for human confirmation before archiving agents, unlinking broad graph sections, removing contacts, "
-        "raising intelligence tier, raising daily credit/resource limits, or making broad graph rewrites unless the "
-        "human explicitly requested the exact change.\n"
+        "Gobiis, link them, and send each one a concise briefing with its role and handoff context after approval.\n"
         "Use contact tools only for contacts the human supplied, approved, or that are already known internal team contacts. "
         "Grant can_configure only to owner-approved contacts. Prefer manual allowlist semantics for explicit contacts.\n"
         "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "
@@ -365,5 +371,5 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
-    META_GOBII_TEAM_MANAGER_SYSTEM_SKILL.skill_key: META_GOBII_TEAM_MANAGER_SYSTEM_SKILL,
+    META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,
 }

@@ -10,7 +10,11 @@ from api.agent.core.prompt_context import get_agent_tools
 from api.agent.system_skills import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.tools.meta_gobii import execute_meta_gobii_tool
-from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+from api.agent.tools.meta_gobii_names import (
+    META_GOBII_LEGACY_SYSTEM_SKILL_KEY,
+    META_GOBII_SYSTEM_SKILL_KEY,
+    META_GOBII_TOOL_NAMES,
+)
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
@@ -42,6 +46,13 @@ def _mock_mcp_manager() -> MagicMock:
     return manager
 
 
+def _assert_confirmation_required(test_case: TestCase, result: dict):
+    test_case.assertEqual(result["status"], "confirmation_required")
+    test_case.assertIn("confirmation_prompt", result)
+    test_case.assertTrue(result["requires_user_confirmed"])
+    test_case.assertTrue(result["proposed_actions"])
+
+
 @tag("batch_agent_tools")
 class MetaGobiiSystemSkillTests(TestCase):
     @classmethod
@@ -62,10 +73,16 @@ class MetaGobiiSystemSkillTests(TestCase):
 
     def test_system_skill_is_discoverable_for_team_graph_queries_only(self):
         definition = get_system_skill_definition(META_GOBII_SYSTEM_SKILL_KEY)
+        legacy_definition = get_system_skill_definition(META_GOBII_LEGACY_SYSTEM_SKILL_KEY)
 
         self.assertIsNotNone(definition)
+        self.assertEqual(definition.name, "Meta Gobii")
+        self.assertEqual(definition.skill_key, "meta_gobii")
+        self.assertEqual(legacy_definition, definition)
         self.assertEqual(definition.tool_names, META_GOBII_TOOL_NAMES)
         self.assertIn("same owner or organization scope", definition.prompt_instructions)
+        self.assertIn("Human approval boundary", definition.prompt_instructions)
+        self.assertIn("user_confirmed=true", definition.prompt_instructions)
         self.assertIn("avoid echoing full email addresses or phone numbers", definition.prompt_instructions)
 
         matches = shortlist_system_skills(
@@ -100,6 +117,34 @@ class MetaGobiiSystemSkillTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn(META_GOBII_SYSTEM_SKILL_KEY, result["message"])
+
+    def test_legacy_skill_state_alias_still_allows_direct_tools(self):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=META_GOBII_LEGACY_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+        )
+
+        result = execute_meta_gobii_tool(self.agent, "meta_gobii_list_agents", {})
+
+        self.assertEqual(result["status"], "ok")
+
+    @patch("api.agent.tools.tool_manager.get_mcp_manager")
+    @patch("api.agent.tools.static_tools.AgentService.get_agents_available", return_value=0)
+    def test_legacy_skill_key_enables_primary_meta_gobii_skill(self, _mock_capacity, mock_get_manager):
+        mock_get_manager.return_value = _mock_mcp_manager()
+
+        result = enable_system_skills(self.agent, [META_GOBII_LEGACY_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["enabled"], [META_GOBII_SYSTEM_SKILL_KEY])
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
 
 
 @tag("batch_agent_tools")
@@ -168,7 +213,7 @@ class MetaGobiiDirectToolTests(TestCase):
     @patch("api.agent.tools.meta_gobii.AgentService.has_agents_available", return_value=True)
     @patch("api.services.persistent_agents.AgentService.has_agents_available", return_value=True)
     @patch("api.models.AgentService.get_agents_available", return_value=10)
-    def test_create_agent_uses_same_owner_and_confirmation_for_resource_fields(
+    def test_create_agent_uses_same_owner_and_confirmation_gate(
         self,
         _model_capacity,
         _provision_capacity,
@@ -184,7 +229,8 @@ class MetaGobiiDirectToolTests(TestCase):
                 "daily_credit_limit": 12,
             },
         )
-        self.assertEqual(blocked["status"], "action_required")
+        _assert_confirmation_required(self, blocked)
+        self.assertFalse(PersistentAgent.objects.filter(user=self.user, name="Sales Gobii").exists())
 
         with self.captureOnCommitCallbacks(execute=True):
             created = execute_meta_gobii_tool(
@@ -207,16 +253,18 @@ class MetaGobiiDirectToolTests(TestCase):
         mock_delay.assert_called_with(str(child.id))
 
     @patch("api.services.agent_settings_resume.process_agent_events_task.delay")
-    def test_update_resource_limits_requires_confirmation_and_respects_access(self, _mock_delay):
+    def test_update_agent_requires_confirmation_and_respects_access(self, _mock_delay):
         blocked = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_update_agent",
             {
                 "agent_id": str(self.peer.id),
-                "daily_credit_limit": 9,
+                "name": "Updated Peer Gobii",
             },
         )
-        self.assertEqual(blocked["status"], "action_required")
+        _assert_confirmation_required(self, blocked)
+        self.peer.refresh_from_db()
+        self.assertEqual(self.peer.name, "Peer Gobii")
 
         updated = execute_meta_gobii_tool(
             self.manager,
@@ -243,8 +291,8 @@ class MetaGobiiDirectToolTests(TestCase):
         )
         self.assertEqual(denied["status"], "error")
 
-    def test_link_and_unlink_accessible_agents_only(self):
-        result = execute_meta_gobii_tool(
+    def test_link_and_unlink_accessible_agents_only_after_confirmation(self):
+        blocked_link = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_link_agents",
             {
@@ -254,7 +302,24 @@ class MetaGobiiDirectToolTests(TestCase):
                 "window_hours": 4,
             },
         )
+        _assert_confirmation_required(self, blocked_link)
+        self.assertFalse(
+            AgentPeerLink.objects.filter(
+                pair_key=AgentPeerLink.build_pair_key(self.manager.id, self.peer.id)
+            ).exists()
+        )
 
+        result = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_link_agents",
+            {
+                "agent_id": str(self.manager.id),
+                "peer_agent_id": str(self.peer.id),
+                "messages_per_window": 10,
+                "window_hours": 4,
+                "user_confirmed": True,
+            },
+        )
         self.assertEqual(result["status"], "ok")
         self.assertTrue(result["created"])
         link = AgentPeerLink.objects.get(id=result["link"]["id"])
@@ -266,7 +331,7 @@ class MetaGobiiDirectToolTests(TestCase):
             "meta_gobii_unlink_agents",
             {"peer_link_id": str(link.id)},
         )
-        self.assertEqual(blocked_unlink["status"], "action_required")
+        _assert_confirmation_required(self, blocked_unlink)
 
         unlinked = execute_meta_gobii_tool(
             self.manager,
@@ -287,7 +352,24 @@ class MetaGobiiDirectToolTests(TestCase):
         self.assertEqual(denied["status"], "error")
 
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_send_agent_message_injects_internal_web_message(self, mock_delay):
+    def test_send_agent_message_requires_confirmation_then_injects_internal_web_message(self, mock_delay):
+        blocked = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_send_agent_message",
+            {
+                "agent_id": str(self.peer.id),
+                "body": "Briefing: focus on recruiting signal and report blockers.",
+                "trigger_processing": True,
+            },
+        )
+        _assert_confirmation_required(self, blocked)
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.peer,
+                body__contains="recruiting signal",
+            ).exists()
+        )
+
         with self.captureOnCommitCallbacks(execute=True):
             result = execute_meta_gobii_tool(
                 self.manager,
@@ -296,6 +378,7 @@ class MetaGobiiDirectToolTests(TestCase):
                     "agent_id": str(self.peer.id),
                     "body": "Briefing: focus on recruiting signal and report blockers.",
                     "trigger_processing": True,
+                    "user_confirmed": True,
                 },
             )
 
@@ -306,6 +389,20 @@ class MetaGobiiDirectToolTests(TestCase):
         mock_delay.assert_called_once_with(str(self.peer.id))
 
     def test_contacts_pending_requests_and_endpoints(self):
+        blocked_add = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_add_contact",
+            {
+                "agent_id": str(self.peer.id),
+                "channel": "email",
+                "address": "TEAM-MEMBER@EXAMPLE.COM",
+                "allow_inbound": True,
+                "allow_outbound": False,
+            },
+        )
+        _assert_confirmation_required(self, blocked_add)
+        self.assertFalse(CommsAllowlistEntry.objects.filter(agent=self.peer, channel=CommsChannel.EMAIL).exists())
+
         added = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_add_contact",
@@ -315,6 +412,7 @@ class MetaGobiiDirectToolTests(TestCase):
                 "address": "TEAM-MEMBER@EXAMPLE.COM",
                 "allow_inbound": True,
                 "allow_outbound": False,
+                "user_confirmed": True,
             },
         )
         self.assertEqual(added["status"], "ok")
@@ -331,7 +429,7 @@ class MetaGobiiDirectToolTests(TestCase):
             "meta_gobii_remove_contact",
             {"agent_id": str(self.peer.id), "contact_id": added["contact"]["id"]},
         )
-        self.assertEqual(blocked_remove["status"], "action_required")
+        _assert_confirmation_required(self, blocked_remove)
 
         removed = execute_meta_gobii_tool(
             self.manager,
@@ -361,6 +459,20 @@ class MetaGobiiDirectToolTests(TestCase):
         )
         self.assertEqual([item["id"] for item in pending["requests"]], [str(request.id)])
 
+        blocked_approve = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_approve_pending_contact",
+            {
+                "agent_id": str(self.peer.id),
+                "request_id": str(request.id),
+                "allow_inbound": True,
+                "allow_outbound": True,
+            },
+        )
+        _assert_confirmation_required(self, blocked_approve)
+        request.refresh_from_db()
+        self.assertEqual(request.status, CommsAllowlistRequest.RequestStatus.PENDING)
+
         approved = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_approve_pending_contact",
@@ -369,6 +481,7 @@ class MetaGobiiDirectToolTests(TestCase):
                 "request_id": str(request.id),
                 "allow_inbound": True,
                 "allow_outbound": True,
+                "user_confirmed": True,
             },
         )
         self.assertEqual(approved["status"], "approved")
@@ -386,10 +499,23 @@ class MetaGobiiDirectToolTests(TestCase):
             address=self.user.email,
             owner_agent=None,
         )
-        endpoint_result = execute_meta_gobii_tool(
+        blocked_endpoint = execute_meta_gobii_tool(
             self.manager,
             "meta_gobii_set_preferred_contact_endpoint",
             {"agent_id": str(self.peer.id), "endpoint_id": str(owner_endpoint.id)},
+        )
+        _assert_confirmation_required(self, blocked_endpoint)
+        self.peer.refresh_from_db()
+        self.assertIsNone(self.peer.preferred_contact_endpoint_id)
+
+        endpoint_result = execute_meta_gobii_tool(
+            self.manager,
+            "meta_gobii_set_preferred_contact_endpoint",
+            {
+                "agent_id": str(self.peer.id),
+                "endpoint_id": str(owner_endpoint.id),
+                "user_confirmed": True,
+            },
         )
         self.assertEqual(endpoint_result["status"], "ok")
         self.peer.refresh_from_db()

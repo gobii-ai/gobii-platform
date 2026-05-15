@@ -4,6 +4,11 @@ from dataclasses import dataclass, field
 from typing import Mapping, Optional
 
 
+SYSTEM_SKILL_KEY_ALIASES = {
+    "meta_gobii_team_manager": "meta_gobii",
+}
+
+
 @dataclass(frozen=True)
 class SystemSkillDocLink:
     """A documentation link surfaced only during setup and troubleshooting."""
@@ -71,16 +76,32 @@ class SystemSkillDefinition:
             normalized.append(value)
         return tuple(normalized)
 
-from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS
+from .defaults import DEFAULT_SYSTEM_SKILL_DEFINITIONS  # noqa: E402
 
 
 SYSTEM_SKILL_REGISTRY: dict[str, SystemSkillDefinition] = dict(DEFAULT_SYSTEM_SKILL_DEFINITIONS)
 
 
-def get_system_skill_definition(skill_key: str) -> Optional[SystemSkillDefinition]:
+def normalize_system_skill_key(skill_key: str) -> str:
     if not isinstance(skill_key, str):
+        return ""
+    normalized = skill_key.strip()
+    return SYSTEM_SKILL_KEY_ALIASES.get(normalized, normalized)
+
+
+def equivalent_system_skill_keys(skill_key: str) -> tuple[str, ...]:
+    normalized = normalize_system_skill_key(skill_key)
+    if not normalized:
+        return ()
+    aliases = sorted(alias for alias, target in SYSTEM_SKILL_KEY_ALIASES.items() if target == normalized)
+    return tuple(dict.fromkeys([normalized, *aliases]))
+
+
+def get_system_skill_definition(skill_key: str) -> Optional[SystemSkillDefinition]:
+    normalized = normalize_system_skill_key(skill_key)
+    if not normalized:
         return None
-    return SYSTEM_SKILL_REGISTRY.get(skill_key.strip())
+    return SYSTEM_SKILL_REGISTRY.get(normalized)
 
 
 def _score_definition(query: str, definition: SystemSkillDefinition) -> int:

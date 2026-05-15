@@ -59,7 +59,7 @@ from console.agent_chat.timeline import (
 )
 from pages.account_info_cache import invalidate_account_info_cache
 
-from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
+from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_SYSTEM_SKILL_KEYS, META_GOBII_TOOL_NAMES
 
 
 WAIT_DEFAULT_TIMEOUT_SECONDS = 10
@@ -253,14 +253,19 @@ _ENDPOINT_OUTPUT = _output_object(
 )
 
 
-SENSITIVE_UPDATE_FIELDS = {"preferred_llm_tier", "daily_credit_limit"}
-
-
 def _confirmation_description(action: str) -> str:
     return (
-        f"Set true only when the human explicitly requested or confirmed this {action}. "
-        "If not confirmed, ask the human before calling this tool."
+        f"Set true only after the human explicitly approved this Meta Gobii {action}. "
+        "If not confirmed, ask for approval before calling this mutating tool."
     )
+
+
+def _confirmation_output_schema() -> dict[str, Any]:
+    return {
+        "confirmation_prompt": {"type": "string"},
+        "proposed_actions": _array({"type": "string"}),
+        "requires_user_confirmed": {"type": "boolean"},
+    }
 
 
 TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
@@ -303,6 +308,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "meta_gobii_create_agent": {
         "description": (
             "Create a persistent Gobii in this Gobii's same owner or organization scope using internal provisioning. "
+            "Requires human approval via user_confirmed before changing the Gobii control plane. "
             "Use for explicitly requested team/graph creation, not speculative extra workers."
         ),
         "parameters": _object(
@@ -325,16 +331,19 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "user_confirmed": {
                     "type": "boolean",
                     "default": False,
-                    "description": _confirmation_description("resource-sensitive create"),
+                    "description": _confirmation_description("create"),
                 },
             }
         ),
-        "output": _output_object({"status": {"type": "string"}, "agent": _AGENT_OUTPUT}, required=("status", "agent")),
+        "output": _output_object(
+            {"status": {"type": "string"}, "agent": _AGENT_OUTPUT, **_confirmation_output_schema()},
+            required=("status",),
+        ),
     },
     "meta_gobii_update_agent": {
         "description": (
-            "Update mutable settings on one accessible Gobii. Ask for human confirmation before changing billing/resource "
-            "sensitive fields such as preferred_llm_tier or daily_credit_limit unless the user explicitly requested it."
+            "Update mutable settings on one accessible Gobii. Requires human approval via user_confirmed before changing "
+            "name, charter, schedule, active state, resource limits, intelligence tier, allowlist policy, or proactivity."
         ),
         "parameters": _object(
             {
@@ -353,7 +362,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "user_confirmed": {
                     "type": "boolean",
                     "default": False,
-                    "description": _confirmation_description("resource-sensitive update"),
+                    "description": _confirmation_description("update"),
                 },
             },
             required=("agent_id",),
@@ -364,8 +373,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "message": {"type": "string"},
                 "agent": _AGENT_OUTPUT,
                 "changed_fields": _array({"type": "string"}),
+                **_confirmation_output_schema(),
             },
-            required=("status", "agent"),
+            required=("status",),
         ),
     },
     "meta_gobii_archive_agent": {
@@ -390,8 +400,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "message": {"type": "string"},
                 "changed": {"type": "boolean"},
                 "agent": _AGENT_OUTPUT,
+                **_confirmation_output_schema(),
             },
-            required=("status", "changed", "agent"),
+            required=("status",),
         ),
     },
     "meta_gobii_get_agent_config_options": {
@@ -407,6 +418,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "meta_gobii_link_agents": {
         "description": (
             "Create or enable a peer-agent link between two accessible Gobiis so they can coordinate. "
+            "Requires human approval via user_confirmed before changing graph wiring. "
             "Use only for user-requested team/graph wiring."
         ),
         "parameters": _object(
@@ -415,12 +427,17 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "peer_agent_id": _agent_id("Second persistent agent UUID."),
                 "messages_per_window": {"type": "integer", "minimum": 1, "maximum": 500, "default": 30},
                 "window_hours": {"type": "integer", "minimum": 1, "maximum": 168, "default": 6},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("link"),
+                },
             },
             required=("agent_id", "peer_agent_id"),
         ),
         "output": _output_object(
-            {"status": {"type": "string"}, "link": _LINK_OUTPUT, "created": {"type": "boolean"}},
-            required=("status", "link", "created"),
+            {"status": {"type": "string"}, "link": _LINK_OUTPUT, "created": {"type": "boolean"}, **_confirmation_output_schema()},
+            required=("status",),
         ),
     },
     "meta_gobii_unlink_agents": {
@@ -440,10 +457,15 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 },
             }
         ),
-        "output": _output_object({"status": {"type": "string"}, "message": {"type": "string"}, "link": _LINK_OUTPUT}),
+        "output": _output_object(
+            {"status": {"type": "string"}, "message": {"type": "string"}, "link": _LINK_OUTPUT, **_confirmation_output_schema()}
+        ),
     },
     "meta_gobii_send_agent_message": {
-        "description": "Send a briefing or task message to one accessible Gobii and optionally attach files already in that agent's filespace.",
+        "description": (
+            "Send a briefing or task message to one accessible Gobii and optionally attach files already in that agent's filespace. "
+            "Requires human approval via user_confirmed before messaging or briefing another Gobii."
+        ),
         "parameters": _object(
             {
                 "agent_id": _agent_id(),
@@ -457,6 +479,11 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "type": "boolean",
                     "default": True,
                     "description": "Whether to queue the agent to process the inbound message.",
+                },
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("message or briefing"),
                 },
             },
             required=("agent_id", "body"),
@@ -472,8 +499,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "message": _MESSAGE_OUTPUT,
                 "conversation_id": _UUID,
                 "attachment_count": {"type": "integer"},
+                **_confirmation_output_schema(),
             },
-            required=("status", "message_id", "agent_id"),
+            required=("status",),
         ),
     },
     "meta_gobii_get_agent_timeline": {
@@ -537,7 +565,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
     },
     "meta_gobii_upload_agent_file": {
-        "description": "Upload a small base64-encoded file into one accessible Gobii's filespace for later use or message attachment.",
+        "description": (
+            "Upload a small base64-encoded file into one accessible Gobii's filespace for later use or message attachment. "
+            "Requires human approval via user_confirmed before writing files."
+        ),
         "parameters": _object(
             {
                 "agent_id": _agent_id(),
@@ -545,10 +576,15 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "content_base64": {"type": "string", "description": "Base64-encoded file content up to 5 MiB."},
                 "mime_type": {"type": "string", "default": "application/octet-stream"},
                 "overwrite": {"type": "boolean", "default": False},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("file upload"),
+                },
             },
             required=("agent_id", "path", "content_base64"),
         ),
-        "output": _output_object({}),
+        "output": _output_object(_confirmation_output_schema()),
     },
     "meta_gobii_list_contacts": {
         "description": "List manual allowlist contacts for one accessible Gobii. Read-only.",
@@ -564,6 +600,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "meta_gobii_add_contact": {
         "description": (
             "Add or reactivate one manual allowlist contact for an accessible Gobii. "
+            "Requires human approval via user_confirmed before changing contacts. "
             "Only use addresses the user supplied, approved, or that are already known internal team contacts."
         ),
         "parameters": _object(
@@ -578,10 +615,17 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                     "default": False,
                     "description": "Grant only to owner-approved contacts who may change charter or schedule.",
                 },
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("contact addition"),
+                },
             },
             required=("agent_id", "channel", "address"),
         ),
-        "output": _output_object({"status": {"type": "string"}, "contact": _CONTACT_OUTPUT, "created": {"type": "boolean"}}),
+        "output": _output_object(
+            {"status": {"type": "string"}, "contact": _CONTACT_OUTPUT, "created": {"type": "boolean"}, **_confirmation_output_schema()}
+        ),
     },
     "meta_gobii_remove_contact": {
         "description": (
@@ -600,7 +644,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
             },
             required=("agent_id", "contact_id"),
         ),
-        "output": _output_object({"status": {"type": "string"}, "message": {"type": "string"}, "contact": _CONTACT_OUTPUT}),
+        "output": _output_object(
+            {"status": {"type": "string"}, "message": {"type": "string"}, "contact": _CONTACT_OUTPUT, **_confirmation_output_schema()}
+        ),
     },
     "meta_gobii_list_pending_contacts": {
         "description": "List pending contact permission requests for one accessible Gobii. Read-only.",
@@ -611,7 +657,10 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
         ),
     },
     "meta_gobii_approve_pending_contact": {
-        "description": "Approve or reject one pending contact request for an accessible Gobii using the normal allowlist-request flow.",
+        "description": (
+            "Approve or reject one pending contact request for an accessible Gobii using the normal allowlist-request flow. "
+            "Requires human approval via user_confirmed before approving or rejecting contact access."
+        ),
         "parameters": _object(
             {
                 "agent_id": _agent_id(),
@@ -620,6 +669,11 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "allow_inbound": {"type": "boolean", "default": True},
                 "allow_outbound": {"type": "boolean", "default": True},
                 "can_configure": {"type": "boolean", "default": False},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("pending contact decision"),
+                },
             },
             required=("agent_id", "request_id"),
         ),
@@ -628,8 +682,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "status": {"type": "string"},
                 "request": _CONTACT_REQUEST_OUTPUT,
                 "contact": _CONTACT_OUTPUT,
+                **_confirmation_output_schema(),
             },
-            required=("status", "request"),
+            required=("status",),
         ),
     },
     "meta_gobii_list_contact_endpoints": {
@@ -640,6 +695,7 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
     "meta_gobii_set_preferred_contact_endpoint": {
         "description": (
             "Set or clear one accessible Gobii's preferred owner-safe contact endpoint. "
+            "Requires human approval via user_confirmed before changing preferred contact routing. "
             "Only agent-owned endpoints or validated owner email/SMS endpoints are accepted."
         ),
         "parameters": _object(
@@ -648,6 +704,11 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "endpoint_id": {"type": "string", "format": "uuid"},
                 "channel": {"type": "string", "enum": ["email", "sms"]},
                 "clear": {"type": "boolean", "default": False},
+                "user_confirmed": {
+                    "type": "boolean",
+                    "default": False,
+                    "description": _confirmation_description("preferred contact endpoint change"),
+                },
             },
             required=("agent_id",),
         ),
@@ -656,8 +717,9 @@ TOOL_DEFINITIONS: dict[str, dict[str, Any]] = {
                 "status": {"type": "string"},
                 "agent": _AGENT_OUTPUT,
                 "preferred_contact_endpoint": {"anyOf": [_ENDPOINT_OUTPUT, {"type": "null"}]},
+                **_confirmation_output_schema(),
             },
-            required=("status", "agent"),
+            required=("status",),
         ),
     },
 }
@@ -686,7 +748,7 @@ def execute_meta_gobii_tool(agent: PersistentAgent, tool_name: str, params: dict
         return {
             "status": "error",
             "message": (
-                "Meta Gobii manager tools are available only after enabling the "
+                "Meta Gobii tools are available only after enabling the "
                 f"{META_GOBII_SYSTEM_SKILL_KEY} system skill for this agent."
             ),
         }
@@ -697,7 +759,10 @@ def execute_meta_gobii_tool(agent: PersistentAgent, tool_name: str, params: dict
     except MetaGobiiToolError as exc:
         payload = {"status": exc.status, "message": exc.message}
         if exc.data:
-            payload["details"] = exc.data
+            if exc.status == "confirmation_required":
+                payload.update(exc.data)
+            else:
+                payload["details"] = exc.data
         return payload
     except (DjangoValidationError, IntegrityError, PersistentAgentProvisioningError) as exc:
         return {"status": "error", "message": "Meta Gobii tool failed validation.", "details": _format_validation_error(exc)}
@@ -706,9 +771,24 @@ def execute_meta_gobii_tool(agent: PersistentAgent, tool_name: str, params: dict
 def _meta_gobii_skill_enabled(agent: PersistentAgent) -> bool:
     return PersistentAgentSystemSkillState.objects.filter(
         agent=agent,
-        skill_key=META_GOBII_SYSTEM_SKILL_KEY,
+        skill_key__in=META_GOBII_SYSTEM_SKILL_KEYS,
         is_enabled=True,
     ).exists()
+
+
+def _require_user_confirmed(params: dict[str, Any], *, action: str, proposed_actions: list[str]) -> None:
+    if _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
+        return
+    prompt = "Please confirm Meta Gobii should " + action.rstrip(".") + "."
+    raise MetaGobiiToolError(
+        f"Human confirmation is required before Meta Gobii can {action.rstrip('.')}.",
+        {
+            "confirmation_prompt": prompt,
+            "proposed_actions": proposed_actions,
+            "requires_user_confirmed": True,
+        },
+        status="confirmation_required",
+    )
 
 
 def _owner_for_agent(agent: PersistentAgent):
@@ -760,6 +840,23 @@ def _tool_get_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) -> 
 
 
 def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
+    proposed_actions = ["Create one persistent Gobii in the invoking Gobii's same owner or organization scope."]
+    if params.get("name"):
+        proposed_actions.append(f"Name it `{params.get('name')}`.")
+    if params.get("charter"):
+        proposed_actions.append("Set the requested charter/instructions.")
+    if "schedule" in params:
+        proposed_actions.append("Set the requested schedule.")
+    if "preferred_llm_tier" in params:
+        proposed_actions.append("Set the requested intelligence tier.")
+    if "daily_credit_limit" in params:
+        proposed_actions.append("Set the requested daily credit/resource limit.")
+    _require_user_confirmed(
+        params,
+        action="create a new persistent Gobii in this owner scope",
+        proposed_actions=proposed_actions,
+    )
+
     owner = _owner_for_agent(invoking_agent)
     if not AgentService.has_agents_available(owner):
         raise MetaGobiiToolError("No additional agent capacity is available for this owner scope.")
@@ -771,19 +868,7 @@ def _tool_create_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
 
     daily_credit_limit = None
     if "daily_credit_limit" in params:
-        if not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-            raise MetaGobiiToolError(
-                "Human confirmation is required before creating a Gobii with an explicit daily credit/resource limit.",
-                {"sensitive_fields": ["daily_credit_limit"]},
-                status="action_required",
-            )
         daily_credit_limit = _normalize_daily_credit_limit(params.get("daily_credit_limit"))
-    if "preferred_llm_tier" in params and not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-        raise MetaGobiiToolError(
-            "Human confirmation is required before creating a Gobii with an explicit intelligence tier.",
-            {"sensitive_fields": ["preferred_llm_tier"]},
-            status="action_required",
-        )
 
     schedule = params.get("schedule")
     if schedule == "":
@@ -848,12 +933,11 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
     if not requested_fields:
         raise MetaGobiiToolError("At least one mutable field is required.")
 
-    if requested_fields & SENSITIVE_UPDATE_FIELDS and not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-        raise MetaGobiiToolError(
-            "Human confirmation is required before changing intelligence tier or daily credit/resource limits.",
-            {"sensitive_fields": sorted(requested_fields & SENSITIVE_UPDATE_FIELDS)},
-            status="action_required",
-        )
+    _require_user_confirmed(
+        params,
+        action=f"update `{agent.name}`",
+        proposed_actions=[f"Update {', '.join(sorted(requested_fields))} on `{agent.name}`."],
+    )
 
     previous_daily_credit_limit = agent.daily_credit_limit
     previous_tier_id = agent.preferred_llm_tier_id
@@ -964,12 +1048,12 @@ def _tool_update_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) 
 
 
 def _tool_archive_agent(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    if not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-        raise MetaGobiiToolError(
-            "Human confirmation is required before archiving a Gobii.",
-            status="action_required",
-        )
     agent = _get_agent(invoking_agent, params.get("agent_id"))
+    _require_user_confirmed(
+        params,
+        action=f"archive `{agent.name}`",
+        proposed_actions=[f"Soft-archive `{agent.name}`. This can be restored from the owner scope."],
+    )
     changed = agent.soft_delete()
     invalidate_account_info_cache(invoking_agent.user_id)
     return {
@@ -1045,6 +1129,14 @@ def _tool_link_agents(invoking_agent: PersistentAgent, params: dict[str, Any]) -
         raise MetaGobiiToolError("Cannot link an agent to itself.")
     messages_per_window = _bounded_int(params.get("messages_per_window", 30), "messages_per_window", minimum=1, maximum=500)
     window_hours = _bounded_int(params.get("window_hours", 6), "window_hours", minimum=1, maximum=168)
+    _require_user_confirmed(
+        params,
+        action=f"link `{agent.name}` and `{peer_agent.name}`",
+        proposed_actions=[
+            f"Create or enable a peer-agent link between `{agent.name}` and `{peer_agent.name}`.",
+            f"Set message window to {messages_per_window} messages per {window_hours} hours.",
+        ],
+    )
     pair_key = AgentPeerLink.build_pair_key(agent.id, peer_agent.id)
     link = AgentPeerLink.objects.filter(pair_key=pair_key).first()
     created = False
@@ -1067,12 +1159,15 @@ def _tool_link_agents(invoking_agent: PersistentAgent, params: dict[str, Any]) -
 
 
 def _tool_unlink_agents(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    if not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-        raise MetaGobiiToolError(
-            "Human confirmation is required before unlinking Gobiis.",
-            status="action_required",
-        )
     link = _resolve_peer_link(invoking_agent, params)
+    _require_user_confirmed(
+        params,
+        action=f"unlink `{link.agent_a.name}` and `{link.agent_b.name}`",
+        proposed_actions=[
+            f"Remove the peer-agent link between `{link.agent_a.name}` and `{link.agent_b.name}`.",
+            "Preserve historical peer conversation messages.",
+        ],
+    )
     payload = _serialize_peer_link(link)
     link.remove_preserving_history()
     return {"status": "unlinked", "message": "Peer link removed; historical conversation messages were preserved.", "link": payload}
@@ -1085,6 +1180,15 @@ def _tool_send_agent_message(invoking_agent: PersistentAgent, params: dict[str, 
     attachment_paths = params.get("attachment_file_paths") or []
     if not isinstance(attachment_paths, list) or any(not isinstance(path, str) for path in attachment_paths):
         raise MetaGobiiToolError("attachment_file_paths must be an array of filespace paths.")
+    _require_user_confirmed(
+        params,
+        action=f"message `{agent.name}`",
+        proposed_actions=[
+            f"Send a briefing/message to `{agent.name}`.",
+            f"Attach {len(attachment_paths)} file(s)." if attachment_paths else "Send without file attachments.",
+            "Queue the Gobii to process the message." if trigger_processing else "Store the message without triggering processing.",
+        ],
+    )
 
     sender_address = build_web_user_address(user_id=invoking_agent.user_id, agent_id=agent.id)
     if not agent.is_sender_whitelisted(CommsChannel.WEB, sender_address):
@@ -1233,6 +1337,14 @@ def _tool_upload_agent_file(invoking_agent: PersistentAgent, params: dict[str, A
     if not isinstance(mime_type, str):
         raise MetaGobiiToolError("mime_type must be a string.")
     overwrite = _optional_bool(params.get("overwrite", False), "overwrite")
+    _require_user_confirmed(
+        params,
+        action=f"upload a file to `{agent.name}`",
+        proposed_actions=[
+            f"Write `{path}` into `{agent.name}` filespace.",
+            "Overwrite an existing file at that path." if overwrite else "Do not overwrite an existing file.",
+        ],
+    )
     try:
         content = base64.b64decode(content_base64, validate=True)
     except (binascii.Error, ValueError) as exc:
@@ -1261,6 +1373,15 @@ def _tool_add_contact(invoking_agent: PersistentAgent, params: dict[str, Any]) -
     allow_inbound = _optional_bool(params.get("allow_inbound", True), "allow_inbound")
     allow_outbound = _optional_bool(params.get("allow_outbound", True), "allow_outbound")
     can_configure = _optional_bool(params.get("can_configure", False), "can_configure")
+    _require_user_confirmed(
+        params,
+        action=f"add a {channel.value} contact for `{agent.name}`",
+        proposed_actions=[
+            f"Add or reactivate one {channel.value} contact for `{agent.name}`.",
+            f"Set inbound={allow_inbound}, outbound={allow_outbound}, can_configure={can_configure}.",
+            "Switch the Gobii to manual allowlist policy if needed.",
+        ],
+    )
 
     contact = CommsAllowlistEntry.objects.filter(agent=agent, channel=channel.value, address__iexact=address).first()
     created = False
@@ -1283,16 +1404,16 @@ def _tool_add_contact(invoking_agent: PersistentAgent, params: dict[str, Any]) -
 
 
 def _tool_remove_contact(invoking_agent: PersistentAgent, params: dict[str, Any]) -> dict[str, Any]:
-    if not _optional_bool(params.get("user_confirmed", False), "user_confirmed"):
-        raise MetaGobiiToolError(
-            "Human confirmation is required before removing an allowed contact.",
-            status="action_required",
-        )
     agent = _get_agent(invoking_agent, params.get("agent_id"))
     contact_id = _parse_uuid(params.get("contact_id"), "contact_id")
     contact = CommsAllowlistEntry.objects.filter(agent=agent, id=contact_id).first()
     if contact is None:
         raise MetaGobiiToolError("Contact not found or inaccessible.")
+    _require_user_confirmed(
+        params,
+        action=f"remove a {contact.channel} contact from `{agent.name}`",
+        proposed_actions=[f"Deactivate one {contact.channel} allowlist contact for `{agent.name}`."],
+    )
     if contact.is_active:
         contact.is_active = False
         contact.save(update_fields=["is_active", "updated_at"])
@@ -1317,6 +1438,28 @@ def _tool_approve_pending_contact(invoking_agent: PersistentAgent, params: dict[
     decision = params.get("decision") or "approve"
     if decision not in {"approve", "reject"}:
         raise MetaGobiiToolError("decision must be approve or reject.")
+    request_preview = CommsAllowlistRequest.objects.filter(agent=agent, id=request_id).first()
+    if request_preview is None:
+        raise MetaGobiiToolError("Pending contact request not found or inaccessible.")
+    if request_preview.status != CommsAllowlistRequest.RequestStatus.PENDING:
+        raise MetaGobiiToolError("This contact request is no longer pending.")
+    if request_preview.is_expired():
+        raise MetaGobiiToolError("This contact request has expired.")
+    _require_user_confirmed(
+        params,
+        action=f"{decision} a pending contact request for `{agent.name}`",
+        proposed_actions=[
+            f"{decision.capitalize()} one pending {request_preview.channel} contact request for `{agent.name}`.",
+            (
+                "If approved, set "
+                f"inbound={_optional_bool(params.get('allow_inbound', True), 'allow_inbound')}, "
+                f"outbound={_optional_bool(params.get('allow_outbound', True), 'allow_outbound')}, "
+                f"can_configure={_optional_bool(params.get('can_configure', False), 'can_configure')}."
+            )
+            if decision == "approve"
+            else "Reject the request without creating an allowlist contact.",
+        ],
+    )
     contact = None
     with transaction.atomic():
         request_obj = CommsAllowlistRequest.objects.select_for_update().filter(agent=agent, id=request_id).first()
@@ -1358,6 +1501,11 @@ def _tool_set_preferred_contact_endpoint(invoking_agent: PersistentAgent, params
     clear = _optional_bool(params.get("clear", False), "clear")
     endpoint = None
     if clear:
+        _require_user_confirmed(
+            params,
+            action=f"clear `{agent.name}` preferred contact endpoint",
+            proposed_actions=[f"Clear the preferred contact endpoint for `{agent.name}`."],
+        )
         agent.preferred_contact_endpoint = None
         agent.save(update_fields=["preferred_contact_endpoint"])
         return {"status": "ok", "agent": _serialize_agent(agent), "preferred_contact_endpoint": None}
@@ -1376,6 +1524,11 @@ def _tool_set_preferred_contact_endpoint(invoking_agent: PersistentAgent, params
     else:
         raise MetaGobiiToolError("Pass endpoint_id, channel, or clear=true.")
 
+    _require_user_confirmed(
+        params,
+        action=f"set `{agent.name}` preferred contact endpoint",
+        proposed_actions=[f"Set the preferred contact endpoint for `{agent.name}` to a safe {endpoint.channel} endpoint."],
+    )
     agent.preferred_contact_endpoint = endpoint
     agent.save(update_fields=["preferred_contact_endpoint"])
     return {

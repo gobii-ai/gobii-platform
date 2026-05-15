@@ -1,6 +1,8 @@
-"""Shared names for the Meta Gobii manager system skill and tools."""
+"""Shared names for the Meta Gobii system skill and tools."""
 
-META_GOBII_SYSTEM_SKILL_KEY = "meta_gobii_team_manager"
+META_GOBII_SYSTEM_SKILL_KEY = "meta_gobii"
+META_GOBII_LEGACY_SYSTEM_SKILL_KEY = "meta_gobii_team_manager"
+META_GOBII_SYSTEM_SKILL_KEYS = (META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_LEGACY_SYSTEM_SKILL_KEY)
 
 META_GOBII_TOOL_NAMES = (
     "meta_gobii_list_agents",
