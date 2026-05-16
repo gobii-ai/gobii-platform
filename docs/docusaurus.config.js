@@ -7,7 +7,7 @@ const socialImage = `${siteUrl}/images/gobii-fish-with-text-dark-purple.png`;
 /** @type {import('@docusaurus/types').Config} */
 const config = {
   title: 'Gobii',
-  tagline: 'Documentation for Gobii AI browser agents',
+  tagline: 'Documentation for Gobii AI employees, teams, integrations, and developer APIs',
   favicon: 'images/favicon.png',
   url: siteUrl,
   baseUrl: '/',
@@ -121,9 +121,9 @@ const config = {
         {
           name: 'description',
           content:
-            'Gobii documentation for AI browser agents, browser-use task automation, API integrations, webhooks, MCP servers, and self-hosted deployments.',
+            'Gobii documentation for creating and managing AI employees, using templates, channels, files, approvals, tools, teams, APIs, Remote MCP, webhooks, and self-hosted deployments.',
         },
-        {name: 'keywords', content: 'Gobii, AI browser agents, browser-use, browser automation API, AI agents, web automation'},
+        {name: 'keywords', content: 'Gobii, AI employees, Gobiis, AI agents, automation, Remote MCP, webhooks, teams, templates, self-hosted'},
         {property: 'og:site_name', content: 'Gobii Docs'},
         {property: 'og:type', content: 'website'},
       ],
@@ -177,10 +177,12 @@ const config = {
           {
             title: 'Docs',
             items: [
-              { label: 'Getting started', to: '/' },
+              { label: 'Start here', to: '/' },
+              { label: 'Using Gobii', to: '/using-gobii' },
+              { label: 'Admin and teams', to: '/admin-and-teams' },
               { label: 'Developer basics', to: '/developers/developer-basics' },
               { label: 'API reference', to: '/api-reference/list-persistent-agents' },
-              { label: 'Self-hosted', to: '/self-hosted/overview' },
+              { label: 'Self-hosting', to: '/self-hosted' },
             ],
           },
         ],

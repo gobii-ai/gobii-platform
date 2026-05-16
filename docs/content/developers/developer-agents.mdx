@@ -1,14 +1,12 @@
 ---
 title: "Agent API"
-sidebarTitle: "Agent API"
+sidebar_label: "Agent API"
 description: "Create, schedule, activate, message, inspect, update, and delete persistent Gobii agents through the REST API."
 ---
 
-Agents are always-on workers you configure once and reuse for multistep automations. Each agent keeps its own
-state, schedule, and communication endpoints so you can trigger actions over time and interact with the agent like a digital
-teammate. Results may be received via webhook (preferred), or retrieved via a `GET` request.
+Agents are the developer/API resource behind Gobiis. Configure an agent once, then reuse it for multistep work, recurring responsibilities, messages, files, tools, and timeline-driven workflows.
 
-Agents run primarily via `browser-use`, along with other AI tools. Additionally, agents may be configured to use MCP servers to expand capabilities.
+Agents can use browser automation and other AI tools. They may also be configured to use MCP servers and connected app tools where available.
 If you want to connect an external AI client to Gobii itself over MCP, see the [Remote MCP Server](/developers/mcp-server) guide.
 
 Core capabilities include:
@@ -18,7 +16,7 @@ Core capabilities include:
 - **Activate/deactivate** agents without losing configuration.
 - **Send messages and fetch timelines** to drive conversational workflows.
 - **Inspect processing state** and recent browser tasks tied to the agent.
-- **Receive [structured data](/developers/structured-data)** as a response
+- **Receive [structured data](/developers/structured-data)** where an endpoint supports schema-guided output.
 
 ## Base path
 
@@ -42,7 +40,7 @@ Key fields you will see in responses:
 - `whitelist_policy` (enum): Controls who can message the agent (`default` or `manual`).
 - `preferred_contact_endpoint_id` (UUID|null): Default email/SMS endpoint the agent uses to reach you.
 - `browser_use_agent_id` (UUID): The underlying browser automation worker.
-- `available_mcp_servers` / `personal_mcp_server_ids` (arrays): MCP server metadata and enabled personal servers.
+- `available_mcp_servers` / `personal_mcp_server_ids` (arrays): MCP server metadata and enabled personal servers where exposed.
 - Timestamps: `created_at`, `updated_at`, `last_interaction_at`.
 
 ## Endpoint summary

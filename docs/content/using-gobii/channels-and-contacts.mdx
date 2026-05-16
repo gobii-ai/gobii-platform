@@ -1,0 +1,54 @@
+---
+title: "Channels And Contacts"
+description: "Understand web chat, email, SMS, app channels, inbound webhooks, contacts, and contact permissions."
+sidebar_label: "Channels And Contacts"
+---
+
+Channels are how people and systems communicate with a Gobii. Contacts define who is allowed to use those channels.
+
+## Channel types
+
+| Channel | Use it for |
+| --- | --- |
+| Web chat | Direct work with a Gobii in the product timeline. |
+| Email | Inbound and outbound email workflows, including custom mailbox setups where supported. |
+| SMS/MMS | Short messages and attachments from approved phone contacts where enabled. |
+| App channels | Inbound events or messages from connected apps where supported. |
+| Inbound webhooks | Developer-triggered events sent to a Gobii webhook. |
+| Remote MCP | External AI clients managing or messaging Gobii agents through MCP. |
+
+Developers should see [Webhooks And Events](/developers/webhooks) and [Remote MCP](/developers/mcp-server).
+
+## Contacts and allowlists
+
+Contact controls help prevent unexpected communication. A contact may be allowed to:
+
+- Send messages to the Gobii.
+- Receive messages from the Gobii.
+- Help configure or collaborate with the Gobii where permissions allow.
+
+Admins and owners can manage broader access through [Contact Access And Allowlists](/admin-and-teams/contact-access-and-allowlists).
+
+## Preferred contact route
+
+Some Gobiis can use a preferred contact route when they need to reach you. Set this only when the route is reliable and appropriate for the Gobii's role.
+
+Examples:
+
+- Use email for long reports or attachments.
+- Use SMS for urgent short updates.
+- Use chat for interactive steering and approvals.
+
+## Safe channel setup
+
+- Start with web chat until the Gobii is behaving correctly.
+- Add email or SMS when communication is part of the job.
+- Use contact approvals before external outreach.
+- Keep outbound communication explicit in the charter.
+- Review app-channel behavior before enabling ongoing triggers.
+
+## Related guides
+
+- [Email And SMS](/using-gobii/email-and-sms)
+- [Approvals And Requests](/using-gobii/approvals-and-requests)
+- [Contact Access And Allowlists](/admin-and-teams/contact-access-and-allowlists)

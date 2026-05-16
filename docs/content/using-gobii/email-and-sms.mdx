@@ -1,0 +1,48 @@
+---
+title: "Email And SMS"
+description: "Configure email and SMS communication for a Gobii, including custom email settings and safe channel boundaries."
+sidebar_label: "Email And SMS"
+---
+
+Email and SMS let a Gobii communicate outside the web chat timeline. Use them when the Gobii's job requires inbound messages, outbound updates, or attachment exchange through those channels.
+
+## Email
+
+Gobii can use default email delivery where available. If you want a Gobii to use your own mailbox, configure custom SMTP and IMAP.
+
+Open email settings:
+
+- Gobii Cloud: `https://gobii.ai/console/agents/<agent_id>/email/`
+- Self-hosted: `http://localhost:8000/console/agents/<agent_id>/email/`
+
+Custom email setup can include:
+
+- SMTP for outbound mail.
+- IMAP for inbound mail.
+- OAuth setup where supported, with guided Gmail-oriented setup in current UI.
+- Manual SMTP/IMAP configuration for other providers.
+
+For manual setup, use provider-specific host, port, security, auth mode, username, and password or app password. Gobii tests connectivity when saving settings.
+
+## SMS and MMS
+
+SMS can be enabled where your plan, region, and deployment support it. Use SMS for concise updates, urgent prompts, or lightweight attachments through MMS.
+
+Before enabling SMS:
+
+- Confirm the phone number is verified where required.
+- Keep messages short and action-oriented.
+- Avoid sending sensitive data by SMS unless your organization has approved that workflow.
+- Use contact permissions so only expected people can communicate with the Gobii.
+
+## Inbound attachments
+
+Email attachments and MMS files can become files available to the Gobii. Use [Files And Workspaces](/using-gobii/files-and-workspaces) to manage reusable files and remove stale ones.
+
+## Security and deliverability
+
+- Do not paste mailbox passwords into chat.
+- Use app passwords or OAuth where required by the provider.
+- Keep allowed contacts narrow.
+- Ask before external sends when the Gobii is new or the content is sensitive.
+- For self-hosted deployments, ensure email workers, provider webhooks, and IMAP services are configured before relying on low-latency inbound mail.

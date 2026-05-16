@@ -1,0 +1,71 @@
+---
+title: "MCP Servers"
+description: "Connect Model Context Protocol servers to Gobiis so they can use external tools, services, and data sources."
+sidebar_label: "MCP Servers"
+---
+
+Model Context Protocol (MCP) servers let a Gobii access external tools and data sources beyond its default tool set.
+
+There are two different Gobii/MCP ideas:
+
+- **MCP servers connected to a Gobii**: external tools that a Gobii can use.
+- **Gobii Remote MCP**: Gobii's own MCP endpoint for external AI clients. Developers should see [Remote MCP](/developers/mcp-server).
+
+This page covers MCP servers connected to Gobiis.
+
+## Where to manage MCP servers
+
+Manage MCP servers in Gobii:
+
+- Gobii Cloud: `https://gobii.ai/console/advanced/mcp-servers/`
+- Self-hosted: `http://localhost:8000/console/advanced/mcp-servers/`
+
+From there you can add a server, configure auth, test it, and assign it to Gobiis.
+
+## Server scopes
+
+MCP servers are scoped so access can be managed:
+
+- **Platform**: managed by deployment operators and available broadly.
+- **Organization**: shared across an organization and assigned to organization-owned Gobiis.
+- **Personal**: owned by a user and enabled for personal Gobiis.
+
+The exact scopes available depend on your role and deployment.
+
+## Connection types
+
+Depending on deployment, MCP servers can use:
+
+- **Remote server URL** for hosted MCP services.
+- **Local command** in self-hosted environments where local command execution is available.
+
+## Authentication
+
+MCP server auth can involve headers, environment-style configuration, or OAuth depending on the server.
+
+If OAuth is required:
+
+1. Create or edit the MCP server.
+2. Save it.
+3. Start the OAuth connection.
+4. Complete the provider flow.
+5. Confirm the server shows as connected.
+
+Use secrets and environment variable names for sensitive values. Do not paste credentials into chat.
+
+## Assign a server to a Gobii
+
+You can usually assign MCP servers from either:
+
+- The Gobii's settings or integrations view.
+- The MCP server management page.
+
+Enable only the MCP servers the Gobii needs. If the Gobii starts choosing the wrong tool, remove unused servers or clarify its charter.
+
+## Troubleshooting
+
+- **OAuth connection required**: complete or refresh the OAuth flow.
+- **Tool missing**: confirm the server is assigned to the Gobii and available in the current context.
+- **Auth error**: verify configured headers, secrets, or OAuth status without exposing secret values.
+- **Unexpected behavior**: narrow the Gobii's charter or disable broad tools.
+- **Self-hosted local command issue**: confirm the service process and command environment are available to the worker that runs tools.

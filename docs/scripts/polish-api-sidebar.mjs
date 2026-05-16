@@ -3,6 +3,7 @@ import YAML from 'yaml';
 
 const specPath = new URL('../static/openapi/GobiiAPI.yaml', import.meta.url);
 const sidebarPath = new URL('../content/api-reference/sidebar.js', import.meta.url);
+const sidebarTsPath = new URL('../content/api-reference/sidebar.ts', import.meta.url);
 const apiDocsDir = new URL('../content/api-reference/', import.meta.url);
 
 function kebabOperationId(operationId) {
@@ -31,6 +32,20 @@ function removeDuplicateSummary(source) {
     new RegExp(`(</MethodEndpoint>\\n+)${escapedTitle}\\n+(<Heading\\n  id=\\{"request"\\})`),
     '$1$2'
   );
+}
+
+function displayTagLabel(label) {
+  if (label === 'browser-use Tasks API') {
+    return 'Legacy Browser Tasks API';
+  }
+  return label;
+}
+
+function normalizeGeneratedLanguage(source) {
+  return source
+    .replace(/AI browser agents, browser-use automation tasks/g, 'persistent agents, legacy browser-use automation tasks')
+    .replace(/AI browser agents and browser-use automation tasks/g, 'persistent agents and legacy browser-use automation tasks')
+    .replace(/AI browser agents/g, 'persistent agents');
 }
 
 const spec = YAML.parse(fs.readFileSync(specPath, 'utf8'));
@@ -69,7 +84,7 @@ for (const [path, pathItem] of Object.entries(spec.paths ?? {})) {
 
 const categoryItems = [...groups].map(([label, items]) => ({
   type: 'category',
-  label,
+  label: displayTagLabel(label),
   link: {
     type: 'doc',
     id: `api-reference/${slugify(label)}`,
@@ -96,13 +111,19 @@ const sidebar = `module.exports = ${JSON.stringify(
 
 fs.writeFileSync(sidebarPath, sidebar);
 
+if (fs.existsSync(sidebarTsPath)) {
+  const sidebarTs = fs.readFileSync(sidebarTsPath, 'utf8')
+    .replace(/label: "browser-use Tasks API"/g, 'label: "Legacy Browser Tasks API"');
+  fs.writeFileSync(sidebarTsPath, sidebarTs);
+}
+
 for (const [id, label] of labelsById) {
   const docPath = new URL(`${id}.api.mdx`, apiDocsDir);
   if (!fs.existsSync(docPath)) {
     continue;
   }
 
-  let doc = fs.readFileSync(docPath, 'utf8');
+  let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
   doc = doc.replace(/^sidebar_label: ".*"$/m, `sidebar_label: "${label.replace(/"/g, '\\"')}"`);
   const description = descriptionsById.get(id);
   if (description) {
@@ -115,7 +136,7 @@ for (const [id, label] of labelsById) {
 if (apiInfoDescription) {
   const docPath = new URL('gobii-api.info.mdx', apiDocsDir);
   if (fs.existsSync(docPath)) {
-    let doc = fs.readFileSync(docPath, 'utf8');
+    let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
     doc = doc.replace(/^description: ".*"$/m, `description: "${apiInfoDescription.replace(/"/g, '\\"')}"`);
     fs.writeFileSync(docPath, doc);
   }
@@ -127,7 +148,11 @@ for (const [slug, description] of tagDescriptionsBySlug) {
     continue;
   }
 
-  let doc = fs.readFileSync(docPath, 'utf8');
+  let doc = normalizeGeneratedLanguage(fs.readFileSync(docPath, 'utf8'));
+  const currentTitle = doc.match(/^title: "([^"]+)"$/m)?.[1];
+  if (currentTitle) {
+    doc = doc.replace(/^title: ".*"$/m, `title: "${displayTagLabel(currentTitle).replace(/"/g, '\\"')}"`);
+  }
   if (/^description: /m.test(doc)) {
     doc = doc.replace(/^description: ".*"$/m, `description: "${description.replace(/"/g, '\\"')}"`);
   } else {

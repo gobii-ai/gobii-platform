@@ -1,0 +1,40 @@
+---
+title: "Organization MCP Servers"
+description: "Configure organization-scoped MCP servers and assign them to the Gobiis that need those tools."
+sidebar_label: "Organization MCP Servers"
+---
+
+Organization MCP servers let a team expose shared tools or data sources to organization-owned Gobiis.
+
+Open MCP server management at `https://gobii.ai/console/advanced/mcp-servers/`.
+
+## When to use organization scope
+
+Use organization scope when:
+
+- Multiple team-owned Gobiis need the same tool server.
+- The server uses organization-managed credentials.
+- Admins should control assignments.
+- A personal MCP server would create continuity risk.
+
+Use personal scope for experiments or user-specific tools.
+
+## Setup flow
+
+1. Create the MCP server.
+2. Choose the connection type supported by your deployment.
+3. Configure authentication or OAuth.
+4. Test the server.
+5. Assign it only to the Gobiis that need it.
+6. Send a controlled test prompt and inspect timeline tool activity.
+
+## Assignment policy
+
+Avoid assigning broad tool servers to every Gobii by default. Assign based on role:
+
+- Research Gobiis may need search or data tools.
+- Operations Gobiis may need internal systems.
+- Customer-facing Gobiis may need stricter write approvals.
+- Demo Gobiis should usually have limited tools.
+
+For user-level MCP concepts, see [MCP Servers](/using-gobii/mcp-servers).

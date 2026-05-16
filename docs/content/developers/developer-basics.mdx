@@ -1,26 +1,26 @@
 ---
 title: "Developer Basics"
-sidebarTitle: "Basics"
-description: "Learn Gobii API fundamentals: authentication, base URLs, agents, browser-use tasks, pagination, sync requests, and webhooks."
+sidebar_label: "Developer Basics"
+description: "Learn Gobii API fundamentals: authentication, base URLs, persistent agents, Remote MCP, webhooks, pagination, and legacy browser tasks."
 ---
 
 ## What the API does
 
-Gobii is the easiest way to run production `browser-use` instances in the cloud. Gobii exposes a REST API for managing always-on `browser-use` agents and submitting browser automation tasks to them, giving teams a managed way to trigger, monitor, and retrieve results from their agents programmatically. The core resources are **agents** (always-on browser-use workers) and **tasks** (a single request for browser-use).
+Gobii exposes APIs for managing persistent AI agents, messaging them, inspecting their timelines, connecting external AI clients through Remote MCP, and receiving event callbacks. For end users those persistent workers are called Gobiis; in API docs they are **agents**.
 
-The Gobii API is the easiest way to have a production ready, `browser-use` environment in the cloud - whether on our infrastructure at [gobii.ai](https://gobii.ai), or your own. Gobii is entirely open source.
+The primary developer resource is the persistent **agent**: a long-lived Gobii with a charter, status, timeline, schedule, contact endpoints, files, and tool configuration. Gobii also supports a legacy browser-use task API for one-off browser automation jobs.
 
 ## Key Concepts
 
-For developers, you may spawn always-on agents, or individual ad-hoc tasks. Both use the same infrastructure and have access to the same tools. Agents are better suited for repeating or evolving tasks to run until cancelled. Ad-hoc tasks are recommended for singular requests that will not repeat.
+Choose the integration model based on the product behavior you need:
 
-|                            | Agents | Tasks    |
-| -------------------------- | ------ | -------- |
-| **Always-On**                  | ✅      | ❌        |
-| **browser-use**                | ✅      | ✅        |
-| **Tools**                      | ✅      | ✅        |
-| **MCP**                        | ✅      | ✅        |
-| **Consistent Browser Profile** | ✅      | Optional |
+| Need | Use |
+| --- | --- |
+| Long-lived AI employee with state, timeline, files, channels, and settings | [Agent API](/developers/developer-agents) |
+| External AI client should manage or message Gobii agents | [Remote MCP](/developers/mcp-server) |
+| Callback when asynchronous work or events complete | [Webhooks And Events](/developers/webhooks) |
+| Machine-readable JSON output | [Structured Data](/developers/structured-data) |
+| One-off browser automation task | [Legacy Browser Tasks](/developers/developer-tasks) |
 
 ## Base URLs
 
@@ -62,10 +62,13 @@ curl -X GET \
   - `GET /agents/{agentId}/` retrieves a single agent.
   - `PUT/PATCH /agents/{agentId}/` updates agent settings (idempotent).
   - `DELETE /agents/{agentId}/` deletes an agent.
-- **Tasks (`/tasks/browser-use/` or `/agents/browser-use/{agentId}/tasks/`):**
+- **Legacy browser tasks (`/tasks/browser-use/` or `/agents/browser-use/{agentId}/tasks/`):**
   - `POST` submits a task to an agent; use `wait` for sync responses or poll `/result/`.
   - `GET` lists tasks (paginated) or retrieves a task.
   - `PUT/PATCH` updates mutable fields like metadata; `DELETE` cancels/removes.
+- **Remote MCP (`/mcp/`):**
+  - `POST` JSON-RPC requests using `X-Api-Key` or `Authorization: Bearer`.
+  - Supports initialize, ping, tools/list, and tools/call.
 - **Pagination:** Default page size is 10 with a `page_size` query param (max 100).
 
 ## Quickstart: health check
@@ -87,4 +90,4 @@ Sample response:
 }
 ```
 
-If you see `pong: true`, your key is valid and the API is reachable. Next, try `POST /tasks/` to run a browser automation task.
+If you see `pong: true`, your key is valid and the API is reachable. Next, create or inspect a persistent agent with the [Agent API](/developers/developer-agents), or connect an MCP client with [Remote MCP](/developers/mcp-server).

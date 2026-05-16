@@ -1,10 +1,10 @@
 ---
 title: "Self-Hosted Deployment"
-sidebarTitle: "Quickstart"
-description: "Run Gobii on your own infrastructure with Docker Compose"
+sidebar_label: "Deployment Quickstart"
+description: "Run Gobii on your own infrastructure with Docker Compose and plan optional workers, channels, tools, MCP, and integrations."
 ---
 
-Run Gobii locally or in your own infrastructure with Docker Compose. This guide covers the initial setup, first-run wizard, optional services, and Bright Data integration.
+Run Gobii locally or in your own infrastructure with Docker Compose. This guide covers initial setup, the first-run wizard, optional services, and key integration prerequisites.
 
 ## Installation and Set-up
 
@@ -27,15 +27,17 @@ When the stack is up, open `http://localhost:8000`.
 ### First-run wizard
 
 Complete the setup flow in the browser:
+
 - Create the first admin account.
 - Pick an LLM provider and model, then add the API key.
-- Sign in and create your first agent.
+- Sign in and create your first Gobii.
 
 You can update providers and models later in **Console → LLM Config**.
 
 ## Optional services
 
 Gobii ships additional Compose profiles for self-hosted deployments:
+
 - `beat`: scheduled jobs and background dispatchers.
 - `email`: IMAP IDLE watchers for low-latency email triggers.
 - `obs`: Flower (Celery observability UI).
@@ -46,7 +48,20 @@ Example:
 docker compose --profile beat --profile email up --build
 ```
 
-For inbound email configuration, see `advanced-usage/custom-email-settings`.
+For inbound email configuration, see [Email And SMS](/using-gobii/email-and-sms).
+
+## Operational capabilities to plan
+
+Depending on which Gobii features you enable, your deployment may also need:
+
+- Provider webhooks for inbound email, SMS, status, opens, and clicks.
+- Public callback URLs for OAuth and MCP server authorization.
+- File storage suitable for uploaded and generated files.
+- Sandbox compute for custom tools if that feature is enabled.
+- Pipedream configuration for connected apps and app-trigger webhooks.
+- Worker capacity for browser work, tools, scheduled jobs, and background processing.
+- LLM routing configuration for persistent agents and browser tasks.
+- Eval-local or staging settings for quality checks before prompt, routing, or system-skill changes.
 
 ## Integrations
 
@@ -61,4 +76,4 @@ Bright Data is preconfigured as a platform MCP server in self-hosted deployments
 2. Restart the stack so the containers pick up the variable.
 3. In the Console, open **MCP Servers** and enable Bright Data tools for the agents that should use them.
 
-See `advanced-usage/mcp-servers` for more on MCP server management.
+See [MCP Servers](/using-gobii/mcp-servers) for user/admin MCP server management and [Remote MCP](/developers/mcp-server) for Gobii's developer MCP endpoint.

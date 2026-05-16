@@ -1,61 +1,78 @@
 ---
-title: "Webhooks"
-sidebarTitle: "Webhooks"
-description: "Use Gobii webhooks to receive asynchronous browser-use task results, completion events, and cancellation events."
+title: "Webhooks And Events"
+sidebar_label: "Webhooks And Events"
+description: "Understand Gobii webhook surfaces: legacy task callbacks, inbound agent webhooks, provider webhooks, Pipedream triggers, and outbound tool webhooks."
 ---
 
-### Task webhooks
+Gobii has several webhook and event surfaces. They are related, but they serve different purposes.
 
-Add an optional `webhook` URL when creating a browser-use task to get a callback when the task finishes or is canceled.
+## Event taxonomy
 
+| Surface | Direction | Audience | Purpose |
+| --- | --- | --- | --- |
+| Legacy browser task webhook | Gobii to your URL | API developers | Receive completion, failure, or cancellation for a browser-use task. |
+| Inbound Gobii webhook | Your system to Gobii | Developers and operators | Trigger or message a specific Gobii from an external system. |
+| Provider webhooks | Provider to Gobii | Operators | Receive email, SMS, status, open/click, or provider events. |
+| Pipedream trigger webhook | Pipedream to Gobii | Product integrations | Deliver subscribed app-trigger events. |
+| Outbound webhook tool | Gobii to your URL | Advanced users/developers | Let a Gobii send a webhook as part of its work. |
 
-**Note:** URLs must be `http` or `https`. Include your own token (e.g., query param or header) if you need verification.
+Only depend on the surfaces documented for your use case. Provider and console implementation routes are not general-purpose public APIs.
 
+## Legacy browser task callbacks
 
-#### Where to send the request
-- Agent-scoped: `POST /api/v1/agents/browser-use/{agentId}/tasks/`
-- User-level: `POST /api/v1/tasks/browser-use/`
+Add an optional `webhook` URL when creating a browser-use task to receive a callback when the task finishes or is canceled.
+
+URLs must be `http` or `https`. Include your own token, signature scheme, or secret path segment if your receiver needs verification.
+
+Agent-scoped task route:
 
 ```bash
-curl -X POST https://api.gobii.com/api/v1/agents/browser-use/{agentId}/tasks/ \
-  -H "Authorization: Bearer $API_KEY" \
+curl -X POST https://gobii.ai/api/v1/agents/browser-use/{agentId}/tasks/ \
+  -H "X-Api-Key: $GOBII_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
         "prompt": {"detail": "Find pricing"},
-        "webhook": "https://example.com/hooks/gobii?token=abc123"
+        "webhook": "https://example.com/hooks/gobii?token=example"
       }'
 ```
 
-Responses include the stored `webhook` plus delivery metadata:
-```json
-{
-  "id": "task-uuid",
-  "status": "pending",
-  "webhook": "https://example.com/hooks/gobii?token=abc123",
-  "webhook_last_called_at": null,
-  "webhook_last_status_code": null,
-  "webhook_last_error": null
-}
+User-level task route:
+
+```bash
+curl -X POST https://gobii.ai/api/v1/tasks/browser-use/ \
+  -H "X-Api-Key: $GOBII_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "prompt": {"detail": "Find pricing"},
+        "webhook": "https://example.com/hooks/gobii?token=example"
+      }'
 ```
 
-#### Delivery semantics
-- Fired once when status becomes `completed`, `failed`, or `cancelled`.
-- POST JSON with headers `Content-Type: application/json` and `User-Agent: Gobii-AgentWebhook/1.0`.
-- 10s timeout; no retries. Non-2xx responses are recorded but not retried.
-- Observability: the `webhook_last_*` fields on the task reflect the last attempt.
+Response fields include the stored `webhook` plus delivery metadata such as `webhook_last_called_at`, `webhook_last_status_code`, and `webhook_last_error`.
 
-#### Payload examples
+### Delivery semantics
+
+- Fired once when status becomes `completed`, `failed`, or `cancelled`.
+- POSTs JSON with `Content-Type: application/json` and `User-Agent: Gobii-AgentWebhook/1.0`.
+- Uses a 10 second timeout.
+- Does not retry non-2xx responses in the current task callback path.
+- Records the last delivery attempt on the task.
+
+### Payload examples
+
 Success:
+
 ```json
 {
   "id": "task-uuid",
   "status": "completed",
   "agent_id": "agent-uuid",
-  "result": { "summary": "Found pricing." }
+  "result": {"summary": "Found pricing."}
 }
 ```
 
 Failure:
+
 ```json
 {
   "id": "task-uuid",
@@ -67,6 +84,7 @@ Failure:
 ```
 
 Cancelled:
+
 ```json
 {
   "id": "task-uuid",
@@ -76,3 +94,31 @@ Cancelled:
   "message": "Task has been cancelled."
 }
 ```
+
+## Inbound Gobii webhooks
+
+Inbound Gobii webhooks let an external system send an event into a specific Gobii. Use this when your own system should trigger a Gobii without going through a human chat channel.
+
+Keep payloads concise and include enough context for the Gobii to act safely. If the event can cause external side effects, design the Gobii's charter so it asks for approval before acting.
+
+## Provider webhooks
+
+Gobii uses provider webhooks for email, SMS, status, open/click, and related delivery events. These routes are for provider integration and deployment configuration, not arbitrary application callbacks.
+
+Self-hosted operators should configure provider routes only with the expected provider secrets and network exposure.
+
+## Pipedream trigger webhooks
+
+Pipedream trigger webhooks deliver events for connected app subscriptions. App-trigger support depends on product configuration and the apps enabled in your workspace.
+
+For user setup, see [Connect Apps](/using-gobii/connect-apps).
+
+## Outbound webhook tool
+
+Where enabled, a Gobii can call an outbound webhook as a tool. Treat this like any other external write:
+
+- Use an endpoint you control.
+- Validate the incoming request.
+- Keep payloads scoped.
+- Require approval before sensitive external actions.
+- Log received events for debugging.

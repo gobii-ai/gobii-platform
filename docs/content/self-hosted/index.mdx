@@ -1,0 +1,28 @@
+---
+title: "Self-Hosting"
+description: "Run Gobii on your own infrastructure and plan required services for workers, channels, files, tools, MCP, and integrations."
+sidebar_label: "Overview"
+slug: /self-hosted
+---
+
+Self-hosting is for operators who want to run Gobii on their own infrastructure.
+
+Start with [Self-Hosted Deployment](/self-hosted/overview).
+
+## Plan these capabilities
+
+The base web app is only part of a production-quality deployment. Decide which capabilities you need:
+
+- Web and worker processes.
+- Scheduled jobs and dispatchers.
+- LLM provider configuration.
+- Browser automation and sandbox compute where used.
+- File storage.
+- Email and SMS provider webhooks.
+- IMAP IDLE or polling for inbound email.
+- MCP server configuration and OAuth callback routes.
+- Pipedream app connections and trigger webhooks if enabled.
+- Billing, usage, and plan controls if running a commercial deployment.
+- Evals and quality tooling for release validation.
+
+Use conservative defaults and enable optional services only when the workflows need them.

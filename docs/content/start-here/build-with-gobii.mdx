@@ -1,0 +1,39 @@
+---
+title: "Build With Gobii"
+description: "Choose the right developer surface: Agent API, Remote MCP, webhooks, structured data, or legacy browser tasks."
+sidebar_label: "Build With Gobii"
+---
+
+Gobii exposes several developer surfaces. Pick the one that matches how your product or workflow should interact with Gobiis.
+
+## Choose a surface
+
+| Need | Use |
+| --- | --- |
+| Create, update, activate, message, or inspect persistent Gobiis from your application | [Agent API](/developers/developer-agents) |
+| Let an external AI client create, manage, message, wait on, and attach files to Gobii agents | [Remote MCP](/developers/mcp-server) |
+| Receive asynchronous task completion or event notifications | [Webhooks And Events](/developers/webhooks) |
+| Request machine-readable JSON output | [Structured Data](/developers/structured-data) |
+| Run one-off browser-use jobs through the older technical task API | [Legacy Browser Tasks](/developers/developer-tasks) |
+| Run Gobii in your own environment | [Self-Hosting](/self-hosted) |
+
+## Recommended starting path
+
+1. Read [Developer Basics](/developers/developer-basics) for base URLs, authentication, environments, and conventions.
+2. Create a persistent agent through the [Agent API](/developers/developer-agents).
+3. Send messages and inspect timelines instead of creating separate task abstractions when you want long-lived context.
+4. Add [Webhooks And Events](/developers/webhooks) when your system needs callbacks.
+5. Use [Remote MCP](/developers/mcp-server) when an MCP-capable client should operate Gobii directly.
+
+## Stable public APIs versus product internals
+
+Gobii has many authenticated console routes for the web app. Those routes are implementation APIs for the product UI unless the docs explicitly describe them as public developer surfaces.
+
+For production integrations, prefer:
+
+- `/api/v1/agents/`
+- `/api/v1/mcp/`
+- documented browser-use task routes when you need the legacy task API
+- documented webhook surfaces
+
+If you need a console-only capability exposed as a stable API, treat that as a product/API request rather than depending on private UI routes.

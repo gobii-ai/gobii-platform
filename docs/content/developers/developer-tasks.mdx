@@ -1,18 +1,18 @@
 ---
-title: "Tasks (for Developers)"
-sidebarTitle: "browser-use Tasks"
-description: "Create, monitor, cancel, and retrieve results from browser-use tasks through the Gobii API."
+title: "Legacy Browser Tasks"
+sidebar_label: "Legacy Browser Tasks"
+description: "Create, monitor, cancel, and retrieve results from ad hoc browser-use tasks through the Gobii API."
 ---
 
-Developers can create single, ad-hoc tasks that do _not_ run continuously. These are useful for a singular action to be performed by an agent, without the overhead of creating and destructing an agent.
+Developers can create single, ad hoc browser-use tasks that do _not_ run continuously. Use this API when you need a one-off browser automation job rather than a persistent Gobii/agent with a timeline.
 
-For example, "Get the current weather in Washington, DC" would be an excellent use case for a Task. On the other hand, "Send me a weather report for the next day in Washington, DC, at 7pm" would be an agent use case.
+For example, "Get the current weather in Washington, DC" can be a browser task. "Send me a weather report every weekday at 7pm" should be a persistent agent.
 
-### browser-use Instances
+### Browser-use instances
 
 When working with Tasks, the developer may elect to create a browser-use profile that is preserved to provide a consistent browser environment between tasks. If this is not required, a user may simply request a task be performed without reference to a browser-use profile. See examples below.
 
-### Asynchronous vs Synchronous
+### Asynchronous vs synchronous
 
 **NOTE:** We _strongly_ encourage issuing requests as asynchronous requests.
 
