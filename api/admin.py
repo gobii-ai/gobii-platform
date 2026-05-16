@@ -1728,6 +1728,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     autocomplete_fields = ("managed_by_solution_partner",)
     list_display = ("name", "slug", "managed_by_solution_partner", "is_active", "created_at")
     list_filter = ("is_active", "plan", "managed_by_solution_partner")
+    inlines = (OrganizationMembershipInline, OrganizationInviteInline)
 
 
 class SolutionPartnerMemberInline(admin.TabularInline):
@@ -1755,7 +1756,6 @@ class SolutionPartnerMemberAdmin(admin.ModelAdmin):
     list_filter = ("is_active", "role", "solution_partner")
     autocomplete_fields = ("solution_partner", "user")
     readonly_fields = ("id", "created_at", "updated_at")
-    inlines = (OrganizationMembershipInline, OrganizationInviteInline)
 
 
 @admin.register(OrganizationMembership)
