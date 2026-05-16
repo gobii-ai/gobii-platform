@@ -11,6 +11,13 @@ from api.agent.events import AgentEventType
 class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
     slug = "monitor_pollution"
     description = "Instruct agent to monitor pollution in DC. Verifies charter update, schedule setting, web browsing, and correct reporting."
+    tier = "extended"
+    category = "monitoring"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("monitoring", "schedule", "browser", "llm_judge")
     tasks = [
         ScenarioTask(name="instruct_agent", assertion_type="manual"),
         ScenarioTask(name="verify_charter_update", assertion_type="llm_judge"),

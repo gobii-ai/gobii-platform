@@ -1,6 +1,7 @@
 import os
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
@@ -8,6 +9,7 @@ from django.test import TestCase, override_settings, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.local_setup import (
+    ensure_eval_local_compat_columns,
     ensure_eval_local_routing_profiles,
     ensure_openrouter_deepseek_v4_flash_profile,
 )
@@ -652,6 +654,87 @@ class MetaGobiiEvalScenarioTests(TestCase):
 
 @tag("batch_eval_fingerprint")
 class MetaGobiiLocalEvalSetupTests(TestCase):
+    def test_fake_redis_supports_redlock_scripts_for_local_eval_processing(self):
+        from pottery import Redlock
+
+        from config.redis_client import _FakeRedis
+
+        redis_client = _FakeRedis()
+        lock = Redlock(
+            key="agent-event-processing:test-agent",
+            masters={redis_client},
+            auto_release_time=5,
+        )
+
+        self.assertTrue(lock.acquire(blocking=False))
+        self.assertGreater(lock.locked(), 0)
+        lock.extend()
+        self.assertGreater(lock.locked(), 0)
+        lock.release()
+        self.assertEqual(lock.locked(), 0)
+
+    def test_fake_redis_supports_agent_event_streams_for_local_eval_processing(self):
+        from config.redis_client import _FakeRedis
+
+        redis_client = _FakeRedis()
+        stream_key = "agent:events:test-agent:stream"
+
+        self.assertEqual(redis_client.publish("agent:events:test-agent", "{}"), 0)
+        first_id = redis_client.xadd(stream_key, {"data": "{\"type\":\"processing_complete\"}"})
+
+        messages = redis_client.xread({stream_key: "0-0"}, count=50, block=1)
+        self.assertEqual(messages, [(stream_key, [(first_id, {"data": "{\"type\":\"processing_complete\"}"})])])
+        self.assertEqual(redis_client.xread({stream_key: first_id}, count=50, block=1), [])
+
+    def test_local_eval_schema_compat_adds_missing_debug_artifacts_column(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_evalruntask"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        self.assertEqual(added, 1)
+        self.assertEqual(schema_editor.added_fields[0][1].column, "debug_artifacts")
+        self.assertIn("api_evalruntask.debug_artifacts", stdout.getvalue())
+
     def test_local_openrouter_profile_seed_uses_env_var_name_without_secret_output(self):
         stdout = StringIO()
         fake_secret = "sk-test-secret-value"
@@ -735,7 +818,20 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertIn("Available eval suites", output)
         self.assertIn("meta_gobii", output)
         self.assertIn("meta_gobii_positive_team_creation", output)
+        self.assertIn("tier=core", output)
+        self.assertIn("category=meta_gobii", output)
         self.assertIn("openrouter-deepseek-v4-flash", output)
+
+    def test_run_evals_list_applies_metadata_filters(self):
+        stdout = StringIO()
+
+        call_command("run_evals", "--list", "--tier", "smoke", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("Scenario filters: tier=smoke", output)
+        self.assertIn("echo_response", output)
+        self.assertIn("weather_lookup", output)
+        self.assertNotIn("meta_gobii_positive_team_creation tier=core", output)
 
     def test_run_evals_lists_seeded_routing_profiles(self):
         stdout = StringIO()
@@ -798,3 +894,59 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             .exclude(status=EvalRunTask.Status.PASSED)
             .exists()
         )
+
+    def test_run_evals_filters_scenarios_by_tag(self):
+        stdout = StringIO()
+
+        call_command(
+            "run_evals",
+            "--suite",
+            "meta_gobii",
+            "--tag",
+            "contact_safety",
+            "--sync",
+            "--n-runs",
+            "1",
+            "--simulated",
+            stdout=stdout,
+        )
+
+        suite_run = EvalSuiteRun.objects.latest("created_at")
+        self.assertEqual(suite_run.suite_slug, "meta_gobii")
+        scenario_slugs = set(suite_run.runs.values_list("scenario_slug", flat=True))
+        self.assertEqual(
+            scenario_slugs,
+            {
+                "meta_gobii_contact_approve_internal",
+                "meta_gobii_no_schedule_approve_contact_only",
+            },
+        )
+        self.assertIn("Applying scenario filters: tag=contact_safety", stdout.getvalue())
+
+    def test_run_evals_repeated_routing_profiles_create_matrix_suite_runs(self):
+        stdout = StringIO()
+
+        ensure_eval_local_routing_profiles()
+        call_command(
+            "run_evals",
+            "--scenario",
+            "meta_gobii_negative_content_task",
+            "--sync",
+            "--n-runs",
+            "1",
+            "--simulated",
+            "--routing-profile",
+            "openrouter-deepseek-v4-flash",
+            "--routing-profile",
+            "openrouter-qwen",
+            stdout=stdout,
+        )
+
+        suite_runs = list(EvalSuiteRun.objects.order_by("created_at"))
+        self.assertEqual(len(suite_runs), 2)
+        self.assertEqual({suite.launch_config["matrix_profile"] for suite in suite_runs}, {
+            "openrouter-deepseek-v4-flash",
+            "openrouter-qwen",
+        })
+        self.assertTrue(all(suite.llm_routing_profile_id for suite in suite_runs))
+        self.assertIn("routing-profile matrix with 2 profiles", stdout.getvalue())

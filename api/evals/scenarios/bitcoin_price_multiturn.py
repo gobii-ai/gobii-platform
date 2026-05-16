@@ -1,4 +1,3 @@
-import json
 from urllib.parse import parse_qs, urlparse
 
 from api.evals.base import EvalScenario, ScenarioTask
@@ -11,6 +10,13 @@ from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMess
 class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
     slug = "bitcoin_price_multiturn"
     description = "Chatty intro followed by Bitcoin price request. Checks for efficient API usage over browser."
+    tier = "core"
+    category = "tool_choice"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("tool_choice", "multi_turn", "web_research", "http_request")
     tasks = [
         ScenarioTask(name="inject_hello", assertion_type="manual"),
         ScenarioTask(name="verify_hello_response", assertion_type="manual"),

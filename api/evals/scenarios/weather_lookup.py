@@ -10,6 +10,13 @@ from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, Per
 class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     slug = "weather_lookup"
     description = "Ask for weather and expect a charter update and a direct HTTP API request to a free weather service."
+    tier = "smoke"
+    category = "tool_choice"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("smoke", "tool_choice", "weather", "http_request", "llm_judge")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_charter_update", assertion_type="manual"),

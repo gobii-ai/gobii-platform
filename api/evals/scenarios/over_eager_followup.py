@@ -8,6 +8,13 @@ from api.models import EvalRunTask, PersistentAgentMessage
 class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
     slug = "over_eager_followup"
     description = "Checks that an agent does not send multiple or pushy follow-ups after a clear 'stand by' message."
+    tier = "core"
+    category = "conversation"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("conversation", "followup", "response_quality", "llm_judge")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_outbound_count", assertion_type="manual"),

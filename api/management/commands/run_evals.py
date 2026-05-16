@@ -8,6 +8,13 @@ from django.core.management.base import BaseCommand, CommandError
 from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
+from api.evals.catalog import (
+    ScenarioCatalogFilters,
+    filter_scenario_slugs,
+    get_scenario_metadata,
+    normalized_filter_values,
+    scenario_to_suite_slugs,
+)
 from api.evals.local_setup import ensure_eval_local_setup, get_eval_local_routing_profile_seeds
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
@@ -106,11 +113,66 @@ class Command(BaseCommand):
             "--routing-profile",
             "--llm-routing-profile",
             dest="routing_profile",
+            action="append",
             type=str,
             help=(
-                "LLM routing profile name or UUID to snapshot onto the eval suite run. "
+                "LLM routing profile name or UUID to snapshot onto the eval suite run. Can be repeated or comma-separated "
+                "to run a model/profile matrix. "
                 "config.eval_local_settings seeds OpenRouter, OpenAI, and optional custom LiteLLM profiles."
             ),
+        )
+        parser.add_argument(
+            "--tag",
+            action="append",
+            default=[],
+            help="Only include scenarios with this metadata tag. Can be repeated or comma-separated.",
+        )
+        parser.add_argument(
+            "--tier",
+            action="append",
+            default=[],
+            help="Only include scenarios in this tier, such as smoke, core, extended, or manual.",
+        )
+        parser.add_argument(
+            "--category",
+            action="append",
+            default=[],
+            help="Only include scenarios in this category, such as planning, tool_choice, or meta_gobii.",
+        )
+        parser.add_argument(
+            "--cost-class",
+            action="append",
+            default=[],
+            help="Only include scenarios with this cost class, such as low, medium, or high.",
+        )
+        parser.add_argument(
+            "--runtime-class",
+            action="append",
+            default=[],
+            help="Only include scenarios with this expected runtime class, such as short, medium, or long.",
+        )
+        parser.add_argument(
+            "--owner",
+            action="append",
+            default=[],
+            help="Only include scenarios owned by this team/person.",
+        )
+        parser.add_argument(
+            "--area",
+            action="append",
+            default=[],
+            help="Only include scenarios for this product/agent area.",
+        )
+        parser.add_argument(
+            "--requires-secret",
+            action="append",
+            default=[],
+            help="Only include scenarios that declare this required secret/secret class.",
+        )
+        parser.add_argument(
+            "--simulation-supported",
+            action="store_true",
+            help="Only include scenarios that declare deterministic simulation support.",
         )
         parser.add_argument(
             "--simulated",
@@ -126,29 +188,92 @@ class Command(BaseCommand):
             default=0,
             help="Optional sleep between scenario runs/submissions for local live evals against rate-limited providers.",
         )
+        parser.add_argument(
+            "--max-concurrency",
+            type=int,
+            default=4,
+            help=(
+                "Maximum queued eval runs to keep in flight while polling async workers. "
+                "Use 0 for unlimited. Synchronous/eager mode still executes one run at a time."
+            ),
+        )
+        parser.add_argument(
+            "--max-runs-total",
+            type=int,
+            default=0,
+            help="Safety cap for total EvalRun rows created by this invocation. Use 0 for no cap.",
+        )
+        parser.add_argument(
+            "--max-scenarios",
+            type=int,
+            default=0,
+            help="Safety cap for selected unique scenario slugs after suite/filter expansion. Use 0 for no cap.",
+        )
 
-    def _print_eval_catalog(self) -> None:
+    def _build_catalog_filters(self, options) -> ScenarioCatalogFilters:
+        return ScenarioCatalogFilters(
+            tags=normalized_filter_values(options.get("tag")),
+            tiers=normalized_filter_values(options.get("tier")),
+            categories=normalized_filter_values(options.get("category")),
+            cost_classes=normalized_filter_values(options.get("cost_class")),
+            runtime_classes=normalized_filter_values(options.get("runtime_class")),
+            owners=normalized_filter_values(options.get("owner")),
+            areas=normalized_filter_values(options.get("area")),
+            required_secrets=normalized_filter_values(options.get("requires_secret")),
+            simulation_supported=True if options.get("simulation_supported") else None,
+        )
+
+    def _filter_summary(self, filters: ScenarioCatalogFilters) -> str:
+        parts = []
+        if filters.tags:
+            parts.append(f"tag={','.join(filters.tags)}")
+        if filters.tiers:
+            parts.append(f"tier={','.join(filters.tiers)}")
+        if filters.categories:
+            parts.append(f"category={','.join(filters.categories)}")
+        if filters.cost_classes:
+            parts.append(f"cost={','.join(filters.cost_classes)}")
+        if filters.runtime_classes:
+            parts.append(f"runtime={','.join(filters.runtime_classes)}")
+        if filters.owners:
+            parts.append(f"owner={','.join(filters.owners)}")
+        if filters.areas:
+            parts.append(f"area={','.join(filters.areas)}")
+        if filters.required_secrets:
+            parts.append(f"requires_secret={','.join(filters.required_secrets)}")
+        if filters.simulation_supported is True:
+            parts.append("simulation_supported=true")
+        return "; ".join(parts)
+
+    def _print_eval_catalog(self, filters: ScenarioCatalogFilters | None = None) -> None:
+        filters = filters or ScenarioCatalogFilters()
         suites = SuiteRegistry.list_all()
         scenarios = ScenarioRegistry.list_all()
-        scenario_to_suites: dict[str, list[str]] = {}
-        for suite_slug, suite in suites.items():
-            if suite_slug == "all":
-                continue
-            for scenario_slug in suite.scenario_slugs:
-                scenario_to_suites.setdefault(scenario_slug, []).append(suite_slug)
+        suite_mapping = scenario_to_suite_slugs()
+        filtered_scenario_slugs = set(filter_scenario_slugs(scenarios.keys(), filters))
 
         self.stdout.write("Available eval suites:")
         for suite_slug, suite in sorted(suites.items(), key=lambda item: (item[0] == "all", item[0])):
+            selected_count = len(filter_scenario_slugs(suite.scenario_slugs, filters))
             self.stdout.write(
-                f"  {suite_slug} ({len(suite.scenario_slugs)} scenarios) - {suite.description}"
+                f"  {suite_slug} ({selected_count}/{len(suite.scenario_slugs)} matching scenarios) - {suite.description}"
             )
 
+        filter_text = self._filter_summary(filters)
+        if filter_text:
+            self.stdout.write(f"\nScenario filters: {filter_text}")
         self.stdout.write("\nAvailable eval scenarios:")
         for scenario_slug, scenario in sorted(scenarios.items()):
-            suites_text = ", ".join(sorted(scenario_to_suites.get(scenario_slug, []))) or "ad-hoc only"
-            simulated_text = " simulated" if getattr(scenario, "supports_simulation", False) else ""
+            if scenario_slug not in filtered_scenario_slugs:
+                continue
+            suites_text = ", ".join(suite_mapping.get(scenario_slug, [])) or "ad-hoc only"
+            metadata = get_scenario_metadata(scenario)
+            tags_text = ",".join(metadata.tags[:6]) or "none"
+            simulated_text = " sim" if metadata.supports_simulation else ""
             self.stdout.write(
-                f"  {scenario_slug} [{suites_text}{simulated_text}] - {scenario.description}"
+                f"  {scenario_slug} [{suites_text}] "
+                f"tier={metadata.tier} category={metadata.category} runtime={metadata.expected_runtime} "
+                f"cost={metadata.cost_class}{simulated_text} tags={tags_text} - {scenario.description}"
             )
 
         local_profiles = get_eval_local_routing_profile_seeds()
@@ -186,6 +311,53 @@ class Command(BaseCommand):
             model_text = ", ".join(models) if models else "no persistent endpoints"
             self.stdout.write(f"  {profile.name} - {profile.display_name} ({model_text})")
 
+    def _routing_profile_refs(self, raw_refs) -> list[str]:
+        refs = []
+        for raw_ref in raw_refs or []:
+            for part in str(raw_ref).split(","):
+                part = part.strip()
+                if part:
+                    refs.append(part)
+        return list(dict.fromkeys(refs))
+
+    def _resolve_routing_profile(self, routing_profile_ref: str) -> LLMRoutingProfile:
+        routing_profile_uuid = None
+        try:
+            routing_profile_uuid = uuid.UUID(routing_profile_ref)
+        except ValueError:
+            pass
+
+        source_routing_profile = None
+        if routing_profile_uuid:
+            source_routing_profile = LLMRoutingProfile.objects.filter(
+                id=routing_profile_uuid,
+                is_eval_snapshot=False,
+            ).first()
+
+        if not source_routing_profile:
+            source_routing_profile = LLMRoutingProfile.objects.filter(
+                name=routing_profile_ref,
+                is_eval_snapshot=False,
+            ).first()
+
+        if source_routing_profile:
+            return source_routing_profile
+
+        snapshot_match = False
+        if routing_profile_uuid:
+            snapshot_match = LLMRoutingProfile.objects.filter(
+                id=routing_profile_uuid,
+                is_eval_snapshot=True,
+            ).exists()
+        if not snapshot_match:
+            snapshot_match = LLMRoutingProfile.objects.filter(
+                name=routing_profile_ref,
+                is_eval_snapshot=True,
+            ).exists()
+        if snapshot_match:
+            raise CommandError("Routing profile must reference a non-snapshot profile.")
+        raise CommandError(f"Routing profile '{routing_profile_ref}' not found.")
+
     def handle(self, *args, **options):
         list_catalog = bool(options["list"])
         list_routing_profiles = bool(options["list_routing_profiles"])
@@ -197,14 +369,18 @@ class Command(BaseCommand):
         run_type_option = options["run_type"]
         run_type = EvalSuiteRun.RunType.OFFICIAL if options["official"] else run_type_option
         requested_runs = max(1, min(10, int(options.get("n_runs") or 1)))
-        routing_profile_ref = (options.get("routing_profile") or "").strip()
+        routing_profile_refs = self._routing_profile_refs(options.get("routing_profile"))
+        catalog_filters = self._build_catalog_filters(options)
         simulated = bool(options.get("simulated"))
         delay_between_runs = max(0, float(options.get("delay_between_runs_seconds") or 0))
+        max_concurrency = max(0, int(options.get("max_concurrency") or 0))
+        max_runs_total = max(0, int(options.get("max_runs_total") or 0))
+        max_scenarios = max(0, int(options.get("max_scenarios") or 0))
         base_site_url = (settings.PUBLIC_SITE_URL or "http://localhost:8000").rstrip("/")
         printed_audit_agents: set[str] = set()
 
         if list_catalog:
-            self._print_eval_catalog()
+            self._print_eval_catalog(catalog_filters)
 
         if list_routing_profiles and settings.EVAL_LOCAL_SETUP_ENABLED:
             ensure_eval_local_setup(stdout=self.stdout)
@@ -254,12 +430,30 @@ class Command(BaseCommand):
                 raise CommandError(f"Suite '{slug}' not found.")
             suites.append((suite_obj.slug, list(suite_obj.scenario_slugs), suite_obj.description))
 
+        filtered_suites = []
+        for suite_slug, scenario_slugs, description in suites:
+            filtered_slugs = filter_scenario_slugs(scenario_slugs, catalog_filters)
+            if max_scenarios and len(filtered_slugs) > max_scenarios:
+                raise CommandError(
+                    f"Selected {len(filtered_slugs)} scenarios after filters, which exceeds --max-scenarios={max_scenarios}."
+                )
+            if not filtered_slugs:
+                filter_text = self._filter_summary(catalog_filters) or "none"
+                self.stdout.write(
+                    self.style.WARNING(
+                        f"Suite {suite_slug} has no scenarios after filters ({filter_text}); skipping."
+                    )
+                )
+                continue
+            filtered_suites.append((suite_slug, filtered_slugs, description))
+        suites = filtered_suites
+
         if simulated:
             unsupported = []
             for _suite_slug, scenario_slugs, _description in suites:
                 for slug in scenario_slugs:
                     scenario = ScenarioRegistry.get(slug)
-                    if not scenario or not getattr(scenario, "supports_simulation", False):
+                    if not scenario or not get_scenario_metadata(scenario).supports_simulation:
                         unsupported.append(slug)
             if unsupported:
                 raise CommandError(
@@ -274,45 +468,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("No suites found to run."))
             return
 
-        source_routing_profile = None
-        if routing_profile_ref:
-            routing_profile_uuid = None
-            try:
-                routing_profile_uuid = uuid.UUID(routing_profile_ref)
-            except ValueError:
-                pass
-
-            if routing_profile_uuid:
-                source_routing_profile = LLMRoutingProfile.objects.filter(
-                    id=routing_profile_uuid,
-                    is_eval_snapshot=False,
-                ).first()
-
-            if not source_routing_profile:
-                source_routing_profile = LLMRoutingProfile.objects.filter(
-                    name=routing_profile_ref,
-                    is_eval_snapshot=False,
-                ).first()
-
-            if not source_routing_profile:
-                snapshot_match = False
-                if routing_profile_uuid:
-                    snapshot_match = LLMRoutingProfile.objects.filter(
-                        id=routing_profile_uuid,
-                        is_eval_snapshot=True,
-                    ).exists()
-                if not snapshot_match:
-                    snapshot_match = LLMRoutingProfile.objects.filter(
-                        name=routing_profile_ref,
-                        is_eval_snapshot=True,
-                    ).exists()
-                if snapshot_match:
-                    raise CommandError("Routing profile must reference a non-snapshot profile.")
-                raise CommandError(f"Routing profile '{routing_profile_ref}' not found.")
-
-            self.stdout.write(
-                f"Using routing profile {source_routing_profile.name} ({source_routing_profile.id})"
-            )
+        source_routing_profiles = [
+            self._resolve_routing_profile(ref)
+            for ref in routing_profile_refs
+        ]
+        if source_routing_profiles:
+            if len(source_routing_profiles) > 1:
+                self.stdout.write(
+                    f"Running routing-profile matrix with {len(source_routing_profiles)} profiles."
+                )
+            for source_routing_profile in source_routing_profiles:
+                self.stdout.write(
+                    f"Using routing profile {source_routing_profile.name} ({source_routing_profile.id})"
+                )
         elif not simulated:
             self.stdout.write(
                 self.style.WARNING(
@@ -321,6 +489,21 @@ class Command(BaseCommand):
                     "--routing-profile."
                 )
             )
+        routing_profile_matrix = source_routing_profiles or [None]
+        selected_run_count = sum(len(scenario_slugs) for _suite_slug, scenario_slugs, _description in suites)
+        total_run_count = selected_run_count * requested_runs * len(routing_profile_matrix)
+        if max_runs_total and total_run_count > max_runs_total:
+            raise CommandError(
+                f"This invocation would create {total_run_count} EvalRun rows, exceeding --max-runs-total={max_runs_total}."
+            )
+
+        filter_text = self._filter_summary(catalog_filters)
+        if filter_text:
+            self.stdout.write(f"Applying scenario filters: {filter_text}")
+        self.stdout.write(
+            f"Selected {selected_run_count} scenario(s), {requested_runs} repeat(s), "
+            f"{len(routing_profile_matrix)} routing profile slot(s): {total_run_count} total run(s)."
+        )
 
         # Base user attribution
         User = get_user_model()
@@ -359,92 +542,120 @@ class Command(BaseCommand):
         suite_runs = []
         run_ids = []
 
-        for suite_slug, scenario_slugs, description in suites:
-            scenario_slugs = list(dict.fromkeys(scenario_slugs))
-            suite_run_id = uuid.uuid4()
-            profile_snapshot = None
-            if source_routing_profile:
-                profile_snapshot = create_eval_profile_snapshot(source_routing_profile, str(suite_run_id))
-            suite_run = EvalSuiteRun.objects.create(
-                id=suite_run_id,
-                suite_slug=suite_slug,
-                launch_config={"mode": "simulated"} if simulated else {},
-                initiated_by=user,
-                status=EvalSuiteRun.Status.RUNNING,
-                run_type=run_type,
-                requested_runs=requested_runs,
-                agent_strategy=agent_strategy,
-                shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
-                started_at=timezone.now(),
-                llm_routing_profile=profile_snapshot,
-            )
+        for source_routing_profile in routing_profile_matrix:
+            profile_name = source_routing_profile.name if source_routing_profile else "active-default"
+            for suite_slug, scenario_slugs, description in suites:
+                scenario_slugs = list(dict.fromkeys(scenario_slugs))
+                suite_run_id = uuid.uuid4()
+                profile_snapshot = None
+                if source_routing_profile:
+                    profile_snapshot = create_eval_profile_snapshot(source_routing_profile, str(suite_run_id))
+                launch_config = {}
+                if simulated:
+                    launch_config["mode"] = "simulated"
+                if filter_text:
+                    launch_config["scenario_filters"] = filter_text
+                if len(routing_profile_matrix) > 1:
+                    launch_config["matrix_profile"] = profile_name
+                suite_run = EvalSuiteRun.objects.create(
+                    id=suite_run_id,
+                    suite_slug=suite_slug,
+                    launch_config=launch_config,
+                    initiated_by=user,
+                    status=EvalSuiteRun.Status.RUNNING,
+                    run_type=run_type,
+                    requested_runs=requested_runs,
+                    agent_strategy=agent_strategy,
+                    shared_agent=shared_agent if agent_strategy == EvalSuiteRun.AgentStrategy.REUSE_AGENT else None,
+                    started_at=timezone.now(),
+                    llm_routing_profile=profile_snapshot,
+                )
 
-            self.stdout.write(self.style.SUCCESS(f"Created suite run {suite_run.id} ({suite_slug}) [{run_type}]"))
-
-            created_for_suite = 0
-            for scenario_slug in scenario_slugs:
-                scenario = ScenarioRegistry.get(scenario_slug)
-                if not scenario:
-                    self.stdout.write(self.style.ERROR(f"Scenario '{scenario_slug}' missing; skipping."))
-                    continue
-
-                for iteration in range(requested_runs):
-                    run_agent = shared_agent
-                    if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
-                        run_agent = _create_ephemeral_agent(label_suffix=f"{scenario.slug[:8]}-{iteration + 1}")
-                        self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
-                        _print_audit_link(run_agent)
-
-                    run = EvalRun.objects.create(
-                        suite_run=suite_run,
-                        scenario_slug=scenario.slug,
-                        scenario_version=getattr(scenario, "version", "") or "",
-                        agent=run_agent,
-                        initiated_by=user,
-                        status=EvalRun.Status.PENDING,
-                        run_type=run_type,
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"Created suite run {suite_run.id} ({suite_slug}) [{run_type}] profile={profile_name}"
                     )
-                    self.stdout.write(f"  Scheduling run {run.id} for scenario '{scenario.slug}' (iteration {iteration + 1}/{requested_runs})...")
+                )
 
-                    run_eval_task.delay(str(run.id))
-                    run_ids.append(run)
-                    created_for_suite += 1
-                    if delay_between_runs:
-                        time.sleep(delay_between_runs)
+                created_for_suite = 0
+                for scenario_slug in scenario_slugs:
+                    scenario = ScenarioRegistry.get(scenario_slug)
+                    if not scenario:
+                        self.stdout.write(self.style.ERROR(f"Scenario '{scenario_slug}' missing; skipping."))
+                        continue
 
-            suite_runs.append(suite_run)
-            if created_for_suite == 0:
-                suite_run.status = EvalSuiteRun.Status.ERRORED
-                suite_run.finished_at = timezone.now()
-                suite_run.save(update_fields=["status", "finished_at", "updated_at"])
-            _update_suite_state(suite_run.id)
+                    for iteration in range(requested_runs):
+                        run_agent = shared_agent
+                        if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
+                            run_agent = _create_ephemeral_agent(label_suffix=f"{scenario.slug[:8]}-{iteration + 1}")
+                            self.stdout.write(f"  Created ephemeral agent for {scenario.slug}: {run_agent.id}")
+                            _print_audit_link(run_agent)
 
-        self.stdout.write(self.style.SUCCESS(f"Dispatched {len(run_ids)} scenario runs across {len(suite_runs)} suite(s)."))
+                        run = EvalRun.objects.create(
+                            suite_run=suite_run,
+                            scenario_slug=scenario.slug,
+                            scenario_version=getattr(scenario, "version", "") or "",
+                            agent=run_agent,
+                            initiated_by=user,
+                            status=EvalRun.Status.PENDING,
+                            run_type=run_type,
+                        )
+                        self.stdout.write(
+                            f"  Queued run {run.id} for scenario '{scenario.slug}' "
+                            f"(iteration {iteration + 1}/{requested_runs}, profile={profile_name})."
+                        )
+                        run_ids.append(run)
+                        created_for_suite += 1
+
+                suite_runs.append(suite_run)
+                if created_for_suite == 0:
+                    suite_run.status = EvalSuiteRun.Status.ERRORED
+                    suite_run.finished_at = timezone.now()
+                    suite_run.save(update_fields=["status", "finished_at", "updated_at"])
+                _update_suite_state(suite_run.id)
+
+        self.stdout.write(self.style.SUCCESS(f"Prepared {len(run_ids)} scenario runs across {len(suite_runs)} suite(s)."))
 
         # Wait and report
         self.stdout.write("\n--- Waiting for Results ---\n")
 
-        pending_ids = {run.id for run in run_ids}
+        run_queue = list(run_ids)
+        active_ids = set()
         printed_tasks = {run.id: set() for run in run_ids}
         total_tasks_all = 0
         passed_tasks_all = 0
+        terminal_task_states = [
+            EvalRunTask.Status.PASSED,
+            EvalRunTask.Status.FAILED,
+            EvalRunTask.Status.ERRORED,
+            EvalRunTask.Status.SKIPPED,
+        ]
+        effective_max_concurrency = 1 if sync_mode else max_concurrency
+        if effective_max_concurrency:
+            self.stdout.write(f"Max in-flight eval runs: {effective_max_concurrency}")
+        else:
+            self.stdout.write("Max in-flight eval runs: unlimited")
 
         try:
-            while pending_ids:
-                current_runs = EvalRun.objects.filter(id__in=pending_ids)
+            while run_queue or active_ids:
+                while run_queue and (
+                    not effective_max_concurrency or len(active_ids) < effective_max_concurrency
+                ):
+                    run = run_queue.pop(0)
+                    self.stdout.write(f"Scheduling run {run.id} for scenario '{run.scenario_slug}'...")
+                    run_eval_task.delay(str(run.id))
+                    active_ids.add(run.id)
+                    if delay_between_runs:
+                        time.sleep(delay_between_runs)
+
+                current_runs = EvalRun.objects.filter(id__in=active_ids).prefetch_related("tasks")
+                finished_ids = set()
 
                 for run in current_runs:
                     for task in run.tasks.all().order_by("sequence"):
                         task_key = f"{task.sequence}-{task.status}"
 
-                        terminal_states = [
-                            EvalRunTask.Status.PASSED,
-                            EvalRunTask.Status.FAILED,
-                            EvalRunTask.Status.ERRORED,
-                            EvalRunTask.Status.SKIPPED,
-                        ]
-
-                        if task.status in terminal_states and task_key not in printed_tasks[run.id]:
+                        if task.status in terminal_task_states and task_key not in printed_tasks[run.id]:
                             status_color = self.style.SUCCESS if task.status == EvalRunTask.Status.PASSED else self.style.ERROR
                             self.stdout.write(f"[{run.scenario_slug}] Task {task.name}: " + status_color(f"{task.status}"))
                             if task.status == EvalRunTask.Status.FAILED:
@@ -454,10 +665,11 @@ class Command(BaseCommand):
 
                     if run.status in (EvalRun.Status.COMPLETED, EvalRun.Status.ERRORED):
                         self.stdout.write(f"Run {run.id} ({run.scenario_slug}) finished: {run.status}")
-                        pending_ids.remove(run.id)
+                        finished_ids.add(run.id)
                         _update_suite_state(run.suite_run_id)
 
-                if pending_ids:
+                active_ids.difference_update(finished_ids)
+                if run_queue or active_ids:
                     time.sleep(0.5)
         except KeyboardInterrupt:
             self.stdout.write(self.style.WARNING("\nPolling interrupted. Runs may still be processing in background."))

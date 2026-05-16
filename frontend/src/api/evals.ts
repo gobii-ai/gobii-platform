@@ -11,6 +11,16 @@ export type EvalTask = {
   assertion_type: string
   expected_summary: string
   observed_summary: string
+  debug_artifacts: Record<string, unknown>
+  artifact_links: {
+    message_id: string | null
+    step_id: string | null
+    browser_task_id: string | null
+    agent_audit_url: string | null
+  }
+  llm_question: string
+  llm_answer: string
+  llm_model: string
   started_at: string | null
   finished_at: string | null
   prompt_tokens: number
@@ -167,6 +177,28 @@ export type EvalSuite = {
   scenario_slugs: string[]
 }
 
+export type EvalScenarioMetadata = {
+  tags: string[]
+  tier: string
+  category: string
+  expected_runtime: string
+  cost_class: string
+  owner: string
+  area: string
+  supports_simulation: boolean
+  required_fixtures: string[]
+  required_secrets: string[]
+}
+
+export type EvalScenario = {
+  slug: string
+  version: string
+  description: string
+  suite_slugs: string[]
+  task_count: number
+  metadata: EvalScenarioMetadata
+}
+
 export type GlobalSkillEvalSecretStatus = {
   label: string
   name: string
@@ -196,7 +228,7 @@ export type GlobalSkillEvalSkill = {
   launchable: boolean
 }
 
-export function fetchSuites(signal?: AbortSignal): Promise<{ suites: EvalSuite[] }> {
+export function fetchSuites(signal?: AbortSignal): Promise<{ suites: EvalSuite[]; scenarios: EvalScenario[] }> {
   return jsonFetch('/console/api/evals/suites/', { method: 'GET', signal })
 }
 
@@ -230,7 +262,8 @@ export function fetchRunDetail(runId: string): Promise<{ run: EvalRun }> {
 }
 
 export type CreateSuiteRunPayload = {
-  suite_slugs: string[]
+  suite_slugs?: string[]
+  scenario_slugs?: string[]
   agent_strategy?: string
   agent_id?: string | null
   run_type?: EvalRunType

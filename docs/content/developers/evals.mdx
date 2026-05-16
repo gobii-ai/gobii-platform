@@ -28,6 +28,8 @@ Keep those categories separate in reports. Passing unit tests does not mean eval
 | `EvalScenario` | `api/evals/base.py` | Base class for one behavioral scenario. |
 | `ScenarioTask` | `api/evals/base.py` | The visible assertions/tasks recorded under each run. |
 | `ScenarioRegistry` | `api/evals/registry.py` | Global scenario registry. |
+| `ScenarioMetadata` | `api/evals/base.py` | First-class scenario taxonomy: tags, tier, category, runtime, cost class, owner, area, simulation support, and fixtures/secrets. |
+| Scenario catalog helpers | `api/evals/catalog.py` | Normalizes metadata, filters scenarios, and serializes the console catalog. |
 | `SuiteRegistry` | `api/evals/suites.py` | Named groups of scenario slugs, plus the dynamic `all` suite. |
 | `EvalRunner` | `api/evals/runner.py` | Executes one `EvalRun`, creates `EvalRunTask` rows, captures fingerprints and model metadata. |
 | `EvalSuiteRun` | `api/models.py` | One suite invocation and its requested repeats, run type, launch config, and routing profile snapshot. |
@@ -51,6 +53,14 @@ List suites and scenarios without touching the database:
 uv run python manage.py run_evals --list
 ```
 
+Filter the catalog by metadata:
+
+```bash
+uv run python manage.py run_evals --list --tier smoke
+uv run python manage.py run_evals --list --tag meta_gobii --category meta_gobii
+uv run python manage.py run_evals --list --cost-class low --runtime-class short
+```
+
 Create the local SQLite schema, seed routing profiles, and list available non-snapshot profiles:
 
 ```bash
@@ -66,6 +76,18 @@ Run one simulated scenario:
 ```bash
 uv run python manage.py run_evals \
   --scenario meta_gobii_negative_content_task \
+  --sync \
+  --n-runs 1 \
+  --simulated \
+  --settings=config.eval_local_settings
+```
+
+Run a focused filtered slice:
+
+```bash
+uv run python manage.py run_evals \
+  --suite meta_gobii \
+  --tag contact_safety \
   --sync \
   --n-runs 1 \
   --simulated \
@@ -95,6 +117,20 @@ uv run python manage.py run_evals \
 
 For live all-suite runs, pass `--routing-profile <profile>` and expect a larger bill and a longer run. Start with one scenario or one suite before running `all`.
 
+Use safety caps for large live runs:
+
+```bash
+uv run python manage.py run_evals \
+  --suite all \
+  --n-runs 1 \
+  --routing-profile openrouter-deepseek-v4-flash \
+  --max-concurrency 4 \
+  --max-runs-total 250 \
+  --settings=config.eval_local_settings
+```
+
+`--max-concurrency` limits how many async worker runs the CLI keeps in flight while it polls results. With `--sync`, local eager execution is still one run at a time. Use `--max-runs-total` and `--max-scenarios` when a filtered command should fail closed instead of accidentally launching a broad suite.
+
 ## Live model runs
 
 Source key files without printing values:
@@ -113,6 +149,20 @@ uv run python manage.py run_evals \
   --routing-profile openrouter-deepseek-v4-flash \
   --settings=config.eval_local_settings
 ```
+
+Compare routing profiles in one invocation:
+
+```bash
+uv run python manage.py run_evals \
+  --suite meta_gobii \
+  --sync \
+  --n-runs 1 \
+  --routing-profile openrouter-deepseek-v4-flash \
+  --routing-profile openrouter-qwen \
+  --settings=config.eval_local_settings
+```
+
+Each profile gets its own `EvalSuiteRun` with a routing-profile snapshot. Use the console comparison view or compare APIs to group by model/profile after the matrix finishes.
 
 OpenRouter Qwen:
 
@@ -159,6 +209,13 @@ For OpenAI-compatible local or proxy endpoints, also set `EVAL_LOCAL_CUSTOM_API_
 
 The CLI prints each created `EvalSuiteRun`, each scheduled `EvalRun`, task status lines, pass rate, suite status, and audit links for created eval agents.
 
+The console evals page has two launch paths:
+
+- Suite launcher: select one or more suites, choose a routing profile, set repeats, and launch.
+- Scenario catalog: search scenario metadata, filter by tier/category/cost, and run one small eval quickly.
+
+The detail page surfaces task `observed_summary`, expected summaries, token/cost rollups, audit links, linked artifact IDs, sanitized debug artifacts, and judge context where scenarios record it. Prefer linking or summarizing artifacts over pasting raw transcripts into issue comments.
+
 Inspect the latest local suite run:
 
 ```bash
@@ -171,17 +228,35 @@ print(r.id, r.suite_slug, r.status, r.run_type); \
 
 Compare model experiments by running the same scenario or suite with different `--routing-profile` values. `EvalRunner` snapshots the routing profile onto the suite run and records `EvalRun.primary_model`, `scenario_fingerprint`, `code_version`, and `code_branch`.
 
+## Scenario metadata
+
+Every scenario inherits normalized metadata from `EvalScenario`:
+
+| Field | Use |
+| --- | --- |
+| `tags` | Cross-cutting filters such as `meta_gobii`, `tool_choice`, `planning`, `contact_safety`, or `llm_judge`. |
+| `tier` | Run posture: `smoke`, `core`, `extended`, or `manual`. |
+| `category` | Primary behavior family, such as `conversation`, `planning`, `tool_choice`, `meta_gobii`, `global_skill`, or a tool domain. |
+| `expected_runtime` | `short`, `medium`, or `long`. |
+| `cost_class` | `low`, `medium`, or `high`. |
+| `owner` / `area` | Who owns the eval and which product/agent area it protects. |
+| `supports_simulation` | Whether `--simulated` is valid. |
+| `required_fixtures` / `required_secrets` | External setup the developer must provide before the eval can run. |
+
+Add metadata as class attributes on the scenario. Dynamic scenario factories should set metadata on the generated class so catalog filters work.
+
 ## Adding scenarios
 
 Add new eval behavior under `api/evals/scenarios/`. A normal scenario should:
 
 1. Subclass `EvalScenario`.
 2. Define a stable `slug`, `version`, `description`, and `tasks`.
-3. Implement `run(self, run_id: str, agent_id: str)`.
-4. Use `ScenarioExecutionTools` when it needs to inject messages, trigger processing, or record task results.
-5. Register itself with `ScenarioRegistry.register(...)`.
-6. Ensure the module is imported by `api/evals/loader.py`.
-7. Add targeted unit tests tagged with an existing eval batch tag, usually `@tag("batch_eval_fingerprint")` unless a more specific registered tag fits.
+3. Define metadata: `tier`, `category`, `expected_runtime`, `cost_class`, `owner`, `area`, `tags`, `required_fixtures`, and `required_secrets` where relevant.
+4. Implement `run(self, run_id: str, agent_id: str)`.
+5. Use `ScenarioExecutionTools` when it needs to inject messages, trigger processing, or record task results.
+6. Register itself with `ScenarioRegistry.register(...)`.
+7. Ensure the module is imported by `api/evals/loader.py`.
+8. Add targeted unit tests tagged with an existing eval batch tag, usually `@tag("batch_eval_fingerprint")` unless a more specific registered tag fits.
 
 Keep scenarios deterministic where practical. If a scenario supports offline execution, set `supports_simulation = True` and make `--simulated` use deterministic local data. If it needs a real model, do not pretend the simulated path measures model quality.
 
@@ -206,6 +281,8 @@ Prefer small, explicit `ScenarioTask` records over one broad pass/fail. A good s
 For direct scoring helpers, keep pure scoring functions close to the scenario data and unit-test them. The Meta Gobii evals are the worked example: `api/evals/meta_gobii.py` defines cases and scoring, while `api/evals/scenarios/meta_gobii.py` executes simulated or live model calls through the canonical runner.
 
 For agent-processing evals, use `api/evals/stop_policy.py` through `ScenarioExecutionTools.trigger_processing(..., eval_stop_policy=...)` when the run should stop after a terminal tool call, all expected tool calls, a tracked human-input request, or an unexpected relevant tool. Keep stop policies narrow so unrelated tool noise does not hide a regression.
+
+When recording failures, pass useful sanitized context through `record_task_result(..., artifacts={...})`. The runner persists safe debug artifacts on `EvalRunTask.debug_artifacts` and links first message/step/browser-task records when supplied. Do not pass secret values; use secret names or status labels only.
 
 ## Meta Gobii worked example
 
@@ -245,3 +322,16 @@ uv run python manage.py run_evals \
 - Do not conflate simulated and live model results.
 - Prefer one scenario or one focused suite while iterating; run `all` only when the change needs whole-registry confidence.
 - Keep eval-local setup explicit. `config.eval_local_settings` is for local SQLite evals, not production traffic.
+
+## Release-gate guidance
+
+Use this as the default gate shape for prompt, tool-choice, routing, and agent-behavior changes:
+
+| Change risk | Minimum eval evidence |
+| --- | --- |
+| Narrow prompt or scoring-helper edit | Relevant unit tests plus one focused simulated or live scenario. |
+| Agent behavior, tool selection, or stop-policy change | Relevant unit tests plus the focused suite (`planning_micro`, `tool_choice_micro`, `meta_gobii`, or another owned suite). |
+| Routing profile or model change | Matrix run of the same scenario/suite across old and new profiles, compared by model/profile. |
+| Broad prompt/routing/system-skill release | `--suite all --n-runs 1` live run against the release candidate profile, with failures triaged or explicitly accepted. |
+
+Mark a run `--official` only when it is intended to be durable comparison evidence. Keep exploratory one-off runs as `one_off`.

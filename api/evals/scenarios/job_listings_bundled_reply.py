@@ -16,6 +16,13 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         "Ensures the agent pulls three listings (one per role) and sends them together "
         "instead of replying once per listing."
     )
+    tier = "extended"
+    category = "web_research"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("web_research", "response_quality", "llm_judge", "long_horizon")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_three_sources", assertion_type="llm_judge"),

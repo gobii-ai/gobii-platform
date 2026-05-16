@@ -9,6 +9,13 @@ from api.models import EvalRunTask, PersistentAgentMessage
 class EchoResponseScenario(EvalScenario, ScenarioExecutionTools):
     slug = "echo_response"
     description = "Send a message and verify the agent replies with the requested keyword."
+    tier = "smoke"
+    category = "conversation"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("smoke", "conversation", "reply")
     tasks = [
         ScenarioTask(name="send_message", assertion_type="manual"),
         ScenarioTask(name="verify_response", assertion_type="manual"),

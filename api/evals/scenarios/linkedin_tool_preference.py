@@ -32,6 +32,13 @@ BROWSER_TOOLS = [
 class LinkedInToolPreferenceScenario(EvalScenario, ScenarioExecutionTools):
     slug = "linkedin_prefers_brightdata"
     description = "Ensures LinkedIn lookups rely on BrightData LinkedIn tools instead of spawning browser tasks."
+    tier = "core"
+    category = "lead_sourcing"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("tool_choice", "linkedin", "brightdata", "browser_avoidance")
     tasks = [
         ScenarioTask(name="inject_linkedin_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_linkedin_tool_usage", assertion_type="manual"),

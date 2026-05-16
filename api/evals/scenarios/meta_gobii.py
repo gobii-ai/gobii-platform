@@ -26,6 +26,7 @@ from api.evals.meta_gobii import (
     MUTATING_META_GOBII_TOOLS,
     SCHEDULE_EXPECTATION_CLARIFY_OR_NONE,
     SCHEDULE_EXPECTATION_EXPLICIT,
+    SCHEDULE_EXPECTATION_NONE,
     SKILL_SEARCH_TOOL_NAME,
     MetaGobiiEvalCase,
     score_meta_gobii_case,
@@ -281,6 +282,13 @@ def _record_response_tool() -> dict[str, Any]:
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
     description = "Evaluates Meta Gobii system-skill selection, tool planning, and approval policy."
     supports_simulation = True
+    tier = "core"
+    category = "meta_gobii"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "meta_gobii"
+    tags = ("meta_gobii", "system_skill", "control_plane", "tool_choice", "simulated")
     tasks = [
         ScenarioTask(name="discover_system_skill", assertion_type="tool_call"),
         ScenarioTask(name="select_system_skill", assertion_type="tool_call"),
@@ -835,10 +843,34 @@ def _scenario_class(case: MetaGobiiEvalCase):
     class _MetaGobiiCaseScenario(MetaGobiiSystemSkillScenario):
         slug = case.scenario_slug
         description = f"Meta Gobii case '{case.slug}' should select and plan the canonical system skill correctly."
+        tags = _case_tags(case)
 
     _MetaGobiiCaseScenario.case = case
     _MetaGobiiCaseScenario.__name__ = "".join(part.title() for part in case.scenario_slug.split("_")) + "Scenario"
     return _MetaGobiiCaseScenario
+
+
+def _case_tags(case: MetaGobiiEvalCase) -> tuple[str, ...]:
+    tags = [
+        "meta_gobii",
+        "system_skill",
+        "control_plane",
+        "tool_choice",
+        "simulated",
+    ]
+    if case.expect_confirmation is True:
+        tags.append("approval")
+    if case.expect_confirmation is False:
+        tags.append("approved_scope")
+    if case.contact_safety:
+        tags.append("contact_safety")
+    if case.expect_initial_proposal:
+        tags.append("team_design")
+    if case.schedule_expectation != SCHEDULE_EXPECTATION_NONE:
+        tags.append("schedule")
+    if case.forbidden_tools or case.forbidden_scope_terms:
+        tags.append("guardrail")
+    return tuple(dict.fromkeys(tags))
 
 
 def _simulated_schedule_policy(case: MetaGobiiEvalCase) -> dict[str, Any]:

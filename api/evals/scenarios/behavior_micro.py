@@ -379,6 +379,14 @@ def all_requests_have_options(requests):
 
 
 class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
+    tier = "core"
+    category = "agent_behavior"
+    expected_runtime = "short"
+    cost_class = "low"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("agent_behavior", "micro")
+
     def _set_planning_state(self, agent_id, state):
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=state)
 
@@ -451,6 +459,8 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
     description = "Planning mode should welcome the user, ask 1-3 tracked questions with options, and not start work."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "human_input")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_welcome_message", assertion_type="manual"),
@@ -548,6 +558,8 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
 class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
     slug = PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST
     description = "A clear task in planning mode should call end_planning before doing substantive work."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "stop_policy")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_end_planning", assertion_type="manual"),
@@ -625,6 +637,8 @@ class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
 class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
     slug = PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING
     description = "An execute-now prompt should still either ask planning questions or end planning before work."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "guardrail")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_first_meaningful_action", assertion_type="manual"),
@@ -706,6 +720,8 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
 class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
     slug = PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES
     description = "Planning mode should not update schedule, charter, or runtime plan before end_planning."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "guardrail", "schedule")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_no_planning_state_mutations", assertion_type="manual"),
@@ -770,6 +786,8 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
 class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST
     description = "An exact JSON API URL should be fetched with http_request, not search or browser tools."
+    category = "api_lookup"
+    tags = ("agent_behavior", "micro", "tool_choice", "api_lookup")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_http_request_first", assertion_type="manual"),
@@ -866,6 +884,8 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
 class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV
     description = "A downloadable CSV request should use create_csv."
+    category = "files"
+    tags = ("agent_behavior", "micro", "tool_choice", "files")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_create_csv", assertion_type="manual"),
@@ -934,6 +954,8 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
 class ToolChoicePdfDeliverableUsesCreatePdfScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_PDF_DELIVERABLE_USES_CREATE_PDF
     description = "A formatted PDF request should use create_pdf."
+    category = "files"
+    tags = ("agent_behavior", "micro", "tool_choice", "files")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_create_pdf", assertion_type="manual"),
@@ -1002,6 +1024,8 @@ class ToolChoicePdfDeliverableUsesCreatePdfScenario(BehaviorMicroScenario):
 class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT
     description = "A missing-recipient email task should ask for tracked human input instead of sending email."
+    category = "human_input"
+    tags = ("agent_behavior", "micro", "tool_choice", "human_input", "outbound")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_human_input", assertion_type="manual"),
@@ -1078,6 +1102,8 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
 
 class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
+    category = "tool_choice"
+    tags = ("agent_behavior", "micro", "tool_choice", "common_use_case")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_plan_policy", assertion_type="manual"),
@@ -1097,7 +1123,6 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _build_mock_config(self):
         case = self.case
-        expected_tools = case.expected_tool_names()
         forbidden_tools = case.forbidden_tool_names()
         accepted_tools = self._accepted_expected_tool_names()
         mock_config = {tool_name: self._mock_success(tool_name) for tool_name in accepted_tools}
@@ -1347,6 +1372,15 @@ def _common_use_case_scenario_class(case):
     class _CommonUseCaseScenario(CommonUseCaseToolChoiceScenario):
         slug = case.slug
         description = f"Common {case.category} request should choose the expected deterministic tool."
+        category = case.category
+        tags = (
+            "agent_behavior",
+            "micro",
+            "tool_choice",
+            "common_use_case",
+            case.category,
+            "planning_expected" if case.plan_expected else "direct_tool",
+        )
 
     _CommonUseCaseScenario.case = case
     _CommonUseCaseScenario.__name__ = "".join(part.title() for part in case.slug.split("_")) + "Scenario"

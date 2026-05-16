@@ -3,8 +3,13 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 
-from api.evals.execution import ScenarioExecutionTools
-from api.models import BrowserUseAgent, PersistentAgent
+from api.evals.execution import (
+    ScenarioExecutionTools,
+    get_eval_routing_profile_for_current_run,
+    set_current_eval_routing_profile,
+    set_current_eval_run_id,
+)
+from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
 
 
 @tag("batch_eval_fingerprint")
@@ -106,3 +111,63 @@ class EvalExecutionProcessingTests(TestCase):
             throw=True,
         )
         mock_delay.assert_not_called()
+
+    def test_record_task_result_persists_sanitized_debug_artifacts(self):
+        run = EvalRun.objects.create(
+            scenario_slug="debug_artifact_test",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        task = EvalRunTask.objects.create(
+            run=run,
+            sequence=1,
+            name="verify_tool_params",
+            assertion_type="manual",
+        )
+
+        self.tools.record_task_result(
+            str(run.id),
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task.name,
+            observed_summary="Tool params did not match.",
+            artifacts={
+                "params": {"url": "https://example.test/data.json", "api_key": "must-not-persist"},
+                "judge_context": {"question": "Was the request correct?", "answer": "No"},
+                "messages": ["short transcript summary"],
+            },
+        )
+
+        task.refresh_from_db()
+        self.assertEqual(task.debug_artifacts["params"]["url"], "https://example.test/data.json")
+        self.assertNotIn("api_key", task.debug_artifacts["params"])
+        self.assertEqual(task.debug_artifacts["judge_context"]["answer"], "No")
+        self.assertEqual(task.debug_artifacts["messages"], ["short transcript summary"])
+
+    def test_eval_judge_routing_profile_falls_back_to_persisted_run_context(self):
+        profile = LLMRoutingProfile.objects.create(
+            name="eval-judge-profile",
+            display_name="Eval Judge Profile",
+        )
+        suite_run = EvalSuiteRun.objects.create(
+            suite_slug="debug_suite",
+            initiated_by=self.user,
+            llm_routing_profile=profile,
+        )
+        run = EvalRun.objects.create(
+            suite_run=suite_run,
+            scenario_slug="debug_artifact_test",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+
+        set_current_eval_routing_profile(None)
+        set_current_eval_run_id(str(run.id))
+        try:
+            resolved = get_eval_routing_profile_for_current_run()
+        finally:
+            set_current_eval_run_id(None)
+
+        self.assertEqual(resolved, profile)

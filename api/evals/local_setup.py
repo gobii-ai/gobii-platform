@@ -6,6 +6,7 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.management import call_command
+from django.db import connection
 
 
 def ensure_eval_local_database(stdout=None) -> bool:
@@ -18,9 +19,57 @@ def ensure_eval_local_database(stdout=None) -> bool:
         Path(db_name).parent.mkdir(parents=True, exist_ok=True)
 
     call_command("migrate", run_syncdb=True, interactive=False, verbosity=0)
+    ensure_eval_local_compat_columns(stdout=stdout)
     if stdout:
         stdout.write("Local eval SQLite schema is ready.")
     return True
+
+
+def ensure_eval_local_compat_columns(stdout=None) -> int:
+    """
+    Backfill columns that eval-local SQLite databases may miss when migrations are disabled.
+
+    config.eval_local_settings uses run_syncdb for fast local setup. That creates new
+    tables, but it does not alter existing SQLite tables when model fields are added.
+    Keep this list explicit so local schema repair stays non-destructive.
+    """
+    from api.models import EvalRunTask
+
+    compat_fields = ((EvalRunTask, ("debug_artifacts",)),)
+    existing_tables = set(connection.introspection.table_names())
+    missing_by_model = []
+    added = 0
+
+    with connection.cursor() as cursor:
+        for model, field_names in compat_fields:
+            table_name = model._meta.db_table
+            if table_name not in existing_tables:
+                continue
+
+            existing_columns = {
+                column.name
+                for column in connection.introspection.get_table_description(cursor, table_name)
+            }
+            missing_fields = [
+                model._meta.get_field(field_name)
+                for field_name in field_names
+                if model._meta.get_field(field_name).column not in existing_columns
+            ]
+            if not missing_fields:
+                continue
+            missing_by_model.append((model, table_name, missing_fields))
+
+    for model, table_name, missing_fields in missing_by_model:
+        with connection.schema_editor() as schema_editor:
+            for field in missing_fields:
+                schema_editor.add_field(model, field)
+                added += 1
+                if stdout:
+                    stdout.write(
+                        f"Added missing local eval column {table_name}.{field.column}."
+                    )
+
+    return added
 
 
 @dataclass(frozen=True)

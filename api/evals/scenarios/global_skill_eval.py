@@ -24,6 +24,14 @@ def _preview_json(value, limit: int = 800) -> str:
 class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
     slug = GLOBAL_SKILL_EVAL_SCENARIO_SLUG
     description = "Evaluates whether an agent enables and correctly uses a selected global skill."
+    tier = "manual"
+    category = "global_skill"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "global_skills"
+    tags = ("global_skill", "skill_enablement", "tool_choice", "llm_judge")
+    required_secrets = ("selected_global_skill_secrets",)
     tasks = [
         ScenarioTask(name="inject_skill_task", assertion_type="manual"),
         ScenarioTask(name="verify_skill_enabled", assertion_type="manual"),

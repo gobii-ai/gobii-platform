@@ -1,4 +1,3 @@
-from datetime import timedelta
 from datetime import datetime
 from django.utils.dateparse import parse_datetime
 
@@ -35,6 +34,13 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
         "Recreates the Carroll Valley permit follow-up prompt that previously triggered duplicate replies. "
         "Agent should send exactly one outbound message, or at most two if a web search occurs between them."
     )
+    tier = "extended"
+    category = "conversation"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("conversation", "followup", "duplicate_reply", "long_horizon")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_single_reply", assertion_type="manual"),
@@ -174,7 +180,6 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
         )
 
         # Seed prior history to mimic the unified history.
-        base_time = timezone.now() - timedelta(minutes=12)
         # Seed prior history to mimic the unified history, plus matching tool calls/steps.
         def _dt(s: str) -> datetime:
             return parse_datetime(s) or timezone.now()

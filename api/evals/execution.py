@@ -5,8 +5,10 @@ import time
 import contextvars
 
 from api.models import (
+    BrowserUseAgentTask,
     PersistentAgent,
     PersistentAgentMessage,
+    PersistentAgentStep,
     EvalRunTask,
     EvalRun,
     CommsAllowlistEntry
@@ -20,6 +22,68 @@ from config.redis_client import get_redis_client
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+
+def _preview_text(value: Any, *, limit: int = 1200) -> str:
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[: limit - 3] + "..."
+
+
+def _serialize_debug_artifact(value: Any, *, depth: int = 0) -> Any:
+    if depth > 3:
+        return _preview_text(value, limit=300)
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return _preview_text(value)
+    if isinstance(value, PersistentAgentMessage):
+        return {
+            "type": "message",
+            "id": str(value.id),
+            "is_outbound": value.is_outbound,
+            "timestamp": value.timestamp.isoformat() if value.timestamp else None,
+            "body_preview": _preview_text(value.body or "", limit=1200),
+        }
+    if isinstance(value, PersistentAgentStep):
+        return {
+            "type": "step",
+            "id": str(value.id),
+            "created_at": value.created_at.isoformat() if value.created_at else None,
+            "description": _preview_text(value.description or "", limit=600),
+        }
+    if isinstance(value, BrowserUseAgentTask):
+        return {
+            "type": "browser_task",
+            "id": str(value.id),
+            "status": value.status,
+            "created_at": value.created_at.isoformat() if value.created_at else None,
+        }
+    if isinstance(value, dict):
+        return {
+            str(key): _serialize_debug_artifact(item, depth=depth + 1)
+            for key, item in value.items()
+            if not str(key).lower().endswith(("key", "token", "secret", "password"))
+        }
+    if isinstance(value, (list, tuple, set)):
+        return [
+            _serialize_debug_artifact(item, depth=depth + 1)
+            for item in list(value)[:25]
+        ]
+    if hasattr(value, "pk") and hasattr(value, "_meta"):
+        return {
+            "type": value._meta.label_lower,
+            "id": str(value.pk),
+        }
+    return _preview_text(value)
+
+
+def _sanitize_debug_artifacts(artifacts: Dict[str, Any]) -> dict[str, Any]:
+    sanitized = {}
+    for key, value in (artifacts or {}).items():
+        sanitized[str(key)] = _serialize_debug_artifact(value)
+    return sanitized
 
 
 _current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -47,6 +111,32 @@ def set_current_eval_routing_profile(profile: Any) -> None:
 def get_current_eval_routing_profile() -> Any:
     """Get the routing profile for the current eval context, or None."""
     return _current_eval_routing_profile.get()
+
+
+def get_eval_routing_profile_for_current_run() -> Any:
+    """Resolve the eval routing profile from context, then persisted run state."""
+    routing_profile = get_current_eval_routing_profile()
+    if routing_profile is not None:
+        return routing_profile
+
+    run_id = get_current_eval_run_id()
+    if not run_id:
+        return None
+
+    try:
+        run = (
+            EvalRun.objects
+            .select_related("llm_routing_profile", "suite_run__llm_routing_profile")
+            .get(id=run_id)
+        )
+    except EvalRun.DoesNotExist:
+        return None
+
+    if run.llm_routing_profile_id:
+        return run.llm_routing_profile
+    if run.suite_run_id and run.suite_run.llm_routing_profile_id:
+        return run.suite_run.llm_routing_profile
+    return None
 
 class AgentEventListener:
     """
@@ -318,6 +408,12 @@ class ScenarioExecutionTools:
             task_obj.first_step = artifacts["step"]
         if "browser_task" in artifacts:
             task_obj.first_browser_task = artifacts["browser_task"]
+        debug_artifacts = _sanitize_debug_artifacts(artifacts)
+        if debug_artifacts:
+            task_obj.debug_artifacts = {
+                **(task_obj.debug_artifacts or {}),
+                **debug_artifacts,
+            }
             
         task_obj.save()
 
@@ -413,7 +509,7 @@ class ScenarioExecutionTools:
 
         # Use failover configs with routing profile support
         try:
-            routing_profile = get_current_eval_routing_profile()
+            routing_profile = get_eval_routing_profile_for_current_run()
             failover_configs = get_llm_config_with_failover(routing_profile=routing_profile)
         except LLMNotConfiguredError as exc:
             logger.error("LLM judge missing configuration: %s", exc)
