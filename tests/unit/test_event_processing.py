@@ -26,11 +26,14 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_call,
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
+    _latest_inbound_message_needs_reply,
+    _should_continue_for_unanswered_inbound_after_tools,
     _gate_send_chat_tool_for_delivery,
     _tool_definition_names_for_completion,
     _persist_tool_call_step,
     build_prompt_context,
     _get_completed_process_run_count,
+    _FinalizedToolBatch,
     _PreparedToolBatch,
     _PreparedToolExecution,
     _ToolExecutionOutcome,
@@ -70,7 +73,6 @@ from api.agent.core.prompt_context import (
 from api.admin import PersistentAgentPromptArchiveAdmin, PromptConfigAdmin, ToolConfigAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
-from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
 from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import (
@@ -3970,6 +3972,30 @@ class EventProcessingRuntimeGuardTests(TestCase):
             charter="Test runtime guard",
             browser_use_agent=self.browser_agent,
         )
+        self.endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="email",
+            address="runtime-agent@example.com",
+            is_primary=True,
+        )
+        self.external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="email",
+            address="runtime-user@example.com",
+        )
+
+    def _create_inbound_email_message(self, *, body: str, timestamp) -> PersistentAgentMessage:
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body=body,
+            raw_payload={},
+            seq=f"RG{int(timestamp.timestamp() * 1_000_000):024d}"[:26],
+        )
+        PersistentAgentMessage.objects.filter(pk=message.pk).update(timestamp=timestamp)
+        message.refresh_from_db()
+        return message
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_tool_call_runtime_rejects_tier_blacklisted_static_tool(self):
@@ -4137,6 +4163,48 @@ class EventProcessingRuntimeGuardTests(TestCase):
         )
 
         self.assertTrue(finalized.followup_required)
+
+    def test_non_message_stop_continues_when_latest_inbound_is_unanswered(self):
+        self._create_inbound_email_message(
+            body="what's the weather in frederick md?",
+            timestamp=timezone.now(),
+        )
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertTrue(_latest_inbound_message_needs_reply(self.agent))
+        self.assertTrue(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
+    def test_non_message_stop_does_not_continue_after_user_facing_reply(self):
+        now = timezone.now()
+        self._create_inbound_email_message(body="thanks", timestamp=now)
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            to_endpoint=self.external_endpoint,
+            is_outbound=True,
+            body="You're welcome.",
+            raw_payload={},
+            seq=f"OUT{int(now.timestamp() * 1_000_000):023d}"[:26],
+        )
+        PersistentAgentMessage.objects.filter(pk=outbound.pk).update(timestamp=now + timedelta(seconds=1))
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertFalse(_latest_inbound_message_needs_reply(self.agent))
+        self.assertFalse(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
 
     def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION

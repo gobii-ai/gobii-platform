@@ -18,7 +18,6 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
-    PersistentAgentMessage,
     PersistentAgentToolCall,
 )
 
@@ -292,6 +291,15 @@ IGNORED_FIRST_ACTION_TOOL_NAMES = {
     "sleep_until_next_trigger",
 }
 
+PLANNING_READ_ONLY_TOOL_NAMES = {
+    "mcp_brightdata_scrape_as_markdown",
+    "mcp_brightdata_search_engine",
+    "read_file",
+    "search_engine",
+    "search_engine_batch",
+    "search_tools",
+}
+
 PLANNING_ALLOWED_FIRST_ACTION_TOOL_NAMES = {
     "request_human_input",
     "end_planning",
@@ -429,9 +437,9 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
         bad_calls = []
         seen_ids = set()
         for call in [*forbidden, *mutations]:
-            if call.id in seen_ids:
+            if call.pk in seen_ids:
                 continue
-            seen_ids.add(call.id)
+            seen_ids.add(call.pk)
             bad_calls.append(call)
         if bad_calls:
             seen = [call.tool_name for call in bad_calls]
@@ -458,12 +466,11 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 @register_scenario
 class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
     slug = PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS
-    description = "Planning mode should welcome the user, ask 1-3 tracked questions with options, and not start work."
+    description = "Planning mode should ask 1-3 tracked questions with options and not start work."
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "human_input")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_welcome_message", assertion_type="manual"),
         ScenarioTask(name="verify_bounded_questions", assertion_type="manual"),
         ScenarioTask(name="verify_no_substantive_work", assertion_type="manual"),
     ]
@@ -497,31 +504,6 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
             observed_summary="Prompt injected and processing completed.",
             artifacts={"message": inbound},
         )
-
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_welcome_message")
-        outbound = PersistentAgentMessage.objects.filter(
-            owner_agent_id=agent_id,
-            conversation_id=inbound.conversation_id,
-            is_outbound=True,
-            timestamp__gt=inbound.timestamp,
-        ).order_by("timestamp").first()
-        if outbound:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_welcome_message",
-                observed_summary="Agent sent an outbound welcome/planning message.",
-                artifacts={"message": outbound},
-            )
-        else:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_welcome_message",
-                observed_summary="No outbound welcome/planning message was sent.",
-            )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_bounded_questions")
         requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
@@ -574,16 +556,22 @@ class PlanningClearTaskEndsPlanningFirstScenario(BehaviorMicroScenario):
             inbound = self.inject_message(
                 agent_id,
                 (
-                    "Set up a daily 9am ET digest of SEC enforcement press releases. "
-                    "Summarize new actions, include links, and skip days with no updates."
+                    "Set up a daily 9am America/New_York local-time digest in this chat of SEC enforcement press releases. "
+                    "Use the official SEC enforcement RSS feed at https://www.sec.gov/rss/enforcement/enforcement.xml. "
+                    "Use concise bullets, include links, and skip days with no updates."
                 ),
                 trigger_processing=True,
                 eval_run_id=run_id,
                 mock_config=self._planning_guardrail_mocks(),
                 eval_stop_policy={
                     "ignore_sqlite_agent_config_mutations": False,
-                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
-                    "stop_on_first_relevant_tool": True,
+                    "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES | PLANNING_READ_ONLY_TOOL_NAMES),
+                    "stop_on_sqlite_agent_config_mutation": True,
+                    "stop_on_tool_names": list(
+                        PLANNING_ALLOWED_FIRST_ACTION_TOOL_NAMES
+                        | PLANNING_MUTATION_TOOL_NAMES
+                        | SUBSTANTIVE_WORK_TOOL_NAMES
+                    ),
                 },
             )
         self.record_task_result(

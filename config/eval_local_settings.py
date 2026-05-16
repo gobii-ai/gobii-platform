@@ -35,6 +35,7 @@ DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": str(_eval_local_dir / "eval-local.sqlite3"),
+        "OPTIONS": {"timeout": 30},
     }
 }
 

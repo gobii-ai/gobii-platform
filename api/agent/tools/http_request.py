@@ -284,7 +284,7 @@ def get_http_request_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
+                        "description": "REQUIRED. true if another tool or user-facing reply must follow; false only when this request completes the turn.",
                     },
                 },
                 "required": ["method", "url", "will_continue_work"],

@@ -20,6 +20,7 @@ from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
+import redis
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
@@ -72,12 +73,10 @@ from .llm_utils import (
 )
 from .llm_streaming import StreamAccumulator
 from .token_usage import (
-    coerce_int as _coerce_int,
     completion_kwargs_from_usage,
     extract_reasoning_content,
     extract_token_usage,
     set_usage_span_attributes,
-    usage_attribute as _usage_attribute,
 )
 from ..short_description import (
     maybe_schedule_mini_description,
@@ -168,8 +167,6 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
-    CommsChannel,
-    build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
@@ -192,7 +189,6 @@ from api.services.signup_preview import (
 )
 from api.services.web_sessions import (
     get_deliverable_web_sessions,
-    has_active_web_session,
     has_deliverable_web_session,
 )
 from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
@@ -1507,6 +1503,36 @@ class _FinalizedToolBatch:
     last_explicit_continue: Optional[bool]
     inferred_message_continue_this_iteration: bool
     executed_non_message_action: bool
+
+
+def _latest_inbound_message_needs_reply(agent: PersistentAgent) -> bool:
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .only("timestamp", "seq")
+        .first()
+    )
+    if latest_inbound is None or latest_inbound.timestamp is None:
+        return False
+
+    return not PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+        timestamp__gt=latest_inbound.timestamp,
+    ).exists()
+
+
+def _should_continue_for_unanswered_inbound_after_tools(
+    agent: PersistentAgent,
+    finalized_batch: _FinalizedToolBatch,
+) -> bool:
+    return (
+        not finalized_batch.followup_required
+        and finalized_batch.last_explicit_continue is False
+        and finalized_batch.executed_non_message_action
+        and not finalized_batch.message_delivery_ok
+        and _latest_inbound_message_needs_reply(agent)
+    )
 
 
 def _normalize_parallel_placeholder_path(raw: str) -> Optional[str]:
@@ -3050,20 +3076,13 @@ def _completion_with_failover(
                 if api_base:
                     llm_span.set_attribute("llm.api_base", api_base)
                 llm_span.set_attribute("llm.api_key_present", bool(api_key_present))
-                try:
-                    masked = None
-                    if api_key_present:
-                        k = params.get("api_key")
-                        masked = (str(k)[:6] + "…") if k else None
-                    logger.info(
-                        "LLM call: provider=%s model=%s api_base=%s api_key=%s",
-                        provider,
-                        model,
-                        api_base or "",
-                        masked or "<none>",
-                    )
-                except Exception:
-                    pass
+                logger.info(
+                    "LLM call: provider=%s model=%s api_base=%s api_key=%s",
+                    provider,
+                    model,
+                    api_base or "",
+                    "<redacted>" if api_key_present else "<none>",
+                )
 
                 # If OpenAI family, add safety_identifier hint when available
                 request_messages = base_messages
@@ -4512,7 +4531,7 @@ def _process_agent_events_locked(
                         and available != TASKS_UNLIMITED
                         and Decimal(available) <= Decimal("0")
                     ):
-                        msg = f"Skipped processing due to insufficient credits (proprietary mode)."
+                        msg = "Skipped processing due to insufficient credits (proprietary mode)."
                         logger.warning(
                             "Persistent agent %s not processed – %s has no remaining task credits.",
                             persistent_agent_id,
@@ -4576,7 +4595,7 @@ def _process_agent_events_locked(
         span.set_attribute('processing.is_first_run', is_first_run)
         span.set_attribute('processing.run_sequence_number', run_sequence_number)
 
-        cumulative_token_usage = _run_agent_loop(
+        _run_agent_loop(
             agent,
             is_first_run=is_first_run,
             credit_snapshot=credit_snapshot,
@@ -5497,6 +5516,12 @@ def _run_agent_loop(
                     logger.info("Agent %s is sleeping.", agent.id)
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
+                elif _should_continue_for_unanswered_inbound_after_tools(agent, finalized_batch):
+                    logger.info(
+                        "Agent %s: non-message tool batch requested stop while latest inbound message "
+                        "is still unanswered; continuing for a user-facing reply.",
+                        agent.id,
+                    )
                 elif not followup_required and last_explicit_continue is False:
                     logger.info(
                         "Agent %s: tool batch ended with explicit stop; auto-sleeping.",

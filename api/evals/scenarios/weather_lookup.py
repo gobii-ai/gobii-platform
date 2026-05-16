@@ -3,13 +3,13 @@ import json
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgent, PersistentAgentMessage, PersistentAgentToolCall
+from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
 
 
 @register_scenario
 class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     slug = "weather_lookup"
-    description = "Ask for weather and expect a charter update and a direct HTTP API request to a free weather service."
+    description = "Ask for weather and expect a direct HTTP API request to a free weather service plus a user-facing answer."
     tier = "smoke"
     category = "tool_choice"
     expected_runtime = "medium"
@@ -19,18 +19,11 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
     tags = ("smoke", "tool_choice", "weather", "http_request", "llm_judge")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
-        ScenarioTask(name="verify_charter_update", assertion_type="manual"),
         ScenarioTask(name="verify_http_request", assertion_type="llm_judge"),
         ScenarioTask(name="verify_response", assertion_type="manual"),
     ]
 
     def run(self, run_id: str, agent_id: str) -> None:
-        original_charter = (
-            PersistentAgent.objects.filter(id=agent_id)
-            .values_list("charter", flat=True)
-            .first()
-            or ""
-        )
         # Task 1: Inject Prompt
         self.record_task_result(
             run_id,
@@ -79,39 +72,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={"message": msg}
         )
 
-        # Task 2: Charter Update
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.RUNNING,
-            task_name="verify_charter_update"
-        )
-
-        updated_charter = (
-            PersistentAgent.objects.filter(id=agent_id)
-            .values_list("charter", flat=True)
-            .first()
-            or ""
-        )
-        if updated_charter.strip() and updated_charter.strip() != original_charter.strip():
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_charter_update",
-                observed_summary="Charter updated.",
-                artifacts={"charter": updated_charter},
-            )
-        else:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_charter_update",
-                observed_summary="Charter did not change."
-            )
-
-        # Task 3: Verify HTTP Request (Judge)
+        # Task 2: Verify HTTP Request (Judge)
         self.record_task_result(
             run_id,
             None,
@@ -182,7 +143,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary="Agent did not make an HTTP request or spawn a web task.",
             )
 
-        # Task 4: Verify Response
+        # Task 3: Verify Response
         self.record_task_result(
             run_id,
             None,
@@ -196,13 +157,26 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             timestamp__gt=msg.timestamp
         ).order_by('timestamp').last()
 
-        if last_outbound:
+        reply = (last_outbound.body or "") if last_outbound else ""
+        normalized_reply = reply.lower()
+        includes_mock_weather = "72" in normalized_reply and "sun" in normalized_reply
+
+        if last_outbound and includes_mock_weather:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_response",
-                observed_summary=f"Agent replied: {last_outbound.body[:100]}...",
+                observed_summary=f"Agent replied with the mocked weather result: {reply[:100]}...",
+                artifacts={"message": last_outbound}
+            )
+        elif last_outbound:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_response",
+                observed_summary=f"Agent replied without the mocked weather result. Body: {reply[:200]}",
                 artifacts={"message": last_outbound}
             )
         else:

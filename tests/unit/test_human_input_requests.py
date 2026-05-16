@@ -378,6 +378,46 @@ class HumanInputRequestTests(TestCase):
         self.assertNotIn("relay_payload", result)
         self.assertNotIn("auto_sleep_ok", result)
 
+    def test_execute_request_human_input_requires_options_in_planning_mode(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "question": "What is your company?",
+                "options": [],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Planning Mode questions must include at least one option", result["message"])
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_requires_batch_options_in_planning_mode(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "question": "What is your company?",
+                        "options": [],
+                    },
+                    {
+                        "question": "What moves matter?",
+                        "options": [{"title": "All updates", "description": "Track anything notable."}],
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("Planning Mode questions must include at least one option", result["message"])
+        self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(
             self.agent,

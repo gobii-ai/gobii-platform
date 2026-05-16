@@ -1,10 +1,12 @@
 import argparse
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
+from django.db import close_old_connections
 from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers canonical scenarios and suites
@@ -621,6 +623,7 @@ class Command(BaseCommand):
 
         run_queue = list(run_ids)
         active_ids = set()
+        active_futures = {}
         printed_tasks = {run.id: set() for run in run_ids}
         total_tasks_all = 0
         passed_tasks_all = 0
@@ -630,12 +633,44 @@ class Command(BaseCommand):
             EvalRunTask.Status.ERRORED,
             EvalRunTask.Status.SKIPPED,
         ]
-        effective_max_concurrency = 1 if sync_mode else max_concurrency
+        using_sqlite = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
+        if sync_mode or (settings.CELERY_TASK_ALWAYS_EAGER and using_sqlite):
+            effective_max_concurrency = 1
+        elif settings.CELERY_TASK_ALWAYS_EAGER:
+            effective_max_concurrency = max_concurrency or max(1, len(run_queue))
+        else:
+            effective_max_concurrency = max_concurrency
+        use_eager_thread_pool = (
+            settings.CELERY_TASK_ALWAYS_EAGER
+            and not sync_mode
+            and effective_max_concurrency != 1
+        )
         if effective_max_concurrency:
             self.stdout.write(f"Max in-flight eval runs: {effective_max_concurrency}")
         else:
             self.stdout.write("Max in-flight eval runs: unlimited")
+        if settings.CELERY_TASK_ALWAYS_EAGER and using_sqlite and not sync_mode and max_concurrency != 1:
+            self.stdout.write(
+                self.style.WARNING(
+                    "Local SQLite evals run serially to avoid database write locks. "
+                    "Use a non-SQLite database with async workers for concurrent live suites."
+                )
+            )
+        if use_eager_thread_pool:
+            self.stdout.write("Using local eager worker threads for eval concurrency.")
 
+        def _run_eval_eager(run_id):
+            close_old_connections()
+            try:
+                run_eval_task.apply(args=(str(run_id),), throw=True)
+            finally:
+                close_old_connections()
+
+        executor = (
+            ThreadPoolExecutor(max_workers=effective_max_concurrency)
+            if use_eager_thread_pool
+            else None
+        )
         try:
             while run_queue or active_ids:
                 while run_queue and (
@@ -643,13 +678,32 @@ class Command(BaseCommand):
                 ):
                     run = run_queue.pop(0)
                     self.stdout.write(f"Scheduling run {run.id} for scenario '{run.scenario_slug}'...")
-                    run_eval_task.delay(str(run.id))
+                    if executor:
+                        active_futures[run.id] = executor.submit(_run_eval_eager, run.id)
+                    else:
+                        run_eval_task.delay(str(run.id))
                     active_ids.add(run.id)
                     if delay_between_runs:
                         time.sleep(delay_between_runs)
 
                 current_runs = EvalRun.objects.filter(id__in=active_ids).prefetch_related("tasks")
                 finished_ids = set()
+                for run_id, future in list(active_futures.items()):
+                    if not future.done():
+                        continue
+                    try:
+                        future.result()
+                    except Exception as exc:
+                        run = EvalRun.objects.filter(id=run_id).first()
+                        if run and run.status in (EvalRun.Status.PENDING, EvalRun.Status.RUNNING):
+                            run.status = EvalRun.Status.ERRORED
+                            run.notes = f"Local eager worker failed: {type(exc).__name__}: {exc}"
+                            run.finished_at = timezone.now()
+                            run.save(update_fields=["status", "notes", "finished_at", "updated_at"])
+                            _update_suite_state(run.suite_run_id)
+                        self.stdout.write(self.style.ERROR(f"Run {run_id} failed in local eager worker: {exc}"))
+                    finally:
+                        del active_futures[run_id]
 
                 for run in current_runs:
                     for task in run.tasks.all().order_by("sequence"):
@@ -674,6 +728,9 @@ class Command(BaseCommand):
         except KeyboardInterrupt:
             self.stdout.write(self.style.WARNING("\nPolling interrupted. Runs may still be processing in background."))
             return
+        finally:
+            if executor:
+                executor.shutdown(wait=True)
 
         # Final summary
         self.stdout.write("\n--- Final Summary ---")

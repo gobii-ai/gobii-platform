@@ -11,6 +11,7 @@ from api.agent.tools.tool_manager import get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    BehaviorMicroScenario,
     CommonUseCaseEvalDefinition,
     COMMON_USE_CASE_EVAL_CASES,
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
@@ -36,6 +37,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     EvalRun,
+    EvalRunTask,
     PersistentAgent,
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
@@ -548,6 +550,27 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertEqual(calls, [before])
+
+    def test_record_forbidden_before_end_handles_tool_call_primary_key(self):
+        EvalRunTask.objects.create(
+            run=self.run,
+            sequence=1,
+            name="verify_no_work_before_end_planning",
+            assertion_type="manual",
+        )
+        self._add_tool_call("http_request")
+
+        passed = BehaviorMicroScenario()._record_forbidden_before_end(
+            self.run.id,
+            None,
+            "verify_no_work_before_end_planning",
+            {"http_request"},
+        )
+
+        self.assertFalse(passed)
+        task = self.run.tasks.get(name="verify_no_work_before_end_planning")
+        self.assertEqual(task.status, EvalRunTask.Status.FAILED)
+        self.assertIn("http_request", task.observed_summary)
 
     def test_planning_mutation_detection_ignores_reads_and_after_end_planning(self):
         self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})

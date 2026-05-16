@@ -69,7 +69,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "type": "array",
                 "items": option_schema,
                 "description": (
-                    "Optional list of user-facing choices. Omit or pass [] for a free-text-only request."
+                    "Optional list of user-facing choices. Omit or pass [] for a free-text-only request. "
+                    "Required in Planning Mode; include an 'Other / I'll explain' option for open-ended questions."
                 ),
             },
         },
@@ -86,7 +87,9 @@ def get_request_human_input_tool() -> dict[str, Any]:
                 "can choose one OR reply in their own words. If you omit options, the user will "
                 "reply with free text only. The request always appears in the web chat human input panel. "
                 "In Planning Mode, planning questions must use this tool; questions sent only by "
-                "chat, email, or SMS are not tracked and do not count. "
+                "chat, email, or SMS are not tracked and do not count. In Planning Mode, every "
+                "question/request item must include options; use an 'Other / I'll explain' option "
+                "when no fixed answers fit. "
                 "This tool does not send email or SMS by itself. If the target is email or SMS and you want "
                 "to notify that channel, call this tool with will_continue_work=true and send a normal "
                 "email or SMS that includes the exact question(s) and options. If you call send_email or "
@@ -110,7 +113,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         "type": "array",
                         "items": option_schema,
                         "description": (
-                            "Optional list of user-facing choices. Omit or pass [] for a free-text-only request."
+                            "Optional list of user-facing choices. Omit or pass [] for a free-text-only request. "
+                            "Required in Planning Mode; include an 'Other / I'll explain' option for open-ended questions."
                         ),
                     },
                     "requests": {
@@ -248,6 +252,14 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
                 }
             )
 
+        if agent.planning_state == PersistentAgent.PlanningState.PLANNING and any(
+            not request["options"] for request in requests
+        ):
+            return {
+                "status": "error",
+                "message": "Planning Mode questions must include at least one option; include an Other / I'll explain option for open-ended questions.",
+            }
+
         result = create_human_input_requests_batch(agent, requests=requests, recipient=recipient)
         if will_continue_work is True:
             result.pop("auto_sleep_ok", None)
@@ -263,6 +275,12 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
     options, error = _normalize_request_options(params.get("options"))
     if error:
         return error
+
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING and not options:
+        return {
+            "status": "error",
+            "message": "Planning Mode questions must include at least one option; include an Other / I'll explain option for open-ended questions.",
+        }
 
     result = create_human_input_request(
         agent,
