@@ -1,19 +1,31 @@
 import base64
 import json
+from decimal import Decimal
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 from api.models import (
     AgentPeerLink,
     BrowserUseAgent,
     CommsChannel,
+    EvalRun,
+    EvalRunTask,
     IntelligenceTier,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentConversation,
+    PersistentAgentCompletion,
+    PersistentAgentError,
     PersistentAgentMessage,
+    PersistentAgentPromptArchive,
+    PersistentAgentStep,
+    PersistentAgentToolCall,
     UserQuota,
     build_web_agent_address,
     build_web_user_address,
@@ -62,7 +74,7 @@ class RemoteMCPViewTests(TestCase):
         )
         UserQuota.objects.get_or_create(user=self.other_user, defaults={"agent_limit": 20})
 
-    def _post_mcp(self, method, params=None, *, auth="x-api-key", extra_headers=None):
+    def _post_mcp(self, method, params=None, *, auth="x-api-key", extra_headers=None, api_key=None):
         payload = {
             "jsonrpc": "2.0",
             "id": "test-1",
@@ -71,10 +83,11 @@ class RemoteMCPViewTests(TestCase):
         if params is not None:
             payload["params"] = params
         headers = dict(extra_headers or {})
+        raw_api_key = api_key or self.raw_api_key
         if auth == "x-api-key":
-            headers["HTTP_X_API_KEY"] = self.raw_api_key
+            headers["HTTP_X_API_KEY"] = raw_api_key
         elif auth == "bearer":
-            headers["HTTP_AUTHORIZATION"] = f"Bearer {self.raw_api_key}"
+            headers["HTTP_AUTHORIZATION"] = f"Bearer {raw_api_key}"
         return self.client.post(
             "/api/v1/mcp/",
             data=json.dumps(payload),
@@ -82,22 +95,57 @@ class RemoteMCPViewTests(TestCase):
             **headers,
         )
 
-    def _call_tool(self, name, arguments=None, *, auth="x-api-key"):
+    def _call_tool(self, name, arguments=None, *, auth="x-api-key", api_key=None):
         return self._post_mcp(
             "tools/call",
             {"name": name, "arguments": arguments or {}},
             auth=auth,
+            api_key=api_key,
         )
 
-    def _create_agent(self, user, name):
+    def _create_agent(self, user, name, *, organization=None):
         with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
             browser_agent = BrowserUseAgent.objects.create(user=user, name=f"{name} Browser")
         return PersistentAgent.objects.create(
             user=user,
+            organization=organization,
             name=name,
             charter=f"{name} charter",
             browser_use_agent=browser_agent,
             preferred_llm_tier=self.tier,
+        )
+
+    def _create_web_message(self, agent, body, *, is_outbound=False):
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(agent.id),
+            defaults={"owner_agent": agent},
+        )
+        if agent_endpoint.owner_agent_id != agent.id:
+            agent_endpoint.owner_agent = agent
+            agent_endpoint.save(update_fields=["owner_agent"])
+        user_address = build_web_user_address(agent.user_id, agent.id)
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        conversation, _ = PersistentAgentConversation.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+            defaults={"owner_agent": agent, "display_name": agent.user.email},
+        )
+        if conversation.owner_agent_id != agent.id:
+            conversation.owner_agent = agent
+            conversation.save(update_fields=["owner_agent"])
+
+        return PersistentAgentMessage.objects.create(
+            owner_agent=agent,
+            from_endpoint=agent_endpoint if is_outbound else user_endpoint,
+            to_endpoint=user_endpoint if is_outbound else None,
+            conversation=conversation,
+            is_outbound=is_outbound,
+            body=body,
+            raw_payload={"source": "unit_test"},
         )
 
     def _structured_content(self, response):
@@ -133,7 +181,13 @@ class RemoteMCPViewTests(TestCase):
         self.assertIn("gobii_get_agent_config_options", tool_names)
         self.assertIn("gobii_send_agent_message", tool_names)
         self.assertIn("gobii_wait_for_agent_event", tool_names)
+        self.assertIn("gobii_get_agent_debug_trace", tool_names)
         self.assertIn("gobii_upload_agent_file", tool_names)
+
+        debug_tool = next(tool for tool in tools_response.json()["result"]["tools"] if tool["name"] == "gobii_get_agent_debug_trace")
+        self.assertIn("sanitized", debug_tool["description"])
+        self.assertEqual(debug_tool["inputSchema"]["properties"]["limit"]["maximum"], 50)
+        self.assertIn("audit_events", debug_tool["inputSchema"]["properties"]["include"]["items"]["enum"])
 
         list_response = self._call_tool("gobii_list_agents")
         self.assertEqual(list_response.status_code, 200)
@@ -622,6 +676,202 @@ class RemoteMCPViewTests(TestCase):
         outbound_to_agent_content = self._structured_content(outbound_to_agent_response)
         self.assertFalse(outbound_to_agent_content["matched"])
         self.assertTrue(outbound_to_agent_content["timed_out"])
+
+    def test_agent_debug_trace_returns_bounded_sanitized_audit_info(self):
+        agent = self._create_agent(self.user, "Debug Trace MCP Agent")
+        self._create_web_message(
+            agent,
+            "Investigate the job. Authorization: Bearer message-secret-token",
+        )
+        completion = PersistentAgentCompletion.objects.create(
+            agent=agent,
+            completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+            response_id="resp-debug",
+            prompt_tokens=11,
+            completion_tokens=7,
+            total_tokens=18,
+            cached_tokens=3,
+            llm_model="debug-model",
+            llm_provider="debug-provider",
+            llm_tool_names=["http_request"],
+            thinking_content="reasoning with api_key=thinking-secret-token",
+            input_cost_total=Decimal("0.011"),
+            input_cost_uncached=Decimal("0.010"),
+            input_cost_cached=Decimal("0.001"),
+            output_cost=Decimal("0.007"),
+            total_cost=Decimal("0.018"),
+            credits_cost=Decimal("0.500"),
+            billed=True,
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            completion=completion,
+            description="Tool call with password=step-secret-token",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="http_request",
+            tool_params={
+                "url": "https://example.test/data",
+                "api_key": "params-secret-token",
+                "headers": {"Authorization": "Bearer params-bearer-secret"},
+            },
+            result="Fetched ok with sk-live-resultsecret1234567890",
+            status="complete",
+            execution_duration_ms=42,
+        )
+        PersistentAgentPromptArchive.objects.create(
+            agent=agent,
+            step=step,
+            rendered_at=timezone.now(),
+            storage_key="prompt_archives/raw-secret-storage-key.json.zst",
+            raw_bytes=1000,
+            compressed_bytes=400,
+            tokens_before=100,
+            tokens_after=80,
+            tokens_saved=20,
+        )
+        PersistentAgentError.objects.create(
+            agent=agent,
+            completion=completion,
+            category=PersistentAgentError.Category.TOOL_PERSISTENCE,
+            source="tests.remote_mcp",
+            message="Tool failed with access_token=error-secret-token",
+            exception_class="RuntimeError",
+            traceback="Traceback with Bearer traceback-secret-token",
+            context={"password": "context-secret-token", "attempt": 1},
+        )
+        run = EvalRun.objects.create(
+            agent=agent,
+            initiated_by=self.user,
+            scenario_slug="debug_trace_scenario",
+            status=EvalRun.Status.COMPLETED,
+        )
+        EvalRunTask.objects.create(
+            run=run,
+            sequence=1,
+            name="verify_trace",
+            status=EvalRunTask.Status.FAILED,
+            assertion_type="manual",
+            observed_summary="Observed api_key=observed-secret-token",
+            debug_artifacts={
+                "params": {"url": "https://example.test/data", "api_key": "artifact-secret-token"},
+                "messages": ["summary with Bearer artifact-bearer-secret"],
+            },
+            first_step=step,
+        )
+
+        response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(agent.id),
+                "limit": 10,
+                "include": ["audit_events", "completions", "eval_debug_artifacts", "diagnostics"],
+                "detail": "standard",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["result"]["isError"])
+        content = self._structured_content(response)
+        self.assertEqual(content["agent"]["id"], str(agent.id))
+        self.assertEqual(content["audit"]["source"], "console.agent_audit.events.fetch_audit_events")
+        self.assertLessEqual(len(content["audit_events"]), 10)
+        event_kinds = {event["kind"] for event in content["audit_events"]}
+        self.assertTrue({"message", "tool_call", "completion", "error"}.issubset(event_kinds))
+        self.assertEqual(content["completions"]["items"][0]["cost"]["total_cost"], "0.018000")
+        self.assertEqual(content["completions"]["items"][0]["prompt_archive"]["tokens_saved"], 20)
+        self.assertEqual(content["eval_debug_artifacts"]["items"][0]["scenario_slug"], "debug_trace_scenario")
+        self.assertGreaterEqual(content["diagnostics"]["recent_error_count"], 1)
+
+        serialized = json.dumps(content)
+        for secret in (
+            "message-secret-token",
+            "thinking-secret-token",
+            "params-secret-token",
+            "params-bearer-secret",
+            "sk-live-resultsecret1234567890",
+            "step-secret-token",
+            "error-secret-token",
+            "traceback-secret-token",
+            "context-secret-token",
+            "artifact-secret-token",
+            "artifact-bearer-secret",
+            "observed-secret-token",
+            "raw-secret-storage-key",
+        ):
+            self.assertNotIn(secret, serialized)
+        self.assertIn("[REDACTED]", serialized)
+
+    def test_agent_debug_trace_enforces_access_scope_for_other_org_agents(self):
+        org = Organization.objects.create(name="MCP Org", slug="mcp-org", created_by=self.user)
+        org.billing.purchased_seats = 1
+        org.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        raw_org_key, _ = ApiKey.create_for_org(org, created_by=self.user, name="mcp-org")
+        other_org = Organization.objects.create(name="Other MCP Org", slug="other-mcp-org", created_by=self.other_user)
+        other_org.billing.purchased_seats = 1
+        other_org.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=other_org,
+            user=self.other_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        other_agent = self._create_agent(self.other_user, "Other Org Debug Agent", organization=other_org)
+
+        response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {"agent_id": str(other_agent.id)},
+            api_key=raw_org_key,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["result"]["isError"])
+        self.assertEqual(self._structured_content(response)["status"], "error")
+        self.assertIn("not found or inaccessible", self._structured_content(response)["message"])
+
+    def test_agent_debug_trace_limit_and_recent_window_are_enforced(self):
+        agent = self._create_agent(self.user, "Debug Trace Window Agent")
+        old_message = self._create_web_message(agent, "Old debug event")
+        old_timestamp = timezone.now() - timedelta(hours=2)
+        PersistentAgentMessage.objects.filter(id=old_message.id).update(timestamp=old_timestamp)
+
+        for index in range(3):
+            self._create_web_message(agent, f"Recent debug event {index}")
+
+        response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(agent.id),
+                "limit": 2,
+                "recent_minutes": 30,
+                "include": ["audit_events"],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        self.assertLessEqual(len(content["audit_events"]), 2)
+        bodies = [event.get("body_text") for event in content["audit_events"] if event.get("kind") == "message"]
+        self.assertTrue(all(body != "Old debug event" for body in bodies))
+
+        invalid_response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(agent.id),
+                "limit": 2,
+                "recent_minutes": 30,
+                "since": timezone.now().isoformat(),
+            },
+        )
+        self.assertEqual(invalid_response.status_code, 200)
+        self.assertTrue(invalid_response.json()["result"]["isError"])
 
     def test_origin_validation_rejects_untrusted_browser_origins(self):
         response = self._post_mcp(

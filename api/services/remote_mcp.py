@@ -40,6 +40,18 @@ from api.models import (
 )
 from api.serializers import PersistentAgentSerializer
 from api.services.agent_settings_resume import queue_settings_change_resume
+from api.services.agent_debug_trace import (
+    DEBUG_TRACE_DEFAULT_INCLUDE,
+    DEBUG_TRACE_DEFAULT_LIMIT,
+    DEBUG_TRACE_DEFAULT_RECENT_MINUTES,
+    DEBUG_TRACE_DETAIL_LEVELS,
+    DEBUG_TRACE_INCLUDE_SECTIONS,
+    DEBUG_TRACE_MAX_LIMIT,
+    DEBUG_TRACE_MAX_RECENT_MINUTES,
+    DEBUG_TRACE_TOOL_NAME,
+    AgentDebugTraceValidationError,
+    build_agent_debug_trace,
+)
 from api.services.daily_credit_limits import calculate_daily_credit_slider_bounds, get_tier_credit_multiplier
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
 from console.agent_chat.timeline import (
@@ -199,6 +211,70 @@ _FILE_NODE_OUTPUT = _object_output(
         "updated_at": _STRING_OR_NULL,
     },
     required=("id", "name", "path", "node_type"),
+)
+
+_DEBUG_TRACE_EVENT_OUTPUT = _object_output(
+    {
+        "kind": {"type": "string"},
+        "id": _STRING_OR_NULL,
+        "timestamp": _STRING_OR_NULL,
+    },
+    required=("kind",),
+)
+
+_DEBUG_TRACE_OUTPUT = _object_output(
+    {
+        "agent": _AGENT_REF_OUTPUT,
+        "scope": _object_output(
+            {
+                "agent_id": _UUID_OUTPUT,
+                "requested_at": _STRING_OR_NULL,
+                "since": _STRING_OR_NULL,
+                "until": _STRING_OR_NULL,
+                "recent_minutes": _INTEGER_OR_NULL,
+                "cursor": _STRING_OR_NULL,
+                "limit": {"type": "integer"},
+                "include": _array_output({"type": "string"}),
+                "detail": {"type": "string"},
+                "eval_run_id": _STRING_OR_NULL,
+            },
+            required=("agent_id", "limit", "include", "detail"),
+        ),
+        "timeline": _object_output(
+            {
+                "events": _array_output(_TIMELINE_EVENT_OUTPUT),
+                "latest_cursor": _STRING_OR_NULL,
+                "oldest_cursor": _STRING_OR_NULL,
+                "newest_cursor": _STRING_OR_NULL,
+                "has_more_older": {"type": "boolean"},
+                "has_more_newer": {"type": "boolean"},
+                "processing_active": {"type": "boolean"},
+                "processing_snapshot": _object_output({}),
+            }
+        ),
+        "audit_events": _array_output(_DEBUG_TRACE_EVENT_OUTPUT),
+        "audit": _object_output(
+            {
+                "source": {"type": "string"},
+                "has_more": {"type": "boolean"},
+                "next_cursor": _STRING_OR_NULL,
+                "returned": {"type": "integer"},
+            }
+        ),
+        "completions": _object_output({}),
+        "eval_debug_artifacts": _object_output({}),
+        "diagnostics": _object_output({}),
+        "redaction": _object_output(
+            {
+                "mode": {"type": "string"},
+                "replacement": {"type": "string"},
+                "notes": _array_output({"type": "string"}),
+            },
+            required=("mode", "replacement"),
+        ),
+        "warnings": _array_output({"type": "string"}),
+    },
+    required=("agent", "scope", "redaction", "warnings"),
 )
 
 
@@ -532,6 +608,71 @@ TOOL_DEFINITIONS = [
         "annotations": {"readOnlyHint": True},
     },
     {
+        "name": DEBUG_TRACE_TOOL_NAME,
+        "title": "Get Agent Debug Trace",
+        "description": (
+            "Fetch bounded, sanitized debugging information for one accessible Gobii agent, including "
+            "recent timeline/audit events, tool calls, completions, prompt archive metadata, usage/cost, "
+            "eval artifacts, and diagnostics. Raw prompt archives and secret-like values are not returned."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "agent_id": _agent_schema("Persistent agent UUID."),
+                "cursor": {
+                    "type": ["string", "null"],
+                    "description": "Optional audit/debug cursor returned as audit.next_cursor for older debug events.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": DEBUG_TRACE_MAX_LIMIT,
+                    "default": DEBUG_TRACE_DEFAULT_LIMIT,
+                    "description": "Maximum items per bounded debug section.",
+                },
+                "recent_minutes": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "maximum": DEBUG_TRACE_MAX_RECENT_MINUTES,
+                    "default": DEBUG_TRACE_DEFAULT_RECENT_MINUTES,
+                    "description": (
+                        "Recent time window when no cursor or explicit since is supplied. Null disables "
+                        "the time window and relies on limit/cursor bounds."
+                    ),
+                },
+                "since": {
+                    "type": ["string", "null"],
+                    "description": "Optional ISO8601 lower time bound. Cannot be combined with recent_minutes.",
+                },
+                "until": {
+                    "type": ["string", "null"],
+                    "description": "Optional ISO8601 upper time bound. Defaults to request time.",
+                },
+                "include": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": list(DEBUG_TRACE_INCLUDE_SECTIONS)},
+                    "default": list(DEBUG_TRACE_DEFAULT_INCLUDE),
+                    "description": "Optional debug sections to include.",
+                },
+                "detail": {
+                    "type": "string",
+                    "enum": list(DEBUG_TRACE_DETAIL_LEVELS),
+                    "default": "standard",
+                    "description": "Controls sanitized preview length; verbose still redacts secrets and omits raw prompts.",
+                },
+                "eval_run_id": {
+                    "type": ["string", "null"],
+                    "format": "uuid",
+                    "description": "Optional eval run UUID to filter eval debug artifacts for this agent.",
+                },
+            },
+            "required": ["agent_id"],
+            "additionalProperties": False,
+        },
+        "outputSchema": _DEBUG_TRACE_OUTPUT,
+        "annotations": {"readOnlyHint": True},
+    },
+    {
         "name": "gobii_wait_for_agent_event",
         "title": "Wait For Agent Timeline Event",
         "description": "Bounded long-poll over an agent's unified timeline using durable cursors and supported structured filters.",
@@ -707,6 +848,7 @@ def call_tool(request, name, arguments):
         "gobii_unlink_agents": _tool_unlink_agents,
         "gobii_send_agent_message": _tool_send_agent_message,
         "gobii_get_agent_timeline": _tool_get_agent_timeline,
+        DEBUG_TRACE_TOOL_NAME: _tool_get_agent_debug_trace,
         "gobii_wait_for_agent_event": _tool_wait_for_agent_event,
         "gobii_list_agent_files": _tool_list_agent_files,
         "gobii_upload_agent_file": _tool_upload_agent_file,
@@ -997,6 +1139,54 @@ def _tool_get_agent_timeline(request, arguments):
         "processing_active": window.processing_active,
         "processing_snapshot": serialize_processing_snapshot(window.processing_snapshot),
     }
+
+
+def _tool_get_agent_debug_trace(request, arguments):
+    agent = _get_agent(request, arguments.get("agent_id"))
+    limit = _bounded_int(
+        arguments.get("limit", DEBUG_TRACE_DEFAULT_LIMIT),
+        "limit",
+        minimum=1,
+        maximum=DEBUG_TRACE_MAX_LIMIT,
+    )
+    cursor = _optional_string(arguments, "cursor")
+    detail = arguments.get("detail", "standard")
+    if not isinstance(detail, str) or detail not in DEBUG_TRACE_DETAIL_LEVELS:
+        raise MCPToolError(
+            "detail must be one of summary, standard, or verbose.",
+            {"field": "detail", "supported_values": list(DEBUG_TRACE_DETAIL_LEVELS)},
+        )
+    include = arguments.get("include", list(DEBUG_TRACE_DEFAULT_INCLUDE))
+    recent_minutes = None
+    recent_minutes_provided = "recent_minutes" in arguments
+    if recent_minutes_provided and arguments.get("recent_minutes") is not None:
+        recent_minutes = _bounded_int(
+            arguments.get("recent_minutes"),
+            "recent_minutes",
+            minimum=1,
+            maximum=DEBUG_TRACE_MAX_RECENT_MINUTES,
+        )
+    since = _optional_string(arguments, "since")
+    until = _optional_string(arguments, "until")
+    eval_run_id = None
+    if arguments.get("eval_run_id"):
+        eval_run_id = _parse_uuid(arguments.get("eval_run_id"), "eval_run_id")
+
+    try:
+        return build_agent_debug_trace(
+            agent,
+            limit=limit,
+            cursor=cursor,
+            recent_minutes=recent_minutes,
+            recent_minutes_provided=recent_minutes_provided,
+            since=since,
+            until=until,
+            include=include,
+            detail=detail,
+            eval_run_id=eval_run_id,
+        )
+    except AgentDebugTraceValidationError as exc:
+        raise MCPToolError(str(exc), exc.data) from exc
 
 
 def _tool_wait_for_agent_event(request, arguments):
@@ -1539,6 +1729,17 @@ def _required_string(arguments, key, *, allow_blank):
     if not allow_blank and not value.strip():
         raise MCPToolError(f"{key} cannot be blank.")
     return value.strip() if not allow_blank else value
+
+
+def _optional_string(arguments, key, *, allow_blank=False):
+    value = arguments.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise MCPToolError(f"{key} must be a string.")
+    if not allow_blank and not value.strip():
+        raise MCPToolError(f"{key} cannot be blank.")
+    return value if allow_blank else value.strip()
 
 
 def _optional_bool(value, key):
