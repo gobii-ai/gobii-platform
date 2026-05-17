@@ -2610,7 +2610,7 @@ class PromptContextBuilderTests(TestCase):
             with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
                  patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
                  patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
-                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
+                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True}) as mock_execute_tool, \
                  patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
                  patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
                 from api.agent.core import event_processing as ep
