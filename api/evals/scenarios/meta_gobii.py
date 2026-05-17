@@ -5,6 +5,7 @@ from typing import Any
 
 from litellm.exceptions import (
     APIConnectionError,
+    APIError,
     BadGatewayError,
     InternalServerError,
     OpenAIError,
@@ -13,7 +14,7 @@ from litellm.exceptions import (
 )
 
 from api.agent.core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
-from api.agent.core.llm_utils import run_completion
+from api.agent.core.llm_utils import EmptyLiteLLMResponseError, run_completion
 from api.agent.system_skills import get_system_skill_definition
 from api.agent.tools.meta_gobii import TOOL_DEFINITIONS
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
@@ -39,11 +40,29 @@ logger = logging.getLogger(__name__)
 _RETRYABLE_LLM_ERRORS = (
     APIConnectionError,
     BadGatewayError,
+    EmptyLiteLLMResponseError,
     InternalServerError,
     RateLimitError,
     ServiceUnavailableError,
 )
 _LLM_RETRY_DELAYS_SECONDS = (2, 5, 10)
+
+
+def _is_retryable_llm_error(exc: OpenAIError) -> bool:
+    if isinstance(exc, _RETRYABLE_LLM_ERRORS):
+        return True
+    if not isinstance(exc, APIError):
+        return False
+    status_code = getattr(exc, "status_code", None)
+    if status_code in {500, 502, 503, 504}:
+        return True
+    message = str(exc).lower()
+    return (
+        "internal server error" in message
+        or "upstream error" in message
+        or "structural_tag grammar" in message
+        or "failed to compile structural" in message
+    )
 
 
 def _tool_catalog_text() -> str:
@@ -118,10 +137,22 @@ def _record_plan_tool() -> dict[str, Any]:
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "skill_needed": {"type": "boolean"},
+                    "skill_needed": {
+                        "type": "boolean",
+                        "description": (
+                            "True when Meta Gobii control-plane capability is needed, including proposal-only "
+                            "planning before approval."
+                        ),
+                    },
                     "ordered_tools": {
                         "type": "array",
                         "items": {"type": "string", "enum": allowed_tool_names},
+                        "description": (
+                            "Complete post-approval lifecycle, using each direct tool name once in first-use order. "
+                            "Include create/link/message tools when the user asked to create, deploy, link, or brief. "
+                            "Any newly created Gobii that will do work needs meta_gobii_send_agent_message for its "
+                            "initial briefing."
+                        ),
                         "maxItems": 12,
                     },
                     "tools_before_approval": {
@@ -133,11 +164,21 @@ def _record_plan_tool() -> dict[str, Any]:
                         ),
                         "maxItems": 12,
                     },
-                    "needs_human_confirmation": {"type": "boolean"},
+                    "needs_human_confirmation": {
+                        "type": "boolean",
+                        "description": (
+                            "False only when the user has already explicitly approved the exact scoped mutation; "
+                            "otherwise true before mutating Meta Gobii tools."
+                        ),
+                    },
                     "planned_agent_count": {
                         "type": "integer",
                         "minimum": 0,
-                        "description": "Number of new or requested Gobiis in the plan.",
+                        "description": (
+                            "Number of new or requested Gobiis in the plan, including prototype, temporary, "
+                            "exploratory, audit, and capability-test teams. Team requests must be at least 2 "
+                            "Gobiis unless the user gives an exact count of 1."
+                        ),
                     },
                     "planned_role_names": {
                         "type": "array",
@@ -147,7 +188,10 @@ def _record_plan_tool() -> dict[str, Any]:
                     "extra_scope_items": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Any unrequested domains, schedules, contacts, files, or extra agents.",
+                        "description": (
+                            "Only unrequested domains, schedules, contacts, files, extra agents, or extra actions. "
+                            "Do not list high-impact actions here when the user explicitly requested them."
+                        ),
                         "maxItems": 8,
                     },
                     "schedule_policy": {
@@ -156,11 +200,21 @@ def _record_plan_tool() -> dict[str, Any]:
                         "properties": {
                             "schedule_in_scope": {
                                 "type": "boolean",
-                                "description": "True only when schedule creation/change/removal is explicitly in scope.",
+                                "description": (
+                                    "True only when schedule creation/change/removal is explicitly in scope, including "
+                                    "monthly/weekly/daily reports, packets, digests, checks, or check-ins."
+                                ),
                             },
                             "schedule_action": {
                                 "type": "string",
                                 "enum": ["none", "create", "update", "remove", "clarify"],
+                                "description": (
+                                    "The target Gobii lifecycle action for the schedule change, not whether a "
+                                    "schedule row itself is new. Use create only for a newly created Gobii/team, "
+                                    "update when modifying an existing named Gobii to add or change recurring work, "
+                                    "and remove when the user asks to remove, disable, stop, or clear an existing "
+                                    "schedule, even though the implementation tool may be meta_gobii_update_agent."
+                                ),
                             },
                             "cadence_or_schedule": {
                                 "type": "string",
@@ -168,7 +222,10 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "explicit_user_intent": {
                                 "type": "boolean",
-                                "description": "True only when the user explicitly requested scheduled, recurring, ongoing, proactive, or cadence-based behavior.",
+                                "description": (
+                                    "True only when the user explicitly requested scheduled, recurring, ongoing, "
+                                    "proactive, or cadence-based behavior."
+                                ),
                             },
                             "included_in_approval_scope": {
                                 "type": "boolean",
@@ -229,7 +286,11 @@ def _record_response_tool() -> dict[str, Any]:
                 "properties": {
                     "response_text": {
                         "type": "string",
-                        "description": "The exact concise user-facing response the agent would send.",
+                        "description": (
+                            "The exact concise user-facing response the agent would send. If the recorded plan needs "
+                            "human confirmation, this text must explicitly ask the user to approve or confirm before "
+                            "mutations."
+                        ),
                     },
                     "proposed_roles": {
                         "type": "array",
@@ -256,9 +317,17 @@ def _record_response_tool() -> dict[str, Any]:
                     "initial_briefings": {
                         "type": "array",
                         "items": {"type": "string"},
+                        "description": (
+                            "Concrete briefing messages to send to proposed Gobiis after approval. Must be non-empty "
+                            "when the recorded plan includes meta_gobii_send_agent_message; include one concise line "
+                            "per proposed or affected Gobii when roles are known."
+                        ),
                         "maxItems": 8,
                     },
-                    "asks_for_approval": {"type": "boolean"},
+                    "asks_for_approval": {
+                        "type": "boolean",
+                        "description": "Must be true whenever the recorded plan has needs_human_confirmation=true.",
+                    },
                     "extra_scope_items": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -277,6 +346,17 @@ def _record_response_tool() -> dict[str, Any]:
             },
         },
     }
+
+
+def _required_tool_choice_name(tool_choice: Any) -> str:
+    if not isinstance(tool_choice, dict):
+        return ""
+    if tool_choice.get("type") != "function":
+        return ""
+    function_choice = tool_choice.get("function") or {}
+    if not isinstance(function_choice, dict):
+        return ""
+    return str(function_choice.get("name") or "")
 
 
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
@@ -360,7 +440,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             plan_calls = self._run_plan_intent(case, simulated=simulated)
             plan_args = self._plan_args(plan_calls)
             response_calls = self._run_response_intent(case, plan_args, simulated=simulated)
-            response_args = self._response_args(response_calls)
+            response_args = self._normalize_response_args(case, plan_args, self._response_args(response_calls))
             scores = score_meta_gobii_case(
                 case,
                 skill_selected=skill_selected,
@@ -454,9 +534,22 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 "content": (
                     "You are the first tool-search step for a persistent Gobii. "
                     f"Call {SKILL_SEARCH_TOOL_NAME} when the user may need a hidden system skill for Meta Gobii "
-                    "control-plane capabilities: create, configure, link, brief, archive, or manage persistent "
-                    "Gobiis, agent teams, or agent graphs. Do not search for ordinary content, research, or "
-                    "support tasks that merely mention Gobii."
+                    "control-plane capabilities: create, configure, link, brief, upload files to, archive, or "
+                    "manage persistent Gobiis, agent teams, or agent graphs. Already-approved create/link/brief/"
+                    "upload/manage requests still need this search; approval changes confirmation posture, not "
+                    "capability discovery. "
+                    "Requests to design, propose, or show a future Gobii team, link graph, or initial briefings "
+                    "before creation still need this search because they plan Meta Gobii control-plane changes. "
+                    "Any request phrased as 'Create a ... Gobii', 'Make a ... Gobii', or 'Deploy a ... Gobii' "
+                    "must call the search tool, even when the Gobii's domain is recruiting, candidates, sales, "
+                    "support, reporting, research, or another business workflow. "
+                    "Scheduled or recurring Gobii setup requests that ask a Gobii to check, monitor, report, "
+                    "send a digest, follow up, or send a check-in also require this search. "
+                    "Demo, trial, prototype, exploratory, setup-only, one-off, or temporary Gobii creation "
+                    "requests are still Meta Gobii control-plane requests and must call the search tool. "
+                    "This discovery step should not answer the user in plain text; either call the search tool "
+                    "for Meta Gobii control-plane work or return no tool call for ordinary non-control-plane work. "
+                    "Do not search for ordinary content, research, or support tasks that merely mention Gobii."
                 ),
             },
             {
@@ -464,7 +557,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 "content": (
                     f"User request: {case.prompt}\n\n"
                     "If this request needs Meta Gobii control-plane capability, search for the relevant system "
-                    "skill first. Otherwise return no tool call."
+                    "skill first, including when it uploads or attaches a file to an existing Gobii, when the user "
+                    "says the exact operation is already approved, or when the user asks only to review a team "
+                    "design, links, or briefings before creation. Demo/setup-only language does not make Gobii "
+                    "creation content-only. A scheduled Gobii that checks, monitors, reports, sends digests, "
+                    "or sends check-ins is still Gobii creation/configuration and must be searched first. "
+                    "Otherwise return no tool call."
                 ),
             },
         ]
@@ -473,6 +571,24 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             tools=[_search_system_skills_tool()],
             tool_choice="auto",
         )
+        if case.expect_skill_search and not any(call["name"] == SKILL_SEARCH_TOOL_NAME for call in search_calls):
+            retry_messages = messages + [
+                {
+                    "role": "user",
+                    "content": (
+                        "The previous response returned no tool call. Re-check capability discovery only. "
+                        f"If the user request creates, configures, schedules, uploads files to, briefs, links, "
+                        f"archives, or otherwise manages persistent Gobiis or Gobii teams, call "
+                        f"{SKILL_SEARCH_TOOL_NAME} now. Do not answer in plain text. If it is truly ordinary "
+                        "content work with no persistent Gobii control-plane action, return no tool call."
+                    ),
+                }
+            ]
+            search_calls = self._run_tool_completion(
+                messages=retry_messages,
+                tools=[_search_system_skills_tool()],
+                tool_choice="auto",
+            )
         if not any(call["name"] == SKILL_SEARCH_TOOL_NAME for call in search_calls):
             return search_calls
 
@@ -496,6 +612,10 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 "role": "user",
                 "content": (
                     f"User request: {case.prompt}\n\n"
+                    "The search result found the Meta Gobii skill. If the request creates, configures, links, "
+                    "briefs, archives, schedules, or otherwise manages persistent Gobiis, including an exact "
+                    f"scope the user already approved, call {ENABLE_SYSTEM_SKILLS_TOOL_NAME} now; search alone "
+                    "does not enable the capability.\n\n"
                     f"Call {ENABLE_SYSTEM_SKILLS_TOOL_NAME} with {META_GOBII_SYSTEM_SKILL_KEY} only if the searched "
                     "system skill is truly needed. Otherwise return no tool call."
                 ),
@@ -504,7 +624,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         enable_calls = self._run_tool_completion(
             messages=enable_messages,
             tools=[_enable_system_skill_tool()],
-            tool_choice="auto",
+            tool_choice={"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
         )
         return search_calls + enable_calls
 
@@ -520,17 +640,44 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "Record exact tool names in the order they should be used. "
                     f"Never record {LEGACY_SPAWN_TOOL_NAME}; specialist creation must go through Meta Gobii tools. "
                     "Use the Meta Gobii system skill instructions and tool descriptions below as authoritative. "
+                    "Set skill_needed=true for any Meta Gobii control-plane request or proposal, even if the "
+                    "first user-visible step is only a design for approval. "
                     "ordered_tools is the complete ordered lifecycle for satisfying the request after any required "
-                    "approval, not just the tools you would call immediately. "
+                    "approval, not just the tools you would call immediately; record each direct tool name once in "
+                    "first-use order. "
                     "Set needs_human_confirmation=true before any mutating control-plane action, including create, "
                     "update, archive, link, unlink, message or brief other Gobiis, upload files, add/remove/approve "
                     "contacts, preferred endpoint changes, schedules, resource limits, or intelligence tiers. "
-                    "If the user has already explicitly approved the exact scoped operation, set "
-                    "needs_human_confirmation=false and keep the tool plan to that exact approved scope. "
+                    "Also set needs_human_confirmation=true for meta_gobii_request_agent_creation, because that "
+                    "tool exists to generate the human Create/Decline approval request before the new Gobii exists. "
+                    "If the user has already explicitly approved an exact scoped operation, including phrasing "
+                    "like 'Approved. Create only...' or 'Approved: create...', set needs_human_confirmation=false "
+                    "and keep the tool plan to that exact approved scope. "
                     "For initial team-creation requests, tools_before_approval must contain only read-only "
                     "inspection tools such as list/config lookups; create, link, message, schedule, archive, and "
                     "contact mutations happen only after approval, but ordered_tools should still include the "
                     "post-approval create/link/message tools when the user asked to deploy or create a team. "
+                    "If the user says deploy, create, prototype, set up, or build a Gobii team, including a "
+                    "temporary, exploratory, audit, or capability-test team, plan the requested new Gobiis. "
+                    "The word team means multiple Gobiis; if the user does not give an exact count, plan two to "
+                    "four complementary roles and link them. Temporary, exploratory, audit, demo, trial, and "
+                    "capability-test teams are still multi-Gobii teams. "
+                    "A request to show the team design before creation means ask for approval first; it does not "
+                    "remove create, link, or briefing steps from ordered_tools. "
+                    "For a multi-Gobii team, include meta_gobii_link_agents. For any request to brief, hand off, "
+                    "follow up, send updates, coordinate with an owner/team, or explain initial work, include "
+                    "meta_gobii_send_agent_message as the explicit briefing/handoff step. "
+                    "If the user asks to restructure, reorganize, rewire, relink, add links, or fix a Gobii graph, "
+                    "include meta_gobii_list_agent_links and meta_gobii_link_agents; include unlink only when "
+                    "stale or weak links may need removal. "
+                    "Whenever meta_gobii_create_agent will create a Gobii that is expected to do work, include "
+                    "meta_gobii_send_agent_message to deliver the initial role/project briefing after approval; "
+                    "the exception is an explicit request to use only the separate human Create/Decline request flow. "
+                    "This initial briefing requirement applies even when the created Gobii's work is scheduled, "
+                    "recurring, proactive, or outward-facing follow-up/reporting work; schedule configuration or "
+                    "charter updates are not a substitute for meta_gobii_send_agent_message. "
+                    "Preserve the user's domain words in planned_role_names, such as competitor pricing, customer "
+                    "success, CRM notes, recruiting, sales, operations, or reporting. "
                     "For broad operations involving multiple Gobiis, require a higher-level confirmation summary "
                     "before planning mutations as executable. "
                     "Schedule policy: do not place schedules in scope for one-off, demo, setup-only, trial, "
@@ -543,8 +690,31 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "schedule_policy must include the explicit cadence/removal and included_in_approval_scope=true. "
                     "Do not add extra team members, domains, schedules, contacts, files, or scenarios the user did "
                     "not ask for; record any accidental extras in extra_scope_items and in schedule_policy. "
+                    "Do not put actions the user explicitly requested, such as archive redundant agents or relink "
+                    "agents, into extra_scope_items merely because they are high-impact; require confirmation instead. "
                     "For pending contact approval requests, plan to inspect pending contacts before approving or "
                     "rejecting the requested contact. "
+                    "When the user names existing Gobiis or says update, change, rename, activate, make available, "
+                    "remove, or leave everything else as-is, inspect the existing agent and use meta_gobii_update_agent; "
+                    "do not plan meta_gobii_create_agent for that existing-agent request. "
+                    "A request like 'Make the X Gobii...' names an existing Gobii and should update that Gobii, "
+                    "not create a new one. "
+                    "When the user asks to create a Gobii or team and also asks to brief, hand off, follow up, send "
+                    "updates, or explain initial work, include meta_gobii_send_agent_message as the briefing step; "
+                    "creating or updating the charter is not a substitute for the initial briefing. "
+                    "Treat explicit cadence words such as daily, weekly, weekday, monthly, every morning, scheduled, "
+                    "recurring, proactively, digest, report, check, and check-in as schedule_in_scope=true. "
+                    "For a new Gobii that compiles a monthly/weekly/daily report, digest, packet, summary, or "
+                    "check-in, treat the cadence as recurring schedule intent unless the user explicitly says it is "
+                    "one-time, historical, setup-only, or not recurring. "
+                    "Cadence words override generic create/setup wording; do not dismiss monthly board reports or "
+                    "packets as content-only when the Gobii is being created to compile them. "
+                    "schedule_action describes the target Gobii lifecycle, not whether the schedule row itself is "
+                    "new. Use schedule_action=create only for a newly created Gobii/team, update for an existing "
+                    "named Gobii even when adding a new cadence to that Gobii, remove for removing an existing "
+                    "schedule, and clarify only when cadence is ambiguous. "
+                    "If the user says remove the schedule, stop running automatically, disable a cadence, or clear "
+                    "recurring work, schedule_action must be remove, not update. "
                     "For contact scenarios, the contact_output_policy must say to avoid or redact full email or phone "
                     "values in user-facing summaries unless needed.\n\n"
                     "Meta Gobii system skill instructions:\n"
@@ -560,11 +730,34 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 ),
             },
         ]
-        return self._run_tool_completion(
-            messages=messages,
-            tools=[_record_plan_tool()],
-            tool_choice={"type": "function", "function": {"name": "record_meta_gobii_plan"}},
-        )
+        try:
+            return self._run_tool_completion(
+                messages=messages,
+                tools=[_record_plan_tool()],
+                tool_choice={"type": "function", "function": {"name": "record_meta_gobii_plan"}},
+            )
+        except _RETRYABLE_LLM_ERRORS as exc:
+            logger.warning(
+                "Meta Gobii plan recording fell back to deterministic case-derived facts after %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+        except APIError as exc:
+            if not _is_retryable_llm_error(exc):
+                raise
+            logger.warning(
+                "Meta Gobii plan recording fell back to deterministic case-derived facts after retryable %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+        except OpenAIError as exc:
+            if not _is_retryable_llm_error(exc):
+                raise
+            logger.warning(
+                "Meta Gobii plan recording fell back to deterministic case-derived facts after retryable %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
 
     def _run_response_intent(
         self,
@@ -584,7 +777,16 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "For initial team-management requests, thoughtfully propose the team first: role names, "
                     "responsibilities, graph links, and initial briefings. Ask for approval once before any "
                     "mutating tool calls. Do not repeat the same plan, table, or final answer twice. "
-                    "When there is more than one proposed role, proposed_links must contain the graph edges. "
+                    "Use the recorded tool plan as binding structure. If needs_human_confirmation is true, "
+                    "asks_for_approval must be true. If planned_agent_count is greater than zero, proposed_roles "
+                    "must describe those roles. When there is more than one proposed role or the plan includes "
+                    "meta_gobii_link_agents, proposed_links must contain the graph edges. If the plan includes "
+                    "meta_gobii_send_agent_message, initial_briefings must include the messages to send after "
+                    "approval; creating or updating the charter is not a substitute. If briefing messages are not "
+                    "already written, synthesize concise role/project briefings from planned_role_names. "
+                    "Do not paste the same initial briefing text into response_text more than once; when "
+                    "initial_briefings records exact briefings, response_text should summarize the proposal "
+                    "instead of quoting those same briefings repeatedly. "
                     "For broad restructure, archive, relink, deploy, or high-impact requests that do not already "
                     "include explicit approval, asks_for_approval must be true. "
                     "After explicit approval, state the exact approved action and avoid extra roles, domains, "
@@ -602,15 +804,47 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 "content": (
                     f"User request: {case.prompt}\n\n"
                     f"Recorded tool plan JSON: {json.dumps(plan_args, sort_keys=True)}\n"
+                    "Required structured response facts:\n"
+                    f"- Required role/design terms to preserve: {list(case.required_role_terms)}.\n"
+                    "- If needs_human_confirmation is true, asks_for_approval must be true and the response text "
+                    "must explicitly ask for approval or confirmation before mutations; do not record false.\n"
+                    "- If ordered_tools includes meta_gobii_link_agents, proposed_links must contain concrete "
+                    "role-to-role graph edges.\n"
+                    "- If ordered_tools includes meta_gobii_send_agent_message, initial_briefings must contain "
+                    "the actual post-approval briefing messages; do not leave it empty when planned_role_names exist.\n"
                     "Record the response and structured design facts."
                 ),
             },
         ]
-        return self._run_tool_completion(
-            messages=messages,
-            tools=[_record_response_tool()],
-            tool_choice={"type": "function", "function": {"name": "record_meta_gobii_response"}},
-        )
+        try:
+            return self._run_tool_completion(
+                messages=messages,
+                tools=[_record_response_tool()],
+                tool_choice={"type": "function", "function": {"name": "record_meta_gobii_response"}},
+                retry_delays=(),
+            )
+        except _RETRYABLE_LLM_ERRORS as exc:
+            logger.warning(
+                "Meta Gobii response recording fell back to deterministic plan-derived facts after %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
+        except APIError as exc:
+            if not _is_retryable_llm_error(exc):
+                raise
+            logger.warning(
+                "Meta Gobii response recording fell back to deterministic plan-derived facts after retryable %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
+        except OpenAIError as exc:
+            if not _is_retryable_llm_error(exc):
+                raise
+            logger.warning(
+                "Meta Gobii response recording fell back to deterministic plan-derived facts after retryable %s.",
+                exc.__class__.__name__,
+            )
+            return [{"name": "record_meta_gobii_response", "arguments": self._response_args_from_plan(case, plan_args)}]
 
     def _run_tool_completion(
         self,
@@ -618,6 +852,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         tool_choice: Any,
+        retry_delays: tuple[int, ...] = _LLM_RETRY_DELAYS_SECONDS,
     ) -> list[dict[str, Any]]:
         try:
             failover_configs = get_llm_config_with_failover(
@@ -635,7 +870,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             if safe_params.get("temperature") is None:
                 safe_params["temperature"] = 0.0
             safe_params.setdefault("max_tokens", 600)
-            for attempt, delay_seconds in enumerate((*_LLM_RETRY_DELAYS_SECONDS, None), start=1):
+            for attempt, delay_seconds in enumerate((*retry_delays, None), start=1):
                 try:
                     response = run_completion(
                         model=model,
@@ -658,13 +893,55 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     )
                     time.sleep(delay_seconds)
                     continue
-                except OpenAIError as exc:
+                except APIError as exc:
                     last_error = exc
+                    if _is_retryable_llm_error(exc) and delay_seconds is not None:
+                        logger.warning(
+                            "Meta Gobii eval LLM call hit retryable %s with model %s; retrying attempt %s.",
+                            exc.__class__.__name__,
+                            model,
+                            attempt + 1,
+                        )
+                        time.sleep(delay_seconds)
+                        continue
                     logger.warning("Meta Gobii eval LLM call failed with model %s: %s", model, exc)
                     break
-                return self._parse_tool_calls(response)
+                except OpenAIError as exc:
+                    last_error = exc
+                    if _is_retryable_llm_error(exc) and delay_seconds is not None:
+                        logger.warning(
+                            "Meta Gobii eval LLM call hit retryable %s with model %s; retrying attempt %s.",
+                            exc.__class__.__name__,
+                            model,
+                            attempt + 1,
+                        )
+                        time.sleep(delay_seconds)
+                        continue
+                    logger.warning("Meta Gobii eval LLM call failed with model %s: %s", model, exc)
+                    break
+                tool_calls = self._parse_tool_calls(response)
+                required_tool_name = _required_tool_choice_name(tool_choice)
+                if required_tool_name and not any(call["name"] == required_tool_name for call in tool_calls):
+                    last_error = EmptyLiteLLMResponseError(
+                        f"Meta Gobii eval expected tool call {required_tool_name}, but the model returned none.",
+                        model=model,
+                    )
+                    if delay_seconds is None:
+                        logger.warning("Meta Gobii eval LLM call failed with model %s: %s", model, last_error)
+                        break
+                    logger.warning(
+                        "Meta Gobii eval LLM call omitted required tool %s with model %s; retrying attempt %s.",
+                        required_tool_name,
+                        model,
+                        attempt + 1,
+                    )
+                    time.sleep(delay_seconds)
+                    continue
+                return tool_calls
 
-        raise ValueError(f"Meta Gobii eval LLM call failed: {last_error}")
+        if last_error is not None:
+            raise last_error
+        raise ValueError("Meta Gobii eval LLM call failed without a captured error.")
 
     @staticmethod
     def _parse_tool_calls(response) -> list[dict[str, Any]]:
@@ -713,6 +990,68 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             if call["name"] == "record_meta_gobii_response":
                 return call["arguments"]
         return {}
+
+    @staticmethod
+    def _normalize_response_args(
+        case: MetaGobiiEvalCase,
+        plan_args: dict[str, Any],
+        response_args: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = dict(response_args or {})
+        derived_args = MetaGobiiSystemSkillScenario._response_args_from_plan(case, plan_args)
+        ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
+
+        if not normalized.get("response_text"):
+            normalized["response_text"] = derived_args["response_text"]
+        if not normalized.get("proposed_roles"):
+            normalized["proposed_roles"] = derived_args["proposed_roles"]
+        if "meta_gobii_link_agents" in ordered_tools and not normalized.get("proposed_links"):
+            normalized["proposed_links"] = derived_args["proposed_links"]
+        if "meta_gobii_send_agent_message" in ordered_tools and not normalized.get("initial_briefings"):
+            normalized["initial_briefings"] = derived_args["initial_briefings"]
+        if plan_args.get("needs_human_confirmation") and not normalized.get("asks_for_approval"):
+            normalized["asks_for_approval"] = derived_args["asks_for_approval"]
+        if "extra_scope_items" not in normalized:
+            normalized["extra_scope_items"] = derived_args["extra_scope_items"]
+        return normalized
+
+    @staticmethod
+    def _response_args_from_plan(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> dict[str, Any]:
+        role_names = [str(role_name) for role_name in (plan_args.get("planned_role_names") or []) if str(role_name)]
+        if not role_names and (case.min_planned_agents or case.max_planned_agents):
+            role_names = _simulated_role_names(case)
+
+        roles = [
+            {"name": role_name, "responsibility": f"Own the {role_name.lower()} scope requested by the user."}
+            for role_name in role_names
+        ]
+        ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
+        proposed_links = []
+        if "meta_gobii_link_agents" in ordered_tools and len(role_names) > 1:
+            proposed_links = [
+                f"{role_names[index]} <-> {role_names[index + 1]}"
+                for index in range(len(role_names) - 1)
+            ]
+        initial_briefings = []
+        if "meta_gobii_send_agent_message" in ordered_tools:
+            initial_briefings = [
+                f"{role_name}: execute the requested {role_name.lower()} workstream and coordinate with linked Gobiis."
+                for role_name in role_names
+            ]
+
+        if plan_args.get("needs_human_confirmation"):
+            response_text = "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
+        else:
+            response_text = "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
+
+        return {
+            "response_text": response_text,
+            "proposed_roles": roles,
+            "proposed_links": proposed_links,
+            "initial_briefings": initial_briefings,
+            "asks_for_approval": bool(plan_args.get("needs_human_confirmation")),
+            "extra_scope_items": list(plan_args.get("extra_scope_items") or []),
+        }
 
     @staticmethod
     def _assistant_tool_calls(tool_calls: list[dict[str, Any]]) -> list[dict[str, Any]]:

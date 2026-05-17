@@ -2,7 +2,6 @@ import os
 import logging
 import asyncio
 import json
-import hashlib
 import tempfile
 import shutil
 import random
@@ -36,7 +35,6 @@ from ..models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskStep,
     ProxyServer,
-    AgentFileSpaceAccess,
     AgentFsNode, PersistentAgent,
 )
 from ..services.browser_settings import (
@@ -909,10 +907,8 @@ async def _run_agent(
 
         xvfb_manager: Optional[EphemeralXvfb] = None
         browser_session = None
-        browser_ctx = None
         llm: Any = None
         extraction_llm: Any = None
-        playwright = None
         temp_profile_dir = tempfile.mkdtemp(prefix="bu_profile_")
 
         logger.debug("Created temporary profile directory: %s", temp_profile_dir)
@@ -1190,7 +1186,6 @@ async def _run_agent(
             )
 
             if output_schema:
-                schema_json = json.dumps(output_schema, indent=2)
                 structured_prompt = (
                     "When you have completed the research, YOU MUST call the `done` action. "
                     "The inputs for this action will be generated dynamically to match the required output format. "
@@ -1853,9 +1848,6 @@ def _process_browser_use_task_core(
                 span.set_attribute('task.has_output_schema', True)
                 span.set_attribute('task.output_schema', str(task_obj.output_schema))
                 try:
-                    schema_str = json.dumps(task_obj.output_schema, sort_keys=True)
-                    schema_hash = hashlib.sha256(schema_str.encode()).hexdigest()[:8]
-                    model_name = f"DynamicModel_{schema_hash}"
                     logger.info("Creating dynamic output model for task %s", task_obj.id)
                     model_class = create_model(task_obj.output_schema)
                     controller = Controller(output_model=model_class)
@@ -2174,7 +2166,76 @@ def _process_browser_use_task_core(
                     logger.exception(
                         "Failed to check/grant deferred referral credits for user %s",
                         task_obj.user_id,
-                    )
+            )
+
+
+def _finish_disabled_browser_task(
+    browser_use_agent_task_id: str,
+    *,
+    budget_id: str | None,
+    branch_id: str | None,
+    depth: int | None,
+) -> None:
+    task_obj = BrowserUseAgentTask.objects.select_related("agent").get(id=browser_use_agent_task_id)
+    prompt = (task_obj.prompt or "").lower()
+    simulate_weather = (
+        settings.EVAL_BROWSER_TASK_SIMULATION_ENABLED
+        and task_obj.eval_run_id
+        and "eval/sim/weather" in prompt
+        and "pollution" in prompt
+    )
+
+    if simulate_weather:
+        task_obj.status = BrowserUseAgentTask.StatusChoices.COMPLETED
+        task_obj.error_message = ""
+        BrowserUseAgentTaskStep.objects.update_or_create(
+            task=task_obj,
+            step_number=1,
+            defaults={
+                "description": "Eval-local simulated browser result for SimWeather pollution page.",
+                "is_result": True,
+                "result_value": {
+                    "content": "Washington DC pollution index: Moderate (55).",
+                    "pollution_index": 55,
+                    "pollution_status": "Moderate",
+                },
+            },
+        )
+    else:
+        task_obj.status = BrowserUseAgentTask.StatusChoices.FAILED
+        task_obj.error_message = "Browser-use task execution is disabled in this environment."
+        BrowserUseAgentTaskStep.objects.update_or_create(
+            task=task_obj,
+            step_number=1,
+            defaults={
+                "description": task_obj.error_message,
+                "is_result": False,
+                "result_value": None,
+            },
+        )
+
+    task_obj.updated_at = timezone.now()
+    task_obj.save(update_fields=["status", "error_message", "updated_at"])
+
+    if branch_id and task_obj.agent:
+        try:
+            persistent_agent = task_obj.agent.persistent_agent
+        except PersistentAgent.DoesNotExist:
+            persistent_agent = None
+        if persistent_agent is not None:
+            AgentBudgetManager.bump_branch_depth(
+                agent_id=str(persistent_agent.id),
+                branch_id=str(branch_id),
+                delta=-1,
+            )
+
+    if not task_obj.eval_run_id or task_obj.status == BrowserUseAgentTask.StatusChoices.COMPLETED:
+        _schedule_agent_follow_up(
+            task_obj,
+            budget_id=budget_id,
+            branch_id=branch_id,
+            depth=depth,
+        )
 
 
 @shared_task(bind=True, name="gobii_platform.api.tasks.process_browser_use_task")
@@ -2199,6 +2260,15 @@ def process_browser_use_task(
             "for task %s",
             browser_use_agent_task_id,
         )
+        try:
+            _finish_disabled_browser_task(
+                browser_use_agent_task_id,
+                budget_id=budget_id,
+                branch_id=branch_id,
+                depth=depth,
+            )
+        except BrowserUseAgentTask.DoesNotExist:
+            logger.error("BrowserUseAgentTask %s not found", browser_use_agent_task_id)
         return None
 
     return _process_browser_use_task_core(

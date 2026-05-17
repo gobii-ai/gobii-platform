@@ -95,6 +95,7 @@ LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
 # config.eval_local_settings module enables them for clean local SQLite runs.
 EVAL_LOCAL_SETUP_ENABLED = env.bool("EVAL_LOCAL_SETUP_ENABLED", default=False)
 EVAL_LOCAL_AUTO_MIGRATE = env.bool("EVAL_LOCAL_AUTO_MIGRATE", default=False)
+EVAL_BROWSER_TASK_SIMULATION_ENABLED = env.bool("EVAL_BROWSER_TASK_SIMULATION_ENABLED", default=False)
 EVAL_LOCAL_OPENROUTER_PROFILE_NAME = env(
     "EVAL_LOCAL_OPENROUTER_PROFILE_NAME",
     default="openrouter-deepseek-v4-flash",
@@ -186,6 +187,8 @@ MAX_PARALLEL_TOOL_CALLS = env.int("MAX_PARALLEL_TOOL_CALLS", default=4)
 # Retry configuration for transient LiteLLM failures
 LITELLM_MAX_RETRIES = env.int("LITELLM_MAX_RETRIES", default=2)
 LITELLM_RETRY_BACKOFF_SECONDS = env.float("LITELLM_RETRY_BACKOFF_SECONDS", default=1.0)
+# Extra full-loop retries when a provider repeatedly returns structurally empty completions.
+AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES = env.int("AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES", default=1)
 # Proxy health check: deactivate after N consecutive failures
 PROXY_CONSECUTIVE_FAILURE_THRESHOLD = env.int("PROXY_CONSECUTIVE_FAILURE_THRESHOLD", default=3)
 # Decodo inventory alerting

@@ -10,7 +10,7 @@ from django.db import connection
 
 
 def ensure_eval_local_database(stdout=None) -> bool:
-    """Create/sync the local SQLite schema when eval-local settings request it."""
+    """Create/sync the local eval schema when eval-local settings request it."""
     if not settings.EVAL_LOCAL_AUTO_MIGRATE:
         return False
 
@@ -21,7 +21,7 @@ def ensure_eval_local_database(stdout=None) -> bool:
     call_command("migrate", run_syncdb=True, interactive=False, verbosity=0)
     ensure_eval_local_compat_columns(stdout=stdout)
     if stdout:
-        stdout.write("Local eval SQLite schema is ready.")
+        stdout.write("Local eval database schema is ready.")
     return True
 
 
@@ -200,7 +200,7 @@ def ensure_eval_local_routing_profile(seed: EvalLocalRoutingProfileSeed, stdout=
             "supports_temperature": True,
             "supports_tool_choice": True,
             "use_parallel_tool_calls": False,
-            "allow_implied_send": False,
+            "allow_implied_send": True,
             "supports_vision": False,
             "supports_reasoning": False,
             "api_base": seed.api_base,

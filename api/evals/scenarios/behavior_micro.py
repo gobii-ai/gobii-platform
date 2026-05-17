@@ -3,12 +3,15 @@ from dataclasses import dataclass, field
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
+    is_eval_synthetic_tool_name,
 )
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import ScenarioRegistry, register_scenario
 from api.evals.stop_policy import (
+    sqlite_batch_is_only_eval_bookkeeping_read,
+    sqlite_batch_is_only_planning_state_read,
     sqlite_batch_is_only_planning_state_mutation,
     sqlite_batch_mutates_agent_config_field,
     sqlite_batch_mutates_planning_state,
@@ -18,6 +21,8 @@ from api.models import (
     PersistentAgent,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
 
@@ -33,10 +38,10 @@ TOOL_CHOICE_MISSING_RECIPIENT_USES_HUMAN_INPUT = "tool_choice_missing_recipient_
 
 UPDATE_PLAN_TOOL_NAME = "update_plan"
 UPDATE_PLAN_POLICY_EXPECT = "expect"
-UPDATE_PLAN_POLICY_FORBID = "forbid"
+UPDATE_PLAN_POLICY_OPTIONAL = "optional"
 UPDATE_PLAN_POLICIES = {
     UPDATE_PLAN_POLICY_EXPECT,
-    UPDATE_PLAN_POLICY_FORBID,
+    UPDATE_PLAN_POLICY_OPTIONAL,
 }
 
 
@@ -94,7 +99,7 @@ class CommonUseCaseEvalDefinition:
 
     @property
     def update_plan_policy(self):
-        return UPDATE_PLAN_POLICY_EXPECT if self.plan_expected else UPDATE_PLAN_POLICY_FORBID
+        return UPDATE_PLAN_POLICY_EXPECT if self.plan_expected else UPDATE_PLAN_POLICY_OPTIONAL
 
     def validate(self):
         if not self.slug:
@@ -126,7 +131,14 @@ class CommonUseCaseEvalDefinition:
         return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.ignored_tools]))
 
     def allowed_preamble_tool_names(self):
-        return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *self.allowed_preamble_tools]))
+        category_defaults = []
+        if self.category == "sheets":
+            category_defaults = GOOGLE_SHEETS_PREAMBLE_TOOLS
+        elif self.category == "files":
+            category_defaults = FILE_DELIVERABLE_PREAMBLE_TOOLS
+        elif self.category == "monitoring":
+            category_defaults = MONITORING_SETUP_PREAMBLE_TOOLS
+        return list(dict.fromkeys([*IGNORED_FIRST_ACTION_TOOL_NAMES, *category_defaults, *self.allowed_preamble_tools]))
 
     def expected_tool_alternatives(self, tool_name):
         return list(self.accepted_tool_alternatives.get(tool_name, ()))
@@ -134,6 +146,29 @@ class CommonUseCaseEvalDefinition:
     def accepted_tool_names_for_expected_tool(self, tool_name):
         return [tool_name, *self.expected_tool_alternatives(tool_name)]
 
+
+LINKEDIN_DISCOVERY_PREAMBLE_TOOLS = [
+    "search_tools",
+    "mcp_brightdata_search_engine",
+    "mcp_brightdata_web_data_linkedin_company_profile",
+]
+LINKEDIN_POSTS_PREAMBLE_TOOLS = [
+    *LINKEDIN_DISCOVERY_PREAMBLE_TOOLS,
+    "mcp_brightdata_web_data_linkedin_company_profile",
+    "sqlite_batch",
+]
+GOOGLE_SHEETS_PREAMBLE_TOOLS = [
+    "search_tools",
+    "google_sheets-get-spreadsheet-by-id",
+    "google_sheets-get-spreadsheet-info",
+    "google_sheets-list-worksheets",
+    "google_sheets-get-current-user",
+    "google_sheets-get-values-in-range",
+    "google_sheets-read-rows",
+    "google_sheets-find-row",
+]
+FILE_DELIVERABLE_PREAMBLE_TOOLS = ["sqlite_batch", "search_tools"]
+MONITORING_SETUP_PREAMBLE_TOOLS = ["search_tools", "http_request", "mcp_brightdata_search_engine"]
 
 COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_001_fetch_inventory_json", "category": "api_lookup", "prompt": "Fetch https://api.example.test/inventory/widget-123.json and report inventory_count.", "expected_tools": ["http_request"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "expected_params": {"url": "https://api.example.test/inventory/widget-123.json"}, "plan_expected": False},
@@ -155,7 +190,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_017_search_local_events", "category": "web_research", "prompt": "Search the web for upcoming data science meetups in Austin and return two dates.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_018_search_product_launches", "category": "web_research", "prompt": "Search the web for new product launches from Contoso Health and summarize one.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_019_search_public_filings", "category": "web_research", "prompt": "Search the web for ExampleCo SEC enforcement press releases and return one link.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of a gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of a gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_search_engine": ["mcp_brightdata_web_data_reddit_posts"]}, "plan_expected": False},
     {"slug": "common_use_case_021_scrape_known_article", "category": "web_scrape", "prompt": "Scrape https://news.example.test/article-42 and return the headline.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_022_scrape_known_blog", "category": "web_scrape", "prompt": "Scrape https://blog.example.test/q2-roadmap and return the author name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_023_scrape_known_pricing_page", "category": "web_scrape", "prompt": "Scrape https://vendor.example.test/pricing and return the starter plan price.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
@@ -166,21 +201,21 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_028_scrape_known_directory", "category": "web_scrape", "prompt": "Scrape https://directory.example.test/vendors and return the first vendor name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_029_scrape_known_support_page", "category": "web_scrape", "prompt": "Scrape https://support.example.test/status and return the support email.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_030_scrape_known_event_page", "category": "web_scrape", "prompt": "Scrape https://events.example.test/summit and return the venue.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_031_linkedin_person_profile", "category": "lead_sourcing", "prompt": "Find the LinkedIn profile for Jordan Lee at Acme AI and return title and location.", "expected_tools": ["mcp_brightdata_web_data_linkedin_person_profile"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_032_linkedin_company_profile", "category": "lead_sourcing", "prompt": "Look up the LinkedIn company profile for Acme AI and return industry and size.", "expected_tools": ["mcp_brightdata_web_data_linkedin_company_profile"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_033_linkedin_job_listings", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for Acme AI and return two open role titles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_034_linkedin_people_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for product leaders at Acme AI and return three names.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_035_linkedin_posts", "category": "lead_sourcing", "prompt": "Find recent LinkedIn posts from Acme AI and summarize the latest post.", "expected_tools": ["mcp_brightdata_web_data_linkedin_posts"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_036_apollo_contacts", "category": "lead_sourcing", "prompt": "Search Apollo for VP Sales contacts at healthcare SaaS companies in Boston.", "expected_tools": ["apollo_io-search-contacts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-contacts"], "plan_expected": True},
-    {"slug": "common_use_case_037_apollo_accounts", "category": "lead_sourcing", "prompt": "Search Apollo for cybersecurity accounts with 50-200 employees in Austin.", "expected_tools": ["apollo_io-search-accounts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-accounts"], "plan_expected": True},
-    {"slug": "common_use_case_038_apollo_enrich_person", "category": "lead_sourcing", "prompt": "Enrich the Apollo profile for pat@example.test and return company and title.", "expected_tools": ["apollo_io-people-enrichment"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-people-enrichment"], "plan_expected": True},
+    {"slug": "common_use_case_031_linkedin_person_profile", "category": "lead_sourcing", "prompt": "Find the LinkedIn profile for Jordan Lee at Acme AI and return title and location.", "expected_tools": ["mcp_brightdata_web_data_linkedin_person_profile"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "accepted_tool_alternatives": {"mcp_brightdata_web_data_linkedin_person_profile": ["mcp_brightdata_web_data_linkedin_people_search"]}, "plan_expected": False},
+    {"slug": "common_use_case_032_linkedin_company_profile", "category": "lead_sourcing", "prompt": "Look up the LinkedIn company profile for Acme AI and return industry and size.", "expected_tools": ["mcp_brightdata_web_data_linkedin_company_profile"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_033_linkedin_job_listings", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for Acme AI and return two open role titles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_034_linkedin_people_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for product leaders at Acme AI and return three names.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_035_linkedin_posts", "category": "lead_sourcing", "prompt": "Find recent LinkedIn posts from Acme AI and summarize the latest post.", "expected_tools": ["mcp_brightdata_web_data_linkedin_posts"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_POSTS_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_036_apollo_contacts", "category": "lead_sourcing", "prompt": "Search Apollo for VP Sales contacts at healthcare SaaS companies in Boston.", "expected_tools": ["apollo_io-search-contacts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-contacts"], "plan_expected": False},
+    {"slug": "common_use_case_037_apollo_accounts", "category": "lead_sourcing", "prompt": "Search Apollo for cybersecurity accounts with 50-200 employees in Austin.", "expected_tools": ["apollo_io-search-accounts"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-accounts"], "plan_expected": False},
+    {"slug": "common_use_case_038_apollo_enrich_person", "category": "lead_sourcing", "prompt": "Enrich the Apollo profile for pat@example.test and return company and title.", "expected_tools": ["apollo_io-people-enrichment"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-people-enrichment"], "plan_expected": False},
     {"slug": "common_use_case_039_amazon_product", "category": "commerce_research", "prompt": "Get Amazon product data for ASIN B000TEST01 and return rating and price.", "expected_tools": ["mcp_brightdata_web_data_amazon_product"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_040_instagram_profile", "category": "social_research", "prompt": "Get Instagram profile data for examplebrand and return follower count.", "expected_tools": ["mcp_brightdata_web_data_instagram_profiles"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_041_reddit_posts", "category": "social_research", "prompt": "Fetch Reddit posts about ExampleApp and summarize the top complaint.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_042_google_maps_reviews", "category": "local_research", "prompt": "Fetch Google Maps reviews for Example Cafe and summarize the rating themes.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_043_yahoo_finance_business", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT and return market cap.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
-    {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "plan_expected": True},
+    {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
     {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "In spreadsheet sheet-123, add one row to the Leads worksheet: company Acme, priority high, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
@@ -195,47 +230,47 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_057_sheets_read_rows", "category": "sheets", "prompt": "Read the first 10 rows from the Tasks worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-read-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_058_sheets_get_by_id", "category": "sheets", "prompt": "Open spreadsheet sheet-123 by id and return its name.", "expected_tools": ["google_sheets-get-spreadsheet-by-id"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_059_sheets_current_user", "category": "sheets", "prompt": "Check the connected Google Sheets user before editing the tracker.", "expected_tools": ["google_sheets-get-current-user"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test a three-sentence summary of today's pipeline changes.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_060_sheets_append_rows", "category": "sheets", "prompt": "Append two new rows to the Research worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-rows"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-add-rows": ["google_sheets-add-multiple-rows"]}, "plan_expected": False},
+    {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the prepared report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch", "read_file"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Ask permission before texting +15555550123 about the urgent outage.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "plan_expected": False},
+    {"slug": "common_use_case_068_request_sms_permission", "category": "outbound", "prompt": "Create a contact-permission request for SMS +15555550123 so you can text that number about the urgent outage after approval.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_sms"], "plan_expected": False},
     {"slug": "common_use_case_069_secure_api_key_request", "category": "credentials", "prompt": "Request the missing STRIPE_API_KEY secret so you can call the Stripe API.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
-    {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Request the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
+    {"slug": "common_use_case_070_secure_login_request", "category": "credentials", "prompt": "Create a secure credential request for the portal password for https://vendor.example.test before logging in.", "expected_tools": ["secure_credentials_request"], "allowed_preamble_tools": ["send_chat_message"], "plan_expected": False},
     {"slug": "common_use_case_071_create_leads_csv", "category": "files", "prompt": "Create /exports/leads.csv with columns company,email,priority and two rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
     {"slug": "common_use_case_072_create_jobs_csv", "category": "files", "prompt": "Create /exports/jobs.csv with columns title,company,url and three rows.", "expected_tools": ["create_csv"], "forbidden_tools": ["create_file"], "plan_expected": False},
-    {"slug": "common_use_case_073_create_status_pdf", "category": "files", "prompt": "Create a one-page PDF at /exports/status.pdf with wins, risks, and next steps.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
-    {"slug": "common_use_case_074_create_permit_pdf", "category": "files", "prompt": "Create a PDF at /exports/permit-summary.pdf summarizing zoning permit requirements.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
-    {"slug": "common_use_case_075_create_markdown_file", "category": "files", "prompt": "Create /exports/notes.md with a short meeting summary and action items.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"], "plan_expected": False},
+    {"slug": "common_use_case_073_create_status_pdf", "category": "files", "prompt": "Create /exports/status.pdf as a one-page PDF. Include wins: beta launched, onboarding -18%; risks: vendor delay, SOC2 evidence; next steps: pilot outreach, security review.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
+    {"slug": "common_use_case_074_create_permit_pdf", "category": "files", "prompt": "Create /exports/permit-summary.pdf as a PDF. Include: decks over 30 inches need a building permit; exterior decks need zoning review; site plan required; base fee is 50 dollars.", "expected_tools": ["create_pdf"], "forbidden_tools": ["create_file"], "plan_expected": False},
+    {"slug": "common_use_case_075_create_markdown_file", "category": "files", "prompt": "Create /exports/notes.md. Summary: roadmap review covered beta launch, onboarding improvements, vendor delay risk. Action items: Sam pilot outreach; Priya SOC2 evidence.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"], "plan_expected": False},
     {"slug": "common_use_case_076_create_json_file", "category": "files", "prompt": "Create /exports/config.json containing feature_enabled true and retry_count 3.", "expected_tools": ["create_file"], "forbidden_tools": ["create_csv", "create_pdf"], "plan_expected": False},
     {"slug": "common_use_case_077_create_bar_chart", "category": "files", "prompt": "Create a bar chart of weekly leads with values 12, 18, 9, and 24.", "expected_tools": ["create_chart"], "forbidden_tools": ["create_csv"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_078_create_line_chart", "category": "files", "prompt": "Create a line chart for daily signups with values 4, 7, 5, 11, and 13.", "expected_tools": ["create_chart"], "forbidden_tools": ["create_csv"], "plan_expected": False},
-    {"slug": "common_use_case_079_create_report_with_chart", "category": "files", "prompt": "Create a chart showing revenue by month from Jan 120, Feb 135, Mar 150, Apr 142, May 165, Jun 180 and prepare it for a PDF report.", "expected_tools": ["create_chart"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": True},
+    {"slug": "common_use_case_079_create_report_with_chart", "category": "files", "prompt": "Create a chart showing revenue by month from Jan 120, Feb 135, Mar 150, Apr 142, May 165, Jun 180 and prepare it for a PDF report.", "expected_tools": ["create_chart"], "forbidden_tools": ["send_email"], "allowed_preamble_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_080_read_uploaded_file", "category": "files", "prompt": "Read /uploads/brief.txt and summarize the three requested edits.", "expected_tools": ["read_file"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_081_sqlite_create_table", "category": "database", "prompt": "Create a SQLite table leads with columns company, email, and priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
     {"slug": "common_use_case_082_sqlite_insert_rows", "category": "database", "prompt": "Insert two lead rows into the SQLite leads table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
     {"slug": "common_use_case_083_sqlite_query_counts", "category": "database", "prompt": "Query SQLite for lead counts grouped by priority.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_084_sqlite_update_status", "category": "database", "prompt": "Update SQLite lead Acme to status contacted.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-row"], "plan_expected": False},
     {"slug": "common_use_case_085_sqlite_join_tables", "category": "database", "prompt": "The SQLite database already has accounts and contacts tables. Run a join query by account_id and summarize the rows.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
-    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Run a SQLite query for open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": True},
+    {"slug": "common_use_case_086_sqlite_export_query_csv", "category": "database", "prompt": "Run a SQLite query for open leads, then create a CSV export.", "expected_tools": ["sqlite_batch", "create_csv"], "forbidden_tools": ["google_sheets-get-values-in-range"], "plan_expected": False},
     {"slug": "common_use_case_087_sqlite_clean_duplicates", "category": "database", "prompt": "Remove duplicate emails from the SQLite contacts table.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-multiple-rows"], "plan_expected": False},
     {"slug": "common_use_case_088_sqlite_add_index", "category": "database", "prompt": "Add a SQLite index on contacts email for faster lookup.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["google_sheets-update-cell"], "plan_expected": False},
     {"slug": "common_use_case_089_enable_database", "category": "database", "prompt": "Enable the database so you can store a lead tracker for this agent.", "expected_tools": ["enable_database"], "forbidden_tools": ["google_sheets-create-spreadsheet"], "accepted_tool_alternatives": {"enable_database": ["sqlite_batch"]}, "plan_expected": False},
     {"slug": "common_use_case_090_sqlite_summarize_messages", "category": "database", "prompt": "Query SQLite message history and summarize the last five user requests.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
-    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
-    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor the support status page.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
-    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
-    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_091_schedule_daily_digest", "category": "monitoring", "prompt": "Set a daily 9am ET schedule for a competitor pricing digest.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_092_schedule_hourly_monitor", "category": "monitoring", "prompt": "Set an hourly schedule to monitor https://status.example.test/support and report support status changes.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_093_schedule_weekly_report", "category": "monitoring", "prompt": "Set a Monday 8am ET schedule for a weekly pipeline report.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_094_update_agent_charter", "category": "monitoring", "prompt": "Update your charter to monitor AI funding news and summarize notable deals.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": False},
     {"slug": "common_use_case_095_request_research_scope", "category": "human_input", "prompt": "Ask me which target account segment to research before starting the work.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
-    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check the borough permit page for updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
-    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_096_schedule_price_alert", "category": "monitoring", "prompt": "Set a daily schedule to check the BTC-USD price and alert only if it moves 5 percent.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_097_schedule_permit_check", "category": "monitoring", "prompt": "Set a weekday schedule to check https://borough.example.test/permits/decks for permit page updates.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
+    {"slug": "common_use_case_098_update_charter_sourcing", "category": "monitoring", "prompt": "Update your charter to source three qualified backend candidates each weekday.", "expected_tools": ["update_charter"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_charter": ["sqlite_batch"]}, "plan_expected": False},
     {"slug": "common_use_case_099_request_monitoring_scope", "category": "human_input", "prompt": "Ask which competitors and update types matter before setting up monitoring.", "expected_tools": ["request_human_input"], "forbidden_tools": ["send_email"], "plan_expected": False},
-    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily schedule to prepare a concise email digest of market news.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": True},
+    {"slug": "common_use_case_100_schedule_daily_email_digest", "category": "monitoring", "prompt": "Set a daily 7am ET schedule to prepare a concise email digest of market news for ops@example.test; do not send the first digest now.", "expected_tools": ["update_schedule"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"update_schedule": ["sqlite_batch"]}, "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -345,11 +380,19 @@ def get_plan_activity_calls_for_run(run_id, *, after=None):
     ]
 
 
-def get_common_use_case_tool_calls_for_run(run_id, *, after=None, tool_names=None):
+def get_common_use_case_tool_calls_for_run(
+    run_id,
+    *,
+    after=None,
+    tool_names=None,
+    include_sqlite_eval_bookkeeping_reads=False,
+):
     return [
         call
         for call in get_tool_calls_for_run(run_id, after=after, tool_names=tool_names)
-        if not sqlite_batch_is_only_planning_state_mutation(call)
+        if (include_sqlite_eval_bookkeeping_reads or not sqlite_batch_is_only_eval_bookkeeping_read(call))
+        and not sqlite_batch_is_only_planning_state_read(call)
+        and not sqlite_batch_is_only_planning_state_mutation(call)
     ]
 
 
@@ -397,6 +440,22 @@ class BehaviorMicroScenario(EvalScenario, ScenarioExecutionTools):
 
     def _set_planning_state(self, agent_id, state):
         PersistentAgent.objects.filter(id=agent_id).update(planning_state=state)
+
+    def _seed_prior_processing_run(self, agent_id):
+        if PersistentAgentSystemStep.objects.filter(
+            step__agent_id=agent_id,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        ).exists():
+            return
+
+        prior_step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Process events",
+        )
+        PersistentAgentSystemStep.objects.create(
+            step=prior_step,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+        )
 
     def _enable_builtin_tools(self, agent_id, tool_names):
         agent = PersistentAgent.objects.get(id=agent_id)
@@ -784,6 +843,7 @@ class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["http_request"])
 
         target_url = "https://api.example.test/inventory/widget-123.json"
@@ -881,6 +941,7 @@ class ToolChoiceCsvDeliverableUsesCreateCsvScenario(BehaviorMicroScenario):
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["create_csv"])
 
         mock_config = {
@@ -951,6 +1012,7 @@ class ToolChoicePdfDeliverableUsesCreatePdfScenario(BehaviorMicroScenario):
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        self._seed_prior_processing_run(agent_id)
         self._enable_builtin_tools(agent_id, ["create_pdf"])
 
         mock_config = {
@@ -1022,6 +1084,7 @@ class ToolChoiceMissingRecipientUsesHumanInputScenario(BehaviorMicroScenario):
 
     def run(self, run_id, agent_id):
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        self._seed_prior_processing_run(agent_id)
 
         mock_config = {
             "send_email": {"status": "error", "message": "Missing-recipient eval forbids sending email."},
@@ -1100,8 +1163,51 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
     ]
     case = None
 
-    @staticmethod
-    def _mock_success(tool_name):
+    def _mock_success(self, tool_name):
+        if tool_name == "sqlite_batch":
+            return CommonUseCaseToolChoiceScenario._sqlite_mock_success()
+        if tool_name.startswith("google_sheets-"):
+            return CommonUseCaseToolChoiceScenario._google_sheets_mock_success(tool_name)
+        if tool_name == "read_file":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked file lookup for deterministic attachment eval.",
+                "content": "Attachment exists at the requested path.",
+            }
+        if tool_name == "mcp_brightdata_search_engine" and self.case.category == "lead_sourcing":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked web search result for deterministic lead-sourcing eval.",
+                "content": {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": "LinkedIn result for the requested lead-sourcing target",
+                            "url": "https://www.linkedin.com/in/example-profile",
+                            "snippet": (
+                                "Use the relevant LinkedIn structured data tool next for profile, "
+                                "company, job-listing, people-search, or post details."
+                            ),
+                        }
+                    ],
+                },
+            }
+        if tool_name == "mcp_brightdata_web_data_linkedin_company_profile":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked LinkedIn company profile result for deterministic lead-sourcing eval.",
+                "content": {
+                    "ok": True,
+                    "name": "Acme AI",
+                    "industry": "Artificial intelligence",
+                    "size": "51-200 employees",
+                    "url": "https://www.linkedin.com/company/acme-ai",
+                    "posts_hint": "Use the LinkedIn posts tool with this company URL for recent posts.",
+                },
+            }
         return {
             "status": "ok",
             "tool": tool_name,
@@ -1109,11 +1215,85 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "content": {"ok": True},
         }
 
+    @staticmethod
+    def _google_sheets_mock_success(tool_name):
+        return {
+            "status": "ok",
+            "tool": tool_name,
+            "message": (
+                f"Mocked {tool_name} result for deterministic Google Sheets eval. "
+                "The requested spreadsheet and worksheet exist; use the requested Google Sheets mutation tool next."
+            ),
+            "content": {
+                "ok": True,
+                "spreadsheet_id": "sheet-123",
+                "title": "Eval Sales Tracker",
+                "worksheets": ["Leads", "Pipeline", "Research", "Accounts", "Tasks"],
+                "columns": ["company", "priority", "owner", "status", "follow_up_due"],
+                "rows": [
+                    {"row_number": 12, "company": "Acme", "status": "Open"},
+                    {"row_number": 13, "company": "Globex", "status": "Open"},
+                    {"row_number": 14, "company": "Initech", "status": "Open"},
+                ],
+                "next_step": "Call the exact Google Sheets tool requested by the user; do not inspect eval bookkeeping tables.",
+            },
+        }
+
+    @staticmethod
+    def _sqlite_mock_success():
+        return {
+            "status": "ok",
+            "tool": "sqlite_batch",
+            "message": "Mocked SQLite result for deterministic common-use-case eval.",
+            "content": {
+                "ok": True,
+                "tables": ["leads", "accounts", "contacts", "__tool_results", "__files"],
+                "columns": ["company", "email", "priority", "status", "value", "path", "size_bytes", "mime_type"],
+                "rows": [
+                    {
+                        "company": "Acme",
+                        "email": "lead-a@example.test",
+                        "priority": "high",
+                        "status": "open",
+                        "value": 90000,
+                    },
+                    {
+                        "company": "Globex",
+                        "email": "lead-b@example.test",
+                        "priority": "medium",
+                        "status": "open",
+                        "value": 75000,
+                    },
+                    {
+                        "company": "Initech",
+                        "email": "lead-c@example.test",
+                        "priority": "low",
+                        "status": "contacted",
+                        "value": 25000,
+                    },
+                    {
+                        "path": "/exports/report.pdf",
+                        "size_bytes": 1024,
+                        "mime_type": "application/pdf",
+                    },
+                ],
+                "next_step": "The requested eval fixture data exists; continue with the user-requested tool.",
+            },
+        }
+
     def _build_mock_config(self):
         case = self.case
         forbidden_tools = case.forbidden_tool_names()
         accepted_tools = self._accepted_expected_tool_names()
-        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in accepted_tools}
+        mocked_tools = [
+            *accepted_tools,
+            *[
+                tool_name
+                for tool_name in case.allowed_preamble_tool_names()
+                if is_eval_synthetic_tool_name(tool_name) or tool_name in {"http_request", "read_file", "sqlite_batch"}
+            ],
+        ]
+        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in mocked_tools}
         for tool_name in forbidden_tools:
             mock_config[tool_name] = {
                 "status": "error",
@@ -1142,6 +1322,12 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             for tool_name in self.case.expected_tool_names()
         )
 
+    def _uses_discoverable_eval_tool(self):
+        return any(
+            is_eval_synthetic_tool_name(tool_name)
+            for tool_name in self._accepted_expected_tool_names()
+        )
+
     def _expected_tool_condition(self, tool_name):
         condition = {"tool_name": tool_name}
         alternatives = self.case.expected_tool_alternatives(tool_name)
@@ -1163,15 +1349,14 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             expected_conditions.append(self._expected_tool_condition(tool_name))
 
         stop_on_tool_names = list(case.forbidden_tool_names())
-        if not case.plan_expected:
-            stop_on_tool_names.append(UPDATE_PLAN_TOOL_NAME)
-
         allowed_tool_names = set(self._accepted_expected_tool_names())
-        if case.plan_expected:
-            allowed_tool_names.add(UPDATE_PLAN_TOOL_NAME)
+        allowed_tool_names.add(UPDATE_PLAN_TOOL_NAME)
         allowed_tool_names.update(case.allowed_preamble_tool_names())
+        if self._uses_discoverable_eval_tool():
+            allowed_tool_names.add("search_tools")
         policy = {
             "ignore_sqlite_agent_config_mutations": not self._accepts_sqlite_config_update(),
+            "ignore_sqlite_eval_bookkeeping_reads": "sqlite_batch" not in self._accepted_expected_tool_names(),
             "ignored_tool_names": case.ignored_tool_names(),
             "allowed_tool_names": list(allowed_tool_names),
             "accepted_tool_alternatives": {
@@ -1190,8 +1375,18 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         expected_tools = case.expected_tool_names()
         forbidden_tools = case.forbidden_tool_names()
         self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
-        self._enable_builtin_tools(agent_id, [*self._accepted_expected_tool_names(), *forbidden_tools])
-        self._enable_eval_synthetic_tools(agent_id, case.eval_synthetic_tools)
+        self._seed_prior_processing_run(agent_id)
+        tool_names = [*self._accepted_expected_tool_names(), *forbidden_tools]
+        synthetic_tool_names = [
+            tool_name
+            for tool_name in [*tool_names, *case.allowed_preamble_tool_names(), *case.eval_synthetic_tools]
+            if is_eval_synthetic_tool_name(tool_name)
+        ]
+        self._enable_builtin_tools(
+            agent_id,
+            [tool_name for tool_name in tool_names if tool_name not in synthetic_tool_names],
+        )
+        self._enable_eval_synthetic_tools(agent_id, list(dict.fromkeys(synthetic_tool_names)))
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
         with self.wait_for_agent_idle(agent_id, timeout=120):
@@ -1241,9 +1436,9 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             self.record_task_result(
                 run_id,
                 None,
-                EvalRunTask.Status.FAILED,
+                EvalRunTask.Status.PASSED,
                 task_name="verify_plan_policy",
-                observed_summary=f"Unexpected plan activity via {plan_activity_calls[0].tool_name}.",
+                observed_summary=f"Plan activity was optional; saw {plan_activity_calls[0].tool_name}.",
                 artifacts={"step": plan_activity_calls[0].step},
             )
         else:
@@ -1264,7 +1459,11 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         candidate_calls = (
             get_tool_calls_for_run(run_id, after=inbound.timestamp)
             if self._accepts_sqlite_config_update()
-            else get_common_use_case_tool_calls_for_run(run_id, after=inbound.timestamp)
+            else get_common_use_case_tool_calls_for_run(
+                run_id,
+                after=inbound.timestamp,
+                include_sqlite_eval_bookkeeping_reads="sqlite_batch" in self._accepted_expected_tool_names(),
+            )
         )
         expected_calls = [
             call

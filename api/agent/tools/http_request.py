@@ -264,6 +264,8 @@ def get_http_request_tool() -> Dict[str, Any]:
             "description": (
                 "Perform a fast and efficient HTTP request to fetch raw structured data (JSON, XML, CSV) or interact with APIs. "
                 "This is the PREFERRED tool for programmatic data retrieval from known endpoints. "
+                "When this tool returns a successful payload that answers the user's request, answer from that payload; do not open a browser task just to verify the same data. "
+                "For weather, a geocoding endpoint only resolves coordinates; call a forecast/current-conditions endpoint before replying with weather. "
                 "Do NOT use this when the task is to read or verify what appears on a webpage; use `spawn_web_task` for user-visible pages even if they are simple HTML. "
                 "The URL, headers, and body can include secret placeholders using the unique pattern <<<my_api_key>>>. These placeholders will be replaced with the corresponding secret values at execution time. The response is truncated to 5MB. Text content is returned even if served with application/octet-stream; only truly binary data (images, etc.) is omitted. You may need to look up API docs using the mcp_brightdata_search_engine tool."
             ),

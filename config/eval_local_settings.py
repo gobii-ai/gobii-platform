@@ -24,6 +24,7 @@ os.environ.setdefault("LLM_BOOTSTRAP_OPTIONAL", "1")
 os.environ.setdefault("BROWSER_USE_TASK_EXECUTION_DISABLED", "1")
 os.environ.setdefault("EVAL_LOCAL_SETUP_ENABLED", "1")
 os.environ.setdefault("EVAL_LOCAL_AUTO_MIGRATE", "1")
+os.environ.setdefault("EVAL_BROWSER_TASK_SIMULATION_ENABLED", "1")
 
 from .settings import *  # noqa: F403
 from .settings import BASE_DIR, STORAGES
@@ -67,5 +68,6 @@ LLM_BOOTSTRAP_OPTIONAL = True
 BROWSER_USE_TASK_EXECUTION_DISABLED = True
 EVAL_LOCAL_SETUP_ENABLED = True
 EVAL_LOCAL_AUTO_MIGRATE = True
+EVAL_BROWSER_TASK_SIMULATION_ENABLED = True
 VITE_USE_DEV_SERVER = False
 STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.StaticFilesStorage"

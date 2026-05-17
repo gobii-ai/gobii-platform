@@ -10,6 +10,11 @@ SQL_MUTATION_RE = re.compile(r"\b(insert|update|delete|replace|alter|drop|create
 PLANNING_STATE_TABLE_NAMES = {
     "__agent_config",
 }
+EVAL_BOOKKEEPING_TABLE_NAMES = {
+    "__agent_config",
+    "__messages",
+    "__tool_results",
+}
 AGENT_CONFIG_FIELD_PATTERNS = {
     "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
     "schedule": re.compile(r"\bschedule\b", re.IGNORECASE),
@@ -23,6 +28,11 @@ def split_sql_statements(sql: str) -> list[str]:
 def sql_mentions_planning_state(statement: str) -> bool:
     lowered = statement.lower()
     return any(table in lowered for table in PLANNING_STATE_TABLE_NAMES)
+
+
+def sql_mentions_eval_bookkeeping(statement: str) -> bool:
+    lowered = statement.lower()
+    return any(table in lowered for table in EVAL_BOOKKEEPING_TABLE_NAMES)
 
 
 def sql_mutates(statement: str) -> bool:
@@ -68,6 +78,34 @@ def sqlite_batch_is_only_planning_state_mutation(tool_call) -> bool:
     return all(sql_mentions_planning_state(statement) for statement in statements)
 
 
+def sqlite_batch_is_only_planning_state_read(tool_call) -> bool:
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
+        return False
+
+    statements = split_sql_statements(sql)
+    if not statements:
+        return False
+
+    return all(sql_mentions_planning_state(statement) for statement in statements) and not any(
+        sql_mutates(statement) for statement in statements
+    )
+
+
+def sqlite_batch_is_only_eval_bookkeeping_read(tool_call) -> bool:
+    sql = sqlite_batch_sql(tool_call)
+    if not sql:
+        return False
+
+    statements = split_sql_statements(sql)
+    if not statements:
+        return False
+
+    return all(sql_mentions_eval_bookkeeping(statement) for statement in statements) and not any(
+        sql_mutates(statement) for statement in statements
+    )
+
+
 def sqlite_batch_mutates_agent_config_field(tool_call, field_name: str) -> bool:
     pattern = AGENT_CONFIG_FIELD_PATTERNS.get(field_name)
     if not pattern:
@@ -88,6 +126,8 @@ def _params_match(actual_params: dict[str, Any], expected_params: dict[str, Any]
 def _is_relevant_call(tool_call, policy: dict[str, Any]) -> bool:
     ignored_tool_names = set(policy.get("ignored_tool_names") or ())
     if tool_call.tool_name in ignored_tool_names:
+        return False
+    if policy.get("ignore_sqlite_eval_bookkeeping_reads", True) and sqlite_batch_is_only_eval_bookkeeping_read(tool_call):
         return False
     if (
         policy.get("ignore_sqlite_agent_config_mutations", True)

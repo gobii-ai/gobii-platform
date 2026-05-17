@@ -1,9 +1,92 @@
-import json
+from urllib.parse import parse_qs, urlparse
 
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
+
+FREDERICK_MD_LATITUDE = 39.4143
+FREDERICK_MD_LONGITUDE = -77.4105
+COORDINATE_TOLERANCE_DEGREES = 0.5
+
+
+def _query_float(query, key):
+    values = query.get(key) or []
+    if not values:
+        return None
+    try:
+        return float(values[0])
+    except (TypeError, ValueError):
+        return None
+
+
+def _coordinates_match_frederick(query) -> bool:
+    latitude = _query_float(query, "latitude")
+    longitude = _query_float(query, "longitude")
+    if latitude is None or longitude is None:
+        point = " ".join(query.get("point", []))
+        if "," not in point:
+            return False
+        raw_latitude, raw_longitude = point.split(",", 1)
+        try:
+            latitude = float(raw_latitude)
+            longitude = float(raw_longitude)
+        except ValueError:
+            return False
+
+    return (
+        abs(latitude - FREDERICK_MD_LATITUDE) <= COORDINATE_TOLERANCE_DEGREES
+        and abs(longitude - FREDERICK_MD_LONGITUDE) <= COORDINATE_TOLERANCE_DEGREES
+    )
+
+
+def _is_free_weather_request(params):
+    method = str(params.get("method") or "GET").upper()
+    if method != "GET":
+        return False, f"Expected GET request, saw {method}."
+
+    raw_url = str(params.get("url") or "")
+    parsed = urlparse(raw_url)
+    host = parsed.netloc.lower()
+    path = parsed.path.lower()
+    query = parse_qs(parsed.query.lower())
+    url_text = raw_url.lower()
+
+    if "wttr.in" in host:
+        if "frederick" in url_text and ("md" in url_text or "maryland" in url_text):
+            return True, "wttr.in request includes Frederick, MD."
+        return False, "wttr.in request did not include Frederick, MD."
+
+    if host == "api.weather.gov" and path.startswith("/points/"):
+        point_text = path.removeprefix("/points/").split("/", 1)[0]
+        point_query = {"point": [point_text]}
+        if _coordinates_match_frederick(point_query):
+            return True, "weather.gov points request targets Frederick, MD coordinates."
+        return False, "weather.gov points request does not target Frederick, MD coordinates."
+
+    if host == "api.weather.gov" and path.startswith("/gridpoints/lwx/"):
+        return True, "weather.gov gridpoints request uses the Frederick-area LWX office."
+
+    if host == "api.weather.gov" and path.startswith("/alerts/"):
+        if _coordinates_match_frederick(query):
+            return True, "weather.gov alerts request targets Frederick, MD coordinates."
+        return False, "weather.gov alerts request does not target Frederick, MD coordinates."
+
+    if "api.open-meteo.com" in host and {"latitude", "longitude"}.issubset(query):
+        if _coordinates_match_frederick(query):
+            return True, "open-meteo request targets Frederick, MD coordinates."
+        return False, "open-meteo request does not target Frederick, MD coordinates."
+
+    if "geocoding-api.open-meteo.com" in host:
+        return False, "Open-Meteo geocoding only resolves coordinates; it is not a weather request."
+
+    if "api.openweathermap.org" in host:
+        location = " ".join(query.get("q", []))
+        if "frederick" in location and ("md" in location or "us" in location):
+            return True, "OpenWeather request includes Frederick."
+        return False, "OpenWeather request did not include Frederick."
+
+    return False, f"URL does not look like a supported free weather API: {raw_url}"
 
 
 @register_scenario
@@ -46,10 +129,40 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                     "https://api.openweathermap.org/data/2.5/weather?q=Frederick,MD,US&appid=demo"
                 )
             },
+            "search_tools": {
+                "status": "success",
+                "message": (
+                    "Use http_request with a direct weather forecast/current-conditions endpoint. "
+                    "Good examples: https://wttr.in/Frederick,MD?format=j1 or "
+                    "https://api.weather.gov/gridpoints/LWX/96,70/forecast. "
+                    "Open-Meteo geocoding endpoints only resolve coordinates; they are not weather results."
+                ),
+            },
             "http_request": {
-                "status": "ok",
-                "content": '{"current_weather": "72F, Sunny"}',
-                "status_code": 200
+                "rules": [
+                    {
+                        "url_contains": "geocoding-api.open-meteo.com",
+                        "result": {
+                            "status": "ok",
+                            "content": {
+                                "results": [
+                                    {
+                                        "name": "Frederick",
+                                        "admin1": "Maryland",
+                                        "latitude": FREDERICK_MD_LATITUDE,
+                                        "longitude": FREDERICK_MD_LONGITUDE,
+                                    }
+                                ]
+                            },
+                            "status_code": 200,
+                        },
+                    }
+                ],
+                "default": {
+                    "status": "ok",
+                    "content": '{"current_weather": "72F, Sunny"}',
+                    "status_code": 200,
+                },
             },
         }
 
@@ -92,38 +205,46 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
             tool_name='spawn_web_task'
         )
 
-        if spawn_calls.exists():
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_http_request",
-                observed_summary="Agent used 'spawn_web_task', which is forbidden. We want direct API request.",
-            )
-        elif http_calls.exists():
-            http_call = http_calls.first()
-            params = http_call.tool_params or {}
+        if http_calls.exists():
+            checked_requests = []
+            valid_call = None
+            valid_reason = ""
+            for http_call in http_calls.order_by("step__created_at", "step__id"):
+                params = http_call.tool_params or {}
+                valid_request, reason = _is_free_weather_request(params)
+                checked_requests.append({"params": params, "reason": reason})
+                if valid_request:
+                    valid_call = http_call
+                    valid_reason = reason
+                    break
 
-            judge_prompt = (
-                f"Analyze this HTTP request parameters: {json.dumps(params)}. "
-                f"Is this a request to a free/open weather API (like open-meteo, weather.gov, etc.) "
-                f"that retrieves weather for Frederick, MD?"
-            )
+            if valid_call is not None:
+                first_spawn_at = (
+                    spawn_calls.order_by("step__created_at")
+                    .values_list("step__created_at", flat=True)
+                    .first()
+                )
+                if first_spawn_at and first_spawn_at < valid_call.step.created_at:
+                    self.record_task_result(
+                        run_id,
+                        None,
+                        EvalRunTask.Status.FAILED,
+                        task_name="verify_http_request",
+                        observed_summary=(
+                            "Agent used spawn_web_task before making a valid direct weather API request."
+                        ),
+                        artifacts={"params": valid_call.tool_params or {}, "checked_requests": checked_requests},
+                    )
+                    return
 
-            choice, reasoning = self.llm_judge(
-                question=judge_prompt,
-                context="User asked: 'what's the weather in frederick md?'. Agent made this request.",
-                options=["Yes", "No"]
-            )
-
-            if choice == "Yes":
+                redundant_browser_note = " A later redundant browser task was ignored." if spawn_calls.exists() else ""
                 self.record_task_result(
                     run_id,
                     None,
                     EvalRunTask.Status.PASSED,
                     task_name="verify_http_request",
-                    observed_summary=f"Valid HTTP request detected. Reasoning: {reasoning}",
-                    artifacts={"params": params}
+                    observed_summary=f"Valid HTTP request detected. {valid_reason}{redundant_browser_note}",
+                    artifacts={"params": valid_call.tool_params or {}, "checked_requests": checked_requests}
                 )
             else:
                 self.record_task_result(
@@ -131,9 +252,20 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                     None,
                     EvalRunTask.Status.FAILED,
                     task_name="verify_http_request",
-                    observed_summary=f"HTTP request invalid/irrelevant. Reasoning: {reasoning}",
-                    artifacts={"params": params}
+                    observed_summary=(
+                        "HTTP requests invalid/irrelevant. "
+                        f"Checked {len(checked_requests)} request(s); last reason: {checked_requests[-1]['reason']}"
+                    ),
+                    artifacts={"checked_requests": checked_requests}
                 )
+        elif spawn_calls.exists():
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_http_request",
+                observed_summary="Agent used 'spawn_web_task' without a valid direct weather API request.",
+            )
         else:
             self.record_task_result(
                 run_id,

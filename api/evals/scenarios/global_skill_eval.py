@@ -6,6 +6,7 @@ from api.evals.global_skill_evals import GLOBAL_SKILL_EVAL_SCENARIO_SLUG
 from api.evals.registry import register_scenario
 from api.models import (
     EvalRunTask,
+    EvalSuiteRun,
     GlobalAgentSkill,
     PersistentAgentMessage,
     PersistentAgentSkill,
@@ -39,6 +40,108 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
         ScenarioTask(name="judge_skill_execution", assertion_type="llm_judge"),
     ]
 
+    def _default_launch_config(self) -> dict:
+        skill, _ = GlobalAgentSkill.objects.update_or_create(
+            name="eval-weather-http-skill",
+            defaults={
+                "description": "Eval fixture skill for direct weather API lookup.",
+                "tools": ["http_request"],
+                "secrets": [],
+                "instructions": (
+                    "Use http_request to fetch requested weather data from a forecast or current-conditions "
+                    "endpoint, then summarize the result clearly. Geocoding endpoints only resolve coordinates; "
+                    "after geocoding, call a weather endpoint before answering."
+                ),
+                "is_active": True,
+            },
+        )
+        return {
+            "global_skill_id": str(skill.id),
+            "global_skill_name": skill.name,
+            "task_prompt": (
+                "Fetch the current weather for Frederick, MD from the public weather API and "
+                "summarize the returned condition."
+            ),
+            "effective_tool_ids": list(skill.get_effective_tool_ids()),
+            "required_secret_status": [],
+            "mock_config": {
+                "http_request": {
+                    "rules": [
+                        {
+                            "url_contains": "geocoding-api.open-meteo.com",
+                            "result": {
+                                "status": "ok",
+                                "content": {
+                                    "results": [
+                                        {
+                                            "name": "Frederick",
+                                            "admin1": "Maryland",
+                                            "latitude": 39.4143,
+                                            "longitude": -77.4105,
+                                        }
+                                    ]
+                                },
+                                "status_code": 200,
+                            },
+                        },
+                        {
+                            "url_contains": "api.weather.gov/points",
+                            "result": {
+                                "status": "ok",
+                                "content": {
+                                    "properties": {
+                                        "forecast": "https://api.weather.gov/gridpoints/LWX/97,73/forecast",
+                                        "forecastHourly": "https://api.weather.gov/gridpoints/LWX/97,73/forecast/hourly",
+                                    }
+                                },
+                                "status_code": 200,
+                            },
+                        },
+                        {
+                            "url_contains": "api.weather.gov/gridpoints",
+                            "result": {
+                                "status": "ok",
+                                "content": {
+                                    "properties": {
+                                        "periods": [
+                                            {
+                                                "name": "Now",
+                                                "temperature": 72,
+                                                "temperatureUnit": "F",
+                                                "shortForecast": "Sunny",
+                                            }
+                                        ]
+                                    }
+                                },
+                                "status_code": 200,
+                            },
+                        },
+                        {
+                            "url_contains": "api.open-meteo.com",
+                            "result": {
+                                "status": "ok",
+                                "content": {"current_weather": {"temperature": 72, "windspeed": 4, "weathercode": 0}},
+                                "status_code": 200,
+                            },
+                        },
+                        {
+                            "url_contains": "wttr.in",
+                            "result": {
+                                "status": "ok",
+                                "content": '{"current_weather": "72F, Sunny"}',
+                                "status_code": 200,
+                            },
+                        }
+                    ],
+                    "default": {
+                        "status": "error",
+                        "message": "Unsupported weather API endpoint in eval mock. Use a forecast or current-conditions endpoint.",
+                        "retryable": True,
+                    },
+                }
+            },
+        }
+
     def run(self, run_id: str, agent_id: str) -> None:
         run = self.get_run(run_id)
         suite_run = run.suite_run
@@ -48,7 +151,12 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
         skill_name = str(launch_config.get("global_skill_name") or "").strip()
         task_prompt = str(launch_config.get("task_prompt") or "").strip()
         if not skill_name or not task_prompt:
-            raise ValueError("Global skill eval launch_config is missing skill metadata or task_prompt.")
+            if suite_run and suite_run.launcher_type == EvalSuiteRun.LauncherType.GLOBAL_SKILL:
+                raise ValueError("Global skill eval launch_config is missing skill metadata or task_prompt.")
+            launch_config = self._default_launch_config()
+            skill_id = str(launch_config.get("global_skill_id") or "").strip()
+            skill_name = str(launch_config.get("global_skill_name") or "").strip()
+            task_prompt = str(launch_config.get("task_prompt") or "").strip()
 
         effective_tool_ids = [str(item).strip() for item in launch_config.get("effective_tool_ids") or [] if str(item).strip()]
         required_secret_status = list(launch_config.get("required_secret_status") or [])
@@ -80,6 +188,7 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
                 instructions,
                 trigger_processing=True,
                 eval_run_id=run_id,
+                mock_config=launch_config.get("mock_config") or None,
             )
         self.record_task_result(
             run_id,

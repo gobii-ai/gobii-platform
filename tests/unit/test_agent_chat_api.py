@@ -2501,6 +2501,209 @@ class AgentChatAPITests(TestCase):
         self.assertFalse(result.get("auto_sleep_ok"))
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_skips_redundant_progress_after_ack(self):
+        start_web_session(self.agent, self.user)
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            conversation=self.conversation,
+            body="I'm on it.",
+            owner_agent=self.agent,
+        )
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Let me extract the data from my searches so I can compile the results.",
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result.get("auto_sleep_ok"))
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body="Let me extract the data from my searches so I can compile the results.",
+            ).exists()
+        )
+
+        second = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Alright, let me get this into a clean structure and deliver the results.",
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(second["status"], "ok")
+        self.assertTrue(second["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body="Alright, let me get this into a clean structure and deliver the results.",
+            ).exists()
+        )
+
+        third = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Let me try a different approach to find the listings.",
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(third["status"], "ok")
+        self.assertTrue(third["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body="Let me try a different approach to find the listings.",
+            ).exists()
+        )
+
+        fourth_body = (
+            "You know what, I keep getting the same fabricated test data from these API and search calls. "
+            "Let me pivot hard and try scraping actual job boards directly with Bright Data."
+        )
+        fourth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": fourth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(fourth["status"], "ok")
+        self.assertTrue(fourth["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body=fourth_body,
+            ).exists()
+        )
+
+        fifth_body = (
+            "Alright, I've been trying every tool and URL I can think of, and the eval environment "
+            "consistently returns this data set. Time to stop fighting the sim and compile everything together."
+        )
+        fifth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": fifth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(fifth["status"], "ok")
+        self.assertTrue(fifth["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body=fifth_body,
+            ).exists()
+        )
+
+        sixth_body = (
+            "The search engine returned the same simulated results for all three queries. "
+            "Let me try scraping actual job boards directly to find real listings."
+        )
+        sixth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": sixth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(sixth["status"], "ok")
+        self.assertTrue(sixth["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body=sixth_body,
+            ).exists()
+        )
+
+        seventh_body = (
+            "You know what - the first result checks all the boxes. The instructions say to use that "
+            "and stop verifying. Let me deliver them!"
+        )
+        seventh = execute_send_chat_message(
+            self.agent,
+            {
+                "body": seventh_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(seventh["status"], "ok")
+        self.assertTrue(seventh["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body=seventh_body,
+            ).exists()
+        )
+
+        eighth_body = "All done! Let me mark the plan complete with the delivered message and wrap up."
+        eighth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": eighth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(eighth["status"], "ok")
+        self.assertTrue(eighth["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body=eighth_body,
+            ).exists()
+        )
+
+        ninth_body = (
+            "Good, the search returned some results but I want to verify them by actually scraping real job boards."
+        )
+        ninth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": ninth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(ninth["status"], "ok")
+        self.assertTrue(ninth["skipped"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=ninth_body).exists())
+
+        tenth_body = "Let me inspect the actual scrape results to see what real data is coming back."
+        tenth = execute_send_chat_message(
+            self.agent,
+            {
+                "body": tenth_body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(tenth["status"], "ok")
+        self.assertTrue(tenth["skipped"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=tenth_body).exists())
+
+    @tag("batch_agent_chat")
     def test_send_chat_tool_rejects_unlisted_address(self):
         start_web_session(self.agent, self.user)
         stranger_address = build_web_user_address(self.user.id + 999, self.agent.id)

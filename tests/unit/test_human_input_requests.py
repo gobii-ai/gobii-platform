@@ -306,6 +306,9 @@ class HumanInputRequestTests(TestCase):
         self.assertIn("Do not send a bare notification", description)
         self.assertIn("plain text only", description)
         self.assertIn("no Markdown or HTML", description)
+        self.assertIn("at most three questions per round", description)
+        self.assertIn("non-blocking backfill", description)
+        self.assertIn("lookback", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
@@ -325,6 +328,10 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(
             function["parameters"]["properties"]["requests"]["items"]["properties"]["question"]["maxLength"],
             500,
+        )
+        self.assertIn(
+            "at most three request items",
+            function["parameters"]["properties"]["requests"]["description"],
         )
 
     def test_execute_request_human_input_creates_free_text_request(self):
@@ -417,6 +424,30 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("Planning Mode questions must include at least one option", result["message"])
         self.assertFalse(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).exists())
+
+    def test_execute_request_human_input_limits_planning_batch_to_three_questions(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "requests": [
+                    {
+                        "question": f"Planning question {index}?",
+                        "options": [{"title": "Answer", "description": "Use this answer."}],
+                    }
+                    for index in range(1, 5)
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["requests_count"], 3)
+        self.assertEqual(result["omitted_request_count"], 1)
+        self.assertIn("allows at most 3 questions", result["message"])
+        self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 3)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(

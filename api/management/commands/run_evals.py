@@ -1,8 +1,10 @@
 import argparse
 import time
 import uuid
+from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 
+from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
@@ -26,10 +28,49 @@ from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMR
 from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
 
 
+@dataclass(frozen=True)
+class EvalExecutionPlan:
+    effective_max_concurrency: int
+    use_eager_thread_pool: bool
+    warn_sqlite_serial: bool
+
+
+def build_eval_execution_plan(
+    *,
+    sync_mode: bool,
+    celery_task_always_eager: bool,
+    using_sqlite: bool,
+    requested_max_concurrency: int,
+    queued_run_count: int,
+) -> EvalExecutionPlan:
+    if sync_mode or (celery_task_always_eager and using_sqlite):
+        effective_max_concurrency = 1
+    elif celery_task_always_eager:
+        effective_max_concurrency = requested_max_concurrency or max(1, queued_run_count)
+    else:
+        effective_max_concurrency = requested_max_concurrency
+
+    return EvalExecutionPlan(
+        effective_max_concurrency=effective_max_concurrency,
+        use_eager_thread_pool=(
+            celery_task_always_eager
+            and not sync_mode
+            and effective_max_concurrency != 1
+        ),
+        warn_sqlite_serial=(
+            celery_task_always_eager
+            and using_sqlite
+            and not sync_mode
+            and requested_max_concurrency != 1
+        ),
+    )
+
+
 class Command(BaseCommand):
     help = (
         "Run canonical Gobii eval scenarios and suites through EvalRunner. Use "
-        "--settings=config.eval_local_settings for explicit local SQLite setup."
+        "--settings=config.eval_local_settings for explicit local SQLite setup, or "
+        "--settings=config.eval_postgres_settings for concurrent local live suites."
     )
 
     def add_arguments(self, parser):
@@ -44,6 +85,9 @@ class Command(BaseCommand):
             "  set -a; source /Users/andrew/.env-openrouter >/dev/null; set +a\n"
             "  uv run python manage.py run_evals --suite meta_gobii --sync --n-runs 1 "
             "--routing-profile openrouter-deepseek-v4-flash --settings=config.eval_local_settings\n"
+            "  uv run python manage.py run_evals --suite all --n-runs 1 "
+            "--routing-profile openrouter-deepseek-v4-flash --max-concurrency 8 "
+            "--settings=config.eval_postgres_settings\n"
             "Simulated runs are deterministic local checks and are not live model evals."
         )
         parser.add_argument(
@@ -56,7 +100,7 @@ class Command(BaseCommand):
             action="store_true",
             help=(
                 "List non-snapshot LLM routing profiles available in the database, then exit. "
-                "With config.eval_local_settings this also creates the local SQLite schema and seeds local profiles."
+                "With eval-local settings this also creates the local schema and seeds local profiles."
             ),
         )
         parser.add_argument(
@@ -120,7 +164,7 @@ class Command(BaseCommand):
             help=(
                 "LLM routing profile name or UUID to snapshot onto the eval suite run. Can be repeated or comma-separated "
                 "to run a model/profile matrix. "
-                "config.eval_local_settings seeds OpenRouter, OpenAI, and optional custom LiteLLM profiles."
+                "Eval-local settings seed OpenRouter, OpenAI, and optional custom LiteLLM profiles."
             ),
         )
         parser.add_argument(
@@ -487,7 +531,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(
                     "No --routing-profile supplied; live runs will use the active database LLM routing profile. "
-                    "Local eval runs usually should pass --settings=config.eval_local_settings and an explicit "
+                    "Local eval runs usually should pass an eval-local --settings module and an explicit "
                     "--routing-profile."
                 )
             )
@@ -510,6 +554,11 @@ class Command(BaseCommand):
         # Base user attribution
         User = get_user_model()
         user, _ = User.objects.get_or_create(username="eval_runner", defaults={"email": "eval@localhost"})
+        EmailAddress.objects.update_or_create(
+            user=user,
+            email=user.email,
+            defaults={"verified": True, "primary": True},
+        )
 
         def _create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
             unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
@@ -633,30 +682,25 @@ class Command(BaseCommand):
             EvalRunTask.Status.ERRORED,
             EvalRunTask.Status.SKIPPED,
         ]
-        using_sqlite = settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3"
-        if sync_mode or (settings.CELERY_TASK_ALWAYS_EAGER and using_sqlite):
-            effective_max_concurrency = 1
-        elif settings.CELERY_TASK_ALWAYS_EAGER:
-            effective_max_concurrency = max_concurrency or max(1, len(run_queue))
-        else:
-            effective_max_concurrency = max_concurrency
-        use_eager_thread_pool = (
-            settings.CELERY_TASK_ALWAYS_EAGER
-            and not sync_mode
-            and effective_max_concurrency != 1
+        execution_plan = build_eval_execution_plan(
+            sync_mode=sync_mode,
+            celery_task_always_eager=settings.CELERY_TASK_ALWAYS_EAGER,
+            using_sqlite=settings.DATABASES["default"]["ENGINE"] == "django.db.backends.sqlite3",
+            requested_max_concurrency=max_concurrency,
+            queued_run_count=len(run_queue),
         )
-        if effective_max_concurrency:
-            self.stdout.write(f"Max in-flight eval runs: {effective_max_concurrency}")
+        if execution_plan.effective_max_concurrency:
+            self.stdout.write(f"Max in-flight eval runs: {execution_plan.effective_max_concurrency}")
         else:
             self.stdout.write("Max in-flight eval runs: unlimited")
-        if settings.CELERY_TASK_ALWAYS_EAGER and using_sqlite and not sync_mode and max_concurrency != 1:
+        if execution_plan.warn_sqlite_serial:
             self.stdout.write(
                 self.style.WARNING(
                     "Local SQLite evals run serially to avoid database write locks. "
-                    "Use a non-SQLite database with async workers for concurrent live suites."
+                    "Use config.eval_postgres_settings or async workers for concurrent live suites."
                 )
             )
-        if use_eager_thread_pool:
+        if execution_plan.use_eager_thread_pool:
             self.stdout.write("Using local eager worker threads for eval concurrency.")
 
         def _run_eval_eager(run_id):
@@ -667,14 +711,15 @@ class Command(BaseCommand):
                 close_old_connections()
 
         executor = (
-            ThreadPoolExecutor(max_workers=effective_max_concurrency)
-            if use_eager_thread_pool
+            ThreadPoolExecutor(max_workers=execution_plan.effective_max_concurrency)
+            if execution_plan.use_eager_thread_pool
             else None
         )
         try:
             while run_queue or active_ids:
                 while run_queue and (
-                    not effective_max_concurrency or len(active_ids) < effective_max_concurrency
+                    not execution_plan.effective_max_concurrency
+                    or len(active_ids) < execution_plan.effective_max_concurrency
                 ):
                     run = run_queue.pop(0)
                     self.stdout.write(f"Scheduling run {run.id} for scenario '{run.scenario_slug}'...")

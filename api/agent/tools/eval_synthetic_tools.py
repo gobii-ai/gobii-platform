@@ -54,6 +54,51 @@ _APOLLO_PEOPLE_ENRICHMENT_SCHEMA = {
     "additionalProperties": True,
 }
 
+_GENERIC_WEB_DATA_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "url": {"type": "string"},
+        "keyword": {"type": "string"},
+        "prompt": {"type": "string"},
+    },
+    "additionalProperties": True,
+}
+
+_GENERIC_SPREADSHEET_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "spreadsheet_id": {"type": "string"},
+        "worksheet": {"type": "string"},
+        "range": {"type": "string"},
+        "row": {"type": "object", "additionalProperties": True},
+        "rows": {
+            "type": "array",
+            "items": {"type": "object", "additionalProperties": True},
+        },
+        "query": {"type": "string"},
+    },
+    "additionalProperties": True,
+}
+
+_GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
+    "google_sheets-get-values-in-range": "Read values from a Google Sheets range.",
+    "google_sheets-find-row": "Find rows in Google Sheets matching criteria.",
+    "google_sheets-add-single-row": "Add one row to a Google Sheets worksheet.",
+    "google_sheets-add-multiple-rows": "Add multiple rows to a Google Sheets worksheet.",
+    "google_sheets-update-cell": "Update one Google Sheets cell.",
+    "google_sheets-update-row": "Update a matching Google Sheets row.",
+    "google_sheets-update-multiple-rows": "Update multiple Google Sheets rows.",
+    "google_sheets-upsert-row": "Insert or update a Google Sheets row by key.",
+    "google_sheets-list-worksheets": "List worksheets in a Google Sheets spreadsheet.",
+    "google_sheets-get-spreadsheet-info": "Get Google Sheets spreadsheet metadata.",
+    "google_sheets-create-spreadsheet": "Create a Google Sheets spreadsheet.",
+    "google_sheets-read-rows": "Read rows from a Google Sheets worksheet.",
+    "google_sheets-get-spreadsheet-by-id": "Open a Google Sheets spreadsheet by ID.",
+    "google_sheets-get-current-user": "Return the connected Google Sheets account user.",
+    "google_sheets-add-rows": "Append rows to a Google Sheets worksheet.",
+}
+
 EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "apollo_io-search-contacts": {
         "description": "Search Apollo.io for people and contacts matching lead criteria.",
@@ -66,6 +111,61 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     "apollo_io-people-enrichment": {
         "description": "Enrich a person profile from Apollo.io using email or identity details.",
         "parameters": _APOLLO_PEOPLE_ENRICHMENT_SCHEMA,
+    },
+    "mcp_brightdata_search_engine": {
+        "description": "Search the web and return relevant result snippets for research tasks.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_scrape_as_markdown": {
+        "description": "Scrape a known web page and return its content as markdown.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_linkedin_person_profile": {
+        "description": "Fetch structured LinkedIn person profile data for a known person or profile URL; prefer this over generic web search when title, headline, or location are needed.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_linkedin_company_profile": {
+        "description": "Fetch structured LinkedIn company profile data; prefer this over generic web search for LinkedIn company industry, size, or profile details.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_linkedin_job_listings": {
+        "description": "Fetch structured LinkedIn job listing data; prefer this over generic web search for LinkedIn role lists and hiring details.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_linkedin_people_search": {
+        "description": "Search LinkedIn people data with structured criteria when a profile URL is unknown; use this before person-profile lookup for name/company searches.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_linkedin_posts": {
+        "description": "Fetch structured LinkedIn post data; prefer this over generic web search for recent LinkedIn posts or updates.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_amazon_product": {
+        "description": "Fetch structured Amazon product data.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_instagram_profiles": {
+        "description": "Fetch structured Instagram profile data.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_reddit_posts": {
+        "description": "Fetch structured Reddit post data.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_google_maps_reviews": {
+        "description": "Fetch structured Google Maps review data.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    "mcp_brightdata_web_data_yahoo_finance_business": {
+        "description": "Fetch structured Yahoo Finance business data.",
+        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+    },
+    **{
+        tool_name: {
+            "description": description,
+            "parameters": _GENERIC_SPREADSHEET_SCHEMA,
+        }
+        for tool_name, description in _GOOGLE_SHEETS_TOOL_DESCRIPTIONS.items()
     },
 }
 

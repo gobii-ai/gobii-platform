@@ -198,7 +198,6 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             (False, "ok i filled out that form for example borough. now what? do i need the other form?", _dt("2025-12-04T20:29:01.837567+00:00")),
             (True, "Great! Which form did you fill? Zoning ($50) or Building ($50-200)? If zoning is done, I can prefill building if you share owner names, contractor contact (or TBD), and confirm $25k value.", _dt("2025-12-04T20:29:47.932746+00:00")),
             (True, "Which form did you fill? Zoning (Accessory Structure) or Building (Residential Addition/Renovation)? Both required. Share owner names, contractor info, and confirm $25k estimated value so I can prefill building.", _dt("2025-12-04T20:30:17.320775+00:00")),
-            (False, "I filled in the Example Borough zoning permit. Where's your source that I need a building permit?", _dt("2025-12-04T20:33:43.359230+00:00")),
             # Additional context messages to match earlier summary
             (True, "Main deck 12x24 (288 sf); walkway 4x24 (96 sf); total 384 sf; height ~12-16 ft; R2 setbacks 35/15/20; decks can project 3 ft; frost depth 36\".", _dt("2025-12-04T19:50:34.806350+00:00")),
         ]
@@ -230,11 +229,19 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
             ("Decided to sleep until next trigger.", _dt("2025-12-04T20:31:19.869856+00:00")),
         ]
 
+        source_result = (
+            "Official source: Example Borough Deck Permit Handout, "
+            "https://exampleborough.gov/building-permits/deck-permit-handout.pdf. "
+            "Section 'Decks and Elevated Platforms' says decks over 30 inches above grade require a UCC "
+            "building permit, and the permit fee schedule lists the building permit at $50 base plus "
+            "valuation-based inspection fees. The zoning permit remains separately required for all decks."
+        )
+
         tool_events = [
             (
                 "browser_task",
                 {"goal": "Extract deck permit requirements, fees, frost depth, zoning constraints"},
-                "Completed browser research for permits/fees/zoning",
+                source_result,
                 _dt("2025-10-20T15:47:59.601830+00:00"),
             ),
             (
@@ -334,8 +341,6 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
                     owner_agent=agent,
                 )
                 PersistentAgentMessage.objects.filter(pk=created.pk).update(timestamp=ts)
-                if not payload["is_outbound"]:
-                    msg = created
             elif kind == "step":
                 step = PersistentAgentStep.objects.create(
                     agent=agent,
@@ -355,7 +360,36 @@ class PermitFollowupSingleReplyScenario(EvalScenario, ScenarioExecutionTools):
                     result=payload["result"],
                 )
 
-        process_agent_events(str(agent.id), eval_run_id=run_id)
+        # Keep the long-horizon history realistic, but make the prompt under test the active inbound.
+        # Otherwise the scenario's outcome depends on the wall-clock distance from a historical seed date.
+        msg = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conv,
+            body="I filled in the Example Borough zoning permit. Where's your source that I need a building permit?",
+            raw_payload={"source": "eval_prompt"},
+            owner_agent=agent,
+        )
+
+        process_agent_events(
+            str(agent.id),
+            eval_run_id=run_id,
+            mock_config={
+                "mcp_brightdata_search_engine": {
+                    "status": "ok",
+                    "content": source_result,
+                },
+                "mcp_brightdata_scrape_as_markdown": {
+                    "status": "ok",
+                    "content": source_result,
+                },
+                "spawn_web_task": {
+                    "status": "completed",
+                    "result": {"content": source_result},
+                    "message": source_result,
+                },
+            },
+        )
 
         self.record_task_result(
             run_id,

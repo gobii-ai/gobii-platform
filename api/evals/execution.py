@@ -4,6 +4,8 @@ import json
 import time
 import contextvars
 
+from litellm.exceptions import OpenAIError
+
 from api.models import (
     BrowserUseAgentTask,
     PersistentAgent,
@@ -14,7 +16,7 @@ from api.models import (
     CommsAllowlistEntry
 )
 from api.agent.comms.message_service import inject_internal_web_message
-from api.agent.core.llm_utils import run_completion
+from api.agent.core.llm_utils import LiteLLMResponseError, run_completion
 from api.agent.events import AgentEventType, get_agent_event_stream
 from api.evals.realtime import broadcast_task_update, broadcast_run_update
 from api.evals.metrics import aggregate_run_metrics
@@ -22,6 +24,18 @@ from config.redis_client import get_redis_client
 from django.utils import timezone
 
 logger = logging.getLogger(__name__)
+
+_JUDGE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+_JUDGE_RETRYABLE_ERRORS = (
+    AttributeError,
+    IndexError,
+    json.JSONDecodeError,
+    KeyError,
+    LiteLLMResponseError,
+    OpenAIError,
+    TypeError,
+    ValueError,
+)
 
 
 def _preview_text(value: Any, *, limit: int = 1200) -> str:
@@ -249,10 +263,15 @@ class ScenarioExecutionTools:
                          Passed to Celery worker for eval mocking.
         """
         current_run_id = eval_run_id or get_current_eval_run_id()
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        resolved_sender_user_id = sender_user_id
+        if current_run_id and sender_user_id == -999 and agent.user_id:
+            resolved_sender_user_id = agent.user_id
+
         msg, _ = inject_internal_web_message(
             agent_id=agent_id,
             body=body,
-            sender_user_id=sender_user_id,
+            sender_user_id=resolved_sender_user_id,
             attachments=attachments,
             trigger_processing=False,  # handle processing explicitly below
             eval_run_id=current_run_id,
@@ -269,9 +288,13 @@ class ScenarioExecutionTools:
         )
 
         # Update agent's preferred contact to this new user so "Welcome" prompts target them
-        agent = PersistentAgent.objects.get(id=agent_id)
         agent.preferred_contact_endpoint = msg.from_endpoint
         agent.save(update_fields=["preferred_contact_endpoint"])
+
+        if current_run_id and resolved_sender_user_id == agent.user_id:
+            from api.services.web_sessions import start_web_session
+
+            start_web_session(agent, agent.user, source="eval")
 
         if trigger_processing:
             self._dispatch_agent_processing(
@@ -488,6 +511,7 @@ class ScenarioExecutionTools:
             {"role": "system", "content": "You are an impartial judge. Evaluate the context and answer the question by calling the `submit_judgment` tool."},
             {"role": "user", "content": f"Context:\n{context}\n\nQuestion: {question}\n\nValid Options: {', '.join(options_list)}"}
         ]
+        judge_tool_choice = {"type": "function", "function": {"name": "submit_judgment"}}
 
         # If caller provided both model and params, use them directly
         if model is not None and params is not None:
@@ -495,15 +519,15 @@ class ScenarioExecutionTools:
             if safe_params.get("temperature") is None:
                 safe_params["temperature"] = 0.0
             try:
-                response = run_completion(
+                return self._run_judge_completion(
                     model=model,
-                    messages=prompt,
-                    tools=[tool_definition],
+                    prompt=prompt,
+                    tool_definition=tool_definition,
+                    tool_choice=judge_tool_choice,
                     params=safe_params,
-                    drop_params=True,
+                    options=options_list,
                 )
-                return self._extract_judgment(response)
-            except Exception as e:
+            except _JUDGE_RETRYABLE_ERRORS as e:
                 logger.error("LLM judge failed with explicit model %s: %s", model, e)
                 return "Error", f"Exception during judgment: {str(e)}"
 
@@ -526,21 +550,62 @@ class ScenarioExecutionTools:
                 safe_params["temperature"] = 0.0
 
             try:
-                response = run_completion(
+                return self._run_judge_completion(
                     model=effective_model,
-                    messages=prompt,
-                    tools=[tool_definition],
+                    prompt=prompt,
+                    tool_definition=tool_definition,
+                    tool_choice=judge_tool_choice,
                     params=safe_params,
-                    drop_params=True,
+                    options=options_list,
                 )
-                return self._extract_judgment(response)
-            except Exception as e:
+            except _JUDGE_RETRYABLE_ERRORS as e:
                 last_error = e
                 logger.warning("LLM judge failed with model %s: %s, trying next", effective_model, e)
                 continue
 
         logger.error("LLM judge failed with all providers: %s", last_error)
         return "Error", f"Exception during judgment: {str(last_error)}"
+
+    def _run_judge_completion(
+        self,
+        *,
+        model: str,
+        prompt: list[dict[str, str]],
+        tool_definition: dict[str, Any],
+        tool_choice: dict[str, Any],
+        params: dict[str, Any],
+        options: list[str],
+    ) -> Tuple[str, str]:
+        last_error: Exception | None = None
+        for attempt, delay_seconds in enumerate((*_JUDGE_RETRY_DELAYS_SECONDS, None), start=1):
+            try:
+                response = run_completion(
+                    model=model,
+                    messages=prompt,
+                    tools=[tool_definition],
+                    tool_choice=tool_choice,
+                    params=params,
+                    drop_params=True,
+                )
+                choice, reasoning = self._extract_judgment(response)
+                if choice not in options:
+                    raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
+                return choice, reasoning
+            except _JUDGE_RETRYABLE_ERRORS as exc:
+                last_error = exc
+                if delay_seconds is None:
+                    raise
+                logger.warning(
+                    "LLM judge returned retryable response error with model %s; retrying attempt %s: %s",
+                    model,
+                    attempt + 1,
+                    exc,
+                )
+                time.sleep(delay_seconds)
+
+        if last_error is not None:
+            raise last_error
+        raise ValueError("LLM judge failed without a captured error.")
 
     def _extract_judgment(self, response) -> Tuple[str, str]:
         """Extract judgment from LLM response tool calls."""

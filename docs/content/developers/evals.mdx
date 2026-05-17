@@ -16,7 +16,7 @@ The canonical eval system lives under `api/evals` and is launched with `uv run p
 | --- | --- | --- | --- |
 | Unit tests | Prove Python code, scoring helpers, registration, and local setup behavior. | `uv run python manage.py test ... --settings=config.test_settings` | Unit test evidence only. |
 | Simulated evals | Deterministic offline eval path for scenarios that declare simulation support. | `run_evals --simulated --settings=config.eval_local_settings` | Eval runner smoke, not live model quality. |
-| Live evals | Run scenarios against a real model through an LLM routing profile. | `run_evals --routing-profile <profile> --settings=config.eval_local_settings` | Model behavior evidence. |
+| Live evals | Run scenarios against a real model through an LLM routing profile. | `run_evals --routing-profile <profile> --settings=config.eval_local_settings` for small slices; use `config.eval_postgres_settings` for full concurrent local suites. | Model behavior evidence. |
 | Official evals | Durable comparison runs for tracked releases or model changes. | Add `--official` or `--run-type official`. | Official trend data. |
 
 Keep those categories separate in reports. Passing unit tests does not mean evals passed, and a simulated eval does not mean a model passed.
@@ -42,6 +42,8 @@ Keep those categories separate in reports. Passing unit tests does not mean eval
 ## Local setup
 
 For local eval development, use `config.eval_local_settings`. It creates and migrates `.local/eval-local.sqlite3`, runs Celery work eagerly, disables browser task execution, and seeds local LLM routing profiles. It is explicit and scoped to eval-local SQLite.
+
+For full live suites, use `config.eval_postgres_settings` with a local Postgres database. It keeps browser task execution disabled and seeds the same local routing profiles, but lets `run_evals --max-concurrency` use bounded local eager worker threads against a database that can tolerate concurrent writes.
 
 Do not use `config.test_settings` for live evals. Test settings mock and isolate runtime behavior for unit tests; live evals need the eval-local or real deployment settings path.
 
@@ -105,7 +107,7 @@ uv run python manage.py run_evals \
   --settings=config.eval_local_settings
 ```
 
-Run every registered scenario:
+Run every registered scenario on local SQLite:
 
 ```bash
 uv run python manage.py run_evals \
@@ -116,6 +118,19 @@ uv run python manage.py run_evals \
 ```
 
 For live all-suite runs, pass `--routing-profile <profile>` and expect a larger bill and a longer run. Start with one scenario or one suite before running `all`.
+
+Run the full live suite with bounded local concurrency:
+
+```bash
+set -a; source /Users/andrew/.env-openrouter >/dev/null; set +a
+
+uv run python manage.py run_evals \
+  --suite all \
+  --n-runs 1 \
+  --routing-profile openrouter-deepseek-v4-flash \
+  --max-concurrency 8 \
+  --settings=config.eval_postgres_settings
+```
 
 Use safety caps for large live runs:
 
@@ -321,7 +336,7 @@ uv run python manage.py run_evals \
 - Do not use `config.test_settings` for live `run_evals`.
 - Do not conflate simulated and live model results.
 - Prefer one scenario or one focused suite while iterating; run `all` only when the change needs whole-registry confidence.
-- Keep eval-local setup explicit. `config.eval_local_settings` is for local SQLite evals, not production traffic.
+- Keep eval-local setup explicit. `config.eval_local_settings` is for local SQLite evals; `config.eval_postgres_settings` is for concurrent local full-suite evals. Neither is production traffic.
 
 ## Release-gate guidance
 

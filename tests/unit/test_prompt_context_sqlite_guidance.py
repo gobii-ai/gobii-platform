@@ -15,6 +15,11 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("json_extract(result_json,'$.result')", section)
         self.assertIn("do not invent columns", section)
 
+    def test_examples_require_sqlite_tool_for_database_queries(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn("User asks to query SQLite/database/tables", examples)
+        self.assertIn("schema proves shape, not result data", examples)
+
     def test_csv_parsing_requires_inspection_and_result_text(self):
         examples = prompt_context._get_sqlite_examples()
         csv_section = examples.split("## CSV Parsing", 1)[1].split(
@@ -78,3 +83,15 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             "If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous",
             examples,
         )
+
+    def test_planning_first_run_welcome_ends_planning_before_execution_tools(self):
+        guidance = prompt_context._get_planning_first_run_welcome_instruction(
+            welcome_target=prompt_context._FirstRunWelcomeTarget(
+                channel="web",
+                address="web://user/1/agent/test",
+                send_tool_name="send_chat_message",
+            )
+        )
+
+        self.assertIn("call the welcome send tool and end_planning in the same response", guidance)
+        self.assertIn("Do not call http_request", guidance)

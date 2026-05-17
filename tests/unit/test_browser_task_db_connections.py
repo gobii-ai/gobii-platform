@@ -15,6 +15,7 @@ from api.models import (
     BrowserUseAgentTaskStep,
     BrowserLLMPolicy,
     BrowserLLMTier,
+    EvalRun,
     BrowserTierEndpoint,
     BrowserModelEndpoint,
     LLMProvider,
@@ -72,6 +73,78 @@ class BrowserTaskDbConnectionTests(TestCase):
 
         self.assertIn("execution is paused", str(ctx.exception).lower())
 
+    @override_settings(EVAL_BROWSER_TASK_SIMULATION_ENABLED=True)
+    def test_disabled_browser_task_completes_eval_weather_simulation(self):
+        from api.tasks.browser_agent_tasks import _finish_disabled_browser_task
+
+        run = EvalRun.objects.create(
+            scenario_slug="monitor_pollution",
+            agent=self.persistent_agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            eval_run=run,
+            prompt="Visit http://localhost:8000/eval/sim/weather/ and report the pollution index.",
+        )
+
+        with (
+            patch("api.tasks.browser_agent_tasks.AgentBudgetManager.bump_branch_depth") as mock_bump_depth,
+            patch("api.tasks.browser_agent_tasks._schedule_agent_follow_up") as mock_follow_up,
+        ):
+            _finish_disabled_browser_task(
+                str(task.id),
+                budget_id="budget-1",
+                branch_id="branch-1",
+                depth=2,
+            )
+
+        task.refresh_from_db()
+        step = task.steps.get(step_number=1)
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self.assertTrue(step.is_result)
+        self.assertEqual(step.result_value["pollution_index"], 55)
+        mock_bump_depth.assert_called_once_with(
+            agent_id=str(self.persistent_agent.id),
+            branch_id="branch-1",
+            delta=-1,
+        )
+        mock_follow_up.assert_called_once()
+
+    @override_settings(EVAL_BROWSER_TASK_SIMULATION_ENABLED=True)
+    def test_disabled_eval_browser_task_failure_does_not_schedule_follow_up(self):
+        from api.tasks.browser_agent_tasks import _finish_disabled_browser_task
+
+        run = EvalRun.objects.create(
+            scenario_slug="job_listings_bundled_reply",
+            agent=self.persistent_agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        task = BrowserUseAgentTask.objects.create(
+            agent=self.agent,
+            user=self.user,
+            eval_run=run,
+            prompt="Find remote software engineer listings.",
+        )
+
+        with (
+            patch("api.tasks.browser_agent_tasks.AgentBudgetManager.bump_branch_depth"),
+            patch("api.tasks.browser_agent_tasks._schedule_agent_follow_up") as mock_follow_up,
+        ):
+            _finish_disabled_browser_task(
+                str(task.id),
+                budget_id="budget-1",
+                branch_id="branch-1",
+                depth=2,
+            )
+
+        task.refresh_from_db()
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.FAILED)
+        mock_follow_up.assert_not_called()
+
     def test_task_is_cancelled_before_start_when_owner_execution_paused(self):
         task = BrowserUseAgentTask.objects.create(
             agent=self.agent,
@@ -108,7 +181,7 @@ class BrowserTaskDbConnectionTests(TestCase):
 
         # Patch internals in the task module to simulate success quickly and avoid external deps
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
-             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
              patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)), \
              patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close:
@@ -136,7 +209,7 @@ class BrowserTaskDbConnectionTests(TestCase):
         )
 
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
-             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
              patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)), \
              patch("api.tasks.browser_agent_tasks.close_old_connections") as mock_close, \
@@ -363,7 +436,7 @@ class BrowserTaskVisionRoutingTests(TestCase):
         ]]
 
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
-             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
              patch("api.tasks.browser_agent_tasks._resolve_browser_provider_priority_from_db", return_value=provider_priority), \
              patch("api.tasks.browser_agent_tasks._execute_agent_with_failover", return_value=({"ok": True}, None)) as mock_execute, \
@@ -397,7 +470,7 @@ class BrowserTaskVisionRoutingTests(TestCase):
         provider_priority = [[_provider_entry("text-only", False)]]
 
         with patch("api.tasks.browser_agent_tasks.LIBS_AVAILABLE", True), \
-             patch("api.tasks.browser_agent_tasks.Controller") as MockController, \
+             patch("api.tasks.browser_agent_tasks.Controller"), \
              patch("api.tasks.browser_agent_tasks.select_proxy_for_task", return_value=None), \
              patch("api.tasks.browser_agent_tasks._resolve_browser_provider_priority_from_db", return_value=provider_priority), \
              patch("api.tasks.browser_agent_tasks._execute_agent_with_failover") as mock_execute, \

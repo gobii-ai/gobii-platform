@@ -27,6 +27,7 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
     _latest_inbound_message_needs_reply,
+    _should_continue_for_pending_progress_reply,
     _should_continue_for_unanswered_inbound_after_tools,
     _gate_send_chat_tool_for_delivery,
     _tool_definition_names_for_completion,
@@ -40,6 +41,7 @@ from api.agent.core.event_processing import (
     _run_agent_loop,
     process_agent_events,
 )
+from api.agent.core.llm_utils import EmptyLiteLLMResponseError
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
     _human_inbound_generation_key,
@@ -4206,6 +4208,31 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertFalse(_latest_inbound_message_needs_reply(self.agent))
         self.assertFalse(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
 
+    def test_pending_progress_reply_continues_after_non_message_stop(self):
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertTrue(_should_continue_for_pending_progress_reply(True, finalized))
+
+    def test_pending_progress_reply_stops_for_human_input_request(self):
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+            human_input_request_ok=True,
+        )
+
+        self.assertFalse(_should_continue_for_pending_progress_reply(True, finalized))
+
     def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
@@ -4599,6 +4626,57 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(error.category, PersistentAgentError.Category.LLM_COMPLETION)
         self.assertEqual(error.exception_class, "RuntimeError")
         self.assertEqual(error.context["iteration"], 1)
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_empty_completion_retries_agent_loop_before_logging_error(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.return_value = self._prompt_context()
+        response = make_completion_response(content="Done")
+        token_usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "m",
+            "provider": "p",
+        }
+        mock_completion.side_effect = [
+            EmptyLiteLLMResponseError("empty response"),
+            (response, token_usage),
+        ]
+
+        from api.agent.core import event_processing as ep
+
+        with (
+            patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2),
+            patch.object(ep.settings, "AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES", 1),
+        ):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(usage.get("total_tokens"), 15)
+        self.assertFalse(PersistentAgentError.objects.filter(agent=self.agent).exists())
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
