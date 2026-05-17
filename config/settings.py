@@ -273,6 +273,12 @@ PUBLIC_BRAND_NAME = env(
     "PUBLIC_BRAND_NAME",
     default=_proprietary_default("brand", "PUBLIC_BRAND_NAME", fallback="Agent Platform"),
 )
+OPENROUTER_ATTRIBUTION_TITLE = env(
+    "OPENROUTER_ATTRIBUTION_TITLE",
+    default=_proprietary_default("brand", "OPENROUTER_ATTRIBUTION_TITLE", fallback="Gobii"),
+)
+
+
 def _public_site_url_default(*, debug: bool | None = None) -> str:
     debug_mode = DEBUG if debug is None else debug
     if debug_mode:

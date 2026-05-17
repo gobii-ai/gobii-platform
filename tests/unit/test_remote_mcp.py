@@ -1,5 +1,6 @@
 import base64
 import json
+import uuid
 from decimal import Decimal
 from datetime import timedelta
 from unittest.mock import patch
@@ -73,6 +74,14 @@ class RemoteMCPViewTests(TestCase):
             password="password",
         )
         UserQuota.objects.get_or_create(user=self.other_user, defaults={"agent_limit": 20})
+        self.staff_user = User.objects.create_user(
+            username="mcp-staff@example.com",
+            email="mcp-staff@example.com",
+            password="password",
+            is_staff=True,
+        )
+        UserQuota.objects.get_or_create(user=self.staff_user, defaults={"agent_limit": 20})
+        self.raw_staff_api_key, self.staff_api_key = ApiKey.create_for_user(self.staff_user, name="mcp-staff")
 
     def _post_mcp(self, method, params=None, *, auth="x-api-key", extra_headers=None, api_key=None):
         payload = {
@@ -188,12 +197,210 @@ class RemoteMCPViewTests(TestCase):
         self.assertIn("sanitized", debug_tool["description"])
         self.assertEqual(debug_tool["inputSchema"]["properties"]["limit"]["maximum"], 50)
         self.assertIn("audit_events", debug_tool["inputSchema"]["properties"]["include"]["items"]["enum"])
+        self.assertIn("user_id", debug_tool["inputSchema"]["properties"])
+        self.assertIn("organization_id", debug_tool["inputSchema"]["properties"])
 
         list_response = self._call_tool("gobii_list_agents")
         self.assertEqual(list_response.status_code, 200)
         content = self._structured_content(list_response)
         self.assertEqual(content["total"], 1)
         self.assertEqual(content["agents"][0]["id"], str(agent.id))
+        self.assertNotIn("access", content)
+
+    def test_non_admin_scope_params_return_structured_tool_error(self):
+        other_agent = self._create_agent(self.other_user, "Scoped Other Agent")
+
+        list_response = self._call_tool(
+            "gobii_list_agents",
+            {"user_id": self.other_user.id},
+        )
+        self.assertEqual(list_response.status_code, 200)
+        self.assertTrue(list_response.json()["result"]["isError"])
+        list_content = self._structured_content(list_response)
+        self.assertEqual(list_content["status"], "error")
+        self.assertEqual(list_content["details"]["code"], "admin_scope_required")
+        self.assertIn("user_id", list_content["details"]["fields"])
+
+        get_response = self._call_tool(
+            "gobii_get_agent",
+            {"agent_id": str(other_agent.id), "user_id": self.other_user.id},
+        )
+        self.assertEqual(get_response.status_code, 200)
+        self.assertTrue(get_response.json()["result"]["isError"])
+        self.assertEqual(self._structured_content(get_response)["details"]["code"], "admin_scope_required")
+
+    def test_staff_can_cross_account_get_debug_and_timeline_by_agent_id(self):
+        other_agent = self._create_agent(self.other_user, "Staff Cross Account Agent")
+        self._create_web_message(
+            other_agent,
+            "Investigate this. Authorization: Bearer staff-cross-account-secret",
+        )
+
+        get_response = self._call_tool(
+            "gobii_get_agent",
+            {"agent_id": str(other_agent.id)},
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(get_response.status_code, 200)
+        get_content = self._structured_content(get_response)
+        self.assertFalse(get_response.json()["result"]["isError"])
+        self.assertEqual(get_content["agent"]["id"], str(other_agent.id))
+        self.assertEqual(get_content["access"]["admin_access"], True)
+        self.assertEqual(get_content["access"]["access_scope"], "staff_cross_account")
+        self.assertEqual(get_content["access"]["target_user_id"], str(self.other_user.id))
+
+        timeline_response = self._call_tool(
+            "gobii_get_agent_timeline",
+            {"agent_id": str(other_agent.id), "limit": 5},
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(timeline_response.status_code, 200)
+        timeline_content = self._structured_content(timeline_response)
+        self.assertFalse(timeline_response.json()["result"]["isError"])
+        self.assertEqual(timeline_content["access"]["target_user_id"], str(self.other_user.id))
+
+        debug_response = self._call_tool(
+            "gobii_get_agent_debug_trace",
+            {
+                "agent_id": str(other_agent.id),
+                "limit": 5,
+                "include": ["audit_events"],
+            },
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(debug_response.status_code, 200)
+        debug_content = self._structured_content(debug_response)
+        self.assertFalse(debug_response.json()["result"]["isError"])
+        self.assertEqual(debug_content["agent"]["id"], str(other_agent.id))
+        self.assertEqual(debug_content["access"]["target_user_id"], str(self.other_user.id))
+        serialized = json.dumps(debug_content)
+        self.assertNotIn("staff-cross-account-secret", serialized)
+        self.assertIn("[REDACTED]", serialized)
+
+    def test_staff_can_use_scoped_list_agents(self):
+        self._create_agent(self.user, "Default User Agent")
+        other_agent = self._create_agent(self.other_user, "Scoped Listed Agent")
+
+        response = self._call_tool(
+            "gobii_list_agents",
+            {"user_id": self.other_user.id},
+            api_key=self.raw_staff_api_key,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        self.assertFalse(response.json()["result"]["isError"])
+        self.assertEqual(content["total"], 1)
+        self.assertEqual(content["agents"][0]["id"], str(other_agent.id))
+        self.assertEqual(content["access"]["admin_access"], True)
+        self.assertEqual(content["access"]["requested_user_id"], str(self.other_user.id))
+
+    def test_staff_can_create_agent_in_scoped_user_and_org_contexts(self):
+        org = Organization.objects.create(name="Scoped MCP Org", slug="scoped-mcp-org", created_by=self.other_user)
+        org.billing.purchased_seats = 1
+        org.billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.other_user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+        with (
+            patch.object(BrowserUseAgent, "select_random_proxy", return_value=None),
+            patch("api.services.persistent_agents.maybe_schedule_short_description"),
+            patch("api.services.persistent_agents.maybe_schedule_mini_description"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_tags"),
+            patch("api.services.persistent_agents.maybe_schedule_agent_avatar"),
+            patch("api.agent.tasks.process_agent_events_task.delay"),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            user_response = self._call_tool(
+                "gobii_create_agent",
+                {
+                    "name": "Scoped User Created Agent",
+                    "charter": "Created for another user by staff.",
+                    "user_id": self.other_user.id,
+                },
+                api_key=self.raw_staff_api_key,
+            )
+            org_response = self._call_tool(
+                "gobii_create_agent",
+                {
+                    "name": "Scoped Org Created Agent",
+                    "charter": "Created for another organization by staff.",
+                    "organization_id": str(org.id),
+                },
+                api_key=self.raw_staff_api_key,
+            )
+
+        self.assertEqual(user_response.status_code, 200)
+        user_content = self._structured_content(user_response)
+        self.assertFalse(user_response.json()["result"]["isError"])
+        user_agent = PersistentAgent.objects.get(id=user_content["agent"]["id"])
+        self.assertEqual(user_agent.user_id, self.other_user.id)
+        self.assertIsNone(user_agent.organization_id)
+        self.assertEqual(user_content["access"]["requested_user_id"], str(self.other_user.id))
+
+        self.assertEqual(org_response.status_code, 200)
+        org_content = self._structured_content(org_response)
+        self.assertFalse(org_response.json()["result"]["isError"])
+        org_agent = PersistentAgent.objects.get(id=org_content["agent"]["id"])
+        self.assertEqual(org_agent.organization_id, org.id)
+        self.assertEqual(org_agent.user_id, self.other_user.id)
+        self.assertEqual(org_content["access"]["requested_organization_id"], str(org.id))
+
+    def test_staff_cross_account_update_agent_records_access_metadata(self):
+        other_agent = self._create_agent(self.other_user, "Staff Mutated Agent")
+
+        response = self._call_tool(
+            "gobii_update_agent",
+            {
+                "agent_id": str(other_agent.id),
+                "user_id": self.other_user.id,
+                "charter": "Updated by staff through scoped Remote MCP.",
+            },
+            api_key=self.raw_staff_api_key,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        content = self._structured_content(response)
+        self.assertFalse(response.json()["result"]["isError"])
+        other_agent.refresh_from_db()
+        self.assertEqual(other_agent.charter, "Updated by staff through scoped Remote MCP.")
+        self.assertEqual(content["access"]["admin_access"], True)
+        self.assertEqual(content["access"]["target_user_id"], str(self.other_user.id))
+
+    def test_staff_scope_invalid_targets_return_structured_tool_errors(self):
+        missing_user_response = self._call_tool(
+            "gobii_list_agents",
+            {"user_id": 999999},
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(missing_user_response.status_code, 200)
+        self.assertTrue(missing_user_response.json()["result"]["isError"])
+        self.assertEqual(self._structured_content(missing_user_response)["details"]["code"], "user_not_found")
+
+        missing_org_response = self._call_tool(
+            "gobii_list_agents",
+            {"organization_id": str(uuid.uuid4())},
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(missing_org_response.status_code, 200)
+        self.assertTrue(missing_org_response.json()["result"]["isError"])
+        self.assertEqual(self._structured_content(missing_org_response)["details"]["code"], "organization_not_found")
+
+        missing_agent_response = self._call_tool(
+            "gobii_get_agent",
+            {"agent_id": str(uuid.uuid4())},
+            api_key=self.raw_staff_api_key,
+        )
+        self.assertEqual(missing_agent_response.status_code, 200)
+        self.assertTrue(missing_agent_response.json()["result"]["isError"])
+        self.assertEqual(
+            self._structured_content(missing_agent_response)["details"]["code"],
+            "agent_not_found_or_inaccessible",
+        )
 
     def test_lifecycle_tools_create_update_link_and_archive_agent(self):
         existing_agent = self._create_agent(self.user, "Existing MCP Agent")
