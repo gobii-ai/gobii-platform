@@ -106,6 +106,7 @@ Gobii also validates `Mcp-Method` and `Mcp-Name` request headers when clients se
 | `gobii_unlink_agents` | Remove a peer-agent link while preserving history. |
 | `gobii_send_agent_message` | Send a web-chat message to an agent, optionally with existing filespace attachments. |
 | `gobii_get_agent_timeline` | Fetch timeline events and processing state using durable cursors. |
+| `gobii_get_agent_debug_trace` | Fetch bounded, sanitized debugging context for one accessible agent. |
 | `gobii_wait_for_agent_event` | Bounded long-poll for matching timeline events after a cursor. |
 | `gobii_list_agent_files` | List an agent's default filespace. |
 | `gobii_upload_agent_file` | Upload a small base64 file into the agent filespace. |
@@ -140,6 +141,40 @@ Unsupported fields are not ignored. A tool call with unsupported arguments retur
 - `status` and `tool_name`: supported for tool/step events
 
 The wait tool returns `matched`, `timed_out`, `events`, `next_cursor`, `latest_cursor`, and `waited_seconds`.
+
+## Debug Traces
+
+`gobii_get_agent_debug_trace` pulls a bounded support/debug view for one agent that the API key can already access. It reuses Gobii's audit timeline data and keeps the normal long-lived agent timeline model; it does not create a separate run, task, or conversation.
+
+Inputs:
+
+- `agent_id` is required.
+- `limit` defaults to `20` and is capped at `50` per returned section.
+- `recent_minutes` defaults to `60` when no cursor or explicit `since` is supplied. Set it to `null` to rely only on `limit` and cursor bounds.
+- `since` and `until` accept ISO8601 timestamps. Time windows are capped at seven days.
+- `cursor` accepts the previous response's `audit.next_cursor` for older audit/debug events.
+- `include` can request any of `timeline`, `audit_events`, `completions`, `eval_debug_artifacts`, and `diagnostics`.
+- `detail` can be `summary`, `standard`, or `verbose`. All levels still redact secrets and omit raw prompt archive payloads.
+- `eval_run_id` can narrow eval debug artifacts to one eval run owned by the same agent.
+
+Outputs include agent metadata, request scope, sanitized timeline/audit events, completion model/usage/cost metadata, prompt archive IDs and token-fit metadata, eval task debug artifacts when present, diagnostics, warnings, and redaction notes. Business and validation failures return normal MCP tool results with `isError: true`; they are not transport failures.
+
+Sanitization is intentionally conservative. The tool recursively redacts sensitive key names and common credential patterns such as bearer tokens, API keys, private keys, cookies, and access tokens. It returns IDs, timestamps, tool names and status summaries, sanitized parameters/results, prompt archive metadata, usage/cost fields, and artifact links/IDs. It does not return full environment values, authorization headers, raw prompt archive payloads, or arbitrary unbounded transcripts.
+
+Example:
+
+```json
+{
+  "name": "gobii_get_agent_debug_trace",
+  "arguments": {
+    "agent_id": "00000000-0000-0000-0000-000000000000",
+    "limit": 20,
+    "recent_minutes": 120,
+    "include": ["audit_events", "completions", "diagnostics"],
+    "detail": "standard"
+  }
+}
+```
 
 ## Agent Links
 
@@ -182,6 +217,7 @@ mcp_servers:
         - gobii_unlink_agents
         - gobii_send_agent_message
         - gobii_get_agent_timeline
+        - gobii_get_agent_debug_trace
         - gobii_wait_for_agent_event
         - gobii_list_agent_files
         - gobii_upload_agent_file
@@ -200,11 +236,12 @@ Use this flow for local dev, preview, or production smoke testing. Archive tempo
 5. `gobii_link_agents`
 6. `gobii_send_agent_message`
 7. `gobii_get_agent_timeline` and capture `latest_cursor`
-8. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
-9. `gobii_upload_agent_file`
-10. `gobii_list_agent_files`
-11. `gobii_unlink_agents`
-12. `gobii_archive_agent` for temporary agents
+8. `gobii_get_agent_debug_trace`; verify returned sections are bounded and sanitized
+9. `gobii_wait_for_agent_event` with a cursor and a short timeout; verify both match and timeout behavior as appropriate
+10. `gobii_upload_agent_file`
+11. `gobii_list_agent_files`
+12. `gobii_unlink_agents`
+13. `gobii_archive_agent` for temporary agents
 
 ## Limitations
 
@@ -215,3 +252,4 @@ Use this flow for local dev, preview, or production smoke testing. Archive tempo
 - Tool results include both MCP text content and `structuredContent`.
 - All tool calls run with the permissions of the provided Gobii API key.
 - Origin headers are validated for browser-originated requests to reduce DNS rebinding risk.
+- Debug traces are sanitized support artifacts, not full audit exports. Use staff audit tooling for raw prompt archive inspection where policy allows it.

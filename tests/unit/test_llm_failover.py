@@ -1,4 +1,5 @@
 """Unit tests for LLM failover (DB-only)."""
+import json
 import os
 import uuid
 from datetime import timedelta
@@ -23,7 +24,7 @@ from api.agent.core.llm_config import (
     get_agent_judge_llm_config,
 )
 from console.api_views import _build_completion_params
-from api.openrouter import DEFAULT_API_BASE
+from api.openrouter import DEFAULT_ATTRIBUTION_TITLE
 from tests.utils.llm_seed import clear_llm_db, get_intelligence_tier, seed_persistent_basic
 
 
@@ -218,10 +219,10 @@ class TestLLMFailover(TestCase):
     def test_openrouter_configs_include_attribution_headers(self):
         seed_persistent_basic(include_openrouter=True)
         referer = "https://example.com"
-        title = "Example App"
+        leaky_title = "Gobii Meta Gobii Skill Eval"
         with override_settings(
             PUBLIC_SITE_URL=referer,
-            PUBLIC_BRAND_NAME=title,
+            PUBLIC_BRAND_NAME=leaky_title,
         ):
             with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
                 configs = get_llm_config_with_failover(token_count=12000)
@@ -230,23 +231,83 @@ class TestLLMFailover(TestCase):
                 _, _, params = openrouter_configs[0]
                 self.assertEqual(
                     params.get("extra_headers"),
-                    {"HTTP-Referer": referer, "X-Title": title},
+                    {"HTTP-Referer": referer, "X-Title": DEFAULT_ATTRIBUTION_TITLE},
                 )
+                self.assertNotIn("Meta Gobii", params["extra_headers"]["X-Title"])
+                self.assertNotIn("Skill Eval", params["extra_headers"]["X-Title"])
 
     def test_get_provider_config_includes_openrouter_headers(self):
         referer = "https://example.com/app"
-        title = "Example App"
+        leaky_title = "Gobii Meta Gobii Skill Eval"
         with override_settings(
             PUBLIC_SITE_URL=referer,
-            PUBLIC_BRAND_NAME=title,
+            PUBLIC_BRAND_NAME=leaky_title,
         ):
             with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
                 model, params = get_provider_config("openrouter_glm")
                 self.assertEqual(model, "openrouter/z-ai/glm-4.5")
                 self.assertEqual(
                     params.get("extra_headers"),
-                    {"HTTP-Referer": referer, "X-Title": title},
+                    {"HTTP-Referer": referer, "X-Title": DEFAULT_ATTRIBUTION_TITLE},
                 )
+                self.assertNotIn("Meta Gobii", params["extra_headers"]["X-Title"])
+                self.assertNotIn("Skill Eval", params["extra_headers"]["X-Title"])
+
+    def test_eval_routing_profile_openrouter_headers_use_generic_public_title(self):
+        clear_llm_db()
+        LLMProvider = apps.get_model('api', 'LLMProvider')
+        PersistentModelEndpoint = apps.get_model('api', 'PersistentModelEndpoint')
+        LLMRoutingProfile = apps.get_model('api', 'LLMRoutingProfile')
+        ProfileTokenRange = apps.get_model('api', 'ProfileTokenRange')
+        ProfilePersistentTier = apps.get_model('api', 'ProfilePersistentTier')
+        ProfilePersistentTierEndpoint = apps.get_model('api', 'ProfilePersistentTierEndpoint')
+
+        provider = LLMProvider.objects.create(
+            key='openrouter',
+            display_name='OpenRouter',
+            enabled=True,
+            env_var_name='OPENROUTER_API_KEY',
+            browser_backend='OPENAI_COMPAT',
+        )
+        endpoint = PersistentModelEndpoint.objects.create(
+            key='meta_gobii_eval_model',
+            provider=provider,
+            enabled=True,
+            litellm_model='openrouter/z-ai/glm-4.5',
+            supports_tool_choice=True,
+        )
+        profile = LLMRoutingProfile.objects.create(
+            name='meta_gobii_skill_eval',
+            display_name='Gobii Meta Gobii Skill Eval',
+            description='Eval routing profile that must not leak to OpenRouter attribution.',
+            is_active=False,
+            is_eval_snapshot=True,
+        )
+        token_range = ProfileTokenRange.objects.create(profile=profile, name='default', min_tokens=0, max_tokens=None)
+        tier = ProfilePersistentTier.objects.create(
+            token_range=token_range,
+            order=1,
+            intelligence_tier=get_intelligence_tier("standard"),
+        )
+        ProfilePersistentTierEndpoint.objects.create(tier=tier, endpoint=endpoint, weight=1.0)
+
+        referer = "https://evals.example.com"
+        with override_settings(
+            PUBLIC_SITE_URL=referer,
+            PUBLIC_BRAND_NAME='Gobii Meta Gobii Skill Eval',
+        ):
+            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": "openrouter-key"}, clear=True):
+                configs = get_llm_config_with_failover(routing_profile=profile, token_count=100)
+
+        self.assertEqual(len(configs), 1)
+        _provider, _model, params = configs[0]
+        self.assertEqual(
+            params.get("extra_headers"),
+            {"HTTP-Referer": referer, "X-Title": DEFAULT_ATTRIBUTION_TITLE},
+        )
+        public_headers = json.dumps(params["extra_headers"])
+        self.assertNotIn("meta_gobii_skill_eval", public_headers)
+        self.assertNotIn("Gobii Meta Gobii Skill Eval", public_headers)
 
     def test_gpt5_temperature_is_forced(self):
         """Runtime configuration coerces GPT-5 to temperature=1 even without overrides."""
