@@ -3496,7 +3496,16 @@ class CommsAllowlistEntryInline(admin.TabularInline):
     """Inline to manage manual allowlist entries for an agent."""
     model = CommsAllowlistEntry
     extra = 0
-    fields = ("channel", "address", "is_active", "verified")
+    fields = (
+        "channel",
+        "address",
+        "is_active",
+        "verified",
+        "sms_contact_purpose",
+        "sms_contact_purpose_details",
+        "sms_contact_permission_attested",
+        "sms_contact_permission_attested_at",
+    )
     readonly_fields = ()
     classes = ("collapse",)
 

@@ -38,6 +38,7 @@ type PendingActionComposerPanelProps = {
       allowInbound: boolean
       allowOutbound: boolean
       canConfigure: boolean
+      smsContactPermissionAttested?: boolean
     }>
   ) => Promise<void>
 }
@@ -175,6 +176,7 @@ export function PendingActionComposerPanel({
         nextDrafts[request.id] = current[request.id] ?? {
           allowInbound: request.allowInbound,
           allowOutbound: request.allowOutbound,
+          smsContactPermissionAttested: Boolean(request.smsContactPermissionAttested),
         }
       })
       return nextDrafts
@@ -263,6 +265,7 @@ export function PendingActionComposerPanel({
     const draft = contactDrafts[request.id] ?? {
       allowInbound: request.allowInbound,
       allowOutbound: request.allowOutbound,
+      smsContactPermissionAttested: Boolean(request.smsContactPermissionAttested),
     }
     setBusyContacts(true)
     setContactError(null)
@@ -274,6 +277,7 @@ export function PendingActionComposerPanel({
           allowInbound: draft.allowInbound,
           allowOutbound: draft.allowOutbound,
           canConfigure: false,
+          smsContactPermissionAttested: draft.smsContactPermissionAttested,
         },
       ])
     } catch (error) {

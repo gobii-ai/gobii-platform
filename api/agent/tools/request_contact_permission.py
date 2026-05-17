@@ -15,8 +15,10 @@ from ...models import (
     PersistentAgent, 
     CommsAllowlistEntry, 
     CommsAllowlistRequest,
-    CommsChannel
+    CommsChannel,
+    SmsContactPurpose,
 )
+from api.services.sms_contact_purpose import sms_contact_purpose_required
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,15 @@ def get_request_contact_permission_tool() -> dict:
                                 "purpose": {
                                     "type": "string", 
                                     "description": "Brief purpose (e.g., 'Schedule meeting', 'Get approval', 'Send report')"
+                                },
+                                "sms_contact_purpose": {
+                                    "type": "string",
+                                    "enum": list(SmsContactPurpose.values),
+                                    "description": "Required for SMS contacts when enabled: operational purpose for using SMS instead of email."
+                                },
+                                "sms_contact_purpose_details": {
+                                    "type": "string",
+                                    "description": "Optional additional operational context for SMS contact approval."
                                 }
                             },
                             "required": ["channel", "address", "reason", "purpose"]
@@ -114,6 +125,8 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             name = contact.get("name", "")
             reason = contact.get("reason")
             purpose = contact.get("purpose")
+            sms_purpose = (contact.get("sms_contact_purpose") or "").strip() or None
+            sms_purpose_details = (contact.get("sms_contact_purpose_details") or "").strip() or None
             
             if not all([channel, address, reason, purpose]):
                 errors.append(f"Missing required fields for contact: {contact}")
@@ -129,8 +142,20 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             # Normalize address
             if channel_enum == CommsChannel.EMAIL:
                 address = address.strip().lower()
+                sms_purpose = None
+                sms_purpose_details = None
             else:
                 address = address.strip()
+                if sms_purpose and sms_purpose not in SmsContactPurpose.values:
+                    errors.append(
+                        f"Invalid SMS contact purpose '{sms_purpose}' for {address}."
+                    )
+                    continue
+                if sms_contact_purpose_required() and not sms_purpose:
+                    errors.append(
+                        f"SMS contact {address} requires an operational purpose before it can be requested."
+                    )
+                    continue
             
             # Check if contact already exists in allowlist
             existing_entry = CommsAllowlistEntry.objects.filter(
@@ -181,7 +206,9 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
                 name=name,
                 reason=reason,
                 purpose=purpose,
-                expires_at=expires_at
+                expires_at=expires_at,
+                sms_contact_purpose=sms_purpose,
+                sms_contact_purpose_details=sms_purpose_details,
             )
             
             created_requests.append({

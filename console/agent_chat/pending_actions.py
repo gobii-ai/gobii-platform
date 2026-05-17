@@ -61,6 +61,13 @@ def _serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
         "allowInbound": bool(request_obj.request_inbound),
         "allowOutbound": bool(request_obj.request_outbound),
         "canConfigure": bool(request_obj.request_configure),
+        "smsContactPurpose": request_obj.sms_contact_purpose,
+        "smsContactPurposeDetails": request_obj.sms_contact_purpose_details,
+        "smsContactPermissionAttested": request_obj.sms_contact_permission_attested,
+        "smsContactPermissionAttestedAt": (
+            request_obj.sms_contact_permission_attested_at.isoformat()
+            if request_obj.sms_contact_permission_attested_at else None
+        ),
         "requestedAt": request_obj.requested_at.isoformat() if request_obj.requested_at else None,
         "expiresAt": request_obj.expires_at.isoformat() if request_obj.expires_at else None,
     }

@@ -194,6 +194,10 @@ export type PendingContactRequest = {
   allowInbound: boolean
   allowOutbound: boolean
   canConfigure: boolean
+  smsContactPurpose?: string | null
+  smsContactPurposeDetails?: string | null
+  smsContactPermissionAttested?: boolean | null
+  smsContactPermissionAttestedAt?: string | null
   requestedAt?: string | null
   expiresAt?: string | null
 }
