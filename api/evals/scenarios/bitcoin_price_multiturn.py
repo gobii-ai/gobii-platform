@@ -1,9 +1,13 @@
+import re
 from urllib.parse import parse_qs, urlparse
 
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMessage
+
+
+BITCOIN_PRICE_RE = re.compile(r"\b68,?500(?:\.50)?\b")
 
 
 def is_supported_bitcoin_price_api_url(url: str) -> bool:
@@ -274,13 +278,22 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             timestamp__gt=btc_msg.timestamp
         ).order_by('-timestamp').first()
 
-        if last_outbound and ("bitcoin" in last_outbound.body.lower() or "68500" in last_outbound.body):
+        body = last_outbound.body if last_outbound else ""
+        lower_body = body.lower()
+        has_asset = "bitcoin" in lower_body or "btc" in lower_body
+        has_price = bool(BITCOIN_PRICE_RE.search(body))
+        if last_outbound and has_asset and has_price and "?" not in body:
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_bitcoin_response",
                 observed_summary=f"Agent replied with Bitcoin price data: {last_outbound.body[:100]}..."
             )
+        elif last_outbound and has_asset and has_price:
+            self.record_task_result(
+                run_id, None, EvalRunTask.Status.FAILED, task_name="verify_bitcoin_response",
+                observed_summary=f"Agent added an unnecessary follow-up question after the price answer. Body: {body}"
+            )
         else:
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.FAILED, task_name="verify_bitcoin_response",
-                observed_summary=f"Agent reply missing Bitcoin price data. Body: {last_outbound.body if last_outbound else 'None'}"
+                observed_summary=f"Agent reply missing Bitcoin price data. Body: {body if last_outbound else 'None'}"
             )

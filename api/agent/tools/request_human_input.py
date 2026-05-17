@@ -82,29 +82,15 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create a tracked human-input request when you need the human to pick an option, "
-                "answer a question, or provide open-ended feedback. If you pass options, the user "
-                "can choose one OR reply in their own words. If you omit options, the user will "
-                "reply with free text only. The request always appears in the web chat human input panel. "
-                "In Planning Mode, planning questions must use this tool; questions sent only by "
-                "chat, email, or SMS are not tracked and do not count. In Planning Mode, every "
-                "question/request item must include options; use an 'Other / I'll explain' option "
-                "when no fixed answers fit. In Planning Mode, ask at most three questions per round; "
-                "the tool will keep only the first three request items to protect the user from "
-                "decision fatigue. In Planning Mode, do not use this tool for non-blocking backfill, "
-                "lookback, or history questions on recurring digests, monitors, or reports when the "
-                "cadence, source, channel, and output shape are already clear; assume no historical "
-                "backfill unless the user asked for it. "
-                "This tool does not send email or SMS by itself. If the target is email or SMS and you want "
-                "to notify that channel, call this tool with will_continue_work=true and send a normal "
-                "email or SMS that includes the exact question(s) and options. If you call send_email or "
-                "send_sms in the same tool-call batch as request_human_input, that outbound message must "
-                "already include the questions because this tool cannot inject them into another tool call. "
-                "Do not send a bare notification like 'please answer the questions'; the recipient may not "
-                "have web chat open. The user's reply on that channel will be processed as answers. "
-                f"Questions must be plain text only, with no Markdown or HTML, and cannot exceed "
-                f"{MAX_HUMAN_INPUT_QUESTION_LENGTH} characters. Keep questions concise and make sure "
-                "it is only the question without extra fluff."
+                "Create tracked human-input only for a real blocker or planning question. It appears in web chat; "
+                "options still allow free-text replies. In Planning Mode, use this for planning questions, include "
+                "options, and ask at most three. Do not ask non-blocking backfill/lookback questions for clear "
+                "recurring digests or monitors. Outside Planning Mode, do not use this for preference surveys, "
+                "timezone/channel choices, optional formatting choices, category example choices such as which "
+                "vendor/company to use, or reversible defaults you can safely choose and disclose afterward. "
+                "If truly blocked outside Planning Mode, ask one concise question. This tool does not send email/SMS; "
+                "if notifying those channels, send the exact question/options there too. Plain text only, no Markdown/HTML, "
+                f"max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
                 "type": "object",
@@ -126,9 +112,8 @@ def get_request_human_input_tool() -> dict[str, Any]:
                         "type": "array",
                         "items": request_schema,
                         "description": (
-                            "Optional list of multiple input requests to ask in one tool call. "
-                            "When provided, omit the top-level question/options. In Planning Mode, include at most "
-                            "three request items."
+                            "Multiple input requests. Omit top-level question/options when provided. "
+                            "Planning Mode: at most three. Outside Planning Mode: only for explicit surveys or multiple real blockers."
                         ),
                     },
                     "recipient": {
@@ -297,6 +282,14 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
         return {
             "status": "error",
             "message": "Planning Mode questions must include at least one option; include an Other / I'll explain option for open-ended questions.",
+        }
+    if agent.planning_state != PersistentAgent.PlanningState.PLANNING and options and len(options) > 3:
+        return {
+            "status": "error",
+            "message": (
+                "Outside Planning Mode, request_human_input is for one blocking decision, not preference surveys. "
+                "Ask at most one concise question with up to 3 options, or choose a reasonable default and disclose it."
+            ),
         }
 
     result = create_human_input_request(

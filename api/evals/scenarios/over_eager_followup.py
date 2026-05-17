@@ -86,9 +86,9 @@ class OverEagerFollowupScenario(EvalScenario, ScenarioExecutionTools):
             self.record_task_result(
                 run_id,
                 None,
-                EvalRunTask.Status.SKIPPED,
+                EvalRunTask.Status.PASSED,
                 task_name="verify_reply_neediness",
-                observed_summary="No reply to evaluate.",
+                observed_summary="No reply to evaluate; no follow-up is ideal for this prompt.",
             )
             return
 

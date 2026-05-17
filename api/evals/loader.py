@@ -7,6 +7,7 @@ from api.evals.scenarios.behavior_micro import (
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
+from api.evals.scenarios.effort_calibration import EFFORT_CALIBRATION_SCENARIO_SLUGS
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -37,6 +38,11 @@ register_builtin_suites(
             slug="tool_choice_micro",
             description="Small deterministic obvious tool-choice behavior checks.",
             scenario_slugs=TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug="effort_calibration",
+            description="Effort calibration and overwork-prevention behavior checks.",
+            scenario_slugs=EFFORT_CALIBRATION_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug=META_GOBII_EVAL_SUITE_SLUG,

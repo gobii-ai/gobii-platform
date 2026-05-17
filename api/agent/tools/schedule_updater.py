@@ -158,13 +158,13 @@ def get_update_schedule_tool() -> dict:
         "type": "function",
         "function": {
             "name": "update_schedule",
-            "description": "Updates the agent's cron schedule. RANDOMIZE IF POSSIBLE TO AVOID THUNDERING HERD. REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISING TIMING.",
+            "description": "Updates the agent's cron schedule. Use when the user asks to set, change, disable, or schedule recurring work. If recurrence is clear but time is omitted, choose a reasonable local default such as weekday/daily 9am instead of asking. Do not fetch or validate target URLs first unless asked. RANDOMIZE IF POSSIBLE TO AVOID THUNDERING HERD. SOME ASSIGNMENTS REQUIRE PRECISE TIMING.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "new_schedule": {
                         "type": "string",
-                        "description": "Cron expression or '@daily', '@every 2h'. Use '' or null to disable. RANDOMIZE IF POSSIBLE TO AVOID THUNDERING HERD. REMEMBER, HOWEVER, SOME ASSIGNMENTS REQUIRE VERY PRECISING TIMING.",
+                        "description": "Cron expression or '@daily', '@every 2h'. Use '' or null to disable. RANDOMIZE IF POSSIBLE TO AVOID THUNDERING HERD. SOME ASSIGNMENTS REQUIRE PRECISE TIMING.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -174,4 +174,4 @@ def get_update_schedule_tool() -> dict:
                 "required": ["will_continue_work"],
             },
         },
-    } 
+    }

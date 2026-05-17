@@ -673,14 +673,13 @@ def _wrap_as_sqlite_result(result_text: str, full_bytes: int) -> str:
 
     This primes the agent's mental model that the inspection step is already
     done, avoiding a redundant query for reasonable-sized results.
-
-    IMPORTANT: We also warn that this full view is ONE-TIME only - next turn
-    they'll only see a truncated preview. Agent must save key info now or
-    note the result_id for future queries via __tool_results.
     """
     return (
         f"[FULL RESULT ({full_bytes} chars) - ONE-TIME VIEW. "
-        f"Next turn shows only preview. Save key data now or query later via __tool_results]\n"
+        f"Use this visible result now. If it answers the request, reply directly in the next message. "
+        f"Do not query __tool_results or sqlite_batch just to reread or parse this small result; "
+        f"use SQL only for real filtering, joining, aggregation, chart input, or truncated/too-large data. "
+        f"Next turn shows only preview]\n"
         f"{result_text}"
     )
 

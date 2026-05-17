@@ -1215,6 +1215,34 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "content": {"ok": True},
         }
 
+    def _mock_for_tool(self, tool_name):
+        result = self._mock_success(tool_name)
+        if not self.case.expected_params or len(self.case.expected_tools) != 1:
+            return result
+
+        expected_tool = self.case.expected_tools[0]
+        if tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool):
+            return result
+
+        required_param_names = sorted(self.case.expected_params)
+        return {
+            "rules": [
+                {
+                    "param_equals": self.case.expected_params,
+                    "result": result,
+                }
+            ],
+            "default": {
+                "status": "error",
+                "tool": tool_name,
+                "message": f"missing required eval parameter: {', '.join(required_param_names)}",
+                "content": {
+                    "ok": False,
+                    "missing_required_eval_parameters": required_param_names,
+                },
+            },
+        }
+
     @staticmethod
     def _google_sheets_mock_success(tool_name):
         return {
@@ -1293,7 +1321,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 if is_eval_synthetic_tool_name(tool_name) or tool_name in {"http_request", "read_file", "sqlite_batch"}
             ],
         ]
-        mock_config = {tool_name: self._mock_success(tool_name) for tool_name in mocked_tools}
+        mock_config = {tool_name: self._mock_for_tool(tool_name) for tool_name in mocked_tools}
         for tool_name in forbidden_tools:
             mock_config[tool_name] = {
                 "status": "error",

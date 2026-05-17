@@ -34,6 +34,9 @@ def get_request_contact_permission_tool() -> dict:
                 "Check if contact already exists before requesting. If the user just gave you a specific email "
                 "address or phone number and it is not already shown in your allowed contacts, request permission "
                 "before reading files, searching, drafting, or asking non-blocking follow-up questions. "
+                "For setup-only recurring work where the user explicitly says not to send the first email/SMS now, "
+                "do not request contact permission during setup; record the recipient in the charter and request "
+                "permission only when an actual outbound send is needed. "
                 "Only use an email or phone number the user has previously provided to you, or that is publicly available. "
                 "Do not guess or fabricate contact details."
             ),

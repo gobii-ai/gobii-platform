@@ -266,6 +266,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
         self.assertIn("Read-only research is allowed and often useful during planning", prompt)
+        self.assertIn("Do not call search_tools as the first meaningful action", prompt)
         self.assertIn("Use request_human_input for planning questions", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)

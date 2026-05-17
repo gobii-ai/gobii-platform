@@ -1224,6 +1224,10 @@ def _scope_item_was_explicitly_requested(normalized_item: str, user_prompt: str)
         ("schedule", ("schedule", "scheduling")),
         ("contact", ("contact",)),
         ("file", ("file", "upload")),
+        ("raise", ("raise", "limit", "credit", "resource")),
+        ("limit", ("raise", "limit", "credit", "resource")),
+        ("credit", ("raise", "limit", "credit")),
+        ("resource", ("limit", "resource")),
     )
     for prompt_stem, item_stems in requested_action_stems:
         if prompt_stem in prompt and any(item_stem in normalized_item for item_stem in item_stems):

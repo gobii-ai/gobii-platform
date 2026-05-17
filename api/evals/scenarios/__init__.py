@@ -22,3 +22,12 @@ from .behavior_micro import (
     ToolChoicePdfDeliverableUsesCreatePdfScenario,
     ToolChoiceMissingRecipientUsesHumanInputScenario,
 )
+from .effort_calibration import (
+    EFFORT_CALIBRATION_SCENARIO_SLUGS,
+    EffortTrivialAnswerStopsScenario,
+    EffortSimpleLookupBoundedToolsScenario,
+    EffortScheduledBriefingFinishesScenario,
+    EffortDefaultableResearchNoQuestionBatteryScenario,
+    EffortPartialBriefingReportsWithoutSurveyScenario,
+    EffortChartRequestedSingleArtifactScenario,
+)

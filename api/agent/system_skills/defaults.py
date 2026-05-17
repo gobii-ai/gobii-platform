@@ -387,8 +387,9 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "Grant can_configure only to owner-approved contacts. Prefer manual allowlist semantics for explicit contacts.\n"
         "When summarizing contact changes, avoid echoing full email addresses or phone numbers unless the user needs "
         "the exact value; prefer names, channels, or masked contact values.\n"
-        "Use file tools only with files the human provided or artifacts you created for these agents. Uploads accept small "
-        "base64 files; do not fetch arbitrary remote URLs through these tools.\n"
+        "Use file tools only with files the human provided or artifacts you created for these agents. When a Gobii must "
+        "work from a provided/uploaded file, copy that file into its filespace before briefing it and attach the path in "
+        "meta_gobii_send_agent_message. Uploads accept small base64 files; do not fetch arbitrary remote URLs through these tools.\n"
         "Known unsupported MCP-equivalent surfaces in this direct skill: arbitrary URL file fetch, ad hoc runtime sessions, "
         "and separate task/run abstractions."
     ),

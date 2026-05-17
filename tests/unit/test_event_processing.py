@@ -4167,6 +4167,44 @@ class EventProcessingRuntimeGuardTests(TestCase):
 
         self.assertTrue(finalized.followup_required)
 
+    @tag("batch_event_processing")
+    def test_finalize_explicit_stop_without_auto_sleep_requires_followup(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="http_request",
+            tool_params={
+                "method": "GET",
+                "url": "https://briefing.example.test/api/daily.json",
+                "will_continue_work": False,
+            },
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-fetch",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:http_request",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "ok", "content": {"items": []}},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, False)
+
     def test_non_message_stop_continues_when_latest_inbound_is_unanswered(self):
         self._create_inbound_email_message(
             body="what's the weather in frederick md?",

@@ -19,6 +19,7 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("send_email", messages_description)
         self.assertIn("send_sms", messages_description)
         self.assertIn("send_chat_message", messages_description)
+        self.assertIn("not for every quick answer", messages_description)
         self.assertIn("send it first with will_continue_work=true", messages_description)
         self.assertIn("then call update_plan after the send tool returns", messages_description)
         self.assertIn("Do not include peer messages", messages_description)
@@ -42,7 +43,7 @@ class UpdatePlanValidationTests(SimpleTestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("messages[0].message_id must be a valid UUID", result["message"])
-        self.assertIn("Use messages only for final user-facing deliveries", result["message"])
+        self.assertIn("Use messages only for substantial final deliverables", result["message"])
         self.assertIn("send_email", result["message"])
         self.assertIn("send_sms", result["message"])
         self.assertIn("send_chat_message", result["message"])

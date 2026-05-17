@@ -91,10 +91,10 @@ _GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
     "google_sheets-update-multiple-rows": "Update multiple Google Sheets rows.",
     "google_sheets-upsert-row": "Insert or update a Google Sheets row by key.",
     "google_sheets-list-worksheets": "List worksheets in a Google Sheets spreadsheet.",
-    "google_sheets-get-spreadsheet-info": "Get Google Sheets spreadsheet metadata.",
+    "google_sheets-get-spreadsheet-info": "Get Google Sheets spreadsheet metadata; use when the user asks for spreadsheet info.",
     "google_sheets-create-spreadsheet": "Create a Google Sheets spreadsheet.",
     "google_sheets-read-rows": "Read rows from a Google Sheets worksheet.",
-    "google_sheets-get-spreadsheet-by-id": "Open a Google Sheets spreadsheet by ID.",
+    "google_sheets-get-spreadsheet-by-id": "Open a Google Sheets spreadsheet by ID when asked to open/get by ID; for spreadsheet info metadata, use google_sheets-get-spreadsheet-info.",
     "google_sheets-get-current-user": "Return the connected Google Sheets account user.",
     "google_sheets-add-rows": "Append rows to a Google Sheets worksheet.",
 }
@@ -117,7 +117,7 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_scrape_as_markdown": {
-        "description": "Scrape a known web page and return its content as markdown.",
+        "description": "Scrape a known web page and return its content as markdown; use when the user says to scrape a docs/help/pricing/blog page.",
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_linkedin_person_profile": {
@@ -129,7 +129,7 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_linkedin_job_listings": {
-        "description": "Fetch structured LinkedIn job listing data; prefer this over generic web search for LinkedIn role lists and hiring details.",
+        "description": "Fetch structured LinkedIn job listing data; prefer this over generic web search for LinkedIn role lists and hiring details. Accept a known company, URL, or category query; if the user asks for a representative category such as a fintech company, proceed with the category or a reasonable representative instead of asking which company.",
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_linkedin_people_search": {

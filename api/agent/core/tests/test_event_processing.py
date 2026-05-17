@@ -12,7 +12,11 @@ from django.utils import timezone
 from api.agent.core.event_processing import (
     _process_agent_events_locked,
     _is_warning_status,
+    _looks_like_blocking_human_input_request,
+    _normalize_tool_params,
     _parse_tool_call_params,
+    _sanitize_tool_name,
+    _should_infer_message_tool_continuation,
     _should_imply_continue,
 )
 from django.urls import reverse
@@ -89,6 +93,20 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
 
         self.assertFalse(result)
 
+    def test_standby_acknowledgement_does_not_infer_continuation(self):
+        result = _should_infer_message_tool_continuation(
+            "Got it. No follow-ups unless you say so; I'll be right here whenever you need me."
+        )
+
+        self.assertFalse(result)
+
+    def test_when_you_need_me_acknowledgement_does_not_infer_continuation(self):
+        result = _should_infer_message_tool_continuation(
+            "Got it! I'll be right here when you need me."
+        )
+
+        self.assertFalse(result)
+
 
 @tag('batch_event_processing')
 class ToolParamUnicodeNormalizationTests(SimpleTestCase):
@@ -144,6 +162,35 @@ class ToolParamParsingTests(SimpleTestCase):
         self.assertNotIn('line1\nline2', tool_params["content"])
         self.assertIn('line1\\nline2', tool_params["content"])
         self.assertIn('import os\\nprint(1)', tool_params["content"])
+
+    def test_http_url_normalization_strips_leaked_dsml_markup(self):
+        params = {
+            "method": "GET",
+            "url": (
+                "https://api.coindesk.com/v1/bpi/currentprice/USD.json\n"
+                '<｜DSML｜parameter name="will_continue_work" string="false">true'
+            ),
+            "will_continue_work": True,
+        }
+
+        normalized = _normalize_tool_params("http_request", params)
+
+        self.assertEqual(normalized["url"], "https://api.coindesk.com/v1/bpi/currentprice/USD.json")
+        self.assertTrue(normalized["will_continue_work"])
+
+    def test_tool_name_normalization_strips_repeated_mcp_prefix(self):
+        self.assertEqual(
+            _sanitize_tool_name("mcp_brightdata_scrape_as_mcp_brightdata_scrape_as_markdown"),
+            "mcp_brightdata_scrape_as_markdown",
+        )
+
+    def test_optional_tweak_question_is_not_blocking_human_input(self):
+        self.assertFalse(
+            _looks_like_blocking_human_input_request(
+                "I'll get the RSS feed parsed and the schedule wired up now. "
+                "Any tweaks before I lock this in? Otherwise I'm off and running!"
+            )
+        )
 
 
 @tag("batch_event_processing")

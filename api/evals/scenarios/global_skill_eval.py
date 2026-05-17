@@ -120,7 +120,10 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
                             "url_contains": "api.open-meteo.com",
                             "result": {
                                 "status": "ok",
-                                "content": {"current_weather": {"temperature": 72, "windspeed": 4, "weathercode": 0}},
+                                "content": {
+                                    "current_weather": {"temperature": 22, "windspeed": 4, "weathercode": 0},
+                                    "current_weather_units": {"temperature": "C", "windspeed": "km/h"},
+                                },
                                 "status_code": 200,
                             },
                         },

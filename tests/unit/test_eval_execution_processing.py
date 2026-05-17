@@ -4,6 +4,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from litellm.exceptions import APIError
 
 from api.evals.execution import (
     ScenarioExecutionTools,
@@ -165,6 +166,47 @@ class EvalExecutionProcessingTests(TestCase):
             {"type": "function", "function": {"name": "submit_judgment"}},
         )
         mock_sleep.assert_called_once_with(1.0)
+
+    @patch("api.agent.core.llm_config.get_llm_config_with_failover")
+    @patch("api.evals.execution.run_completion")
+    def test_llm_judge_falls_back_to_json_on_structured_grammar_error(self, mock_completion, mock_configs):
+        mock_configs.return_value = [("openrouter", "deepseek/deepseek-v4-flash", {})]
+        grammar_error = APIError(
+            status_code=500,
+            message=(
+                "OpenrouterException - Upstream error from Morph: "
+                "Failed to compile structural_tag grammar"
+            ),
+            llm_provider="openrouter",
+            model="deepseek/deepseek-v4-flash",
+        )
+        mock_completion.side_effect = [
+            grammar_error,
+            SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content=json.dumps(
+                                {"choice": "Pass", "reasoning": "The required skill was enabled and used."}
+                            )
+                        )
+                    )
+                ]
+            ),
+        ]
+
+        choice, reasoning = self.tools.llm_judge(
+            question="Did the agent correctly execute the selected global skill?",
+            context="The selected global skill was enabled and an effective tool was used.",
+            options=("Pass", "Fail"),
+        )
+
+        self.assertEqual(choice, "Pass")
+        self.assertIn("Structured judge fallback used", reasoning)
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertIn("tools", mock_completion.call_args_list[0].kwargs)
+        self.assertNotIn("tools", mock_completion.call_args_list[1].kwargs)
+        self.assertNotIn("tool_choice", mock_completion.call_args_list[1].kwargs)
 
     def test_record_task_result_persists_sanitized_debug_artifacts(self):
         run = EvalRun.objects.create(

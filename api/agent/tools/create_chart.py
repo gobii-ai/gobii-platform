@@ -313,7 +313,8 @@ def get_create_chart_tool() -> Dict[str, Any]:
         "function": {
             "name": "create_chart",
             "description": (
-                "Create a beautiful chart from a SQL query. The query runs against your SQLite database "
+                "Create a chart artifact from a SQL query when the user requests a chart or a visual is materially necessary. "
+                "Do not use this for routine summaries just because numbers are present. The query runs against your SQLite database "
                 "and results become chart data. Column names in your SELECT become the keys for x/y/values/labels. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
                 "For pie/donut: use 'values' and 'labels'. For others: use 'x' and 'y' (y can be a list for multi-series). "

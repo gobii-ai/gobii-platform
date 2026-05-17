@@ -42,9 +42,49 @@ _INTERNAL_PROGRESS_RE = re.compile(
     r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
-    r"real data is coming back)\b",
+    r"real data is coming back|got what i need|let me also grab|let me send it over|let me end planning|"
+    r"already have [^.?!]{0,80}\bdata)\b",
     re.IGNORECASE,
 )
+_OPTIONAL_PROGRESS_QUESTION_RE = re.compile(
+    r"\b(?:any tweaks|any changes|anything to adjust|otherwise\b|if not\b|unless you want)\b",
+    re.IGNORECASE,
+)
+_TRAILING_OPTIONAL_FOLLOWUP_RE = re.compile(
+    r"[\s—–-]+(?:want me to|would you like me to|do you want me to|should i|shall i)\b[^?\n]{0,240}\?\s*[^\w\s]*\s*$",
+    re.IGNORECASE,
+)
+PLACEHOLDER_MESSAGE_BODIES = {
+    "body",
+    "message",
+    "text",
+    "content",
+    "string",
+    "your message here",
+}
+
+
+def _looks_like_placeholder_body(body: str) -> bool:
+    normalized = re.sub(r"\s+", " ", (body or "").strip().lower())
+    return normalized in PLACEHOLDER_MESSAGE_BODIES
+
+
+_TOOL_CALL_MARKUP_RE = re.compile(
+    r"<\s*(?:function|function_calls|invoke|parameter)\b|"
+    r"<\s*endor_thinking\s*>|"
+    r"<\uff5cDSML\uff5c(?:function_calls|invoke|parameter)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_tool_call_markup(body: str) -> bool:
+    return bool(_TOOL_CALL_MARKUP_RE.search(body or ""))
+
+
+def _strip_trailing_optional_followup(body: str) -> str:
+    return _TRAILING_OPTIONAL_FOLLOWUP_RE.sub("", body or "").rstrip()
+
+
 _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
     r"\b(?:fabricated test data|eval environment|stop fighting the sim|pivot hard|trying every tool|"
     r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
@@ -90,6 +130,8 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     lower = text.lower()
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
+    if "?" in text and _OPTIONAL_PROGRESS_QUESTION_RE.search(text):
+        return True
     if any(marker in lower for marker in ("as requested", "you asked", "blocking", "blocked", "?")):
         return False
     return bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
@@ -132,7 +174,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                 "properties": {
                     "body": {
                         "type": "string",
-                        "description": "Message content to deliver in chat. Must be actual message text, NOT tool call syntax. XML like <function_calls> or <invoke> in this field does NOT execute tools—it will be sent as literal text to the user.",
+                        "description": "Actual user-facing chat text. Do not pass schema placeholders like 'body', 'message', or 'text'. Do not pass tool-call syntax; XML like <function_calls> or <invoke> is sent literally, not executed.",
                     },
                     "to_address": {
                         "type": "string",
@@ -168,12 +210,27 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     body = substitute_variables_with_filespace(body, agent)
     if not body:
         return {"status": "error", "message": "Message body is required."}
+    if _looks_like_placeholder_body(body):
+        return {
+            "status": "error",
+            "message": "Message body must contain actual user-facing content, not a schema placeholder.",
+            "retryable": False,
+        }
+    if _looks_like_tool_call_markup(body):
+        return {
+            "status": "error",
+            "message": (
+                "Message body must contain actual user-facing content, not raw tool-call markup. "
+                "Use the tool_calls field to invoke tools."
+            ),
+            "retryable": False,
+        }
     will_continue = _should_continue_work(params)
-    if (
-        will_continue
-        and _has_outbound_since_latest_inbound(agent)
-        and _looks_like_routine_progress_message(body)
-    ):
+    if not will_continue:
+        body = _strip_trailing_optional_followup(body)
+        if not body:
+            return {"status": "error", "message": "Message body is required after removing optional follow-up."}
+    if will_continue and _looks_like_routine_progress_message(body):
         return {
             "status": "ok",
             "message": "Skipped routine progress-only chat message.",

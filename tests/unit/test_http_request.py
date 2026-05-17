@@ -98,6 +98,49 @@ class HttpRequestJsonParsingTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_get_with_explicit_stop_still_requires_response_inspection(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+        mock_request.return_value = _make_mock_response(
+            content=json.dumps({"status": "operational"}).encode("utf-8"),
+            content_type="application/json",
+        )
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://status.example.com/summary.json",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("auto_sleep_ok", result)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_mutating_request_with_explicit_stop_can_auto_sleep(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+        mock_request.return_value = _make_mock_response(
+            content=b'{"accepted": true}',
+            content_type="application/json",
+        )
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "POST",
+                "url": "https://hooks.example.com/notify",
+                "body": "{}",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertIs(result["auto_sleep_ok"], True)
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_headers_string_json_is_parsed(self, mock_request, mock_proxy):
         """JSON string headers should be parsed into a header dict."""
         mock_proxy.return_value = None
