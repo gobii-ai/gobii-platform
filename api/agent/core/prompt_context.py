@@ -615,6 +615,14 @@ hint absent → query first: SELECT substr(result_text, 1, 8000) FROM __tool_res
 DIGEST shows parsed_from/fields → those are the correct paths
 CHECK hints FIRST → saves queries and avoids regex escaping errors
 
+## CSV Parsing
+inspect before parsing: read enough result_text to confirm delimiter/header shape, then csv_headers(result_text), csv_parse(result_text), and exact header names from path_from_hint when provided.
+If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous.
+For nearby text evidence, use enough context:
+grep_context_all(
+        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)
+If still unclear, try wider context (200 chars) before inventing a field or claim.
+
 # Defensive wrappers (compose freely)
 nullable         → COALESCE(x, {default})
 empty_string     → NULLIF(TRIM(x), '')

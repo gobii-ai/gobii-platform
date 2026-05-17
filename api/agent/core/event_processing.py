@@ -2497,7 +2497,12 @@ def _finalize_tool_batch(
             followup_required = True
         elif is_error_status or tool_had_warning:
             followup_required = True
-        elif prepared.explicit_continue is not True and not allow_auto_sleep:
+        elif (
+            prepared.explicit_continue is not True
+            and not allow_auto_sleep
+            and not terminal_message_delivery_ok
+            and not human_input_request_ok
+        ):
             followup_required = True
 
         executed_calls += 1

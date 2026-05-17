@@ -83,8 +83,9 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "name": "request_human_input",
             "description": (
                 "Create tracked human-input only for a real blocker or planning question. It appears in web chat; "
-                "options still allow free-text replies. In Planning Mode, use this for planning questions, include "
-                "options, and ask at most three. Do not ask non-blocking backfill/lookback questions for clear "
+                "options still allow free-text replies. In Planning Mode, planning questions must use this tool; "
+                "questions sent only by chat, email, or SMS are not tracked. Include options and ask at most three. "
+                "Do not ask non-blocking backfill/lookback questions for clear "
                 "recurring digests or monitors. Outside Planning Mode, do not use this for preference surveys, "
                 "timezone/channel choices, optional formatting choices, category example choices such as which "
                 "vendor/company to use, or reversible defaults you can safely choose and disclose afterward. "

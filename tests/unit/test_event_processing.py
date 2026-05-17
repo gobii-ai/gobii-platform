@@ -624,7 +624,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn("## Planning Mode", system_message["content"])
-        self.assertIn("## REQUIRED: Your very first action must be sending a welcome message", system_message["content"])
+        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
         self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
         self.assertIn("Read-only research is allowed and often useful during planning", system_message["content"])
