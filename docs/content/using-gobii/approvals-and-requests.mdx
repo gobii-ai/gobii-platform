@@ -1,0 +1,93 @@
+---
+title: "Approvals And Requests"
+description: "Understand human input, credentials, contact permissions, Gobii creation requests, and other approval checkpoints."
+sidebar_label: "Approvals And Requests"
+---
+
+Approvals are how Gobii keeps humans in control. A Gobii can continue routine work, but it should pause when it needs a decision, sensitive access, or permission to change something important.
+
+## Common request types
+
+| Request | What it means |
+| --- | --- |
+| Human input | Gobii needs a decision, answer, selection, or clarification. |
+| Secret request | Gobii needs credentials or an environment-style value to use a service. |
+| Contact request | Gobii wants permission to communicate with a person or endpoint. |
+| Spawn request | Gobii or Meta Gobii proposes creating another Gobii. |
+| Change approval | Meta Gobii proposes changing names, charters, links, files, contacts, schedules, or limits. |
+
+<Screenshot
+  src="/images/product/meta-gobii-approval.jpg"
+  alt="Meta Gobii timeline showing a pending approval request before creating a three-Gobii recruiting team."
+  caption="Approval requests keep important changes explicit. Review the scope, then approve, revise, or narrow the instruction in chat."
+/>
+
+## How to respond
+
+1. Read the request and the reason.
+2. Check the scope: who, what, where, and for how long.
+3. Approve only if the request matches your intent.
+4. Reject or reply with a narrower instruction when the scope is too broad.
+5. Use secrets flows for credentials. Do not paste credentials into chat.
+
+Example response:
+
+> Approve contacting Taylor only about the renewal spreadsheet. Do not add Taylor as a long-term contact yet.
+
+## Human input requests
+
+Human input requests are ordinary decisions Gobii cannot or should not make alone. They may include options or a free-text answer.
+
+Use them to clarify business judgment:
+
+- Which account list should it use?
+- Is the draft ready to send?
+- Should a finding be escalated?
+- Which vendor is the priority?
+
+## Credential and secret requests
+
+When Gobii needs access, it may request a secret. Secrets are stored outside the chat transcript and can be scoped to a Gobii or promoted for broader reuse when appropriate.
+
+Use [Secrets And Credentials](/using-gobii/secrets-and-credentials) for the full model.
+
+## Contact requests
+
+Contact approvals control who can talk to a Gobii and who a Gobii can contact. They help prevent accidental outreach.
+
+Before approving a contact request, check:
+
+- The person or endpoint.
+- Whether inbound, outbound, or both directions are needed.
+- Whether the contact should help configure the Gobii or only communicate with it.
+- Whether the approval should be temporary or long-lived.
+
+See [Contact Access And Allowlists](/admin-and-teams/contact-access-and-allowlists).
+
+## Meta Gobii approvals
+
+Meta Gobii can propose changes across Gobiis, but important mutations should appear in an approval plan before execution.
+
+It should ask before:
+
+- Creating a Gobii.
+- Updating a name, charter, status, schedule, intelligence setting, or credit limit.
+- Connecting or disconnecting Gobiis.
+- Sending a brief to another Gobii.
+- Adding or removing contacts.
+- Uploading files.
+- Archiving a Gobii.
+
+See [Meta Gobii](/using-gobii/meta-gobii).
+
+## Good approval language
+
+Add approval boundaries to charters and messages:
+
+- "Ask before contacting anyone outside our company."
+- "Ask before using credentials on a new domain."
+- "Ask before creating or archiving another Gobii."
+- "Do not start recurring work unless I explicitly approve the cadence."
+- "Do not spend more than the daily credit limit without asking."
+
+Clear boundaries reduce surprises and make pending requests easier to evaluate.

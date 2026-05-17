@@ -1,0 +1,43 @@
+---
+title: "Connect Apps"
+description: "Connect external apps to a Gobii through Gobii's app integration flows and use conservative access boundaries."
+sidebar_label: "Connect Apps"
+---
+
+Connected apps let a Gobii work with external services through supported integration flows. Gobii uses Pipedream-backed app connections for many app capabilities.
+
+## When to connect an app
+
+Connect an app when the Gobii's job requires direct access to a system, such as a messaging channel, task system, spreadsheet, CRM, or other SaaS tool.
+
+Do not connect an app only because it might be useful later. Each connection increases the Gobii's available surface area.
+
+## Typical setup
+
+1. Open the Gobii.
+2. Find the tools, apps, or integrations area.
+3. Search for the app.
+4. Connect or authorize the app when prompted.
+5. Assign the connected app to the Gobii.
+6. Send a test instruction in chat.
+7. Review the timeline for tool activity or pending requests.
+
+Some app connections may appear in just-in-time flows when a Gobii needs a specific app to complete a request.
+
+## App channels and triggers
+
+Some connected app flows can act like inbound channels. For example, an app event can trigger Gobii to respond to a message or event.
+
+Current app-channel behavior may vary by app and deployment. Treat Discord-style inbound message subscriptions as the conservative V1 pattern unless the product UI for your workspace shows broader support.
+
+## Safety checklist
+
+- Connect the app only to the Gobii that needs it.
+- Prefer read-only scopes when the app supports them and the workflow allows it.
+- Ask Gobii to summarize what it will do before external writes.
+- Use approvals for outreach, posting, deletion, purchases, or account changes.
+- Remove app connections that are no longer needed.
+
+## Developer note
+
+Pipedream app connections, direct app tools, and Pipedream trigger webhooks are different surfaces. Developers should start with [Webhooks And Events](/developers/webhooks) and use product app connections only through documented public APIs or UI flows.

@@ -49,12 +49,12 @@ const root = doc.toJS();
 root.info = {
   ...root.info,
   description:
-    'REST API reference for Gobii AI browser agents, browser-use automation tasks, webhooks, authentication, request parameters, and response schemas.',
+    'REST API reference for Gobii persistent agents, legacy browser-use automation tasks, webhooks, authentication, request parameters, and response schemas.',
 };
 
 root.tags = [
-  { name: 'Agents API', description: 'Persistent Gobii agent endpoints for creating, scheduling, messaging, and managing AI browser agents.' },
-  { name: 'browser-use Tasks API', description: 'browser-use profile and task endpoints for submitting browser automation jobs, polling status, and retrieving results.' },
+  { name: 'Agents API', description: 'Persistent Gobii agent endpoints for creating, scheduling, messaging, and managing Gobiis through the API.' },
+  { name: 'browser-use Tasks API', description: 'Legacy browser-use profile and task endpoints for submitting browser automation jobs, polling status, and retrieving results.' },
   { name: 'Utilities', description: 'Utility endpoints for health checks and simple Gobii API integration verification.' },
 ];
 
@@ -72,7 +72,12 @@ for (const [operationPath, pathItem] of Object.entries(root.paths ?? {})) {
     const description = typeof operation.description === 'string' ? operation.description.trim() : '';
     const genericDescription = /ViewSet|Override create/i.test(description);
     if (!description || description.length < 70 || genericDescription) {
-      operation.description = `${title || operation.operationId} with the Gobii REST API endpoint ${method.toUpperCase()} ${operationPath}. Includes authentication, parameters, request body, response schema, and examples for AI browser agents and browser-use automation tasks.`;
+      operation.description = `${title || operation.operationId} with the Gobii REST API endpoint ${method.toUpperCase()} ${operationPath}. Includes authentication, parameters, request body, response schema, and examples for persistent agents and legacy browser-use automation tasks.`;
+    } else {
+      operation.description = description
+        .replace(/AI browser agents, browser-use automation tasks/g, 'persistent agents, legacy browser-use automation tasks')
+        .replace(/AI browser agents and browser-use automation tasks/g, 'persistent agents and legacy browser-use automation tasks')
+        .replace(/AI browser agents/g, 'persistent agents');
     }
   }
 }

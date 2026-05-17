@@ -220,6 +220,27 @@ html {
   border-radius: 6px;
 }
 
+.gobii-doc-screenshot {
+  margin: 1.35rem 0 1.6rem;
+}
+
+.gobii-doc-screenshot img {
+  background: var(--gobii-doc-panel-background);
+  border: 1px solid var(--gobii-doc-panel-border);
+  border-radius: 8px;
+  box-shadow: var(--gobii-doc-soft-shadow);
+  display: block;
+  height: auto;
+  width: 100%;
+}
+
+.gobii-doc-screenshot figcaption {
+  color: var(--ifm-color-emphasis-700);
+  font-size: 0.88rem;
+  line-height: 1.55;
+  margin-top: 0.55rem;
+}
+
 .openapi-tabs__schema-container,
 .openapi-explorer__request-form {
   border-radius: 8px;

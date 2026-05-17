@@ -1,0 +1,40 @@
+---
+title: "System Skills And Profiles"
+description: "Understand Gobii system skills, profiles, and when to treat them as admin-managed capabilities."
+sidebar_label: "System Skills"
+---
+
+System skills are managed capability bundles that shape how Gobiis perform higher-level work. They are not ordinary user prompts.
+
+Examples can include:
+
+- Runtime planning.
+- Meta Gobii management.
+- Connected app channels.
+- Domain-specific managed skills.
+
+Available skills and profile controls depend on deployment and product configuration.
+
+## When admins should care
+
+Admins should review system skills when:
+
+- A workspace needs a managed capability across many Gobiis.
+- A skill requires credentials or profile configuration.
+- A skill affects external communication or app channels.
+- A skill is being tested before broader rollout.
+
+## Profiles
+
+Profiles can hold configuration for a system skill, including secrets or settings where supported. Treat profile configuration like production integration configuration:
+
+- Scope it intentionally.
+- Use least-privilege credentials.
+- Document what the profile is for.
+- Test with a small set of Gobiis before wider use.
+
+## Internal and beta features
+
+Some system skill, audit, judge, routing, or staff tools are internal or contributor-facing. Do not document them as public product features unless they are available in the product UI for your audience.
+
+For eval and quality workflows, see [Engineering](/engineering).

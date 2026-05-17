@@ -1,0 +1,32 @@
+---
+title: "Developers"
+description: "Build on Gobii with the Agent API, Remote MCP, webhooks and events, structured data, and legacy browser task APIs."
+sidebar_label: "Overview"
+slug: /developers
+---
+
+Developer docs cover stable public integration surfaces. The Gobii product UI also has many authenticated console routes, but those are not public APIs unless documented here.
+
+## Start here
+
+- [Developer Basics](/developers/developer-basics): authentication, base URLs, environments, and conventions.
+- [Agent API](/developers/developer-agents): create, update, message, activate, inspect, and delete persistent agents.
+- [Remote MCP](/developers/mcp-server): connect an MCP-capable client to Gobii over HTTPS.
+- [Webhooks And Events](/developers/webhooks): understand outbound task callbacks, inbound Gobii webhooks, provider webhooks, and app-trigger webhooks.
+- [Structured Data](/developers/structured-data): request JSON Schema based outputs.
+- [Legacy Browser Tasks](/developers/developer-tasks): use the older ad hoc browser-use task API when you need one-off task execution.
+
+## Naming
+
+End-user docs call the AI employee a **Gobii**. Developer docs use **agent** for the persistent API resource because that is the public API term.
+
+## Stable surfaces
+
+Prefer these surfaces for production integrations:
+
+- `/api/v1/agents/`
+- `/api/v1/mcp/`
+- documented `/api/v1/tasks/browser-use/` and `/api/v1/agents/browser-use/...` routes for legacy task use
+- documented webhook URLs and payloads
+
+Do not build production integrations against private console APIs unless Gobii explicitly documents them as supported.

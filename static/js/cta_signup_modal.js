@@ -357,6 +357,9 @@
       try {
         const response = await fetch(url, {
           credentials: "same-origin",
+          headers: {
+            "X-Gobii-Auth-Modal": "1",
+          },
         });
         if (!response.ok) {
           throw new Error("Unable to load authentication options.");

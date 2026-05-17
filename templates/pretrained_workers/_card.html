@@ -12,44 +12,38 @@
     <h3 class="mt-4 text-2xl font-medium text-slate-900">{{ worker.display_name }}</h3>
     <p class="mt-3 text-base text-slate-600 leading-relaxed">{{ worker.tagline }}</p>
     <dl class="mt-6 space-y-3 text-sm text-slate-500">
-      <div class="flex items-start gap-3">
-        <span class="text-indigo-500 mt-0.5">🗓️</span>
-        <div>
-          <dt class="font-semibold text-slate-700">Cadence</dt>
-          <dd>{{ worker.schedule_description|default:worker.base_schedule }}</dd>
-        </div>
-      </div>
+      <dt class="flex items-start gap-3 font-semibold text-slate-700">
+        <span class="text-indigo-500 mt-0.5" aria-hidden="true">🗓️</span>
+        <span>Cadence</span>
+      </dt>
+      <dd class="-mt-2 ml-7">{{ worker.schedule_description|default:worker.base_schedule }}</dd>
       {% if worker.event_triggers %}
-        <div class="flex items-start gap-3">
-          <span class="text-indigo-500 mt-0.5">⚡</span>
-          <div>
-            <dt class="font-semibold text-slate-700">Event triggers</dt>
-            <dd class="space-y-1">
-              {% for trigger in worker.event_triggers|slice:":2" %}
-                <p>{{ trigger.name|default:trigger.type|capfirst }}</p>
-              {% endfor %}
-              {% if worker.event_triggers|length > 2 %}
-                <p class="text-indigo-500">+{{ worker.event_triggers|length|add:-2 }} more</p>
-              {% endif %}
-            </dd>
-          </div>
-        </div>
+        <dt class="flex items-start gap-3 font-semibold text-slate-700">
+          <span class="text-indigo-500 mt-0.5" aria-hidden="true">⚡</span>
+          <span>Event triggers</span>
+        </dt>
+        <dd class="-mt-2 ml-7 space-y-1">
+          {% for trigger in worker.event_triggers|slice:":2" %}
+            <p>{{ trigger.name|default:trigger.type|capfirst }}</p>
+          {% endfor %}
+          {% if worker.event_triggers|length > 2 %}
+            <p class="text-indigo-500">+{{ worker.event_triggers|length|add:-2 }} more</p>
+          {% endif %}
+        </dd>
       {% endif %}
       {% if worker.display_default_tools %}
-        <div class="flex items-start gap-3">
-          <span class="text-indigo-500 mt-0.5">🔧</span>
-          <div>
-            <dt class="font-semibold text-slate-700">Built-in integrations</dt>
-            <dd class="flex flex-wrap gap-2 mt-1">
-              {% for tool in worker.display_default_tools|slice:":3" %}
-                <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">{{ tool }}</span>
-              {% endfor %}
-              {% if worker.display_default_tools|length > 3 %}
-                <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-600 font-medium">+{{ worker.display_default_tools|length|add:-3 }}</span>
-              {% endif %}
-            </dd>
-          </div>
-        </div>
+        <dt class="flex items-start gap-3 font-semibold text-slate-700">
+          <span class="text-indigo-500 mt-0.5" aria-hidden="true">🔧</span>
+          <span>Built-in integrations</span>
+        </dt>
+        <dd class="-mt-2 ml-7 flex flex-wrap gap-2">
+          {% for tool in worker.display_default_tools|slice:":3" %}
+            <span class="px-3 py-1 rounded-full bg-slate-100 text-slate-600 font-medium">{{ tool }}</span>
+          {% endfor %}
+          {% if worker.display_default_tools|length > 3 %}
+            <span class="px-3 py-1 rounded-full bg-indigo-100 text-indigo-600 font-medium">+{{ worker.display_default_tools|length|add:-3 }}</span>
+          {% endif %}
+        </dd>
       {% endif %}
     </dl>
     <div class="mt-auto pt-6 flex flex-col gap-3">

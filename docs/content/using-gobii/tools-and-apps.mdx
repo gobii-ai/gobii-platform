@@ -1,0 +1,65 @@
+---
+title: "Tools And Apps"
+description: "Understand the tools, apps, MCP servers, system skills, and custom capabilities a Gobii can use."
+sidebar_label: "Tools And Apps"
+---
+
+Tools and apps expand what a Gobii can do. Keep the model simple: give each Gobii the smallest set of capabilities it needs for the job, then add more only when the workflow requires them.
+
+## Tool types
+
+| Type | What it is | Typical audience |
+| --- | --- | --- |
+| Built-in tools | Core Gobii capabilities such as files, communication, web work, HTTP requests, search, charts, PDFs, and human input. | Users |
+| Connected apps | SaaS and app integrations connected through Gobii's app connection flows. | Users and admins |
+| MCP servers | Model Context Protocol servers that expose external tools or data sources to Gobiis. | Advanced users, admins, developers |
+| System skills | Product-level capability bundles such as planning, Meta Gobii, connected app channels, or domain-specific skills. | Admins and operators |
+| Custom tools | Code-backed tools available where sandbox compute is enabled. | Developers and advanced operators |
+
+## Connect only what the Gobii needs
+
+Before enabling a tool or app, ask:
+
+- Does this Gobii need the capability for its role?
+- Can the tool read or change sensitive data?
+- Does it require credentials or OAuth?
+- Should use of the tool require approval?
+- Is the tool personal, organization-owned, or platform-provided?
+
+Smaller tool sets make behavior easier to understand and debug.
+
+## App connections
+
+Connected apps let a Gobii use supported external services. Some app flows are interactive: you choose an app, connect it, then assign it to the Gobii.
+
+See [Connect Apps](/using-gobii/connect-apps).
+
+## MCP servers
+
+MCP servers are a flexible way to expose tools and data. They can be personal, organization-scoped, or platform-managed depending on deployment and admin policy.
+
+See [MCP Servers](/using-gobii/mcp-servers) and [Organization MCP Servers](/admin-and-teams/organization-mcp-servers).
+
+## System skills and profiles
+
+System skills are higher-level product capabilities. Examples include runtime planning, Meta Gobii, connected app channels, or other managed skill bundles.
+
+Admins may configure profiles for system skills in some deployments. Treat these as workspace-level capability settings, not ordinary chat prompts.
+
+See [System Skills And Profiles](/admin-and-teams/system-skills-and-profiles).
+
+## Credentials
+
+Do not paste credentials into chat. If a tool or app needs a password, API key, token, or environment-style value, use Gobii's secrets flow.
+
+See [Secrets And Credentials](/using-gobii/secrets-and-credentials).
+
+## Troubleshooting
+
+If a Gobii cannot use a tool:
+
+- Confirm the tool or app is enabled for that Gobii.
+- Confirm OAuth or credential setup is complete.
+- Check whether the tool is available in the current personal or organization context.
+- Review the timeline for a pending approval or secret request.
+- Ask the Gobii to explain which tool it tried to use and what blocked it.

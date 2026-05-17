@@ -1,0 +1,31 @@
+---
+title: "Dedicated IPs"
+description: "Use dedicated outbound IPs when a workflow needs stable egress identity for allowlisting or compliance."
+sidebar_label: "Dedicated IPs"
+---
+
+Dedicated IPs provide stable outbound IP addresses for supported Gobii workflows. They are useful when a destination system requires allowlisting or when operations teams need predictable egress identity.
+
+## When to use dedicated IPs
+
+Use dedicated IPs when:
+
+- A vendor requires IP allowlisting.
+- A sensitive internal service only accepts traffic from known egress addresses.
+- Your organization needs clearer network-level audit posture.
+- A high-value workflow should not share general outbound egress.
+
+Do not use dedicated IPs as a substitute for authentication, authorization, or least-privilege credentials.
+
+## Manage dedicated IPs
+
+Dedicated IPs may be available as a billing add-on depending on plan and deployment.
+
+Open billing at `https://gobii.ai/console/billing/` and review dedicated IP controls.
+
+## Operational notes
+
+- Coordinate allowlist changes with the destination system owner.
+- Keep documentation of which Gobii workflows depend on each IP.
+- Remove unused IPs to avoid unnecessary cost.
+- For self-hosted deployments, egress behavior depends on your infrastructure.
