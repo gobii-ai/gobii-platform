@@ -1,7 +1,6 @@
 """Web chat sender tool for persistent agents."""
 
-from __future__ import annotations
-
+import re
 from typing import Any, Dict
 
 from django.conf import settings
@@ -32,6 +31,27 @@ from ...services.email_verification import has_verified_email
 from ...services.web_sessions import get_deliverable_web_session
 from .outbound_duplicate_guard import detect_recent_duplicate_message
 
+_PROGRESS_PREFIX_RE = re.compile(
+    r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?(?:now\s+)?"
+    r"(?:let me|i(?:'ll| will| am going to| want to| need to)|i'm going to)\s+"
+    r"(?:start|begin|continue|check|fetch|pull|look|search|research|extract|compile|process|analy[sz]e|verify|"
+    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|format|summarize|structure|try)\b",
+    re.IGNORECASE,
+)
+_INTERNAL_PROGRESS_RE = re.compile(
+    r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
+    r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
+    r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
+    r"real data is coming back)\b",
+    re.IGNORECASE,
+)
+_TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
+    r"\b(?:fabricated test data|eval environment|stop fighting the sim|pivot hard|trying every tool|"
+    r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
+    r"stop verifying|let me deliver|all done)\b",
+    re.IGNORECASE,
+)
+
 
 def _should_continue_work(params: Dict[str, Any]) -> bool:
     """Return True if the agent indicates more work right after this chat message."""
@@ -40,6 +60,39 @@ def _should_continue_work(params: Dict[str, Any]) -> bool:
         normalized = raw.strip().lower()
         return normalized in {"1", "true", "yes"}
     return bool(raw)
+
+
+def _latest_inbound_timestamp(agent: PersistentAgent):
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp")
+        .values_list("timestamp", flat=True)
+        .first()
+    )
+    return latest_inbound
+
+
+def _has_outbound_since_latest_inbound(agent: PersistentAgent) -> bool:
+    latest_inbound_at = _latest_inbound_timestamp(agent)
+    if latest_inbound_at is None:
+        return False
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+        timestamp__gt=latest_inbound_at,
+    ).exists()
+
+
+def _looks_like_routine_progress_message(body: str) -> bool:
+    text = " ".join((body or "").split())
+    if not text:
+        return False
+    lower = text.lower()
+    if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
+        return True
+    if any(marker in lower for marker in ("as requested", "you asked", "blocking", "blocked", "?")):
+        return False
+    return bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
 
 
 def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
@@ -71,7 +124,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for questions, blockers, config changes, or findings. "
-                "Do not narrate what you will do next, tool sequencing, plan mechanics, or internal reasoning."
+                "Do not narrate what you will do next after an acknowledgement, and do not send routine progress narration such as "
+                "tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {
                 "type": "object",
@@ -115,6 +169,17 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
     if not body:
         return {"status": "error", "message": "Message body is required."}
     will_continue = _should_continue_work(params)
+    if (
+        will_continue
+        and _has_outbound_since_latest_inbound(agent)
+        and _looks_like_routine_progress_message(body)
+    ):
+        return {
+            "status": "ok",
+            "message": "Skipped routine progress-only chat message.",
+            "auto_sleep_ok": False,
+            "skipped": True,
+        }
     attachment_paths = params.get("attachments")
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)

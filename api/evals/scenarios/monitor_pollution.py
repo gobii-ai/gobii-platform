@@ -1,20 +1,92 @@
 import time
 
+from celery.schedules import crontab, schedule as celery_schedule
+
+from api.agent.core.schedule_parser import ScheduleParser
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentMessage
 from api.evals.sim_config import get_sim_weather_url
 from api.agent.events import AgentEventType
+from api.services.schedule_enforcement import cron_interval_seconds
+
+
+def _charter_mentions_pollution_monitoring(charter: str | None) -> tuple[bool, str]:
+    text = (charter or "").lower()
+    has_monitoring = any(term in text for term in ("monitor", "check", "track", "watch"))
+    has_pollution = any(term in text for term in ("pollution", "air quality", "aqi"))
+    has_dc = any(term in text for term in ("washington", "dc", "d.c."))
+
+    if has_monitoring and has_pollution and has_dc:
+        return True, "Charter mentions monitoring pollution or air quality in Washington DC."
+
+    missing = []
+    if not has_monitoring:
+        missing.append("monitoring intent")
+    if not has_pollution:
+        missing.append("pollution/air quality")
+    if not has_dc:
+        missing.append("Washington DC")
+    return False, f"Charter missing {', '.join(missing)}."
+
+
+def _schedule_interval_seconds(schedule: str | None) -> tuple[float | None, str]:
+    if not schedule:
+        return None, "No schedule set."
+
+    try:
+        parsed_schedule = ScheduleParser.parse(schedule)
+    except ValueError as exc:
+        return None, f"Invalid schedule: {exc}"
+
+    if parsed_schedule is None:
+        return None, "Schedule disables recurring checks."
+
+    if isinstance(parsed_schedule, crontab):
+        return cron_interval_seconds(parsed_schedule), "Cron schedule parsed successfully."
+
+    if isinstance(parsed_schedule, celery_schedule):
+        run_every = parsed_schedule.run_every
+        try:
+            if hasattr(run_every, "total_seconds"):
+                return float(run_every.total_seconds()), "Interval schedule parsed successfully."
+            return float(run_every), "Interval schedule parsed successfully."
+        except (TypeError, ValueError, OverflowError):
+            return None, "Interval schedule could not be measured."
+
+    return None, "Unsupported schedule type."
+
+
+def _schedule_is_reasonable_pollution_monitoring(schedule: str | None) -> tuple[bool, str]:
+    interval_seconds, parse_reason = _schedule_interval_seconds(schedule)
+    if interval_seconds is None:
+        return False, parse_reason
+
+    min_interval_seconds = 6 * 60 * 60
+    max_interval_seconds = 7 * 24 * 60 * 60
+    if interval_seconds < min_interval_seconds:
+        return False, f"Schedule is too frequent for pollution monitoring ({interval_seconds / 60:.0f} minutes)."
+    if interval_seconds > max_interval_seconds:
+        return False, f"Schedule is too infrequent for regular monitoring ({interval_seconds / 86400:.1f} days)."
+
+    return True, f"{parse_reason} Interval is {interval_seconds / 3600:.1f} hours."
 
 @register_scenario
 class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
     slug = "monitor_pollution"
     description = "Instruct agent to monitor pollution in DC. Verifies charter update, schedule setting, web browsing, and correct reporting."
+    tier = "extended"
+    category = "monitoring"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("monitoring", "schedule", "browser")
     tasks = [
         ScenarioTask(name="instruct_agent", assertion_type="manual"),
-        ScenarioTask(name="verify_charter_update", assertion_type="llm_judge"),
-        ScenarioTask(name="verify_schedule_setting", assertion_type="llm_judge"),
+        ScenarioTask(name="verify_charter_update", assertion_type="manual"),
+        ScenarioTask(name="verify_schedule_setting", assertion_type="manual"),
         ScenarioTask(name="verify_web_browsing", assertion_type="manual"),
         ScenarioTask(name="verify_pollution_report", assertion_type="exact_match"),
     ]
@@ -86,13 +158,9 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         # 2. Verify Charter Update
         self.record_task_result(run_id, 2, EvalRunTask.Status.RUNNING)
 
-        charter_judge_q = "Does the agent's charter mention monitoring pollution or air quality in Washington DC?"
-        charter_choice, charter_reason = self.llm_judge(
-            question=charter_judge_q,
-            context=f"Agent Charter:\n{agent.charter}",
-        )
+        charter_accepted, charter_reason = _charter_mentions_pollution_monitoring(agent.charter)
         
-        if charter_choice == "Yes":
+        if charter_accepted:
             self.record_task_result(
                 run_id, 2, EvalRunTask.Status.PASSED,
                 observed_summary=f"Charter updated: {charter_reason}",
@@ -108,16 +176,9 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         # 3. Verify Schedule Setting
         self.record_task_result(run_id, 3, EvalRunTask.Status.RUNNING)
 
-        schedule_judge_q = (
-            "Is the agent's schedule set to something reasonable for monitoring daily weather/pollution? "
-            "(e.g. daily, twice daily). It should NOT be extremely frequent (every minute) or missing."
-        )
-        schedule_choice, schedule_reason = self.llm_judge(
-            question=schedule_judge_q,
-            context=f"Agent Schedule: {agent.schedule}",
-        )
+        schedule_accepted, schedule_reason = _schedule_is_reasonable_pollution_monitoring(agent.schedule)
 
-        if schedule_choice == "Yes":
+        if schedule_accepted:
             self.record_task_result(
                 run_id, 3, EvalRunTask.Status.PASSED,
                 observed_summary=f"Schedule accepted: {schedule_reason}",
@@ -172,26 +233,30 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         # 5. Verify Pollution Report (Message)
         self.record_task_result(run_id, 5, EvalRunTask.Status.RUNNING)
         
-        last_message = PersistentAgentMessage.objects.filter(
+        report_messages = PersistentAgentMessage.objects.filter(
             owner_agent_id=agent_id,
             is_outbound=True
-        ).order_by('timestamp').last()
+        ).order_by('timestamp')
 
-        if not last_message:
+        if not report_messages.exists():
             self.record_task_result(
                 run_id, 5, EvalRunTask.Status.FAILED,
                 observed_summary="Agent did not send any reply."
             )
             return
 
-        body = (last_message.body or "").lower()
-        if "55" in body:
+        message_with_index = next(
+            (message for message in report_messages if "55" in (message.body or "").lower()),
+            None,
+        )
+        if message_with_index:
              self.record_task_result(
                 run_id, 5, EvalRunTask.Status.PASSED,
-                observed_summary=f"Agent reported correct index: {last_message.body}",
-                artifacts={"message": last_message}
+                observed_summary=f"Agent reported correct index: {message_with_index.body}",
+                artifacts={"message": message_with_index}
             )
         else:
+            last_message = report_messages.last()
             self.record_task_result(
                 run_id, 5, EvalRunTask.Status.FAILED,
                 observed_summary=f"Agent failed to report '55'. Body: {last_message.body}",

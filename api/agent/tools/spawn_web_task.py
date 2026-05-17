@@ -8,6 +8,7 @@ including tool definition and execution logic.
 import logging
 from typing import Dict, Any, Optional
 
+from django.conf import settings
 from django.utils import timezone
 
 from ...models import (
@@ -24,6 +25,53 @@ from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 from ...services.browser_settings import get_browser_settings_for_owner
 
 logger = logging.getLogger(__name__)
+
+
+def _should_simulate_eval_weather_task(prompt: str, eval_run_id: str | None) -> bool:
+    prompt_lower = (prompt or "").lower()
+    return (
+        settings.BROWSER_USE_TASK_EXECUTION_DISABLED
+        and settings.EVAL_BROWSER_TASK_SIMULATION_ENABLED
+        and bool(eval_run_id)
+        and "eval/sim/weather" in prompt_lower
+        and "pollution" in prompt_lower
+    )
+
+
+def _create_simulated_eval_weather_task(
+    agent: PersistentAgent,
+    *,
+    prompt: str,
+    requires_vision: bool,
+    eval_run_id: str,
+) -> dict[str, Any]:
+    result_value = {
+        "content": "Washington DC pollution index: Moderate (55).",
+        "pollution_index": 55,
+        "pollution_status": "Moderate",
+    }
+    task = BrowserUseAgentTask.objects.create(
+        agent=agent.browser_use_agent,
+        user=agent.user,
+        prompt=prompt,
+        requires_vision=requires_vision,
+        eval_run_id=eval_run_id,
+        status=BrowserUseAgentTask.StatusChoices.COMPLETED,
+        **get_billing_snapshot_for_owner(_get_plan_owner(agent)),
+    )
+    BrowserUseAgentTaskStep.objects.create(
+        task=task,
+        step_number=1,
+        description="Eval-local simulated browser result for SimWeather pollution page.",
+        is_result=True,
+        result_value=result_value,
+    )
+    return {
+        "status": "completed",
+        "task_id": str(task.id),
+        "message": "Browser task completed with eval-local simulated result.",
+        "result": result_value,
+    }
 
 
 def _get_plan_owner(agent: Optional[PersistentAgent]):
@@ -112,6 +160,8 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
     browser_use_agent = agent.browser_use_agent
 
     plan_settings = _get_browser_settings(agent)
+    budget_ctx = get_budget_context()
+    eval_run_id = getattr(budget_ctx, "eval_run_id", None)
 
     # Check active task limit from settings (per agent)
     active_count = BrowserUseAgentTask.objects.filter(
@@ -163,6 +213,14 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
                     f"You have already started {daily_count} task(s) today."
                 ),
             }
+
+    if _should_simulate_eval_weather_task(prompt, eval_run_id):
+        return _create_simulated_eval_weather_task(
+            agent,
+            prompt=prompt,
+            requires_vision=requires_vision,
+            eval_run_id=eval_run_id,
+        )
     
     # Log web task creation
     prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
@@ -174,7 +232,6 @@ def execute_spawn_web_task(agent: PersistentAgent, params: Dict[str, Any]) -> Di
 
     try:
         # ---------------- Recursion gating ---------------- #
-        budget_ctx = get_budget_context()
         next_depth = 1
         budget_id = None
         branch_id = None

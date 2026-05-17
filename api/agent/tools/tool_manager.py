@@ -60,6 +60,7 @@ from .eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
     get_eval_synthetic_tool_definition,
+    is_eval_synthetic_tool_name,
 )
 from .python_exec import get_python_exec_tool
 from .run_command import get_run_command_tool, execute_run_command
@@ -77,8 +78,6 @@ from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
 from .static_tools import get_static_tool_names
-from config.plans import PLAN_CONFIG
-
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
@@ -1385,6 +1384,38 @@ def execute_enabled_tool(
         if isinstance(result, dict):
             _record_pipedream_tool_side_effects(agent, entry, params, result)
         return result
+
+    if entry.provider == "eval":
+        if not is_eval_synthetic_tool_name(resolved_name):
+            return {"status": "error", "message": f"Unknown eval synthetic tool '{resolved_name}'."}
+
+        try:
+            row = PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name=resolved_name,
+            ).first()
+        except DatabaseError:
+            logger.exception("Failed to load enabled entry for eval tool %s", resolved_name)
+            row = None
+
+        if row:
+            row.last_used_at = datetime.now(UTC)
+            row.usage_count = (row.usage_count or 0) + 1
+            update_fields = ["last_used_at", "usage_count"]
+            metadata_updates = _apply_tool_metadata(row, entry)
+            if metadata_updates:
+                update_fields.extend(metadata_updates)
+            try:
+                row.save(update_fields=list(dict.fromkeys(update_fields)))
+            except DatabaseError:
+                logger.exception("Failed to record usage for eval tool %s", resolved_name)
+
+        return {
+            "status": "ok",
+            "tool": resolved_name,
+            "message": f"Mocked {resolved_name} result for deterministic eval execution.",
+            "content": {"ok": True},
+        }
 
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)

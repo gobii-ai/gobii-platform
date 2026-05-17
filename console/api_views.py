@@ -24,7 +24,7 @@ from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
 from django.db import IntegrityError, models, transaction
-from django.db.models import Min, Max, Q
+from django.db.models import Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
 from django.http.multipartparser import MultiPartParserError
 from django.shortcuts import get_object_or_404
@@ -64,7 +64,6 @@ from api.agent.files.filespace_service import dedupe_name, get_or_create_default
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from api.models import (
-    AgentSpawnRequest,
     BrowserLLMPolicy,
     BrowserUseAgent,
     BrowserUseAgentTask,
@@ -124,7 +123,6 @@ from api.models import (
     TaskCredit,
     build_web_agent_address,
     build_web_user_address,
-    UserPhoneNumber,
 )
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
@@ -137,7 +135,6 @@ from console.agent_audit.export import (
 )
 from console.agent_audit.timeline import build_audit_timeline
 from console.agent_audit.serializers import serialize_system_message
-from console.agent_chat.timeline import compute_processing_status
 from console.llm_tier_usage import (
     build_browser_endpoint_tier_usage,
     build_persistent_endpoint_tier_usage,
@@ -242,6 +239,7 @@ from api.agent.tools.sqlite_agent_config import seed_sqlite_agent_config
 from api.agent.tools.sqlite_skills import seed_sqlite_skills
 from api.pipedream_app_utils import normalize_app_slugs
 from api.evals.tasks import gc_eval_runs_task
+from api.evals.catalog import serialize_scenario_catalog_item, scenario_to_suite_slugs
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task
@@ -2772,6 +2770,16 @@ class StaffPromptArchiveAPIView(SystemAdminAPIView):
 
 
 def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
+    artifact_links = {
+        "message_id": str(task.first_message_id) if task.first_message_id else None,
+        "step_id": str(task.first_step_id) if task.first_step_id else None,
+        "browser_task_id": str(task.first_browser_task_id) if task.first_browser_task_id else None,
+        "agent_audit_url": (
+            f"/console/staff/agents/{task.run.agent_id}/audit/"
+            if task.run_id and task.run.agent_id
+            else None
+        ),
+    }
     return {
         "id": task.id,
         "sequence": task.sequence,
@@ -2780,6 +2788,11 @@ def _serialize_eval_task(task: EvalRunTask) -> dict[str, Any]:
         "assertion_type": task.assertion_type,
         "expected_summary": task.expected_summary,
         "observed_summary": task.observed_summary,
+        "debug_artifacts": task.debug_artifacts or {},
+        "artifact_links": artifact_links,
+        "llm_question": task.llm_question,
+        "llm_answer": task.llm_answer,
+        "llm_model": task.llm_model,
         "started_at": task.started_at.isoformat() if task.started_at else None,
         "finished_at": task.finished_at.isoformat() if task.finished_at else None,
         "prompt_tokens": task.prompt_tokens,
@@ -8764,7 +8777,15 @@ class EvalSuiteListAPIView(SystemAdminAPIView):
                     "scenario_slugs": list(suite.scenario_slugs),
                 }
             )
-        return JsonResponse({"suites": suites})
+        suite_mapping = scenario_to_suite_slugs()
+        scenarios = [
+            serialize_scenario_catalog_item(
+                scenario,
+                suite_slugs=suite_mapping.get(slug, []),
+            )
+            for slug, scenario in sorted(ScenarioRegistry.list_all().items())
+        ]
+        return JsonResponse({"suites": suites, "scenarios": scenarios})
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -8946,9 +8967,26 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
-        suite_slugs = body.get("suite_slugs") or ["all"]
-        if not isinstance(suite_slugs, list) or not suite_slugs:
+        suite_slugs = body.get("suite_slugs")
+        scenario_slugs = body.get("scenario_slugs") or []
+        if suite_slugs is None and not scenario_slugs:
+            suite_slugs = ["all"]
+        if suite_slugs is not None and (not isinstance(suite_slugs, list) or not suite_slugs):
             return HttpResponseBadRequest("suite_slugs must be a non-empty list")
+        if not isinstance(scenario_slugs, list):
+            return HttpResponseBadRequest("scenario_slugs must be a list")
+
+        suite_specs = []
+        for suite_slug in suite_slugs or []:
+            suite_obj = SuiteRegistry.get(str(suite_slug))
+            if not suite_obj:
+                return HttpResponseBadRequest(f"Suite '{suite_slug}' not found")
+            suite_specs.append((suite_obj.slug, list(dict.fromkeys(suite_obj.scenario_slugs))))
+        for scenario_slug in scenario_slugs:
+            scenario = ScenarioRegistry.get(str(scenario_slug))
+            if not scenario:
+                return HttpResponseBadRequest(f"Scenario '{scenario_slug}' not found")
+            suite_specs.append((f"single::{scenario.slug}", [scenario.slug]))
 
         agent_strategy = body.get("agent_strategy") or EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO
         if agent_strategy not in dict(EvalSuiteRun.AgentStrategy.choices):
@@ -9003,13 +9041,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
         created_suite_runs: list[EvalSuiteRun] = []
         created_runs: list[EvalRun] = []
 
-        for suite_slug in suite_slugs:
-            suite_obj = SuiteRegistry.get(suite_slug)
-            if not suite_obj:
-                return HttpResponseBadRequest(f"Suite '{suite_slug}' not found")
-
-            scenario_slugs = list(dict.fromkeys(suite_obj.scenario_slugs))
-
+        for suite_slug, scenario_slugs in suite_specs:
             # Create a temporary suite run ID to use for snapshot naming
             temp_suite_run_id = uuid.uuid4()
 
@@ -9023,7 +9055,7 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
 
             suite_run = EvalSuiteRun.objects.create(
                 id=temp_suite_run_id,
-                suite_slug=suite_obj.slug,
+                suite_slug=suite_slug,
                 initiated_by=request.user,
                 status=EvalSuiteRun.Status.RUNNING,
                 run_type=run_type,
@@ -9235,7 +9267,6 @@ class EvalRunCompareAPIView(SystemAdminAPIView):
 
     def get(self, request: HttpRequest, run_id: str, *args: Any, **kwargs: Any):
         from django.db.models import Avg, Count, Sum
-        from django.db.models.functions import Coalesce
 
         run = get_object_or_404(EvalRun, pk=run_id)
 
@@ -9406,8 +9437,6 @@ class EvalSuiteRunCompareAPIView(SystemAdminAPIView):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, suite_run_id: str, *args: Any, **kwargs: Any):
-        from django.db.models import Avg, Count, Sum
-
         suite_run = get_object_or_404(
             EvalSuiteRun.objects.prefetch_related("runs__tasks"),
             pk=suite_run_id,

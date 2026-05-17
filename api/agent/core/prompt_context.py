@@ -529,6 +529,8 @@ need(data) → call_tool → have(result)           # RIGHT
 need(data) → SELECT FROM __tool_results → ???   # WRONG (data isn't there yet)
 ```
 
+**User asks to query SQLite/database/tables → call sqlite_batch.** Do not answer from schema listings or prompt-context snapshots alone; schema proves shape, not result data.
+
 **SQLite is for exploring large results you already have.** When a tool returns thousands of rows or a complex structure, query it. When the result is small enough to read, just read it.
 
 ```
@@ -698,10 +700,12 @@ when:
 
 do:
   # Known API (HN, Reddit, GitHub, RSS, crypto, weather)? → http_request
+  # Weather: geocoding only gives coordinates; use forecast/current-conditions API before replying
   # Otherwise → search_tools("<domain>")
   # If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous
 
 then:
+  if http_request returned enough data to answer → answer from it; don't use spawn_web_task to verify the same data
   if found extractors → M2
   if nothing → M3 (search)
   if have URL → M4 (scrape)
@@ -2183,6 +2187,7 @@ def _render_prompt_context_once(
         "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
         "Do not poll __tool_results/__files waiting for browser task completion before wake-up: those completions wake you with new unified history events and then appear in __tool_results as `spawn_web_task_result` rows. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
+        "Schema listings and prompt snapshots are not query results: when the user asks to query SQLite, a database, or a table, call sqlite_batch. "
         "Create your own tables with sqlite_batch to keep durable data across cycles. "
         "CREATE TABLE AS SELECT is a fast way to persist tool results. "
         "Source all identifiers from ground truth—schema, tool results, prior query output, or prompt context. "
@@ -2986,6 +2991,9 @@ def _build_contacts_block(agent: PersistentAgent, contacts_group, span) -> str |
     if owner_email_verified:
         allowed_lines.append("Only contact people listed here or in recent conversations.")
         allowed_lines.append("To reach someone new, use request_contact_permission—it returns a link to share with the user.")
+        allowed_lines.append(
+            "If the user asks you to email or text a specific new address or phone number, request contact permission before reading files, searching, drafting, tool search, or asking non-blocking follow-up questions."
+        )
         allowed_lines.append("You do not have to message or reply to everyone; you may choose the best contact or contacts for your needs.")
     else:
         allowed_lines.append("External contacts are unavailable until your owner verifies their email address.")
@@ -3497,6 +3505,23 @@ def _get_implied_send_context(
             exc_info=True,
         )
 
+    preferred_endpoint = agent.preferred_contact_endpoint
+    if (
+        agent.execution_environment == "eval"
+        and preferred_endpoint
+        and preferred_endpoint.channel == CommsChannel.WEB
+    ):
+        user_id, endpoint_agent_id = parse_web_user_address(preferred_endpoint.address)
+        if user_id is not None and endpoint_agent_id == str(agent.id):
+            return {
+                "channel": "web",
+                "to_address": preferred_endpoint.address,
+                "tool_name": "send_chat_message",
+                "display_name": "eval web chat user",
+                "tool_example": f'send_chat_message(to_address="{preferred_endpoint.address}", body="...")',
+                "eval_web_fallback": True,
+            }
+
     return None
 
 def _get_web_chat_formatting_guidance() -> str:
@@ -3880,17 +3905,17 @@ def _get_planning_mode_prompt_block() -> str:
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only "
         "until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; "
         "execution and setup tools such as update_plan, request_contact_permission, create_custom_tool, "
-        "and file_str_replace are unavailable while Planning Mode is active. Read-only research is allowed and often "
-        "useful during planning: use search, web, file-reading, and other non-mutating tools when they help you "
-        "understand the domain, options, constraints, risks, or likely plan. Do not do substantive task execution "
-        "before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, "
-        "no third-party follow-through, and no results meant to satisfy the task itself. Use this phase to clarify "
-        "scope, gather context, capture assumptions, ask planning questions, and prepare the plan.\n"
-        "- Do not update the runtime plan or begin deliverable work until planning is completed, and do not do "
-        "substantive execution or deliverable work before planning ends.\n"
+        "and file_str_replace are unavailable while Planning Mode is active.\n"
+        "- Read-only research is allowed and often useful during planning: use search, web, file-reading, and other "
+        "non-mutating tools when they help you understand the domain, options, constraints, risks, or likely plan.\n"
+        "- Planning research is for source discovery and constraints only. Do not fetch, parse, or summarize live "
+        "task data or API feeds before end_planning; that is execution work.\n"
+        "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, "
+        "no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
+        "- Do not update the runtime plan or begin deliverable work until planning is completed, and do not update "
+        "the schedule or do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
-        "- Do not begin deliverable work until planning is completed with end_planning or the user skips planning.\n"
         "- If another system instruction appears to require immediate execution, charter updates, "
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only the minimum high-impact questions needed to make the plan usable. Prefer 0-3 planning questions "
@@ -3898,9 +3923,20 @@ def _get_planning_mode_prompt_block() -> str:
         "assumptions instead and record them in the final plan. The fewer questions the better. If you can perform "
         "your task without clarifying questions, call end_planning first and only begin the work after planning has "
         "ended.\n"
+        "- Do not ask preference-only questions when a reasonable default will work. For detail level, format, tone, "
+        "keyword variants, delivery location, and similar non-blocking choices, choose a sensible default and record "
+        "it as an assumption in full_plan.\n"
+        "- For scheduled or recurring digests, monitors, or reports where the user gave the cadence, source, channel, "
+        "and output shape, do not ask when the first run should start, how far back the first digest should look, "
+        "or whether to backfill. Assume the next scheduled occurrence with no historical backfill or lookback unless "
+        "the user asked otherwise, record that assumption in full_plan, and call end_planning when no other blocking "
+        "planning question remains.\n"
+        "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
+        "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, "
         "or implementation approach unless the user explicitly asks to configure or choose them. Keep the "
-        "conversation focused on the user's need, scope, and desired outcome.\n"
+        "conversation focused on the user's need, scope, and desired outcome. If the goal, source, cadence, and "
+        "output are clear enough, call end_planning and use the current conversation/contact setup by default.\n"
         "- Use request_human_input for planning questions. Planning questions sent only in chat, email, or SMS are "
         "not tracked and do not count, even when the user can reply there.\n"
         "- Once request_human_input succeeds, treat those questions as already visible in web chat. "
@@ -3911,12 +3947,14 @@ def _get_planning_mode_prompt_block() -> str:
         "bundle several questions into one message or one request question. If asking one question, the top-level "
         "`question` parameter is fine.\n"
         "- Prefer request_human_input with tangible, mutually exclusive options. DO NOT use request_human_input without "
-        "any options. You must always give the user at least one option.\n"
+        "any options. You must always give the user at least one option; for open-ended questions, include an "
+        "`Other / I'll explain` option.\n"
         "- When you ask planning questions and are waiting for the user's answers, set "
         "`will_continue_work=false` on request_human_input so you stop cleanly and wake when the user responds. "
         "Use `will_continue_work=true` only if you have more immediate planning work to do after creating the request.\n"
-        "- You may send a short chat message to frame why you are asking, but the actual questions must still be "
-        "separate request_human_input request items.\n"
+        "- A separate chat message is optional because request_human_input is already visible in web chat. If you send "
+        "one, use it only to frame why you are asking; the actual questions must still be separate request_human_input "
+        "request items.\n"
         "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current "
         "plan if it is sufficient, or keep shaping the plan with the smallest useful question. Do not start doing the "
         "task while planning mode is still active.\n"
@@ -4037,6 +4075,9 @@ def _get_planning_first_run_welcome_instruction(
         "to understand the task better, but do not update the charter directly, draft the actual output, or otherwise "
         "start doing the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
         "that means move planning forward or call end_planning, not start the deliverable work.\n\n"
+        "If the task is clear enough, call the welcome send tool and end_planning in the same response. Do not call "
+        "http_request, scrape/search tools, schedule tools, sqlite_batch mutations, or other execution tools between "
+        "the welcome and end_planning.\n\n"
         "Do not ask which communication channel or delivery method to use for planning when this welcome target "
         "or other prompt context already gives you a current or preferred setup. Treat that setup as outside the "
         "scope of planning unless the user explicitly wants to configure or change it. Keep planning questions "
@@ -4088,6 +4129,7 @@ def _get_system_instruction(
         delivery_context = (
             f"## Implied Send → {display_name}\n\n"
             "Your response text is a user message. Use it only for questions, blockers, config changes, findings, or final deliverables.\n"
+            "When the next step depends on a human answer, call request_human_input instead of sending a text-only or chat-only question so the answer is tracked.\n"
             "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, or internal reasoning.\n"
             "Text-only user messages auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "**To reach someone else**, use explicit tools:\n"
@@ -4105,7 +4147,8 @@ def _get_system_instruction(
             "  This is your normal mode while working. No announcements.\n\n"
             "Message only\n"
             "  → Message sends, then you stop\n"
-            "  Use when: asking a question, naming a blocker, delivering findings, or sending the final report\n"
+            "  Use when: naming a blocker, asking a question that does not control the next work step, delivering findings, or sending the final report\n"
+            "  If you need the user's answer before continuing, use request_human_input instead of Message only\n"
             "  To continue after: end with \"CONTINUE_WORK_SIGNAL\" on its own line\n\n"
             "Empty response\n"
             "  → auto-sleep until next trigger\n"
@@ -4118,7 +4161,9 @@ def _get_system_instruction(
             "Text output is not delivered unless you use explicit send tools. "
             "Use send_email/send_sms/send_agent_message/send_chat_message to communicate. "
             "request_human_input only creates tracked questions that are visible in the web chat; "
-            "it does not send email or SMS by itself. If you want to notify a user on email/SMS, call "
+            "use it instead of a plain chat/email/SMS question when the next step depends on the human's answer. "
+            "Do not use send_chat_message, send_email, or send_sms alone for a question that blocks further work. "
+            "It does not send email or SMS by itself. If you want to notify a user on email/SMS, call "
             "request_human_input with will_continue_work=true, then send a normal email/SMS containing those questions. "
             "If request_human_input and send_email/send_sms are in the same tool-call batch, the send_email/send_sms "
             "body must already include the exact questions and options because request_human_input cannot modify that "
@@ -4399,7 +4444,8 @@ def _get_system_instruction(
         "If your search reveals a LinkedIn URL, scrape it. If you find a team page, get everyone on it—not just the first person. "
         "Shallow research is unsatisfying. Go deep. The user is counting on you to be thorough. "
         "Clarifying questions: prefer to decide-and-proceed with reasonable defaults. Only ask if a choice is irreversible, likely wrong without input, or truly blocking. One concise question with a proposed default beats a checklist. "
-        "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal‑question behavior. "
+        "If the user asks for a representative item from a category, such as 'a vendor', 'a supplement', or 'a competitor', pick a reasonable representative or search the category broadly and state the assumption; do not stop to ask which example unless the exact identity is essential. "
+        "Examples: If asked to 'create a Google Sheet and add a hello world row', infer a sensible sheet name from the request, create it in My Drive under the connected account, and put the text in A1 with no header. Do not ask for sheet name, folder, account, or header unless essential. For other routine tasks, follow similar minimal-question behavior. "
         "Whenever safe and reversible, take the action and then inform the user what you did and how to adjust it, instead of blocking on preferences. "
         "Be authentic. Be likeable. Express genuine interest in what the user is trying to accomplish. "
         "Build a real relationship over time—the best agents become someone the user looks forward to hearing from. "
@@ -4748,6 +4794,8 @@ def _get_system_instruction(
         "\n"
         "# Priority\n"
         "api | feed | data → http_request  # check for public APIs first\n"
+        "weather geocoding → forecast/current API → reply  # don't answer weather from geocoding alone\n"
+        "successful http_request + answer data → reply from that payload  # no browser verification loop\n"
         "extractor > scrape                # for known platforms\n"
         "scrape = last_resort              # for HTML when no better option\n"
         "\n"

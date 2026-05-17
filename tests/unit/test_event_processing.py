@@ -26,17 +26,22 @@ from api.agent.core.event_processing import (
     _execute_prepared_tool_call,
     _execute_prepared_tool_batch,
     _finalize_tool_batch,
+    _latest_inbound_message_needs_reply,
+    _should_continue_for_pending_progress_reply,
+    _should_continue_for_unanswered_inbound_after_tools,
     _gate_send_chat_tool_for_delivery,
     _tool_definition_names_for_completion,
     _persist_tool_call_step,
     build_prompt_context,
     _get_completed_process_run_count,
+    _FinalizedToolBatch,
     _PreparedToolBatch,
     _PreparedToolExecution,
     _ToolExecutionOutcome,
     _run_agent_loop,
     process_agent_events,
 )
+from api.agent.core.llm_utils import EmptyLiteLLMResponseError
 from api.agent.core.processing_flags import (
     PendingDrainSettings,
     _human_inbound_generation_key,
@@ -70,7 +75,6 @@ from api.agent.core.prompt_context import (
 from api.admin import PersistentAgentPromptArchiveAdmin, PromptConfigAdmin, ToolConfigAdmin
 from api.agent.tools.schedule_updater import execute_update_schedule as _execute_update_schedule
 from api.agent.tools.http_request import execute_http_request as _execute_http_request
-from api.agent.files.filespace_service import DOWNLOADS_DIR_NAME
 from api.agent.tools.tool_manager import enable_tools
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tasks.process_events import (
@@ -3970,6 +3974,30 @@ class EventProcessingRuntimeGuardTests(TestCase):
             charter="Test runtime guard",
             browser_use_agent=self.browser_agent,
         )
+        self.endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel="email",
+            address="runtime-agent@example.com",
+            is_primary=True,
+        )
+        self.external_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel="email",
+            address="runtime-user@example.com",
+        )
+
+    def _create_inbound_email_message(self, *, body: str, timestamp) -> PersistentAgentMessage:
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.external_endpoint,
+            to_endpoint=self.endpoint,
+            is_outbound=False,
+            body=body,
+            raw_payload={},
+            seq=f"RG{int(timestamp.timestamp() * 1_000_000):024d}"[:26],
+        )
+        PersistentAgentMessage.objects.filter(pk=message.pk).update(timestamp=timestamp)
+        message.refresh_from_db()
+        return message
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_tool_call_runtime_rejects_tier_blacklisted_static_tool(self):
@@ -3991,6 +4019,7 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("intelligence tier", result["message"])
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
@@ -4137,6 +4166,73 @@ class EventProcessingRuntimeGuardTests(TestCase):
         )
 
         self.assertTrue(finalized.followup_required)
+
+    def test_non_message_stop_continues_when_latest_inbound_is_unanswered(self):
+        self._create_inbound_email_message(
+            body="what's the weather in frederick md?",
+            timestamp=timezone.now(),
+        )
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertTrue(_latest_inbound_message_needs_reply(self.agent))
+        self.assertTrue(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
+    def test_non_message_stop_does_not_continue_after_user_facing_reply(self):
+        now = timezone.now()
+        self._create_inbound_email_message(body="thanks", timestamp=now)
+        outbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.endpoint,
+            to_endpoint=self.external_endpoint,
+            is_outbound=True,
+            body="You're welcome.",
+            raw_payload={},
+            seq=f"OUT{int(now.timestamp() * 1_000_000):023d}"[:26],
+        )
+        PersistentAgentMessage.objects.filter(pk=outbound.pk).update(timestamp=now + timedelta(seconds=1))
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertFalse(_latest_inbound_message_needs_reply(self.agent))
+        self.assertFalse(_should_continue_for_unanswered_inbound_after_tools(self.agent, finalized))
+
+    def test_pending_progress_reply_continues_after_non_message_stop(self):
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+        )
+
+        self.assertTrue(_should_continue_for_pending_progress_reply(True, finalized))
+
+    def test_pending_progress_reply_stops_for_human_input_request(self):
+        finalized = _FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=False,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=True,
+            human_input_request_ok=True,
+        )
+
+        self.assertFalse(_should_continue_for_pending_progress_reply(True, finalized))
 
     def test_signup_preview_processing_pause_is_suppressed_during_planning(self):
         self.agent.signup_preview_state = PersistentAgent.SignupPreviewState.AWAITING_SIGNUP_COMPLETION
@@ -4531,6 +4627,57 @@ class OrchestratorHumanInputInterruptTests(TestCase):
         self.assertEqual(error.category, PersistentAgentError.Category.LLM_COMPLETION)
         self.assertEqual(error.exception_class, "RuntimeError")
         self.assertEqual(error.context["iteration"], 1)
+
+    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
+    @patch("api.agent.core.event_processing.get_pending_drain_settings")
+    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
+    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
+    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
+    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    def test_empty_completion_retries_agent_loop_before_logging_error(
+        self,
+        mock_build_prompt,
+        mock_completion,
+        _mock_tools,
+        _mock_seed_config,
+        _mock_seed_skills,
+        _mock_burn_control,
+        mock_pending_settings,
+        _mock_follow_up,
+    ):
+        mock_pending_settings.return_value = PendingDrainSettings(
+            pending_set_ttl_seconds=123,
+            pending_drain_delay_seconds=10,
+            pending_drain_limit=50,
+            pending_drain_schedule_ttl_seconds=60,
+        )
+        mock_build_prompt.return_value = self._prompt_context()
+        response = make_completion_response(content="Done")
+        token_usage = {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+            "model": "m",
+            "provider": "p",
+        }
+        mock_completion.side_effect = [
+            EmptyLiteLLMResponseError("empty response"),
+            (response, token_usage),
+        ]
+
+        from api.agent.core import event_processing as ep
+
+        with (
+            patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 2),
+            patch.object(ep.settings, "AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES", 1),
+        ):
+            usage = _run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(usage.get("total_tokens"), 15)
+        self.assertFalse(PersistentAgentError.objects.filter(agent=self.agent).exists())
 
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
@@ -5088,6 +5235,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
@@ -5170,3 +5318,37 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             args=[str(self.agent.id)],
             countdown=expected_delay_seconds,
         )
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_delayed_agent_follow_up_does_not_run_immediately_in_eager_mode(
+        self,
+        mock_apply_async,
+    ):
+        from api.agent.core import event_processing as ep
+
+        ep._schedule_agent_follow_up(
+            agent_id=self.agent.id,
+            delay_seconds=60,
+            reason="Test",
+        )
+
+        mock_apply_async.assert_not_called()
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")
+    @patch("api.agent.core.event_processing.claim_pending_drain_slot")
+    def test_delayed_pending_drain_does_not_run_immediately_in_eager_mode(
+        self,
+        mock_claim_pending_drain_slot,
+        mock_apply_async,
+    ):
+        from api.agent.core import event_processing as ep
+
+        ep._schedule_pending_drain(
+            delay_seconds=60,
+            schedule_ttl_seconds=120,
+        )
+
+        mock_claim_pending_drain_slot.assert_not_called()
+        mock_apply_async.assert_not_called()

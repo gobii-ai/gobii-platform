@@ -20,10 +20,12 @@ from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
+import redis
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
+from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
@@ -66,18 +68,17 @@ from .processing_flags import (
     set_processing_heartbeat,
 )
 from .llm_utils import (
+    EmptyLiteLLMResponseError,
     raise_if_empty_litellm_response,
     raise_if_invalid_litellm_response,
     run_completion,
 )
 from .llm_streaming import StreamAccumulator
 from .token_usage import (
-    coerce_int as _coerce_int,
     completion_kwargs_from_usage,
     extract_reasoning_content,
     extract_token_usage,
     set_usage_span_attributes,
-    usage_attribute as _usage_attribute,
 )
 from ..short_description import (
     maybe_schedule_mini_description,
@@ -168,8 +169,6 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
-    CommsChannel,
-    build_web_user_address,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
@@ -192,7 +191,6 @@ from api.services.signup_preview import (
 )
 from api.services.web_sessions import (
     get_deliverable_web_sessions,
-    has_active_web_session,
     has_deliverable_web_session,
 )
 from constants.feature_flags import AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION
@@ -249,9 +247,34 @@ CONTINUATION_PHRASES = (
     "moving on to ",
 )
 
+BLOCKING_HUMAN_INPUT_PATTERNS = (
+    re.compile(r"\bbefore\s+(?:i|we)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+need\b.*\b(?:first|before|from you)\b", re.IGNORECASE),
+    re.compile(r"\b(?:please|can you|could you)\s+(?:provide|share|confirm|choose|tell|send)\b", re.IGNORECASE),
+    re.compile(r"\bwhich\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
+    re.compile(r"\bwhat\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
+    re.compile(r"\b(?:which|what)\b.*\bwould\s+you\s+like\s+(?:me|us)\b", re.IGNORECASE),
+)
+MARKDOWN_PUNCTUATION_RE = re.compile(r"[*_`>#\[\]]+")
+
 
 class OrchestratorPromptStale(RuntimeError):
     """Raised when newer human input makes an in-flight orchestrator prompt stale."""
+
+
+def _looks_like_blocking_human_input_request(message_text: str) -> bool:
+    normalized = " ".join((message_text or "").split())
+    return bool("?" in normalized and any(pattern.search(normalized) for pattern in BLOCKING_HUMAN_INPUT_PATTERNS))
+
+
+def _extract_human_input_question(message_text: str) -> str:
+    for raw_line in (message_text or "").splitlines():
+        line = MARKDOWN_PUNCTUATION_RE.sub("", raw_line).strip(" -\t")
+        if "?" in line:
+            return _truncate_text_bytes(line, 500).strip()
+
+    fallback = MARKDOWN_PUNCTUATION_RE.sub("", message_text or "").strip()
+    return _truncate_text_bytes(fallback, 500).strip()
 
 
 def _truncate_text_bytes(text: str, max_bytes: int) -> str:
@@ -678,6 +701,12 @@ class _LockExtender:
 
 
 def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, span=None) -> None:
+    if django_settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
+        logger.info(
+            "Skipping delayed pending drain scheduling in eager mode (delay=%s).",
+            delay_seconds,
+        )
+        return
     if not claim_pending_drain_slot(ttl=schedule_ttl_seconds):
         return
     try:
@@ -692,6 +721,14 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
 
 def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int, span=None, reason: str) -> None:
     """Schedule a direct follow-up for a single agent without going through pending-drain."""
+    if django_settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
+        logger.info(
+            "Skipping delayed %s follow-up for agent %s in eager mode (delay=%s).",
+            reason,
+            agent_id,
+            delay_seconds,
+        )
+        return
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
@@ -1507,6 +1544,53 @@ class _FinalizedToolBatch:
     last_explicit_continue: Optional[bool]
     inferred_message_continue_this_iteration: bool
     executed_non_message_action: bool
+    progress_message_delivery_ok: bool = False
+    terminal_message_delivery_ok: bool = False
+    human_input_request_ok: bool = False
+
+
+def _latest_inbound_message_needs_reply(agent: PersistentAgent) -> bool:
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .only("timestamp", "seq")
+        .first()
+    )
+    if latest_inbound is None or latest_inbound.timestamp is None:
+        return False
+
+    return not PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+        timestamp__gt=latest_inbound.timestamp,
+    ).exists()
+
+
+def _should_continue_for_unanswered_inbound_after_tools(
+    agent: PersistentAgent,
+    finalized_batch: _FinalizedToolBatch,
+) -> bool:
+    return (
+        not finalized_batch.followup_required
+        and finalized_batch.last_explicit_continue is False
+        and finalized_batch.executed_non_message_action
+        and not finalized_batch.message_delivery_ok
+        and _latest_inbound_message_needs_reply(agent)
+    )
+
+
+def _should_continue_for_pending_progress_reply(
+    pending_reply_after_progress: bool,
+    finalized_batch: _FinalizedToolBatch,
+) -> bool:
+    return (
+        pending_reply_after_progress
+        and not finalized_batch.followup_required
+        and finalized_batch.last_explicit_continue is False
+        and finalized_batch.executed_non_message_action
+        and not finalized_batch.message_delivery_ok
+        and not finalized_batch.human_input_request_ok
+    )
 
 
 def _normalize_parallel_placeholder_path(raw: str) -> Optional[str]:
@@ -1601,6 +1685,67 @@ def _parallel_batch_ineligible_reason(
     return None
 
 
+def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -> bool:
+    url_contains = rule.get("url_contains")
+    if url_contains is not None:
+        url = str(exec_params.get("url") or "").lower()
+        expected_parts = [url_contains] if isinstance(url_contains, str) else list(url_contains)
+        if not all(str(part).lower() in url for part in expected_parts):
+            return False
+
+    param_equals = rule.get("param_equals")
+    if param_equals:
+        for key, expected in param_equals.items():
+            if exec_params.get(key) != expected:
+                return False
+
+    return True
+
+
+def _resolve_eval_mock_result(
+    mock_config: Optional[Dict[str, Any]],
+    tool_name: str,
+    exec_params: Dict[str, Any],
+) -> Any:
+    if not mock_config:
+        return None
+
+    mock_result = mock_config.get(tool_name)
+    if not isinstance(mock_result, dict) or (
+        "rules" not in mock_result and "default" not in mock_result
+    ):
+        return mock_result
+
+    for rule in mock_result.get("rules") or []:
+        if _eval_mock_rule_matches(rule, exec_params):
+            return rule.get("result")
+
+    return mock_result.get("default")
+
+
+def _strip_linkified_url_artifact(value: str) -> str:
+    text = value.strip()
+    for separator in ('">', "'>"):
+        if separator in text:
+            candidate = text.rsplit(separator, 1)[-1].strip()
+            if candidate.startswith(("http://", "https://")):
+                return candidate
+    return text
+
+
+def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
+    if tool_name != "http_request" or not isinstance(tool_params.get("url"), str):
+        return tool_params
+
+    normalized_url = _strip_linkified_url_artifact(tool_params["url"])
+    if normalized_url == tool_params["url"]:
+        return tool_params
+
+    normalized_params = dict(tool_params)
+    normalized_params["url"] = normalized_url
+    return normalized_params
+
+
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -1612,7 +1757,7 @@ def _execute_tool_call_runtime(
 ) -> tuple[Any, Optional[List[dict]]]:
     updated_tools: Optional[List[dict]] = None
     mock_config = getattr(budget_ctx, "mock_config", None) if budget_ctx else None
-    mock_result = mock_config.get(tool_name) if mock_config else None
+    mock_result = _resolve_eval_mock_result(mock_config, tool_name, exec_params)
     if planning_mode_disallows_tool(agent, tool_name):
         return {
             "status": "error",
@@ -1698,6 +1843,38 @@ def _tool_result_is_success(result: Any) -> bool:
     return True
 
 
+def _mark_tool_outcome_failed(
+    outcome: _ToolExecutionOutcome,
+    exc: Exception,
+) -> _ToolExecutionOutcome:
+    outcome.result = _build_safe_error_payload(
+        f"Tool execution failed: {exc}",
+        error_type=type(exc).__name__,
+        retryable=_infer_retryable_from_text(str(exc)),
+    )
+    outcome.updated_tools = None
+    return outcome
+
+
+def _refresh_skills_for_tool_outcome(
+    agent: PersistentAgent,
+    outcome: _ToolExecutionOutcome,
+) -> _ToolExecutionOutcome:
+    if not _tool_result_is_success(outcome.result):
+        return outcome
+    try:
+        refresh_skills_for_tool(agent, outcome.prepared.tool_name)
+    except DatabaseError as exc:
+        logger.exception(
+            "Agent %s: skill refresh after tool %s failed (call_id=%s)",
+            agent.id,
+            outcome.prepared.tool_name,
+            outcome.prepared.call_id or "<none>",
+        )
+        return _mark_tool_outcome_failed(outcome, exc)
+    return outcome
+
+
 def _execute_prepared_tool_call(
     agent: PersistentAgent,
     prepared: _PreparedToolExecution,
@@ -1719,7 +1896,7 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
             )
-            if _tool_result_is_success(result):
+            if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
     except Exception as exc:
         logger.exception(
@@ -1762,6 +1939,10 @@ def _prepare_tool_batch(
     followup_required = False
     all_calls_sleep = not has_non_sleep_calls
     abort_after_execution = False
+    batch_has_human_input_request = any(
+        _get_tool_call_name(call) == "request_human_input"
+        for call in tool_calls
+    )
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
@@ -1917,6 +2098,19 @@ def _prepare_tool_batch(
                 followup_required = True
                 break
 
+            if tool_name == "send_chat_message" and not batch_has_human_input_request:
+                message_body = str(tool_params.get("body") or "")
+                if _looks_like_blocking_human_input_request(message_body):
+                    tool_name = "request_human_input"
+                    tool_params = {
+                        "question": _extract_human_input_question(message_body),
+                        "will_continue_work": _coerce_optional_bool(tool_params.get("will_continue_work")) is True,
+                    }
+                    logger.info(
+                        "Agent %s: routing blocking chat question to request_human_input.",
+                        agent.id,
+                    )
+
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
             if not _enforce_tool_rate_limit(
@@ -1946,6 +2140,7 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
+            tool_params = _normalize_tool_params(tool_name, tool_params)
             explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
             inferred_continue = False
             if tool_name in MESSAGE_TOOL_NAMES:
@@ -2074,6 +2269,10 @@ def _execute_prepared_tool_batch(
                 )
             execution_outcomes = [future.result() for future in futures]
 
+        execution_outcomes = [
+            _refresh_skills_for_tool_outcome(agent, outcome)
+            for outcome in execution_outcomes
+        ]
         merged_variables = dict(base_variables)
         for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
             merged_variables.update(outcome.variable_map)
@@ -2158,6 +2357,9 @@ def _finalize_tool_batch(
     last_explicit_continue: Optional[bool] = None
     inferred_message_continue_this_iteration = False
     executed_non_message_action = False
+    progress_message_delivery_ok = False
+    terminal_message_delivery_ok = False
+    human_input_request_ok = False
 
     for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
         prepared = outcome.prepared
@@ -2198,10 +2400,21 @@ def _finalize_tool_batch(
             result_preview,
             "…" if len(result_content) > len(result_preview) else "",
         )
-        if tool_name in MESSAGE_TOOL_NAMES:
+        message_delivery_skipped = (
+            tool_name in MESSAGE_TOOL_NAMES
+            and isinstance(result, dict)
+            and result.get("skipped") is True
+        )
+        if tool_name in MESSAGE_TOOL_NAMES and not message_delivery_skipped:
             status_label = str(status or "").lower()
             if status_label in MESSAGE_SUCCESS_STATUSES:
                 message_delivery_ok = True
+                body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+                body = str(prepared.tool_params.get(body_key) or "") if body_key else ""
+                if prepared.explicit_continue is True and _should_infer_message_tool_continuation(body):
+                    progress_message_delivery_ok = True
+                else:
+                    terminal_message_delivery_ok = True
 
         is_error_status = _is_error_status(result)
         tool_status = "error" if is_error_status else "complete"
@@ -2238,6 +2451,8 @@ def _finalize_tool_batch(
                 credits_consumed=prepared.credits_consumed,
                 consumed_credit=prepared.consumed_credit,
             )
+        elif tool_name == "request_human_input":
+            human_input_request_ok = True
         if tool_name == "request_human_input" and isinstance(result, dict):
             attach_originating_step_from_result(step, result)
 
@@ -2248,7 +2463,11 @@ def _finalize_tool_batch(
         if prepared.explicit_continue is True and prepared.inferred_continue:
             inferred_message_continue_this_iteration = True
 
-        if tool_name == "search_tools":
+        if message_delivery_skipped:
+            # Skipped progress-only sends are intentionally not user-visible.
+            # Keep the loop alive so the agent can produce the actual reply.
+            followup_required = True
+        elif tool_name == "search_tools":
             followup_required = True
         elif is_error_status or tool_had_warning:
             followup_required = True
@@ -2266,6 +2485,9 @@ def _finalize_tool_batch(
         last_explicit_continue=last_explicit_continue,
         inferred_message_continue_this_iteration=inferred_message_continue_this_iteration,
         executed_non_message_action=executed_non_message_action,
+        progress_message_delivery_ok=progress_message_delivery_ok,
+        terminal_message_delivery_ok=terminal_message_delivery_ok,
+        human_input_request_ok=human_input_request_ok,
     )
 
 
@@ -2421,12 +2643,26 @@ def _build_implied_send_tool_call(
 
     channel = ctx.get("channel")
     to_address = ctx.get("to_address")
-    if not has_deliverable_web_session(agent):
+    eval_web_fallback = bool(ctx.get("eval_web_fallback")) and agent.execution_environment == "eval"
+    if not eval_web_fallback and not has_deliverable_web_session(agent):
         return None, "Implied send failed: no deliverable web session."
     if channel != "web":
         return None, "Implied send failed: active web session required."
 
     if channel == "web":
+        if _looks_like_blocking_human_input_request(message_text):
+            tool_params = {
+                "question": _extract_human_input_question(message_text),
+                "will_continue_work": will_continue_work,
+            }
+            return (
+                {
+                    "id": "implied_human_input",
+                    "function": {"name": "request_human_input", "arguments": json.dumps(tool_params)},
+                },
+                None,
+            )
+
         tool_params = {"to_address": to_address, "body": message_text}
         if will_continue_work:
             tool_params["will_continue_work"] = True
@@ -3050,20 +3286,13 @@ def _completion_with_failover(
                 if api_base:
                     llm_span.set_attribute("llm.api_base", api_base)
                 llm_span.set_attribute("llm.api_key_present", bool(api_key_present))
-                try:
-                    masked = None
-                    if api_key_present:
-                        k = params.get("api_key")
-                        masked = (str(k)[:6] + "…") if k else None
-                    logger.info(
-                        "LLM call: provider=%s model=%s api_base=%s api_key=%s",
-                        provider,
-                        model,
-                        api_base or "",
-                        masked or "<none>",
-                    )
-                except Exception:
-                    pass
+                logger.info(
+                    "LLM call: provider=%s model=%s api_base=%s api_key=%s",
+                    provider,
+                    model,
+                    api_base or "",
+                    "<redacted>" if api_key_present else "<none>",
+                )
 
                 # If OpenAI family, add safety_identifier hint when available
                 request_messages = base_messages
@@ -4512,7 +4741,7 @@ def _process_agent_events_locked(
                         and available != TASKS_UNLIMITED
                         and Decimal(available) <= Decimal("0")
                     ):
-                        msg = f"Skipped processing due to insufficient credits (proprietary mode)."
+                        msg = "Skipped processing due to insufficient credits (proprietary mode)."
                         logger.warning(
                             "Persistent agent %s not processed – %s has no remaining task credits.",
                             persistent_agent_id,
@@ -4576,7 +4805,7 @@ def _process_agent_events_locked(
         span.set_attribute('processing.is_first_run', is_first_run)
         span.set_attribute('processing.run_sequence_number', run_sequence_number)
 
-        cumulative_token_usage = _run_agent_loop(
+        _run_agent_loop(
             agent,
             is_first_run=is_first_run,
             credit_snapshot=credit_snapshot,
@@ -4706,8 +4935,10 @@ def _run_agent_loop(
 
     reasoning_only_streak = 0
     inferred_message_continue_streak = 0
+    pending_reply_after_progress = False
     continuation_notice: Optional[str] = None
     web_session_activation_retry_used = False
+    empty_response_loop_retries = 0
 
     def _current_human_inbound_generation() -> int:
         return get_human_inbound_generation(agent.id, client=redis_client)
@@ -5004,6 +5235,7 @@ def _run_agent_loop(
                         allow_streamed_content=prompt_allows_implied_send,
                         stale_prompt_checker=_is_orchestrator_prompt_stale,
                     )
+                    empty_response_loop_retries = 0
                     if heartbeat:
                         heartbeat.touch("llm_response")
 
@@ -5048,6 +5280,21 @@ def _run_agent_loop(
                     )
                     continue
                 except Exception as e:
+                    if (
+                        isinstance(e, EmptyLiteLLMResponseError)
+                        and empty_response_loop_retries < settings.AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES
+                    ):
+                        empty_response_loop_retries += 1
+                        logger.warning(
+                            "Agent %s: provider returned empty completions after internal retries; retrying agent loop (%s/%s).",
+                            agent.id,
+                            empty_response_loop_retries,
+                            settings.AGENT_EMPTY_LLM_RESPONSE_LOOP_RETRIES,
+                        )
+                        if heartbeat:
+                            heartbeat.touch("llm_empty_response_loop_retry")
+                        continue
+
                     current_span = trace.get_current_span()
                     mark_span_failed_with_exception(current_span, e, "LLM completion failed with all providers")
                     log_agent_error(
@@ -5486,6 +5733,11 @@ def _run_agent_loop(
 
                 _mark_accepted_human_generation_consumed()
 
+                if finalized_batch.terminal_message_delivery_ok or finalized_batch.human_input_request_ok:
+                    pending_reply_after_progress = False
+                elif finalized_batch.progress_message_delivery_ok:
+                    pending_reply_after_progress = True
+
                 if executed_non_message_action:
                     inferred_message_continue_streak = 0
                 elif inferred_message_continue_this_iteration:
@@ -5497,6 +5749,18 @@ def _run_agent_loop(
                     logger.info("Agent %s is sleeping.", agent.id)
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
+                elif _should_continue_for_unanswered_inbound_after_tools(agent, finalized_batch):
+                    logger.info(
+                        "Agent %s: non-message tool batch requested stop while latest inbound message "
+                        "is still unanswered; continuing for a user-facing reply.",
+                        agent.id,
+                    )
+                elif _should_continue_for_pending_progress_reply(pending_reply_after_progress, finalized_batch):
+                    logger.info(
+                        "Agent %s: non-message tool batch requested stop after a progress reply; "
+                        "continuing for the user-facing answer.",
+                        agent.id,
+                    )
                 elif not followup_required and last_explicit_continue is False:
                     logger.info(
                         "Agent %s: tool batch ended with explicit stop; auto-sleeping.",

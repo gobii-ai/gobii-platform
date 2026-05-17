@@ -1,13 +1,17 @@
 import os
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from django.core.management import call_command
 from django.test import TestCase, override_settings, tag
+from litellm.exceptions import APIError
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.management.commands.run_evals import build_eval_execution_plan
 from api.evals.local_setup import (
+    ensure_eval_local_compat_columns,
     ensure_eval_local_routing_profiles,
     ensure_openrouter_deepseek_v4_flash_profile,
 )
@@ -24,6 +28,7 @@ from api.evals.meta_gobii import (
     score_meta_gobii_case,
 )
 from api.evals.registry import ScenarioRegistry
+from api.evals.scenarios.meta_gobii import MetaGobiiSystemSkillScenario, _is_retryable_llm_error, _record_plan_tool
 from api.evals.suites import SuiteRegistry
 from api.models import (
     EvalRunTask,
@@ -117,6 +122,150 @@ class MetaGobiiEvalRegistrationTests(TestCase):
                 ],
             )
 
+    def test_openrouter_structural_tag_grammar_error_is_retryable(self):
+        error = APIError(
+            status_code=400,
+            message="Upstream error from Morph: Failed to compile structural_tag grammar",
+            llm_provider="openrouter",
+            model="deepseek/deepseek-v4-flash",
+        )
+
+        self.assertTrue(_is_retryable_llm_error(error))
+
+    def test_plan_intent_falls_back_on_retryable_api_error(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        error = APIError(
+            status_code=400,
+            message="Upstream error from Morph: Failed to compile structural_tag grammar",
+            llm_provider="openrouter",
+            model="deepseek/deepseek-v4-flash",
+        )
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=error):
+            calls = scenario._run_plan_intent(_case("safety_archive_raise_limits"), simulated=False)
+
+        self.assertEqual(calls[0]["name"], "record_meta_gobii_plan")
+        self.assertIn("ordered_tools", calls[0]["arguments"])
+
+    def test_skill_discovery_requires_enable_call_after_search_result(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        calls = []
+
+        def fake_run_tool_completion(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "team design"}}]
+            return [
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": ["meta_gobii"]},
+                }
+            ]
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
+            discovery_calls = scenario._run_skill_discovery(
+                _case("team_management_capability_test"),
+                simulated=False,
+            )
+
+        self.assertEqual([call["name"] for call in discovery_calls], [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME])
+        self.assertEqual(
+            calls[1]["tool_choice"],
+            {"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
+        )
+
+    def test_skill_discovery_prompt_covers_file_upload_requests(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        calls = []
+
+        def fake_run_tool_completion(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "upload file to Gobii"}}]
+            return [
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": ["meta_gobii"]},
+                }
+            ]
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
+            scenario._run_skill_discovery(_case("no_schedule_upload_files_only"), simulated=False)
+
+        discovery_text = "\n".join(message["content"] for message in calls[0]["messages"])
+        self.assertIn("upload files to", discovery_text)
+        self.assertIn("uploads or attaches a file", discovery_text)
+
+    def test_skill_discovery_prompt_covers_scheduled_gobii_creation_requests(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        calls = []
+
+        def fake_run_tool_completion(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "recruiting pipeline Gobii"}}]
+            return [
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": ["meta_gobii"]},
+                }
+            ]
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
+            scenario._run_skill_discovery(_case("schedule_recurring_candidate_pipeline"), simulated=False)
+
+        discovery_text = "\n".join(message["content"] for message in calls[0]["messages"])
+        self.assertIn("Create a ... Gobii", discovery_text)
+        self.assertIn("Scheduled or recurring Gobii setup", discovery_text)
+        self.assertIn("sends check-ins", discovery_text)
+
+    def test_skill_discovery_retries_omitted_positive_search_once(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        calls = []
+
+        def fake_run_tool_completion(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return []
+            if len(calls) == 2:
+                return [{"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "upload file to Gobii"}}]
+            return [
+                {
+                    "name": ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+                    "arguments": {"skill_keys": ["meta_gobii"]},
+                }
+            ]
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
+            discovery_calls = scenario._run_skill_discovery(_case("no_schedule_upload_files_only"), simulated=False)
+
+        self.assertEqual([call["name"] for call in discovery_calls], [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME])
+        self.assertEqual(len(calls), 3)
+        retry_text = "\n".join(message["content"] for message in calls[1]["messages"])
+        self.assertIn("previous response returned no tool call", retry_text)
+        self.assertIn("uploads files to", retry_text)
+
+    def test_skill_discovery_does_not_retry_negative_search_omission(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        calls = []
+
+        def fake_run_tool_completion(**kwargs):
+            calls.append(kwargs)
+            return []
+
+        with patch.object(scenario, "_run_tool_completion", side_effect=fake_run_tool_completion):
+            discovery_calls = scenario._run_skill_discovery(_case("negative_content_task"), simulated=False)
+
+        self.assertEqual(discovery_calls, [])
+        self.assertEqual(len(calls), 1)
+
+    def test_schedule_action_schema_defines_existing_gobii_updates(self):
+        schedule_policy = _record_plan_tool()["function"]["parameters"]["properties"]["schedule_policy"]
+        schedule_action = schedule_policy["properties"]["schedule_action"]
+
+        self.assertIn("target Gobii lifecycle", schedule_action["description"])
+        self.assertIn("existing named Gobii", schedule_action["description"])
+
     def test_standalone_meta_gobii_eval_command_is_removed(self):
         command_path = (
             Path(__file__).resolve().parents[2]
@@ -205,6 +354,49 @@ class MetaGobiiEvalScoringTests(TestCase):
         self.assertTrue(scores["schedule_scope"][0])
         self.assertTrue(scores["team_design"][0])
 
+    def test_single_customer_success_follow_up_does_not_require_peer_link(self):
+        case = _case("ambiguous_customer_success_follow_up")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "customer success Gobii"}},
+                {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME, "arguments": {"skill_keys": ["meta_gobii"]}},
+            ],
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_list_agents",
+                    "meta_gobii_get_agent_config_options",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": ["meta_gobii_list_agents", "meta_gobii_get_agent_config_options"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 1,
+                "planned_role_names": ["Customer Success Churn Follow-up Gobii"],
+                "extra_scope_items": [],
+                "contact_output_policy": "No contact output involved.",
+                "schedule_policy": _no_schedule_policy(),
+            },
+            response_args={
+                "response_text": "One customer success Gobii for churn-risk follow-up. Please approve.",
+                "proposed_roles": [
+                    {
+                        "name": "Customer Success Churn Follow-up Gobii",
+                        "responsibility": "Coordinate churn-risk follow-up with the account owner.",
+                    }
+                ],
+                "proposed_links": [],
+                "initial_briefings": ["Customer Success Churn Follow-up Gobii: coordinate with the account owner."],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertTrue(scores["tool_plan"][0])
+        self.assertTrue(scores["team_design"][0])
+
     def test_negative_content_case_fails_if_meta_gobii_is_selected(self):
         case = _case("negative_content_task")
 
@@ -253,6 +445,53 @@ class MetaGobiiEvalScoringTests(TestCase):
 
         self.assertFalse(scores["confirmation_policy"][0])
 
+    def test_avoided_scope_notes_do_not_count_as_planned_extra_scope(self):
+        case = _case("chaos_broad_management_requires_confirmation")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_list_agent_links"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [
+                    "Unrequested schedules/cadences",
+                    "Not included: contact changes",
+                    "Unrequested intelligence tier changes",
+                    "Schedules not requested - will not add recurring cadences",
+                    "Files not requested - will not upload files",
+                ],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+
+    def test_requested_high_impact_actions_do_not_count_as_extra_scope(self):
+        case = _case("chaos_broad_management_requires_confirmation")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            plan_args={
+                "ordered_tools": ["meta_gobii_list_agents", "meta_gobii_archive_agent", "meta_gobii_link_agents"],
+                "tools_before_approval": ["meta_gobii_list_agents"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [
+                    "Archiving redundant agents after inspection",
+                    "Relinking agents after graph audit",
+                ],
+                "contact_output_policy": "",
+            },
+        )
+
+        self.assertTrue(scores["minimal_action"][0])
+
     def test_contact_case_requires_safe_contact_output_policy(self):
         case = _case("contact_approve_internal")
 
@@ -287,6 +526,34 @@ class MetaGobiiEvalScoringTests(TestCase):
 
         self.assertFalse(unsafe_scores["contact_safety"][0])
         self.assertTrue(safe_scores["contact_safety"][0])
+
+    def test_contact_case_accepts_endpoint_setting_as_supporting_receive_updates(self):
+        case = _case("contact_approve_internal")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "approve contact"}},
+                {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME, "arguments": {"skill_keys": ["meta_gobii"]}},
+            ],
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_list_agents",
+                    "meta_gobii_list_pending_contacts",
+                    "meta_gobii_approve_pending_contact",
+                    "meta_gobii_set_preferred_contact_endpoint",
+                ],
+                "tools_before_approval": [],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 0,
+                "planned_role_names": [],
+                "extra_scope_items": [],
+                "contact_output_policy": "Avoid echoing full email addresses; use a masked value.",
+            },
+        )
+
+        self.assertTrue(scores["tool_plan"][0])
 
     def test_spawn_agent_disabled_guardrail_rejects_legacy_direct_tool(self):
         case = _case("spawn_agent_disabled_guardrail")
@@ -414,6 +681,46 @@ class MetaGobiiEvalScoringTests(TestCase):
 
         self.assertFalse(missing_schedule_scores["schedule_scope"][0])
         self.assertTrue(good_scores["schedule_scope"][0])
+
+    def test_required_role_terms_accept_basic_singular_plural_matches(self):
+        case = _case("schedule_weekday_ops_checkin_team")
+
+        scores = score_meta_gobii_case(
+            case,
+            skill_selected=True,
+            discovery_calls=[
+                {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "ops team"}},
+                {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME, "arguments": {"skill_keys": ["meta_gobii"]}},
+            ],
+            plan_args={
+                "ordered_tools": [
+                    "meta_gobii_get_agent_config_options",
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "tools_before_approval": ["meta_gobii_get_agent_config_options"],
+                "needs_human_confirmation": True,
+                "planned_agent_count": 2,
+                "planned_role_names": ["Blocker Collector", "Standup Drafter"],
+                "extra_scope_items": [],
+                "schedule_policy": _explicit_schedule_policy(cadence="weekday morning"),
+                "contact_output_policy": "",
+            },
+            response_args={
+                "response_text": "A blocker collector and a standup drafter will be linked. Please approve.",
+                "proposed_roles": [
+                    {"name": "Blocker Collector", "responsibility": "Gather each launch blocker."},
+                    {"name": "Standup Drafter", "responsibility": "Draft the standup update."},
+                ],
+                "proposed_links": ["Blocker Collector <-> Standup Drafter"],
+                "initial_briefings": ["Blocker Collector: gather every blocker."],
+                "asks_for_approval": True,
+                "extra_scope_items": [],
+            },
+        )
+
+        self.assertTrue(scores["team_design"][0])
 
     def test_ambiguous_schedule_case_rejects_invented_cadence_but_accepts_clarification(self):
         case = _case("ambiguous_monitor_competitor_pricing")
@@ -649,9 +956,171 @@ class MetaGobiiEvalScenarioTests(TestCase):
         self.assertEqual(statuses["select_system_skill"], EvalRunTask.Status.PASSED)
         self.assertEqual(statuses["plan_meta_gobii_tools"], EvalRunTask.Status.PASSED)
 
+    def test_discovery_prompt_covers_design_before_creation_requests(self):
+        scenario = ScenarioRegistry.get("meta_gobii_team_management_capability_test")
+
+        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
+            discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
+
+        self.assertEqual(discovery_calls, [])
+        messages = mock_completion.call_args.kwargs["messages"]
+        prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
+        self.assertIn("design", prompt_text)
+        self.assertIn("links", prompt_text)
+        self.assertIn("briefings", prompt_text)
+        self.assertIn("before creation", prompt_text)
+
+    def test_discovery_prompt_covers_demo_setup_team_requests(self):
+        scenario = ScenarioRegistry.get("meta_gobii_no_schedule_demo_team")
+
+        with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
+            discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
+
+        self.assertEqual(discovery_calls, [])
+        messages = mock_completion.call_args.kwargs["messages"]
+        prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
+        self.assertIn("demo", prompt_text)
+        self.assertIn("setup-only", prompt_text)
+        self.assertIn("does not make gobii creation content-only", prompt_text)
+
+    def test_response_normalization_derives_missing_briefings_from_plan(self):
+        scenario = ScenarioRegistry.get("meta_gobii_no_schedule_recruiting_project_team")
+
+        response_args = scenario._normalize_response_args(
+            scenario.case,
+            {
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_link_agents",
+                    "meta_gobii_send_agent_message",
+                ],
+                "needs_human_confirmation": True,
+                "planned_role_names": ["Sourcing", "Screening", "Coordinator"],
+                "extra_scope_items": [],
+            },
+            {
+                "response_text": "Please approve this plan.",
+                "proposed_roles": [{"name": "Sourcing", "responsibility": "Own sourcing."}],
+                "proposed_links": [],
+                "initial_briefings": [],
+                "asks_for_approval": False,
+            },
+        )
+
+        self.assertTrue(response_args["asks_for_approval"])
+        self.assertTrue(response_args["proposed_links"])
+        self.assertEqual(len(response_args["initial_briefings"]), 3)
+
 
 @tag("batch_eval_fingerprint")
 class MetaGobiiLocalEvalSetupTests(TestCase):
+    def test_eager_sqlite_execution_stays_serial(self):
+        plan = build_eval_execution_plan(
+            sync_mode=False,
+            celery_task_always_eager=True,
+            using_sqlite=True,
+            requested_max_concurrency=8,
+            queued_run_count=169,
+        )
+
+        self.assertEqual(plan.effective_max_concurrency, 1)
+        self.assertFalse(plan.use_eager_thread_pool)
+        self.assertTrue(plan.warn_sqlite_serial)
+
+    def test_eager_postgres_execution_uses_bounded_thread_pool(self):
+        plan = build_eval_execution_plan(
+            sync_mode=False,
+            celery_task_always_eager=True,
+            using_sqlite=False,
+            requested_max_concurrency=8,
+            queued_run_count=169,
+        )
+
+        self.assertEqual(plan.effective_max_concurrency, 8)
+        self.assertTrue(plan.use_eager_thread_pool)
+        self.assertFalse(plan.warn_sqlite_serial)
+
+    def test_fake_redis_supports_redlock_scripts_for_local_eval_processing(self):
+        from pottery import Redlock
+
+        from config.redis_client import _FakeRedis
+
+        redis_client = _FakeRedis()
+        lock = Redlock(
+            key="agent-event-processing:test-agent",
+            masters={redis_client},
+            auto_release_time=5,
+        )
+
+        self.assertTrue(lock.acquire(blocking=False))
+        self.assertGreater(lock.locked(), 0)
+        lock.extend()
+        self.assertGreater(lock.locked(), 0)
+        lock.release()
+        self.assertEqual(lock.locked(), 0)
+
+    def test_fake_redis_supports_agent_event_streams_for_local_eval_processing(self):
+        from config.redis_client import _FakeRedis
+
+        redis_client = _FakeRedis()
+        stream_key = "agent:events:test-agent:stream"
+
+        self.assertEqual(redis_client.publish("agent:events:test-agent", "{}"), 0)
+        first_id = redis_client.xadd(stream_key, {"data": "{\"type\":\"processing_complete\"}"})
+
+        messages = redis_client.xread({stream_key: "0-0"}, count=50, block=1)
+        self.assertEqual(messages, [(stream_key, [(first_id, {"data": "{\"type\":\"processing_complete\"}"})])])
+        self.assertEqual(redis_client.xread({stream_key: first_id}, count=50, block=1), [])
+
+    def test_local_eval_schema_compat_adds_missing_debug_artifacts_column(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_evalruntask"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        self.assertEqual(added, 1)
+        self.assertEqual(schema_editor.added_fields[0][1].column, "debug_artifacts")
+        self.assertIn("api_evalruntask.debug_artifacts", stdout.getvalue())
+
     def test_local_openrouter_profile_seed_uses_env_var_name_without_secret_output(self):
         stdout = StringIO()
         fake_secret = "sk-test-secret-value"
@@ -735,7 +1204,20 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertIn("Available eval suites", output)
         self.assertIn("meta_gobii", output)
         self.assertIn("meta_gobii_positive_team_creation", output)
+        self.assertIn("tier=core", output)
+        self.assertIn("category=meta_gobii", output)
         self.assertIn("openrouter-deepseek-v4-flash", output)
+
+    def test_run_evals_list_applies_metadata_filters(self):
+        stdout = StringIO()
+
+        call_command("run_evals", "--list", "--tier", "smoke", stdout=stdout)
+
+        output = stdout.getvalue()
+        self.assertIn("Scenario filters: tier=smoke", output)
+        self.assertIn("echo_response", output)
+        self.assertIn("weather_lookup", output)
+        self.assertNotIn("meta_gobii_positive_team_creation tier=core", output)
 
     def test_run_evals_lists_seeded_routing_profiles(self):
         stdout = StringIO()
@@ -798,3 +1280,59 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             .exclude(status=EvalRunTask.Status.PASSED)
             .exists()
         )
+
+    def test_run_evals_filters_scenarios_by_tag(self):
+        stdout = StringIO()
+
+        call_command(
+            "run_evals",
+            "--suite",
+            "meta_gobii",
+            "--tag",
+            "contact_safety",
+            "--sync",
+            "--n-runs",
+            "1",
+            "--simulated",
+            stdout=stdout,
+        )
+
+        suite_run = EvalSuiteRun.objects.latest("created_at")
+        self.assertEqual(suite_run.suite_slug, "meta_gobii")
+        scenario_slugs = set(suite_run.runs.values_list("scenario_slug", flat=True))
+        self.assertEqual(
+            scenario_slugs,
+            {
+                "meta_gobii_contact_approve_internal",
+                "meta_gobii_no_schedule_approve_contact_only",
+            },
+        )
+        self.assertIn("Applying scenario filters: tag=contact_safety", stdout.getvalue())
+
+    def test_run_evals_repeated_routing_profiles_create_matrix_suite_runs(self):
+        stdout = StringIO()
+
+        ensure_eval_local_routing_profiles()
+        call_command(
+            "run_evals",
+            "--scenario",
+            "meta_gobii_negative_content_task",
+            "--sync",
+            "--n-runs",
+            "1",
+            "--simulated",
+            "--routing-profile",
+            "openrouter-deepseek-v4-flash",
+            "--routing-profile",
+            "openrouter-qwen",
+            stdout=stdout,
+        )
+
+        suite_runs = list(EvalSuiteRun.objects.order_by("created_at"))
+        self.assertEqual(len(suite_runs), 2)
+        self.assertEqual({suite.launch_config["matrix_profile"] for suite in suite_runs}, {
+            "openrouter-deepseek-v4-flash",
+            "openrouter-qwen",
+        })
+        self.assertTrue(all(suite.llm_routing_profile_id for suite in suite_runs))
+        self.assertIn("routing-profile matrix with 2 profiles", stdout.getvalue())

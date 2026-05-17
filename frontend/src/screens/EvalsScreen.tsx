@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { AlertTriangle, Beaker, ChevronDown, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { AlertTriangle, Beaker, ChevronDown, Loader2, Play, RefreshCcw, CheckSquare, Minus, Plus, Search, Tags } from 'lucide-react'
 
 import {
   createGlobalSkillEvalRun,
@@ -7,6 +7,7 @@ import {
   fetchGlobalSkillEvalLauncher,
   fetchSuiteRuns,
   fetchSuites,
+  type EvalScenario,
   type EvalSuite,
   type EvalSuiteRun,
   type GlobalSkillEvalSkill,
@@ -33,6 +34,7 @@ const formatPassRate = (taskTotals: EvalSuiteRun['task_totals'] | null | undefin
 
 export function EvalsScreen() {
   const [suites, setSuites] = useState<EvalSuite[]>([])
+  const [scenarios, setScenarios] = useState<EvalScenario[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [globalSkills, setGlobalSkills] = useState<GlobalSkillEvalSkill[]>([])
   const [globalSecretsUrl, setGlobalSecretsUrl] = useState<string>('/console/secrets/')
@@ -49,6 +51,11 @@ export function EvalsScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [routingProfiles, setRoutingProfiles] = useState<RoutingProfileListItem[]>([])
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const [scenarioQuery, setScenarioQuery] = useState('')
+  const [scenarioTierFilter, setScenarioTierFilter] = useState('all')
+  const [scenarioCategoryFilter, setScenarioCategoryFilter] = useState('all')
+  const [scenarioCostFilter, setScenarioCostFilter] = useState('all')
+  const [launchingScenarioSlug, setLaunchingScenarioSlug] = useState<string | null>(null)
 
   const listRefreshInFlight = useRef(false)
   const runTypeFilterOptions: { value: 'all' | EvalSuiteRun['run_type']; label: string }[] = [
@@ -62,6 +69,7 @@ export function EvalsScreen() {
     try {
       const result = await fetchSuites()
       setSuites(result.suites)
+      setScenarios(result.scenarios || [])
     } catch (error) {
       console.error(error)
       setErrorMessage('Unable to load suites right now.')
@@ -147,6 +155,42 @@ export function EvalsScreen() {
 
   const selectedGlobalSkill = globalSkills.find((skill) => skill.id === selectedGlobalSkillId) || null
   const hasMissingGlobalSkillSecrets = Boolean(selectedGlobalSkill?.missing_required_secrets.length)
+  const scenarioTierOptions = useMemo(
+    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.tier).filter(Boolean))).sort(),
+    [scenarios],
+  )
+  const scenarioCategoryOptions = useMemo(
+    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.category).filter(Boolean))).sort(),
+    [scenarios],
+  )
+  const scenarioCostOptions = useMemo(
+    () => Array.from(new Set(scenarios.map((scenario) => scenario.metadata.cost_class).filter(Boolean))).sort(),
+    [scenarios],
+  )
+  const filteredScenarios = useMemo(() => {
+    const query = scenarioQuery.trim().toLowerCase()
+    return scenarios.filter((scenario) => {
+      const metadata = scenario.metadata
+      if (scenarioTierFilter !== 'all' && metadata.tier !== scenarioTierFilter) return false
+      if (scenarioCategoryFilter !== 'all' && metadata.category !== scenarioCategoryFilter) return false
+      if (scenarioCostFilter !== 'all' && metadata.cost_class !== scenarioCostFilter) return false
+      if (!query) return true
+      const haystack = [
+        scenario.slug,
+        scenario.description,
+        metadata.category,
+        metadata.tier,
+        metadata.cost_class,
+        metadata.expected_runtime,
+        metadata.owner,
+        metadata.area,
+        ...metadata.tags,
+        ...scenario.suite_slugs,
+      ].join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [scenarios, scenarioQuery, scenarioTierFilter, scenarioCategoryFilter, scenarioCostFilter])
+  const visibleScenarios = filteredScenarios.slice(0, 18)
 
   const handleLaunch = async () => {
     setLaunching(true)
@@ -165,6 +209,25 @@ export function EvalsScreen() {
       setErrorMessage('Failed to launch evals.')
     } finally {
       setLaunching(false)
+    }
+  }
+
+  const handleScenarioLaunch = async (scenario: EvalScenario) => {
+    setLaunchingScenarioSlug(scenario.slug)
+    setErrorMessage(null)
+    try {
+      await createSuiteRuns({
+        scenario_slugs: [scenario.slug],
+        agent_strategy: 'ephemeral_per_scenario',
+        n_runs: clampRunCount(1),
+        llm_routing_profile_id: selectedProfileId,
+      })
+      await loadSuiteRuns()
+    } catch (error) {
+      console.error(error)
+      setErrorMessage('Failed to launch scenario eval.')
+    } finally {
+      setLaunchingScenarioSlug(null)
     }
   }
 
@@ -350,6 +413,84 @@ export function EvalsScreen() {
               <p className="text-sm font-medium">No suites registered.</p>
             </div>
           )}
+        </div>
+      </section>
+
+      <section className="card overflow-hidden" style={{ padding: 0 }}>
+        <div className="bg-gradient-to-r from-sky-50/90 to-teal-50/90 border-b border-sky-100 px-6 py-4">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-900 uppercase tracking-wide">Scenario Catalog</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Find and launch one focused eval without running a whole suite.</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="search"
+                  value={scenarioQuery}
+                  onChange={(event) => setScenarioQuery(event.target.value)}
+                  placeholder="Search scenarios"
+                  className="w-56 rounded-lg border border-sky-100 bg-white pl-9 pr-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+              <CatalogSelect value={scenarioTierFilter} onChange={setScenarioTierFilter} options={scenarioTierOptions} label="Tier" />
+              <CatalogSelect value={scenarioCategoryFilter} onChange={setScenarioCategoryFilter} options={scenarioCategoryOptions} label="Category" />
+              <CatalogSelect value={scenarioCostFilter} onChange={setScenarioCostFilter} options={scenarioCostOptions} label="Cost" />
+            </div>
+          </div>
+        </div>
+        <div className="divide-y divide-sky-50">
+          {visibleScenarios.map((scenario) => {
+            const metadata = scenario.metadata
+            const isLaunching = launchingScenarioSlug === scenario.slug
+            return (
+              <div key={scenario.slug} className="flex flex-col gap-4 bg-white p-5 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-mono text-sm font-bold text-slate-900">{scenario.slug}</span>
+                    <CatalogChip tone="blue">{metadata.tier}</CatalogChip>
+                    <CatalogChip tone="teal">{metadata.category}</CatalogChip>
+                    <CatalogChip tone={metadata.cost_class === 'high' ? 'amber' : 'slate'}>{`${metadata.cost_class} cost`}</CatalogChip>
+                    {metadata.supports_simulation ? <CatalogChip tone="emerald">simulated</CatalogChip> : null}
+                  </div>
+                  <p className="mt-2 max-w-4xl text-sm leading-relaxed text-slate-600">
+                    {scenario.description || 'No description provided.'}
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                    <span>{pluralize(scenario.task_count, 'task')}</span>
+                    <span>Runtime {metadata.expected_runtime}</span>
+                    {scenario.suite_slugs.length ? <span>Suites: {scenario.suite_slugs.slice(0, 3).join(', ')}</span> : null}
+                    {metadata.tags.length ? (
+                      <span className="inline-flex items-center gap-1">
+                        <Tags className="h-3 w-3" />
+                        {metadata.tags.slice(0, 5).join(', ')}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-2 self-start rounded-lg bg-slate-900 px-3 py-2 text-xs font-bold text-white shadow-sm transition-colors hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-2 disabled:opacity-50"
+                  onClick={() => handleScenarioLaunch(scenario)}
+                  disabled={Boolean(launchingScenarioSlug)}
+                >
+                  {isLaunching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
+                  Run Scenario
+                </button>
+              </div>
+            )
+          })}
+          {!visibleScenarios.length && (
+            <div className="bg-white p-10 text-center text-sm font-medium text-slate-500">
+              No scenarios match the current filters.
+            </div>
+          )}
+          {filteredScenarios.length > visibleScenarios.length ? (
+            <div className="bg-white px-6 py-3 text-xs font-medium text-slate-500">
+              Showing {visibleScenarios.length} of {filteredScenarios.length} matching scenarios. Narrow the filters to launch a specific one.
+            </div>
+          ) : null}
         </div>
       </section>
 
@@ -634,5 +775,51 @@ export function EvalsScreen() {
       </section>
 
     </div>
+  )
+}
+
+function CatalogSelect({
+  value,
+  onChange,
+  options,
+  label,
+}: {
+  value: string
+  onChange: (value: string) => void
+  options: string[]
+  label: string
+}) {
+  return (
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="appearance-none rounded-lg border border-sky-100 bg-white px-3 py-2 pr-8 text-sm font-semibold text-slate-700 focus:outline-none focus:ring-2 focus:ring-sky-500"
+        aria-label={label}
+      >
+        <option value="all">{label}</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {option}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-500" />
+    </div>
+  )
+}
+
+function CatalogChip({ children, tone = 'slate' }: { children: string; tone?: 'slate' | 'blue' | 'teal' | 'emerald' | 'amber' }) {
+  const classes = {
+    slate: 'bg-white text-slate-700 ring-slate-200',
+    blue: 'bg-blue-50 text-blue-700 ring-blue-200',
+    teal: 'bg-teal-50 text-teal-700 ring-teal-200',
+    emerald: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
+    amber: 'bg-amber-50 text-amber-800 ring-amber-200',
+  }
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold uppercase tracking-wide ring-1 ${classes[tone]}`}>
+      {children}
+    </span>
   )
 }

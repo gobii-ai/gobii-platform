@@ -10,12 +10,20 @@ import threading
 import time
 from itertools import count
 from unittest.mock import patch, MagicMock
-from django.test import TransactionTestCase, tag
+from django.test import TransactionTestCase, override_settings, tag
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from api.encryption import SecretsEncryption
-from api.models import PersistentAgent, BrowserUseAgent, BrowserUseAgentTask, BrowserConfig, PersistentAgentSecret, TaskCredit
+from api.models import (
+    PersistentAgent,
+    BrowserUseAgent,
+    BrowserUseAgentTask,
+    BrowserConfig,
+    EvalRun,
+    PersistentAgentSecret,
+    TaskCredit,
+)
 from api.agent.core.budget import AgentBudgetManager, BudgetContext, set_current_context as set_budget_context
 from api.agent.tools.spawn_web_task import execute_spawn_web_task
 from constants.grant_types import GrantTypeChoices
@@ -223,6 +231,55 @@ class SpawnDepthTrackingTests(TransactionTestCase):
         task = BrowserUseAgentTask.objects.get(id=result["task_id"])
         self.assertEqual(task.billing_plan, "startup")
         self.assertFalse(task.billing_is_trial)
+
+    @override_settings(
+        BROWSER_USE_TASK_EXECUTION_DISABLED=True,
+        EVAL_BROWSER_TASK_SIMULATION_ENABLED=True,
+    )
+    @patch('api.tasks.browser_agent_tasks.process_browser_use_task')
+    def test_eval_weather_browser_task_returns_synchronous_simulated_result(self, mock_process_task):
+        run = EvalRun.objects.create(
+            scenario_slug="monitor_pollution",
+            agent=self.agent,
+            initiated_by=self.user,
+            status=EvalRun.Status.RUNNING,
+        )
+        set_budget_context(
+            BudgetContext(
+                agent_id=str(self.agent.id),
+                budget_id=self.budget_id,
+                branch_id=self.branch_id,
+                depth=0,
+                max_steps=100,
+                max_depth=3,
+                eval_run_id=str(run.id),
+            )
+        )
+
+        result = execute_spawn_web_task(
+            self.agent,
+            {
+                "prompt": (
+                    "Open http://localhost:8000/eval/sim/weather/ and report the pollution index."
+                ),
+                "requires_vision": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["result"]["pollution_index"], 55)
+        mock_process_task.delay.assert_not_called()
+        task = BrowserUseAgentTask.objects.get(id=result["task_id"])
+        self.assertEqual(task.status, BrowserUseAgentTask.StatusChoices.COMPLETED)
+        self.assertEqual(str(task.eval_run_id), str(run.id))
+        self.assertEqual(task.steps.get().result_value["pollution_status"], "Moderate")
+        self.assertEqual(
+            AgentBudgetManager.get_branch_depth(
+                agent_id=str(self.agent.id),
+                branch_id=self.branch_id,
+            ),
+            0,
+        )
 
     @patch('api.models.TaskCreditService.check_and_consume_credit_for_owner', return_value={"success": True, "credit": None, "error_message": None})
     @patch('api.tasks.browser_agent_tasks.process_browser_use_task')

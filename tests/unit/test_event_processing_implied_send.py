@@ -50,6 +50,9 @@ class ImpliedSendTests(TestCase):
         )
         self.task_credit_patcher.start()
         self.addCleanup(self.task_credit_patcher.stop)
+        self.follow_up_patcher = patch("api.agent.core.event_processing._schedule_agent_follow_up")
+        self.follow_up_patcher.start()
+        self.addCleanup(self.follow_up_patcher.stop)
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -61,6 +64,142 @@ class ImpliedSendTests(TestCase):
             charter="Test charter",
             browser_use_agent=browser_agent,
         )
+
+    def test_eval_mock_result_supports_url_rules(self):
+        mock_config = {
+            "http_request": {
+                "rules": [
+                    {
+                        "url_contains": "geocoding-api.open-meteo.com",
+                        "result": {"status": "ok", "content": {"results": []}},
+                    }
+                ],
+                "default": {"status": "ok", "content": '{"current_weather": "72F, Sunny"}'},
+            }
+        }
+
+        geocoding_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"url": "https://geocoding-api.open-meteo.com/v1/search?name=Frederick"},
+        )
+        forecast_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"url": "https://wttr.in/Frederick,MD?format=j1"},
+        )
+
+        self.assertEqual(geocoding_result["content"], {"results": []})
+        self.assertIn("current_weather", forecast_result["content"])
+
+    def test_http_request_params_strip_linkified_url_artifacts(self):
+        params = ep._normalize_tool_params(
+            "http_request",
+            {"url": 'https://releases.example.test/latest.json">https://releases.example.test/latest.json'},
+        )
+
+        self.assertEqual(params["url"], "https://releases.example.test/latest.json")
+
+    def test_skipped_progress_chat_keeps_batch_followup_required(self):
+        skipped_chat = ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=1,
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": "I've got the details. Let me deliver the structured results now.",
+                    "will_continue_work": True,
+                },
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id="call_chat",
+                explicit_continue=True,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=None,
+            ),
+            result={
+                "status": "ok",
+                "message": "Skipped routine progress-only chat message.",
+                "auto_sleep_ok": False,
+                "skipped": True,
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+        sqlite_stop = ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=2,
+                tool_name="sqlite_batch",
+                tool_params={"sql": "UPDATE charter SET content = content", "will_continue_work": False},
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id="call_sql",
+                explicit_continue=False,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=None,
+            ),
+            result={"status": "ok", "auto_sleep_ok": True},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [skipped_chat, sqlite_stop],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
+        self.assertFalse(finalized.message_delivery_ok)
+        self.assertIs(finalized.last_explicit_continue, False)
+
+    def test_delivered_progress_chat_marks_pending_reply(self):
+        progress_chat = ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=1,
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": "Let me pull those details now.",
+                    "will_continue_work": True,
+                },
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id="call_chat",
+                explicit_continue=True,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=None,
+            ),
+            result={
+                "status": "ok",
+                "message": "Web chat message sent.",
+                "auto_sleep_ok": False,
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [progress_chat],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.message_delivery_ok)
+        self.assertTrue(finalized.progress_message_delivery_ok)
+        self.assertFalse(finalized.terminal_message_delivery_ok)
 
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
@@ -115,7 +254,9 @@ class ImpliedSendTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertFalse(mock_send_chat.called)
@@ -182,7 +323,9 @@ class ImpliedSendTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertFalse(mock_send_chat.called)
@@ -234,6 +377,50 @@ class ImpliedSendTests(TestCase):
             description__startswith="Message delivery requires explicit send tools",
         ).first()
         self.assertIsNotNone(correction_step)
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_allows_eval_web_preferred_endpoint_without_active_session(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            owner_agent=None,
+        )
+        self.agent.execution_environment = "eval"
+        self.agent.preferred_contact_endpoint = endpoint
+        self.agent.save(update_fields=["execution_environment", "preferred_contact_endpoint"])
+
+        resp = self._mock_completion("Here are the bundled results.")
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertTrue(mock_send_chat.called)
+        params = mock_send_chat.call_args[0][1]
+        self.assertEqual(params["to_address"], endpoint.address)
+        self.assertEqual(params["body"], "Here are the bundled results.")
 
     def test_implied_send_prefers_deliverable_web_session(self):
         start_web_session(self.agent, self.user)
@@ -299,6 +486,162 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(mock_completion.call_count, 2)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_routes_blocking_question_to_human_input(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_request_human_input,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion(
+            "Before I start researching, which target account segment should I research?\n\n"
+            "- Enterprise\n"
+            "- Mid-market"
+        )
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertEqual(
+            params,
+            {
+                "question": "Before I start researching, which target account segment should I research?",
+                "will_continue_work": False,
+            },
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_implied_send_routes_would_you_like_question_to_human_input(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_request_human_input,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        resp = self._mock_completion(
+            "Which target account segment would you like me to research?\n\n"
+            "- Enterprise\n"
+            "- Mid-market\n"
+            "- SMB / Small business"
+        )
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertEqual(
+            params,
+            {
+                "question": "Which target account segment would you like me to research?",
+                "will_continue_work": False,
+            },
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_chat_blocking_question_routes_to_human_input(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_request_human_input,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_chat"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "body": "Before I start monitoring, which competitors should I track?",
+            }
+        )
+
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertEqual(
+            params,
+            {
+                "question": "Before I start monitoring, which competitors should I track?",
+                "will_continue_work": False,
+            },
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
@@ -359,6 +702,9 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         )
         self.task_credit_patcher.start()
         self.addCleanup(self.task_credit_patcher.stop)
+        self.follow_up_patcher = patch("api.agent.core.event_processing._schedule_agent_follow_up")
+        self.follow_up_patcher.start()
+        self.addCleanup(self.follow_up_patcher.stop)
 
         browser_agent = BrowserUseAgent.objects.create(
             user=self.user,
@@ -491,6 +837,8 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         )
 
         with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ), patch(
             "api.agent.core.event_processing._completion_with_failover",
             return_value=(
                 completion,
@@ -779,7 +1127,9 @@ class DailyLimitMessageOnlyModeTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         self.assertTrue(mock_send_chat.called)
@@ -832,7 +1182,9 @@ class DailyLimitMessageOnlyModeTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
         params = mock_send_chat.call_args[0][1]
@@ -939,6 +1291,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         self.assertIsNone(params.get("will_continue_work"))
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
@@ -947,6 +1300,7 @@ class DailyLimitMessageOnlyModeTests(TestCase):
         mock_completion,
         mock_build_prompt,
         mock_send_chat,
+        mock_request_human_input,
         _mock_credit,
     ):
         mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
@@ -982,11 +1336,15 @@ class DailyLimitMessageOnlyModeTests(TestCase):
             },
         )
 
-        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), patch(
+            "api.agent.core.event_processing._schedule_agent_follow_up",
+        ):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        params = mock_send_chat.call_args[0][1]
-        self.assertIsNone(params.get("will_continue_work"))
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertIs(params.get("will_continue_work"), False)
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_email", return_value={"status": "ok", "auto_sleep_ok": True})

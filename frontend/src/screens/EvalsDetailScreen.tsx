@@ -21,6 +21,16 @@ const formatTokens = (value?: number | null) => {
   return value.toLocaleString()
 }
 
+const formatDebugValue = (value: unknown) => {
+  if (value == null) return '—'
+  if (typeof value === 'string') return value
+  try {
+    return JSON.stringify(value, null, 2)
+  } catch {
+    return String(value)
+  }
+}
+
 const formatTs = (value: string | null | undefined) => {
   if (!value) return '—'
   try {
@@ -811,6 +821,9 @@ function TaskRow({ task }: { task: EvalTask }) {
   const isFail = task.status === 'failed' || task.status === 'errored'
   const costChip = task.total_cost != null ? formatCurrency(task.total_cost, 4) : '—'
   const creditChip = task.credits_cost != null ? `${task.credits_cost.toFixed(3)} cr` : '0 cr'
+  const debugEntries = Object.entries(task.debug_artifacts || {})
+  const artifactLinks = task.artifact_links || {}
+  const hasDebugContext = debugEntries.length > 0 || task.llm_question || task.llm_answer || artifactLinks.agent_audit_url
 
   return (
     <div className={`
@@ -836,6 +849,36 @@ function TaskRow({ task }: { task: EvalTask }) {
             {task.observed_summary}
           </div>
         )}
+        {hasDebugContext ? (
+          <details className="mt-2 rounded-lg bg-white p-2.5 text-xs ring-1 ring-slate-100">
+            <summary className="cursor-pointer font-semibold text-slate-700">Debug context</summary>
+            <div className="mt-2 space-y-2">
+              {artifactLinks.agent_audit_url ? (
+                <a
+                  href={artifactLinks.agent_audit_url}
+                  className="inline-flex items-center rounded bg-amber-50 px-2 py-1 font-semibold text-amber-800 ring-1 ring-amber-200 hover:bg-amber-100"
+                >
+                  Agent audit timeline
+                </a>
+              ) : null}
+              {task.llm_question || task.llm_answer ? (
+                <div className="space-y-1">
+                  {task.llm_model ? <div className="font-mono text-slate-500">Judge model: {task.llm_model}</div> : null}
+                  {task.llm_question ? <pre className="whitespace-pre-wrap rounded bg-white p-2 text-slate-600 ring-1 ring-slate-100">{task.llm_question}</pre> : null}
+                  {task.llm_answer ? <pre className="whitespace-pre-wrap rounded bg-white p-2 text-slate-600 ring-1 ring-slate-100">{task.llm_answer}</pre> : null}
+                </div>
+              ) : null}
+              {debugEntries.map(([key, value]) => (
+                <div key={key}>
+                  <div className="mb-1 font-mono text-[11px] font-bold uppercase tracking-wide text-slate-400">{key}</div>
+                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded bg-white p-2 text-slate-600 ring-1 ring-slate-100">
+                    {formatDebugValue(value)}
+                  </pre>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
         <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] uppercase tracking-wide text-slate-500">
           <span className="px-2 py-1 rounded-full bg-slate-100 font-semibold text-slate-700">{costChip}</span>
           <span className="px-2 py-1 rounded-full bg-blue-50 text-blue-700 font-semibold">{creditChip}</span>

@@ -1,17 +1,22 @@
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
+from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
-from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.search_tools import search_tools
-from api.agent.tools.tool_manager import get_enabled_tool_definitions
+from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
+from api.evals.scenarios.bitcoin_price_multiturn import is_supported_bitcoin_price_api_url
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    BehaviorMicroScenario,
     CommonUseCaseEvalDefinition,
+    CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
@@ -19,7 +24,7 @@ from api.evals.scenarios.behavior_micro import (
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
-    UPDATE_PLAN_POLICY_FORBID,
+    UPDATE_PLAN_POLICY_OPTIONAL,
     all_requests_have_options,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
@@ -30,16 +35,28 @@ from api.evals.scenarios.behavior_micro import (
     get_planning_mutation_calls_before_end_planning,
     tool_call_is_plan_activity,
 )
-from api.evals.stop_policy import should_stop_for_eval_policy
+from api.evals.scenarios.monitor_pollution import (
+    _charter_mentions_pollution_monitoring,
+    _schedule_is_reasonable_pollution_monitoring,
+)
+from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingleReplyScenario
+from api.evals.scenarios.weather_lookup import _is_free_weather_request
+from api.evals.stop_policy import (
+    should_stop_for_eval_policy,
+    sqlite_batch_is_only_eval_bookkeeping_read,
+    sqlite_batch_is_only_planning_state_read,
+)
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
     EvalRun,
+    EvalRunTask,
     PersistentAgent,
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentToolCall,
 )
@@ -87,7 +104,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             self.assertIsInstance(case.stop_after_success, bool)
             self.assertEqual(
                 case.update_plan_policy,
-                UPDATE_PLAN_POLICY_EXPECT if case.plan_expected else UPDATE_PLAN_POLICY_FORBID,
+                UPDATE_PLAN_POLICY_EXPECT if case.plan_expected else UPDATE_PLAN_POLICY_OPTIONAL,
             )
             self.assertEqual(
                 [task.name for task in registered[case.slug].tasks],
@@ -99,6 +116,21 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 ],
             )
 
+        brightdata_tools = {
+            tool_name
+            for case in COMMON_USE_CASE_EVAL_CASES
+            for tool_name in [*case.expected_tools, *case.forbidden_tools]
+            if tool_name.startswith("mcp_brightdata_")
+        }
+        self.assertTrue(brightdata_tools.issubset(EVAL_SYNTHETIC_TOOL_DEFINITIONS))
+        google_sheets_tools = {
+            tool_name
+            for case in COMMON_USE_CASE_EVAL_CASES
+            for tool_name in [*case.expected_tools, *case.forbidden_tools]
+            if tool_name.startswith("google_sheets-")
+        }
+        self.assertTrue(google_sheets_tools.issubset(EVAL_SYNTHETIC_TOOL_DEFINITIONS))
+
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
@@ -106,6 +138,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
         )
+        self.assertIn("Enterprise leads increased", by_slug["common_use_case_061_send_summary_email"].prompt)
+        self.assertIn("sqlite_batch", by_slug["common_use_case_062_send_attachment_email"].allowed_preamble_tools)
+        self.assertIn("Action items", by_slug["common_use_case_075_create_markdown_file"].prompt)
         self.assertEqual(by_slug["common_use_case_069_secure_api_key_request"].forbidden_tools, ())
         self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].allowed_preamble_tools, ("search_tools",))
         self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].allowed_preamble_tools, ("search_tools",))
@@ -130,12 +165,140 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_089_enable_database"].accepted_tool_alternatives,
             {"enable_database": ("sqlite_batch",)},
         )
-        self.assertTrue(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
-        self.assertTrue(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_031_linkedin_person_profile"].plan_expected)
+        self.assertEqual(
+            by_slug["common_use_case_031_linkedin_person_profile"].allowed_preamble_tools,
+            (
+                "search_tools",
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_web_data_linkedin_company_profile",
+            ),
+        )
+        self.assertFalse(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
+        self.assertIn("ET schedule", by_slug["common_use_case_093_schedule_weekly_report"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
+            {"mcp_brightdata_search_engine": ("mcp_brightdata_web_data_reddit_posts",)},
+        )
         self.assertEqual(
             by_slug["common_use_case_091_schedule_daily_digest"].accepted_tool_alternatives,
             {"update_schedule": ("sqlite_batch",)},
         )
+        self.assertIn(
+            "google_sheets-get-spreadsheet-by-id",
+            by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
+            {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
+        )
+        sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success(
+            "google_sheets-get-spreadsheet-by-id"
+        )
+        self.assertIn("Tasks", sheets_mock["content"]["worksheets"])
+        self.assertIn(
+            "mcp_brightdata_search_engine",
+            by_slug["common_use_case_096_schedule_price_alert"].allowed_preamble_tool_names(),
+        )
+        self.assertFalse(
+            ScenarioRegistry.get("common_use_case_090_sqlite_summarize_messages")._build_eval_stop_policy()[
+                "ignore_sqlite_eval_bookkeeping_reads"
+            ]
+        )
+
+    def test_eval_synthetic_tools_execute_without_external_integration_handlers(self):
+        user = get_user_model().objects.create_user(username="eval-synth")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            browser_use_agent=browser_agent,
+            name="Eval agent",
+            execution_environment="eval",
+        )
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name="mcp_brightdata_search_engine",
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name="mcp_brightdata_search_engine",
+        )
+
+        result = execute_enabled_tool(agent, "mcp_brightdata_search_engine", {"query": "pricing"})
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["tool"], "mcp_brightdata_search_engine")
+
+    def test_weather_request_validation_is_deterministic(self):
+        valid, reason = _is_free_weather_request({"url": "https://wttr.in/Frederick,MD?format=j1"})
+        self.assertTrue(valid, reason)
+
+        valid, reason = _is_free_weather_request(
+            {"url": "https://api.open-meteo.com/v1/forecast?latitude=39.4143&longitude=-77.4105"}
+        )
+        self.assertTrue(valid, reason)
+
+        invalid, reason = _is_free_weather_request(
+            {"url": "https://api.open-meteo.com/v1/forecast?latitude=38.9072&longitude=-77.0369"}
+        )
+        self.assertFalse(invalid)
+        self.assertIn("does not target Frederick", reason)
+
+        invalid, reason = _is_free_weather_request(
+            {"url": "https://geocoding-api.open-meteo.com/v1/search?name=Frederick,MD"}
+        )
+        self.assertFalse(invalid)
+        self.assertIn("geocoding only resolves coordinates", reason)
+
+        invalid, reason = _is_free_weather_request({"url": "https://example.test/weather"})
+        self.assertFalse(invalid)
+        self.assertIn("supported free weather API", reason)
+
+    def test_sqlite_agent_config_reads_are_common_use_case_bookkeeping(self):
+        call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT * FROM __agent_config WHERE id = 1;"},
+        )
+
+        self.assertTrue(sqlite_batch_is_only_planning_state_read(call))
+
+        result_table_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT result_id, tool_name FROM __tool_results ORDER BY created_at DESC;"},
+        )
+        self.assertTrue(sqlite_batch_is_only_eval_bookkeeping_read(result_table_call))
+
+        messages_table_call = SimpleNamespace(
+            tool_name="sqlite_batch",
+            tool_params={"sql": "SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 5;"},
+        )
+        self.assertTrue(sqlite_batch_is_only_eval_bookkeeping_read(messages_table_call))
+
+    def test_bitcoin_price_api_validation_accepts_supported_direct_price_apis(self):
+        self.assertTrue(
+            is_supported_bitcoin_price_api_url(
+                "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+            )
+        )
+        self.assertTrue(is_supported_bitcoin_price_api_url("https://api.coindesk.com/v1/bpi/currentprice.json"))
+        self.assertTrue(is_supported_bitcoin_price_api_url("https://api.coindesk.com/v1/bpi/currentprice/USD.json"))
+        self.assertFalse(is_supported_bitcoin_price_api_url("https://api.coindesk.com/v1/bpi/currentprice/BTC.json"))
+        self.assertFalse(is_supported_bitcoin_price_api_url("https://example.test/bitcoin"))
+
+    def test_monitor_pollution_checks_are_deterministic(self):
+        charter_ok, charter_reason = _charter_mentions_pollution_monitoring(
+            "Monitor the pollution index in Washington DC every day."
+        )
+        self.assertTrue(charter_ok, charter_reason)
+
+        missing_charter_ok, missing_charter_reason = _charter_mentions_pollution_monitoring(
+            "Check the weather every day."
+        )
+        self.assertFalse(missing_charter_ok, missing_charter_reason)
+
+        schedule_ok, schedule_reason = _schedule_is_reasonable_pollution_monitoring("0 9 * * *")
+        self.assertTrue(schedule_ok, schedule_reason)
+
+        too_frequent_ok, too_frequent_reason = _schedule_is_reasonable_pollution_monitoring("* * * * *")
+        self.assertFalse(too_frequent_ok, too_frequent_reason)
 
 
 @tag("batch_eval_fingerprint")
@@ -225,6 +388,13 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(row.tool_name, "apollo_io-search-accounts")
         self.assertIn("apollo_io-search-accounts", self._tool_definition_names(self.agent))
 
+    def test_common_use_case_stop_policy_allows_tool_discovery_for_eval_synthetic_tools(self):
+        scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
+
+        policy = scenario._build_eval_stop_policy()
+
+        self.assertIn("search_tools", policy["allowed_tool_names"])
+
     @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=False)
     @patch("api.agent.tools.search_tools.enable_tools")
     @patch("api.agent.tools.search_tools.run_completion")
@@ -308,8 +478,10 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertNotIn("update_plan", simple.expected_tool_names())
         self.assertNotIn("update_plan", simple.forbidden_tool_names())
+        self.assertEqual(simple.update_plan_policy, UPDATE_PLAN_POLICY_OPTIONAL)
         self.assertNotIn("update_plan", planned.expected_tool_names())
         self.assertNotIn("update_plan", planned.forbidden_tool_names())
+        self.assertEqual(planned.update_plan_policy, UPDATE_PLAN_POLICY_EXPECT)
 
     def test_common_eval_definition_requires_plan_expected_for_update_plan(self):
         with self.assertRaises(ValueError):
@@ -322,6 +494,71 @@ class BehaviorMicroHelperTests(TestCase):
                     "plan_expected": True,
                 }
             )
+
+    @patch("api.evals.scenarios.permit_followup_single_reply.process_agent_events")
+    def test_permit_followup_prompt_under_test_is_current_inbound(self, mock_process_agent_events):
+        prompt_body = (
+            "I filled in the Example Borough zoning permit. Where's your source that I need a building permit?"
+        )
+
+        def send_one_reply(agent_id, **_kwargs):
+            agent = PersistentAgent.objects.get(id=agent_id)
+            inbound = (
+                PersistentAgentMessage.objects.filter(
+                    owner_agent_id=agent_id,
+                    is_outbound=False,
+                    body=prompt_body,
+                )
+                .order_by("-timestamp")
+                .get()
+            )
+            PersistentAgentMessage.objects.create(
+                is_outbound=True,
+                from_endpoint=agent.preferred_contact_endpoint,
+                conversation=inbound.conversation,
+                body=(
+                    "The source is the Example Borough deck handout: decks over 30 inches above grade "
+                    "need a UCC building permit."
+                ),
+                raw_payload={"source": "test_reply"},
+                owner_agent_id=agent_id,
+            )
+
+        mock_process_agent_events.side_effect = send_one_reply
+        for index, task in enumerate(PermitFollowupSingleReplyScenario.tasks, start=1):
+            EvalRunTask.objects.create(
+                run=self.run,
+                sequence=index,
+                name=task.name,
+                assertion_type=task.assertion_type,
+            )
+
+        PermitFollowupSingleReplyScenario().run(str(self.run.id), str(self.agent.id))
+
+        prompts = list(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                is_outbound=False,
+                body=prompt_body,
+            ).order_by("timestamp")
+        )
+        self.assertEqual(len(prompts), 1)
+        self.assertEqual(prompts[0].raw_payload, {"source": "eval_prompt"})
+        self.assertGreater(prompts[0].timestamp, timezone.now() - timedelta(minutes=1))
+        self.assertTrue(
+            PersistentAgentToolCall.objects.filter(
+                step__agent=self.agent,
+                tool_name="browser_task",
+                result__icontains="deck-permit-handout.pdf",
+            ).exists()
+        )
+
+        statuses = {
+            task.name: task.status
+            for task in EvalRunTask.objects.filter(run=self.run).order_by("sequence")
+        }
+        self.assertEqual(statuses["inject_prompt"], EvalRunTask.Status.PASSED)
+        self.assertEqual(statuses["verify_single_reply"], EvalRunTask.Status.PASSED)
 
     def test_common_eval_definition_rejects_expected_params_for_multi_tool_cases(self):
         with self.assertRaisesMessage(
@@ -384,6 +621,21 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(
             get_common_use_case_tool_calls_for_run(self.run.id, tool_names=["sqlite_batch"]),
             [mixed_batch],
+        )
+
+    def test_common_use_case_tool_calls_can_count_sqlite_message_history_when_expected(self):
+        message_history_read = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "SELECT * FROM __messages ORDER BY timestamp DESC LIMIT 5"},
+        )
+
+        self.assertEqual(get_common_use_case_tool_calls_for_run(self.run.id), [])
+        self.assertEqual(
+            get_common_use_case_tool_calls_for_run(
+                self.run.id,
+                include_sqlite_eval_bookkeeping_reads=True,
+            ),
+            [message_history_read],
         )
 
     def test_first_common_use_case_tool_call_ignores_chat_and_config_mutation(self):
@@ -548,6 +800,27 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertEqual(calls, [before])
+
+    def test_record_forbidden_before_end_handles_tool_call_primary_key(self):
+        EvalRunTask.objects.create(
+            run=self.run,
+            sequence=1,
+            name="verify_no_work_before_end_planning",
+            assertion_type="manual",
+        )
+        self._add_tool_call("http_request")
+
+        passed = BehaviorMicroScenario()._record_forbidden_before_end(
+            self.run.id,
+            None,
+            "verify_no_work_before_end_planning",
+            {"http_request"},
+        )
+
+        self.assertFalse(passed)
+        task = self.run.tasks.get(name="verify_no_work_before_end_planning")
+        self.assertEqual(task.status, EvalRunTask.Status.FAILED)
+        self.assertIn("http_request", task.observed_summary)
 
     def test_planning_mutation_detection_ignores_reads_and_after_end_planning(self):
         self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})

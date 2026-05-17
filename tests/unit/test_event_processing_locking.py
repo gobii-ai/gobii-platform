@@ -2,7 +2,7 @@
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from api.agent.core import event_processing as ep
 from api.agent.core.processing_flags import (
@@ -87,6 +87,7 @@ class EventProcessingLockFallbackTests(TestCase):
         self.redis.delete(pending_set_key())
         self.redis.delete(pending_drain_schedule_key())
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.Redlock", new=_BlockedRedlock)
     def test_lock_busy_schedules_pending_drain(self, mock_apply_async):
@@ -98,6 +99,7 @@ class EventProcessingLockFallbackTests(TestCase):
         self.assertTrue(self.redis.sismember(pending_set_key(), str(self.agent.id)))
         self.assertTrue(self.redis.exists(pending_drain_schedule_key()))
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.Redlock", new=_BlockedRedlock)
     def test_lock_busy_does_not_reschedule_when_drain_slot_claimed(self, mock_apply_async):

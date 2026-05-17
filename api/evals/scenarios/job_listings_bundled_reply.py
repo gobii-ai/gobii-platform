@@ -3,10 +3,23 @@ import time
 from typing import Set
 from urllib.parse import urlsplit
 
+from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
-from api.models import EvalRunTask, PersistentAgentMessage
+from api.models import EvalRunTask, PersistentAgent, PersistentAgentEnabledTool, PersistentAgentMessage
+
+
+JOB_LISTINGS_FIXTURE = (
+    "Three current remote Full Stack Software Engineer listings:\n"
+    "1. Full Stack Software Engineer - Remote at Acme Cloud, salary $145k-$175k, "
+    "location Remote US, source LinkedIn Jobs, link https://www.linkedin.com/jobs/view/100000001\n"
+    "2. Senior Full Stack Engineer - Remote at Globex Data, salary $150k-$185k, "
+    "location Remote North America, source Indeed, link https://www.indeed.com/viewjob?jk=globex123\n"
+    "3. Full Stack Product Engineer - Remote at Initech Labs, salary $135k-$165k, "
+    "location Remote, source Remote OK, link https://remoteok.com/remote-jobs/100000-initech-full-stack-product-engineer"
+)
 
 
 @register_scenario
@@ -16,6 +29,13 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         "Ensures the agent pulls three listings (one per role) and sends them together "
         "instead of replying once per listing."
     )
+    tier = "extended"
+    category = "web_research"
+    expected_runtime = "long"
+    cost_class = "high"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("web_research", "response_quality", "llm_judge", "long_horizon")
     tasks = [
         ScenarioTask(name="inject_prompt", assertion_type="manual"),
         ScenarioTask(name="verify_three_sources", assertion_type="llm_judge"),
@@ -26,16 +46,51 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         # Send the job scraping prompt and wait for processing to finish.
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
 
+        agent = PersistentAgent.objects.get(id=agent_id)
+        mark_tool_enabled_without_discovery(agent, "mcp_brightdata_search_engine")
+        PersistentAgentEnabledTool.objects.filter(
+            agent=agent,
+            tool_full_name="mcp_brightdata_search_engine",
+        ).update(
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name="mcp_brightdata_search_engine",
+        )
+
         prompt = (
             "Find three current remote Full Stack Software Engineer job listings from three different sources. "
-            "Include salary, location, and the specific job link."
+            "Include salary, location, and the specific job link. Use the first successful result containing "
+            "three listings, do not keep verifying after that, and send all three listings together in one reply."
         )
+        mock_config = {
+            "mcp_brightdata_search_engine": {
+                "status": "ok",
+                "content": JOB_LISTINGS_FIXTURE,
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "status": "ok",
+                "content": JOB_LISTINGS_FIXTURE,
+            },
+            "mcp_brightdata_web_data_linkedin_job_listings": {
+                "status": "ok",
+                "content": JOB_LISTINGS_FIXTURE,
+            },
+            "http_request": {
+                "status": "ok",
+                "content": JOB_LISTINGS_FIXTURE,
+            },
+            "spawn_web_task": {
+                "status": "completed",
+                "result": {"content": JOB_LISTINGS_FIXTURE},
+                "message": JOB_LISTINGS_FIXTURE,
+            },
+        }
         with self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
                 prompt,
                 trigger_processing=True,
                 eval_run_id=run_id,
+                mock_config=mock_config,
             )
 
         self.record_task_result(

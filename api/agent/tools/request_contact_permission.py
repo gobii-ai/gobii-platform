@@ -31,8 +31,10 @@ def get_request_contact_permission_tool() -> dict:
                 "Request permission to contact someone via email or SMS who is not in your allowlist. "
                 "Creates a request that the user must approve before you can contact them. "
                 "Returns a URL that you MUST send to the user so they can approve the contact. "
-                "Check if contact already exists before requesting."
-                "Only use an email or phone number the user has previously provided to you, or that is publicly available."
+                "Check if contact already exists before requesting. If the user just gave you a specific email "
+                "address or phone number and it is not already shown in your allowed contacts, request permission "
+                "before reading files, searching, drafting, or asking non-blocking follow-up questions. "
+                "Only use an email or phone number the user has previously provided to you, or that is publicly available. "
                 "Do not guess or fabricate contact details."
             ),
             "parameters": {
@@ -168,7 +170,7 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             # Set expiry to 7 days from now by default
             expires_at = timezone.now() + timedelta(days=7)
             
-            request = CommsAllowlistRequest.objects.create(
+            CommsAllowlistRequest.objects.create(
                 agent=agent,
                 channel=channel_enum,
                 address=address,

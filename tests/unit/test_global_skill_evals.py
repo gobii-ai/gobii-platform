@@ -13,12 +13,10 @@ from api.evals.global_skill_evals import (
     GLOBAL_SKILL_EVAL_SUITE_SLUG,
 )
 from api.models import (
-    BrowserUseAgent,
     EvalRun,
     EvalSuiteRun,
     GlobalAgentSkill,
     GlobalSecret,
-    PersistentAgent,
 )
 
 
@@ -395,6 +393,75 @@ class GlobalSkillEvalScenarioTests(TestCase):
                 "judge_skill_execution": "passed",
             },
         )
+
+    def test_scenario_uses_default_skill_fixture_for_canonical_suite_runs(self):
+        now = timezone.now()
+        scenario = GlobalSkillEvalScenario()
+        recorded = []
+        injected_kwargs = []
+        tool_call = SimpleNamespace(
+            tool_name="http_request",
+            tool_params={"url": "https://api.weather.gov/gridpoints/LWX/96,70/forecast"},
+            status="complete",
+            step=SimpleNamespace(created_at=now),
+        )
+
+        with (
+            patch.object(
+                scenario,
+                "get_run",
+                return_value=SimpleNamespace(
+                    suite_run=SimpleNamespace(
+                        launch_config={},
+                        launcher_type=EvalSuiteRun.LauncherType.SUITE,
+                    )
+                ),
+            ),
+            patch.object(scenario, "wait_for_agent_idle", return_value=nullcontext()),
+            patch.object(
+                scenario,
+                "inject_message",
+                side_effect=lambda *args, **kwargs: injected_kwargs.append(kwargs) or SimpleNamespace(timestamp=now),
+            ),
+            patch.object(
+                scenario,
+                "record_task_result",
+                side_effect=lambda *args, **kwargs: recorded.append(
+                    {
+                        "task_name": kwargs.get("task_name"),
+                        "status": args[2],
+                        "observed_summary": kwargs.get("observed_summary", ""),
+                    }
+                ),
+            ),
+            patch.object(scenario, "llm_judge", return_value=("Pass", "Default eval skill was used.")),
+            patch("api.evals.scenarios.global_skill_eval.PersistentAgentSkill.objects.filter") as mock_enabled_filter,
+            patch("api.evals.scenarios.global_skill_eval.PersistentAgentToolCall.objects.filter") as mock_tool_filter,
+            patch("api.evals.scenarios.global_skill_eval.PersistentAgentMessage.objects.filter") as mock_message_filter,
+        ):
+            mock_enabled_filter.return_value = _FakeQuerySet([SimpleNamespace(name="eval-weather-http-skill")])
+            mock_tool_filter.side_effect = [
+                _FakeQuerySet([tool_call]),
+                _FakeQuerySet([tool_call]),
+            ]
+            mock_message_filter.return_value = _FakeQuerySet([SimpleNamespace(body="It is 72F and Sunny.")])
+
+            scenario.run("run-1", "agent-1")
+
+        final_status_by_task = {item["task_name"]: item["status"] for item in recorded}
+        self.assertEqual(final_status_by_task["judge_skill_execution"], "passed")
+        http_mock = injected_kwargs[0]["mock_config"]["http_request"]
+        self.assertIn("rules", http_mock)
+        self.assertEqual(http_mock["rules"][0]["url_contains"], "geocoding-api.open-meteo.com")
+        self.assertTrue(
+            any(rule["url_contains"] == "api.weather.gov/points" for rule in http_mock["rules"])
+        )
+        self.assertTrue(
+            any(rule["url_contains"] == "api.weather.gov/gridpoints" for rule in http_mock["rules"])
+        )
+        self.assertEqual(http_mock["default"]["status"], "error")
+        skill = GlobalAgentSkill.objects.get(name="eval-weather-http-skill")
+        self.assertIn("forecast or current-conditions endpoint", skill.instructions)
 
     def test_scenario_fails_when_skill_not_enabled_even_if_judge_passes(self):
         tool_call = SimpleNamespace(

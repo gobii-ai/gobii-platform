@@ -18,18 +18,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import sqlparse
-
-# Context protection limits
-MAX_RESULT_ROWS = 100  # Hard cap on rows returned
-MAX_RESULT_BYTES = 8000  # ~2K tokens worth of result data
-WARN_RESULT_ROWS = 50  # Warn if exceeding this
-MAX_AUTO_CORRECTION_ATTEMPTS = 8
-MAX_AUTO_CORRECTION_CANDIDATES = 20
 from sqlparse import tokens as sql_tokens
 from sqlparse.sql import Statement
-
-if TYPE_CHECKING:
-    from ...models import PersistentAgent
 from .sqlite_guardrails import (
     clear_guarded_connection,
     get_blocked_statement_reason,
@@ -40,6 +30,16 @@ from .sqlite_guardrails import (
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
 from .sqlite_helpers import is_write_statement
 from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
+
+if TYPE_CHECKING:
+    from ...models import PersistentAgent
+
+# Context protection limits
+MAX_RESULT_ROWS = 100  # Hard cap on rows returned
+MAX_RESULT_BYTES = 8000  # ~2K tokens worth of result data
+WARN_RESULT_ROWS = 50  # Warn if exceeding this
+MAX_AUTO_CORRECTION_ATTEMPTS = 8
+MAX_AUTO_CORRECTION_CANDIDATES = 20
 
 logger = logging.getLogger(__name__)
 PROTECTED_TABLE_NAMES = frozenset(
@@ -561,7 +561,6 @@ def _fix_json_key_vs_alias(sql: str, error_msg: str) -> tuple[str, str | None]:
         return sql, None
 
     missing = match.group(1)
-    missing_lower = missing.lower()
 
     # Look for patterns like: json_extract(..., '$.{missing}') as {alias}
     # or: json_extract(..., '$.{missing}') AS {alias}
@@ -1659,7 +1658,7 @@ def _run_sqlite_batch_in_subprocess(
             return json.loads(stdout)
         except json.JSONDecodeError as exc:
             logger.error("Failed to parse sqlite_batch result: %s", exc)
-            return {"status": "error", "message": f"SQLite batch failed: invalid result format"}
+            return {"status": "error", "message": "SQLite batch failed: invalid result format"}
 
     except Exception as exc:
         logger.exception("Failed to run sqlite_batch worker")
@@ -1696,15 +1695,6 @@ def _execute_sqlite_batch_inner(
         will_continue_work = will_continue_work_raw.lower() == "true"
     else:
         will_continue_work = None
-    user_message_raw = params.get("_has_user_facing_message", None)
-    if user_message_raw is None:
-        has_user_facing_message = False
-    elif isinstance(user_message_raw, bool):
-        has_user_facing_message = user_message_raw
-    elif isinstance(user_message_raw, str):
-        has_user_facing_message = user_message_raw.lower() == "true"
-    else:
-        has_user_facing_message = bool(user_message_raw)
 
     conn: Optional[sqlite3.Connection] = None
     results: List[Dict[str, Any]] = []
@@ -1863,7 +1853,7 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
+                        "description": "REQUIRED. true if another tool or user-facing reply must follow; false only when this query/update completes the turn.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],

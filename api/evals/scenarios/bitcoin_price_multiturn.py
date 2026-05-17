@@ -1,4 +1,3 @@
-import json
 from urllib.parse import parse_qs, urlparse
 
 from api.evals.base import EvalScenario, ScenarioTask
@@ -7,10 +6,44 @@ from api.evals.execution import ScenarioExecutionTools
 from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMessage
 
 
+def is_supported_bitcoin_price_api_url(url: str) -> bool:
+    if not url:
+        return False
+
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+
+    if parsed.netloc == "api.coingecko.com":
+        if parsed.path == "/api/v3/simple/price":
+            ids = ",".join(query.get("ids", []))
+            vs = ",".join(query.get("vs_currencies", []))
+            return "bitcoin" in ids and "usd" in vs
+
+        if parsed.path == "/api/v3/coins/markets":
+            ids = ",".join(query.get("ids", []))
+            vs = ",".join(query.get("vs_currency", []))
+            return "bitcoin" in ids and "usd" in vs
+
+    if parsed.netloc == "api.coindesk.com":
+        return parsed.path in {
+            "/v1/bpi/currentprice.json",
+            "/v1/bpi/currentprice/USD.json",
+        }
+
+    return False
+
+
 @register_scenario
 class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
     slug = "bitcoin_price_multiturn"
     description = "Chatty intro followed by Bitcoin price request. Checks for efficient API usage over browser."
+    tier = "core"
+    category = "tool_choice"
+    expected_runtime = "medium"
+    cost_class = "medium"
+    owner = "agent-platform"
+    area = "agent_behavior"
+    tags = ("tool_choice", "multi_turn", "web_research", "http_request")
     tasks = [
         ScenarioTask(name="inject_hello", assertion_type="manual"),
         ScenarioTask(name="verify_hello_response", assertion_type="manual"),
@@ -59,6 +92,12 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         # --- Turn 2: Bitcoin Price Request (with mocks) ---
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_bitcoin_request")
 
+        bitcoin_price_response = {
+            "status": "ok",
+            "content": '{"bitcoin":{"usd":68500.50}}',
+            "status_code": 200,
+        }
+
         # Mock config - passed directly to Celery worker
         mock_config = {
             "spawn_web_task": {
@@ -73,9 +112,33 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                 )
             },
             "http_request": {
-                "status": "ok",
-                "content": '{"bitcoin":{"usd":68500.50}}',
-                "status_code": 200
+                "rules": [
+                    {
+                        "url_contains": "api.coingecko.com/api/v3/simple/price",
+                        "result": bitcoin_price_response,
+                    },
+                    {
+                        "url_contains": "api.coingecko.com/api/v3/coins/markets",
+                        "result": bitcoin_price_response,
+                    },
+                    {
+                        "url_contains": "api.coindesk.com/v1/bpi/currentprice.json",
+                        "result": bitcoin_price_response,
+                    },
+                    {
+                        "url_contains": "api.coindesk.com/v1/bpi/currentprice/USD.json",
+                        "result": bitcoin_price_response,
+                    },
+                ],
+                "default": {
+                    "status": "error",
+                    "message": (
+                        "Unsupported Bitcoin price API URL for this eval. "
+                        "Request a Bitcoin USD quote endpoint such as CoinGecko simple price "
+                        "or Coindesk currentprice/USD.json."
+                    ),
+                    "retryable": True,
+                },
             },
         }
 
@@ -177,35 +240,15 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
-        def is_expected_coingecko_url(url: str) -> bool:
-            if not url:
-                return False
-            parsed = urlparse(url)
-            if parsed.netloc != "api.coingecko.com":
-                return False
-
-            query = parse_qs(parsed.query)
-            if parsed.path == "/api/v3/simple/price":
-                ids = ",".join(query.get("ids", []))
-                vs = ",".join(query.get("vs_currencies", []))
-                return "bitcoin" in ids and "usd" in vs
-
-            if parsed.path == "/api/v3/coins/markets":
-                ids = ",".join(query.get("ids", []))
-                vs = ",".join(query.get("vs_currency", []))
-                return "bitcoin" in ids and "usd" in vs
-
-            return False
-
         http_request_to_expected_api = any(
-            is_expected_coingecko_url((call.tool_params or {}).get("url", ""))
+            is_supported_bitcoin_price_api_url((call.tool_params or {}).get("url", ""))
             for call in http_calls
         )
 
         if http_request_to_expected_api:
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_http_request_after_search",
-                observed_summary="Agent correctly made http_request to a supported Coingecko API endpoint."
+                observed_summary="Agent correctly made http_request to a supported Bitcoin price API endpoint."
             )
         else:
             seen_urls = [
@@ -216,7 +259,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.FAILED, task_name="verify_http_request_after_search",
                 observed_summary=(
-                    "Agent did not make http_request to a supported Coingecko endpoint. "
+                    "Agent did not make http_request to a supported Bitcoin price API endpoint. "
                     f"Seen URLs: {seen_urls}"
                 )
             )

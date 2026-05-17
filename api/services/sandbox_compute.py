@@ -80,6 +80,8 @@ def sandbox_compute_enabled_for_agent(agent: Optional[PersistentAgent]) -> bool:
             getattr(agent, "id", None),
         )
         return False
+    if not getattr(flag, "pk", None):
+        return False
 
     try:
         return bool(flag.is_active_for_user(agent.user))

@@ -1,4 +1,11 @@
-import hashlib, secrets, uuid, os, string, re, datetime, json
+import datetime
+import hashlib
+import json
+import os
+import re
+import secrets
+import string
+import uuid
 from decimal import Decimal, ROUND_HALF_UP, ROUND_DOWN
 from functools import lru_cache
 from typing import Optional, Tuple
@@ -319,7 +326,7 @@ class AgentColor(models.Model):
 
         with transaction.atomic():
             cls.objects.update_or_create(
-                name=f"color_0",
+                name="color_0",
                 defaults={
                     "hex_value": cls.DEFAULT_HEX,
                     "sort_order": 0,
@@ -9538,7 +9545,6 @@ class CommsAllowlistEntry(models.Model):
                 counts = get_agent_contact_counts(self.agent)
                 if counts is None:
                     return
-                active_count = counts["active_total"]
                 pending_count = counts["pending_total"]
                 total_count = counts["total"]
             except Exception as e:
@@ -13238,6 +13244,11 @@ class EvalRunTask(models.Model):
     first_step = models.ForeignKey(PersistentAgentStep, on_delete=models.SET_NULL, null=True, blank=True)
     first_message = models.ForeignKey(PersistentAgentMessage, on_delete=models.SET_NULL, null=True, blank=True)
     first_browser_task = models.ForeignKey(BrowserUseAgentTask, on_delete=models.SET_NULL, null=True, blank=True)
+    debug_artifacts = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text="Sanitized eval debugging context such as prompt snippets, tool params, judge context, and artifact IDs.",
+    )
     
     # Specific assertion data
     tool_called = models.CharField(max_length=200, blank=True)
