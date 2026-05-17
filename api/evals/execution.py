@@ -4,7 +4,7 @@ import json
 import time
 import contextvars
 
-from litellm.exceptions import OpenAIError
+from litellm.exceptions import APIError, OpenAIError
 
 from api.models import (
     BrowserUseAgentTask,
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _JUDGE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
 _JUDGE_RETRYABLE_ERRORS = (
     AttributeError,
+    APIError,
     IndexError,
     json.JSONDecodeError,
     KeyError,
@@ -36,6 +37,11 @@ _JUDGE_RETRYABLE_ERRORS = (
     TypeError,
     ValueError,
 )
+
+
+def _is_structured_judge_grammar_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return "structural_tag grammar" in message or "failed to compile structural" in message
 
 
 def _preview_text(value: Any, *, limit: int = 1200) -> str:
@@ -98,6 +104,56 @@ def _sanitize_debug_artifacts(artifacts: Dict[str, Any]) -> dict[str, Any]:
     for key, value in (artifacts or {}).items():
         sanitized[str(key)] = _serialize_debug_artifact(value)
     return sanitized
+
+
+def _response_message_content(response: Any) -> str:
+    choices = response.get("choices") if isinstance(response, dict) else getattr(response, "choices", None)
+    if not choices:
+        raise ValueError("LLM judge JSON fallback returned no choices.")
+    first_choice = choices[0]
+    message = first_choice.get("message") if isinstance(first_choice, dict) else getattr(first_choice, "message", None)
+    if message is None:
+        raise ValueError("LLM judge JSON fallback returned no message.")
+    content = message.get("content") if isinstance(message, dict) else getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+                continue
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                parts.append(part["text"])
+        return "\n".join(parts)
+    raise ValueError("LLM judge JSON fallback returned no text content.")
+
+
+def _strip_json_code_fence(text: str) -> str:
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.splitlines()
+    if len(lines) >= 3 and lines[-1].strip() == "```":
+        return "\n".join(lines[1:-1]).strip()
+    return stripped
+
+
+def _extract_json_object_from_text(text: str) -> dict[str, Any]:
+    stripped = _strip_json_code_fence(text)
+    if not stripped:
+        raise ValueError("LLM judge JSON fallback returned empty content.")
+
+    decoder = json.JSONDecoder()
+    starts = [0] + [idx for idx, char in enumerate(stripped) if char == "{" and idx != 0]
+    for start in starts:
+        try:
+            payload, _end = decoder.raw_decode(stripped[start:])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("LLM judge JSON fallback did not return a JSON object.")
 
 
 _current_eval_run_id: contextvars.ContextVar[str | None] = contextvars.ContextVar(
@@ -592,6 +648,18 @@ class ScenarioExecutionTools:
                     raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
                 return choice, reasoning
             except _JUDGE_RETRYABLE_ERRORS as exc:
+                if _is_structured_judge_grammar_error(exc):
+                    logger.warning(
+                        "LLM judge structured tool call failed with provider grammar error for model %s; "
+                        "retrying as strict JSON text.",
+                        model,
+                    )
+                    return self._run_unstructured_judge_completion(
+                        model=model,
+                        prompt=prompt,
+                        params=params,
+                        options=options,
+                    )
                 last_error = exc
                 if delay_seconds is None:
                     raise
@@ -607,6 +675,61 @@ class ScenarioExecutionTools:
             raise last_error
         raise ValueError("LLM judge failed without a captured error.")
 
+    def _run_unstructured_judge_completion(
+        self,
+        *,
+        model: str,
+        prompt: list[dict[str, str]],
+        params: dict[str, Any],
+        options: list[str],
+    ) -> Tuple[str, str]:
+        fallback_prompt = [
+            {
+                "role": "system",
+                "content": (
+                    "You are an impartial judge. Evaluate the context and answer the question. "
+                    "Return exactly one JSON object with keys choice and reasoning. Do not use markdown."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{prompt[1]['content']}\n\n"
+                    "Return JSON only in this shape: "
+                    '{"choice":"<one valid option>","reasoning":"<concise justification>"}'
+                ),
+            },
+        ]
+        last_error: Exception | None = None
+        for attempt, delay_seconds in enumerate((*_JUDGE_RETRY_DELAYS_SECONDS, None), start=1):
+            try:
+                response = run_completion(
+                    model=model,
+                    messages=fallback_prompt,
+                    params=params,
+                    drop_params=True,
+                )
+                choice, reasoning = self._extract_unstructured_judgment(response)
+                if choice not in options:
+                    raise ValueError(f"LLM judge returned invalid choice {choice!r}: {reasoning}")
+                return choice, f"Structured judge fallback used after provider grammar error. {reasoning}"
+            except _JUDGE_RETRYABLE_ERRORS as exc:
+                last_error = exc
+                if delay_seconds is None:
+                    raise
+                logger.warning(
+                    "LLM judge JSON fallback returned retryable response error with model %s; "
+                    "retrying attempt %s: %s",
+                    model,
+                    attempt + 1,
+                    exc,
+                )
+                time.sleep(delay_seconds)
+
+        if last_error is not None:
+            raise last_error
+        raise ValueError("LLM judge JSON fallback failed without a captured error.")
+
     def _extract_judgment(self, response) -> Tuple[str, str]:
         """Extract judgment from LLM response tool calls."""
         tool_calls = response.choices[0].message.tool_calls
@@ -619,6 +742,16 @@ class ScenarioExecutionTools:
                 return args.get("choice"), args.get("reasoning")
 
         return "Error", "LLM did not call submit_judgment tool."
+
+    def _extract_unstructured_judgment(self, response) -> Tuple[str, str]:
+        payload = _extract_json_object_from_text(_response_message_content(response))
+        choice = payload.get("choice")
+        reasoning = payload.get("reasoning")
+        if not isinstance(choice, str):
+            raise ValueError("LLM judge JSON fallback did not return a string choice.")
+        if not isinstance(reasoning, str):
+            raise ValueError("LLM judge JSON fallback did not return string reasoning.")
+        return choice, reasoning
 
     def wait_for_event(
         self,

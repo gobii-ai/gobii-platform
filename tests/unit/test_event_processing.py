@@ -624,7 +624,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIsNotNone(system_message)
         self.assertIn("## Planning Mode", system_message["content"])
-        self.assertIn("## REQUIRED: Your very first action must be sending a welcome message", system_message["content"])
+        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
         self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
         self.assertIn("Read-only research is allowed and often useful during planning", system_message["content"])
@@ -2610,7 +2610,7 @@ class PromptContextBuilderTests(TestCase):
             with patch('api.agent.core.event_processing.build_prompt_context', return_value=([{"role": "system", "content": "sys"}], 1000, None)), \
                  patch('api.agent.core.event_processing.get_llm_config_with_failover', return_value=[("mock", "mock-model", {})]), \
                  patch('api.agent.core.event_processing._completion_with_failover', side_effect=completion_side_effect) as mock_completion, \
-                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok"}) as mock_execute_tool, \
+                 patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True}) as mock_execute_tool, \
                  patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None}), \
                  patch('api.agent.core.event_processing.Analytics.track_event') as mock_track_event:
                 from api.agent.core import event_processing as ep
@@ -4166,6 +4166,44 @@ class EventProcessingRuntimeGuardTests(TestCase):
         )
 
         self.assertTrue(finalized.followup_required)
+
+    @tag("batch_event_processing")
+    def test_finalize_explicit_stop_without_auto_sleep_requires_followup(self):
+        prepared = _PreparedToolExecution(
+            idx=0,
+            tool_name="http_request",
+            tool_params={
+                "method": "GET",
+                "url": "https://briefing.example.test/api/daily.json",
+                "will_continue_work": False,
+            },
+            exec_params={},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call-fetch",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason="unsafe_tool:http_request",
+        )
+        outcome = _ToolExecutionOutcome(
+            prepared=prepared,
+            result={"status": "ok", "content": {"items": []}},
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [outcome],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, False)
 
     def test_non_message_stop_continues_when_latest_inbound_is_unanswered(self):
         self._create_inbound_email_message(

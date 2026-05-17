@@ -26,7 +26,8 @@ PLAN_STATUSES = {
 }
 _WHITESPACE_RE = re.compile(r"\s+")
 MESSAGE_DELIVERABLE_GUIDANCE = (
-    "Use messages only for final user-facing deliveries from send_email, send_sms, or send_chat_message. "
+    "Use messages only for substantial final deliverables in existing multi-step work, not for every quick answer, "
+    "lookup, briefing, or one-shot chart. Message deliverables must come from send_email, send_sms, or send_chat_message. "
     "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now, "
     "send it first with will_continue_work=true, then call update_plan after the send tool returns. "
     "Do not include peer messages from send_agent_message."
@@ -73,6 +74,8 @@ def get_update_plan_tool() -> dict[str, Any]:
             "name": PLAN_TOOL_NAME,
             "description": (
                 "Updates the task plan.\n"
+                "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
+                "quick lookups, simple research answers, scheduled briefings, or one-shot chart requests.\n"
                 "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
                 "Every call replaces the full current plan, including the deliverable references."

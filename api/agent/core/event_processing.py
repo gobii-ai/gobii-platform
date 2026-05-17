@@ -256,6 +256,10 @@ BLOCKING_HUMAN_INPUT_PATTERNS = (
     re.compile(r"\b(?:which|what)\b.*\bwould\s+you\s+like\s+(?:me|us)\b", re.IGNORECASE),
 )
 MARKDOWN_PUNCTUATION_RE = re.compile(r"[*_`>#\[\]]+")
+OPTIONAL_NON_BLOCKING_QUESTION_RE = re.compile(
+    r"\b(?:any tweaks|any changes|anything to adjust|otherwise\b|if not\b|unless you want)\b",
+    re.IGNORECASE,
+)
 
 
 class OrchestratorPromptStale(RuntimeError):
@@ -264,6 +268,8 @@ class OrchestratorPromptStale(RuntimeError):
 
 def _looks_like_blocking_human_input_request(message_text: str) -> bool:
     normalized = " ".join((message_text or "").split())
+    if OPTIONAL_NON_BLOCKING_QUESTION_RE.search(normalized):
+        return False
     return bool("?" in normalized and any(pattern.search(normalized) for pattern in BLOCKING_HUMAN_INPUT_PATTERNS))
 
 
@@ -545,7 +551,13 @@ STOP_HINT_PHRASES = (
     "i'll wait",
     "i will wait",
     "standing by",
+    "i'll be right here",
+    "i will be right here",
     "whenever you're ready",
+    "whenever you need",
+    "whenever you need me",
+    "when you need me",
+    "right here whenever",
 )
 PARALLEL_SAFE_PLACEHOLDER_RE = re.compile(r"\$\[([^\]]+)\]")
 PARALLEL_SAFE_OUTPUT_EXTENSIONS = {
@@ -996,7 +1008,15 @@ def _sanitize_tool_name(name: str) -> str:
     # Strip the function call syntax if present
     paren_idx = name.find("(")
     if paren_idx > 0:
-        return name[:paren_idx].strip()
+        name = name[:paren_idx].strip()
+
+    if name.startswith("mcp_"):
+        repeated_idx = name.find("_mcp_", 4)
+        if repeated_idx > 0:
+            repeated_name = name[repeated_idx + 1 :].strip()
+            if repeated_name.startswith("mcp_"):
+                return repeated_name
+
     return name
 
 
@@ -1723,6 +1743,9 @@ def _resolve_eval_mock_result(
     return mock_result.get("default")
 
 
+_HTTP_URL_PREFIX_RE = re.compile(r"^(https?://[^\s<>'\"\uff5c]+)")
+
+
 def _strip_linkified_url_artifact(value: str) -> str:
     text = value.strip()
     for separator in ('">', "'>"):
@@ -1730,6 +1753,9 @@ def _strip_linkified_url_artifact(value: str) -> str:
             candidate = text.rsplit(separator, 1)[-1].strip()
             if candidate.startswith(("http://", "https://")):
                 return candidate
+    match = _HTTP_URL_PREFIX_RE.match(text)
+    if match and match.group(1) != text:
+        return match.group(1)
     return text
 
 
@@ -2471,7 +2497,12 @@ def _finalize_tool_batch(
             followup_required = True
         elif is_error_status or tool_had_warning:
             followup_required = True
-        elif prepared.explicit_continue is None and not allow_auto_sleep:
+        elif (
+            prepared.explicit_continue is not True
+            and not allow_auto_sleep
+            and not terminal_message_delivery_ok
+            and not human_input_request_ok
+        ):
             followup_required = True
 
         executed_calls += 1

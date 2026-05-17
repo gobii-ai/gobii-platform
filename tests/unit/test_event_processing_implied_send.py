@@ -1874,6 +1874,13 @@ class MessageContinuationInferenceTests(TestCase):
             )
         )
 
+    def test_infer_continuation_false_for_waiting_acknowledgement(self):
+        self.assertFalse(
+            ep._should_infer_message_tool_continuation(
+                "Got it! I'll be right here when you need me."
+            )
+        )
+
     def test_infer_continuation_false_when_question_present(self):
         self.assertFalse(
             ep._should_infer_message_tool_continuation(

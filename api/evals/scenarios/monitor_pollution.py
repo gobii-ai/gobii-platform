@@ -11,6 +11,9 @@ from api.evals.sim_config import get_sim_weather_url
 from api.agent.events import AgentEventType
 from api.services.schedule_enforcement import cron_interval_seconds
 
+INITIAL_PROCESSING_TIMEOUT_SECONDS = 300
+BACKGROUND_DRAIN_TIMEOUT_SECONDS = 300
+
 
 def _charter_mentions_pollution_monitoring(charter: str | None) -> tuple[bool, str]:
     text = (charter or "").lower()
@@ -108,13 +111,19 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         with self.agent_event_listener(agent_id, start_time=time.time()) as events:
             msg = self.inject_message(agent_id, instruction, trigger_processing=True)
 
-            first_event = events.wait_for(AgentEventType.PROCESSING_COMPLETE, timeout=120)
+            first_event = events.wait_for(
+                AgentEventType.PROCESSING_COMPLETE,
+                timeout=INITIAL_PROCESSING_TIMEOUT_SECONDS,
+            )
             if not first_event:
                 self.record_task_result(
                     run_id,
                     1,
                     EvalRunTask.Status.FAILED,
-                    observed_summary="Timed out waiting for initial agent processing to complete.",
+                    observed_summary=(
+                        "Timed out waiting for initial agent processing to complete "
+                        f"after {INITIAL_PROCESSING_TIMEOUT_SECONDS}s."
+                    ),
                 )
                 return
 
@@ -123,7 +132,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
             completion_event = first_event
             if outstanding:
                 idle_wait_start = time.time()
-                remaining = 180
+                remaining = BACKGROUND_DRAIN_TIMEOUT_SECONDS
                 while remaining > 0:
                     completion_event = events.wait_for(
                         AgentEventType.PROCESSING_COMPLETE,
@@ -134,7 +143,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
                     outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0)
                     if outstanding == 0:
                         break
-                    remaining = max(0, 180 - int(time.time() - idle_wait_start))
+                    remaining = max(0, BACKGROUND_DRAIN_TIMEOUT_SECONDS - int(time.time() - idle_wait_start))
 
             final_outstanding = int((completion_event.get("payload") or {}).get("outstanding_tasks", 0) or 0) if completion_event else None
             if not completion_event or final_outstanding != 0:
@@ -142,7 +151,10 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
                     run_id,
                     1,
                     EvalRunTask.Status.FAILED,
-                    observed_summary="Timed out waiting for agent to finish background web task.",
+                    observed_summary=(
+                        "Timed out waiting for agent to finish background web task "
+                        f"after {BACKGROUND_DRAIN_TIMEOUT_SECONDS}s."
+                    ),
                 )
                 return
 

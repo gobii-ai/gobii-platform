@@ -1884,7 +1884,7 @@ class MCPToolFunctionsTests(TestCase):
         mock_response.choices = [choice]
         mock_run_completion.return_value = mock_response
 
-        result = search_tools(self.agent, "customer research")
+        result = search_tools(self.agent, "account workflow")
 
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
@@ -2584,6 +2584,52 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual(result["status"], "success")
         self.assertEqual(result["skills"]["enabled"], ["ops-report"])
         mock_enable_global_skills.assert_called_once()
+        mock_fallback_builtin_selection.assert_not_called()
+        mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools._fallback_builtin_selection')
+    def test_search_tools_exact_global_skill_name_fallback_preempts_builtin_http(
+        self,
+        mock_fallback_builtin_selection,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        skill = GlobalAgentSkill.objects.create(
+            name="reports-http-skill",
+            description="Fetch reports through the bundled HTTP workflow",
+            tools=["http_request"],
+            instructions="Use the report API flow before answering.",
+        )
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+        mock_fallback_builtin_selection.return_value = ["http_request"]
+
+        msg = MagicMock()
+        msg.content = ""
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "reports-http-skill")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["skills"]["enabled"], ["reports-http-skill"])
+        self.assertEqual(result["skills"]["already_enabled"], [])
+        self.assertTrue(
+            PersistentAgentSkill.objects.filter(agent=self.agent, global_skill=skill).exists()
+        )
         mock_fallback_builtin_selection.assert_not_called()
         mock_enable_tools.assert_not_called()
 

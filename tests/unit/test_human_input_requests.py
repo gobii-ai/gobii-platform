@@ -299,16 +299,15 @@ class HumanInputRequestTests(TestCase):
         function = tool["function"]
         description = function["description"]
         self.assertEqual(function["name"], "request_human_input")
-        self.assertIn("always appears in the web chat human input panel", description)
-        self.assertIn("does not send email or SMS by itself", description)
-        self.assertIn("same tool-call batch as request_human_input", description)
-        self.assertIn("already include the questions", description)
-        self.assertIn("Do not send a bare notification", description)
-        self.assertIn("plain text only", description)
-        self.assertIn("no Markdown or HTML", description)
-        self.assertIn("at most three questions per round", description)
+        self.assertIn("appears in web chat", description)
+        self.assertIn("does not send email/SMS", description)
+        self.assertIn("send the exact question/options there too", description)
+        self.assertIn("Plain text only", description)
+        self.assertIn("no Markdown/HTML", description)
+        self.assertIn("ask at most three", description)
         self.assertIn("non-blocking backfill", description)
         self.assertIn("lookback", description)
+        self.assertIn("preference surveys", description)
         self.assertNotIn("title", function["parameters"]["properties"])
         self.assertIn("options", function["parameters"]["properties"])
         self.assertIn("requests", function["parameters"]["properties"])
@@ -330,7 +329,7 @@ class HumanInputRequestTests(TestCase):
             500,
         )
         self.assertIn(
-            "at most three request items",
+            "at most three",
             function["parameters"]["properties"]["requests"]["description"],
         )
 

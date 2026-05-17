@@ -7,6 +7,7 @@ from django.test import TestCase, tag
 from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.core import event_processing as ep
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
@@ -575,6 +576,32 @@ class BehaviorMicroHelperTests(TestCase):
                     "plan_expected": True,
                 }
             )
+
+    def test_common_use_case_expected_params_mock_requires_exact_http_url(self):
+        scenario = ScenarioRegistry.get("common_use_case_010_fetch_form_json")
+        mock_config = scenario._build_mock_config()
+
+        missing_url_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"method": "GET", "will_continue_work": True},
+        )
+        wrong_url_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"method": "GET", "url": "https://permits.example.test/forms/other.json"},
+        )
+        expected_url_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"method": "GET", "url": "https://permits.example.test/forms/zoning.json"},
+        )
+
+        self.assertEqual(missing_url_result["status"], "error")
+        self.assertIn("missing required eval parameter: url", missing_url_result["message"])
+        self.assertEqual(wrong_url_result["status"], "error")
+        self.assertEqual(expected_url_result["status"], "ok")
+        self.assertEqual(expected_url_result["content"], {"ok": True})
 
     def test_plan_activity_only_includes_update_plan(self):
         read = self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})

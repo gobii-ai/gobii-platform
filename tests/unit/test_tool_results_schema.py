@@ -641,7 +641,8 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertTrue(is_inline)
         # Should be wrapped with one-time view warning
         self.assertIn("[FULL RESULT (30000 chars) - ONE-TIME VIEW", preview)
-        self.assertIn("Save key data now or query later via __tool_results", preview)
+        self.assertIn("Use this visible result now", preview)
+        self.assertIn("Do not query __tool_results or sqlite_batch just to reread", preview)
         self.assertIn(medium_text, preview)
 
     def test_fresh_tool_call_over_threshold_truncated(self):

@@ -180,6 +180,32 @@ def _fallback_builtin_selection(
     return candidates
 
 
+def _normalize_named_selection_text(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _fallback_named_selection(query: str, available_names: set[str]) -> list[str]:
+    """
+    Select explicitly named skills when the inner LLM returns no tool calls.
+
+    This keeps exact skill searches from falling through to keyword-based
+    builtin matching when a skill name contains words like "http" or "api".
+    """
+    query_key = _normalize_named_selection_text(query or "")
+    if not query_key:
+        return []
+
+    padded_query = f" {query_key} "
+    selected: list[str] = []
+    for name in sorted(available_names, key=lambda item: (-len(item), item)):
+        name_key = _normalize_named_selection_text(name)
+        if not name_key:
+            continue
+        if query_key == name_key or f" {name_key} " in padded_query:
+            selected.append(name)
+    return selected
+
+
 def _find_tool_by_suffix(
     available_names: Iterable[str],
     suffix: str,
@@ -400,8 +426,7 @@ def _build_search_tool_definitions(
             "function": {
                 "name": "enable_tools",
                 "description": (
-                    "Enable tools and optionally suggest external resources. "
-                    "Use exact full names from the catalog."
+                    "Enable exact tools from the catalog; optionally suggest verified external resources."
                 ),
                 "parameters": {
                     "type": "object",
@@ -440,8 +465,7 @@ def _build_search_tool_definitions(
                 "function": {
                     "name": "enable_agent_skills",
                     "description": (
-                        "Refresh this agent's saved skills into the prompt recency queue and enable their required tools. "
-                        "Use exact names from the Available agent skills list."
+                        "Refresh exact saved agent skills and enable their required tools."
                     ),
                     "parameters": {
                         "type": "object",
@@ -466,8 +490,7 @@ def _build_search_tool_definitions(
                 "function": {
                     "name": "enable_global_skills",
                     "description": (
-                        "Import global skills into the agent's local skill history. "
-                        "Use exact names from the Available global skills list."
+                        "Import exact global skills into the agent's local skill history."
                     ),
                     "parameters": {
                         "type": "object",
@@ -492,8 +515,7 @@ def _build_search_tool_definitions(
                 "function": {
                     "name": "enable_system_skills",
                     "description": (
-                        "Enable code-defined system skills by enabling their hidden underlying tools. "
-                        "Use exact skill keys from the Available system skills list."
+                        "Enable exact code-defined system skills and their hidden tools."
                     ),
                     "parameters": {
                         "type": "object",
@@ -518,8 +540,7 @@ def _build_search_tool_definitions(
                 "function": {
                     "name": "enable_apps",
                     "description": (
-                        "Enable Pipedream apps for future tool discovery. "
-                        "Use exact app slugs from the Available Pipedream apps list."
+                        "Enable exact Pipedream app slugs for future tool discovery."
                     ),
                     "parameters": {
                         "type": "object",
@@ -840,11 +861,16 @@ def _search_with_llm(
         f'If a needed Pipedream app is not enabled yet and you require it, tell the user to go to "Add Apps" here: '
         f"{enable_apps_manually_url} and search for the exact app slug.\n"
         "Do this sparingly and only if you truly require the integration. "
-        "You may already have the tools you need for integration via http_request or other methods."
+        "You may already have the tools you need for integration via http_request or other methods.\n"
     )
 
     examples_text = _build_tool_examples(available_names)
     examples_block = f"## Examples\n\n{examples_text}\n\n" if examples_text else ""
+    selection_example = (
+        "\nExample placeholders: tool_names: [\"<TOOL>\"]; "
+        "enable_agent_skills.skill_names: [\"<SAVED_SKILL>\"]; "
+        "skill_names: [\"<GLOBAL_SKILL>\"]; skill_keys: [\"<SYSTEM_SKILL>\"]\n"
+    )
     image_generation_rules = ""
     if CREATE_IMAGE_TOOL_NAME in available_names:
         image_generation_rules = (
@@ -855,12 +881,11 @@ def _search_with_llm(
         )
 
     system_prompt = (
-        "You select tools for research tasks. Be INCLUSIVE - enable all tools that might help.\n"
-        "CRITICAL: Use EXACT tool names, skill names, and app slugs from the lists below. Never invent or modify names.\n"
-        "If nothing matches, do NOT call any tool.\n\n"
+        "Select helpful tools and skills. Be inclusive, but copy exact names/slugs from the lists; never invent them.\n"
+        "If nothing matches, call nothing.\n\n"
         f"{examples_block}"
         "## Format\n"
-        "Call enable_tools with tool_names copied verbatim from the Available tools list.\n"
+        "Call enable_tools with exact full names from Available tools.\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
         f"{image_generation_rules}"
@@ -874,57 +899,36 @@ def _search_with_llm(
     )
     if global_skill_lines:
         system_prompt += (
-            "\n- Only include skill names that appear in Available global skills.\n"
-            "Call enable_global_skills with skill_names copied verbatim from the Available global skills list.\n"
-            "- Treat global skills as capability bundles. Use the `use when` and `enables` guidance to decide when a skill should be enabled.\n"
+            "\n- Global skills: Treat global skills as capability bundles. "
+            "Call enable_global_skills with exact Available global skill names when `use when`/`enables` match.\n"
         )
     if agent_skill_lines:
         system_prompt += (
-            "\n- Only include saved skill names that appear in Available agent skills.\n"
-            "Call enable_agent_skills with skill_names copied verbatim from the Available agent skills list.\n"
-            "- Treat agent skills as this agent's saved workflows. Use them when a query matches their `use when` guidance or needs their listed tools.\n"
+            "\n- Agent skills: Treat agent skills as this agent's saved workflows. "
+            "Call enable_agent_skills with exact Available agent skill names when `use when`/`enables` match.\n"
         )
     if system_skill_lines:
         system_prompt += (
-            "\n- Only include skill keys that appear in Available system skills.\n"
-            "Call enable_system_skills with skill_keys copied verbatim from the Available system skills list.\n"
-            "- Treat system skills as capability bundles. Prefer enabling one when the query matches its `use when` guidance or needs the capabilities listed under `enables`.\n"
+            "\n- System skills: Treat system skills as capability bundles. "
+            "Call enable_system_skills with exact Available system skill keys when `use when`/`enables` match.\n"
         )
     if app_lines:
         if auto_enable_apps and enable_apps_callback is not None:
             system_prompt += (
-                "\n- Only include app slugs that appear in Available Pipedream apps.\n"
-                "Call enable_apps with app_slugs copied verbatim from the Available Pipedream apps list.\n"
-                "Do not call enable_tools, enable_agent_skills, enable_global_skills, or enable_system_skills in the same response as enable_apps.\n"
-                "If a needed Pipedream app is not enabled yet, call enable_apps with exact app slugs and stop there.\n"
-                "Do this sparingly and only if you truly require the integration. "
-                "You may already have the tools you need for integration via http_request or other methods."
-                "Example (placeholders, do not copy names):\n"
-                "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
-                "enable_agent_skills.skill_names: [\"<AGENT_SKILL_NAME_FROM_LIST>\"]\n"
-                "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
-                "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
-                "app_slugs: [\"<APP_SLUG_FROM_LIST>\"]\n"
+                "\n- Pipedream apps: call enable_apps with exact Available app slugs only when a needed app is missing. "
+                "Do not combine enable_apps with tool/skill calls; after enabling apps, stop and search again for tools.\n"
+                f"{selection_example}"
+                "app_slugs: [\"<APP_SLUG>\"]\n"
             )
         else:
             system_prompt += (
-                "\n- Do not call enable_apps. Automatic Pipedream app enablement is disabled.\n"
+                "\n- Automatic Pipedream app enablement is disabled. Do not call enable_apps.\n"
                 f"{manual_app_guidance}"
-                "Only enable tools that are already available in Available tools.\n"
-                "Example (placeholders, do not copy names):\n"
-                "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
-                "enable_agent_skills.skill_names: [\"<AGENT_SKILL_NAME_FROM_LIST>\"]\n"
-                "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
-                "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
+                "Enable only tools/skills already listed.\n"
+                f"{selection_example}"
             )
     else:
-        system_prompt += (
-            "\nExample (placeholders, do not copy names):\n"
-            "tool_names: [\"<TOOL_NAME_FROM_LIST>\", \"<ANOTHER_TOOL_NAME_FROM_LIST>\"]\n"
-            "enable_agent_skills.skill_names: [\"<AGENT_SKILL_NAME_FROM_LIST>\"]\n"
-            "skill_names: [\"<SKILL_NAME_FROM_LIST>\"]\n"
-            "skill_keys: [\"<SYSTEM_SKILL_KEY_FROM_LIST>\"]\n"
-        )
+        system_prompt += selection_example
     user_prompt = f"Query: {query}\n\nAvailable tools:\n" + "\n".join(tool_lines)
     if agent_skill_lines:
         user_prompt += "\n\nAvailable agent skills:\n" + "\n".join(agent_skill_lines)
@@ -936,21 +940,18 @@ def _search_with_llm(
         user_prompt += (
             "\n\nAvailable Pipedream apps:\n"
             + "\n".join(app_lines)
-            + "\n\nUse ONLY tool names, saved skill names, skill names, skill keys, and app slugs from the lists above."
+            + "\n\nUse ONLY names/slugs from the lists above."
         )
         if auto_enable_apps and enable_apps_callback is not None:
-            user_prompt += " If none match, do not call enable_tools, enable_agent_skills, enable_global_skills, enable_system_skills, or enable_apps."
+            user_prompt += " If none match, call no enable function."
         else:
             user_prompt += (
-                f' If a needed app is not enabled, you may tell the user to go to "Add Apps" '
-                f"here: {enable_apps_manually_url} and search for the exact app slug. "
-                "Do this sparingly and only if you truly require the integration. "
-                "You may already have the tools you need for integration via http_request or other methods."
+                f' If a required app is missing, sparingly tell the user to add the exact app slug at "Add Apps": {enable_apps_manually_url}.'
             )
-            user_prompt += " If none match, do not call enable_tools, enable_agent_skills, enable_global_skills, or enable_system_skills."
+            user_prompt += " If none match, call no tool/skill enable function."
     else:
         user_prompt += "\n\nUse ONLY tool names, saved skill names, skill names, and skill keys from the lists above."
-        user_prompt += " If none match, do not call enable_tools, enable_agent_skills, enable_global_skills, or enable_system_skills."
+        user_prompt += " If none match, call no tool/skill enable function."
 
     try:
         failover_configs = get_llm_config_with_failover(
@@ -1128,6 +1129,59 @@ def _search_with_llm(
                         (content_text[:200] + "...") if content_text and len(content_text) > 200 else content_text,
                     )
 
+                named_fallback_selected = False
+                if not requested and not requested_agent_skills and not requested_skills and not requested_system_skills:
+                    fallback_skills = _fallback_named_selection(query or "", available_global_skill_names)
+                    if fallback_skills:
+                        named_fallback_selected = True
+                        try:
+                            enabled_global_skills_result = enable_global_skills(
+                                agent,
+                                fallback_skills,
+                                available_skills=global_skills,
+                            )
+                            logger.info(
+                                "search_tools.%s: exact-name fallback enabled global skills: %s",
+                                provider_name,
+                                ", ".join(fallback_skills),
+                            )
+                        except Exception as err:  # pragma: no cover - defensive enabling
+                            logger.error("search_tools.%s: fallback enable_global_skills failed: %s", provider_name, err)
+
+                    fallback_agent_skills = _fallback_named_selection(query or "", available_agent_skill_names)
+                    if fallback_agent_skills:
+                        named_fallback_selected = True
+                        try:
+                            enabled_agent_skills_result = _enable_agent_skills(
+                                agent,
+                                fallback_agent_skills,
+                                available_skills=agent_skills,
+                            )
+                            logger.info(
+                                "search_tools.%s: exact-name fallback enabled agent skills: %s",
+                                provider_name,
+                                ", ".join(fallback_agent_skills),
+                            )
+                        except Exception as err:  # pragma: no cover - defensive enabling
+                            logger.error("search_tools.%s: fallback enable_agent_skills failed: %s", provider_name, err)
+
+                    fallback_system_skills = _fallback_named_selection(query or "", available_system_skill_keys)
+                    if fallback_system_skills:
+                        named_fallback_selected = True
+                        try:
+                            enabled_system_skills_result = enable_system_skills(
+                                agent,
+                                fallback_system_skills,
+                                available_skills=system_skills,
+                            )
+                            logger.info(
+                                "search_tools.%s: exact-name fallback enabled system skills: %s",
+                                provider_name,
+                                ", ".join(fallback_system_skills),
+                            )
+                        except Exception as err:  # pragma: no cover - defensive enabling
+                            logger.error("search_tools.%s: fallback enable_system_skills failed: %s", provider_name, err)
+
                 message_lines: List[str] = []
                 if content_text:
                     message_lines.append(content_text.strip())
@@ -1173,7 +1227,13 @@ def _search_with_llm(
                 )
 
                 # Fallback only when the model made no explicit tool or skill selection.
-                if not requested and not requested_agent_skills and not requested_skills and not requested_system_skills:
+                if (
+                    not requested
+                    and not requested_agent_skills
+                    and not requested_skills
+                    and not requested_system_skills
+                    and not named_fallback_selected
+                ):
                     fallback = _fallback_builtin_selection(query or "", content_text or "", available_names)
                     fallback = [name for name in fallback if name in available_names]
                     if fallback:
@@ -1405,6 +1465,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
             "description": (
                 "Discover and enable the right tools and skills for the current task, including saved custom tools. "
                 "Use this first when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
+                "Do not use it when an already-enabled direct tool clearly fits, such as sqlite_batch, create_csv, update_schedule, or a named integration tool. "
                 "Call it again when the task changes and you need different capabilities."
             ),
             "parameters": {

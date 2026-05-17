@@ -176,10 +176,11 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("search_tools(", prompt)
         self.assertNotIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("## Planning Mode", prompt)
-        self.assertIn("REQUIRED: Your very first action must be sending a welcome message", prompt)
+        self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", prompt)
         self.assertIn(f"Contact channel: email at {self.user.email}", prompt)
-        self.assertIn("MUST call send_email to introduce yourself", prompt)
-        self.assertIn("Greeting comes first, always.", prompt)
+        self.assertIn("Your welcome message should", prompt)
+        self.assertIn("After the welcome, continue Planning Mode", prompt)
+        self.assertIn("call the welcome send tool and end_planning in the same response", prompt)
         self.assertIn("Be warm and adventurous", prompt)
         self.assertIn("### R1: Greeting (first impression)", prompt)
         self.assertIn("## Then Planning Mode: clarify before main work", prompt)
@@ -242,7 +243,7 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         normal_prompt_index = prompt.index("You are a persistent AI agent.")
         planning_index = prompt.index("## Planning Mode")
-        welcome_index = prompt.index("## REQUIRED: Your very first action must be sending a welcome message")
+        welcome_index = prompt.index("This is your first run.")
         self.assertLess(normal_prompt_index, planning_index)
         self.assertLess(planning_index, welcome_index)
 
@@ -266,6 +267,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
         self.assertIn("Read-only research is allowed and often useful during planning", prompt)
+        self.assertIn("Do not call search_tools as the first meaningful action", prompt)
         self.assertIn("Use request_human_input for planning questions", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
         self.assertEqual(prompt.count("Resume the pending planning turn."), 1)
@@ -344,12 +346,12 @@ class PersistentAgentPlanningModeTests(TestCase):
 
         prompt = _get_system_instruction(self.agent, is_first_run=True)
 
-        self.assertIn("## Then charter + everything else", prompt)
+        self.assertIn("## Then calibrate setup to the task", prompt)
         self.assertIn("### Execution Template", prompt)
-        self.assertIn("search_tools(", prompt)
+        self.assertIn("search_tools('{domain}')", prompt)
         self.assertNotIn("search_tools(will_continue_work=true)", prompt)
-        self.assertIn("sqlite_batch(charter + schedule)", prompt)
-        self.assertIn("update_plan", prompt)
+        self.assertIn("Use sqlite_batch for durable analysis data", prompt)
+        self.assertIn("update __agent_config only if", prompt)
         self.assertNotIn("## Planning Mode", prompt)
 
     def test_skip_endpoint_cancels_pending_questions_and_exposes_payloads(self):

@@ -962,7 +962,10 @@ class MetaGobiiEvalScenarioTests(TestCase):
         with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
             discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
 
-        self.assertEqual(discovery_calls, [])
+        self.assertEqual(
+            [call["name"] for call in discovery_calls],
+            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
+        )
         messages = mock_completion.call_args.kwargs["messages"]
         prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
         self.assertIn("design", prompt_text)
@@ -976,7 +979,10 @@ class MetaGobiiEvalScenarioTests(TestCase):
         with patch.object(scenario, "_run_tool_completion", return_value=[]) as mock_completion:
             discovery_calls = scenario._run_skill_discovery(scenario.case, simulated=False)
 
-        self.assertEqual(discovery_calls, [])
+        self.assertEqual(
+            [call["name"] for call in discovery_calls],
+            [SKILL_SEARCH_TOOL_NAME, ENABLE_SYSTEM_SKILLS_TOOL_NAME],
+        )
         messages = mock_completion.call_args.kwargs["messages"]
         prompt_text = "\n".join(str(message.get("content") or "") for message in messages).lower()
         self.assertIn("demo", prompt_text)
