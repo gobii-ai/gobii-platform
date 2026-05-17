@@ -4019,6 +4019,7 @@ class EventProcessingRuntimeGuardTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("intelligence tier", result["message"])
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing._runtime_exceeded", return_value=True)
@@ -5234,6 +5235,7 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             browser_use_agent=self.browser_agent,
         )
 
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=False)
     @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value="none")
@@ -5316,3 +5318,37 @@ class EventProcessingMaxIterationsFollowUpTests(TestCase):
             args=[str(self.agent.id)],
             countdown=expected_delay_seconds,
         )
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("api.agent.tasks.process_events.process_agent_events_task.apply_async")
+    def test_delayed_agent_follow_up_does_not_run_immediately_in_eager_mode(
+        self,
+        mock_apply_async,
+    ):
+        from api.agent.core import event_processing as ep
+
+        ep._schedule_agent_follow_up(
+            agent_id=self.agent.id,
+            delay_seconds=60,
+            reason="Test",
+        )
+
+        mock_apply_async.assert_not_called()
+
+    @override_settings(CELERY_TASK_ALWAYS_EAGER=True)
+    @patch("api.agent.tasks.process_events.process_pending_agent_events_task.apply_async")
+    @patch("api.agent.core.event_processing.claim_pending_drain_slot")
+    def test_delayed_pending_drain_does_not_run_immediately_in_eager_mode(
+        self,
+        mock_claim_pending_drain_slot,
+        mock_apply_async,
+    ):
+        from api.agent.core import event_processing as ep
+
+        ep._schedule_pending_drain(
+            delay_seconds=60,
+            schedule_ttl_seconds=120,
+        )
+
+        mock_claim_pending_drain_slot.assert_not_called()
+        mock_apply_async.assert_not_called()

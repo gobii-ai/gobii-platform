@@ -124,7 +124,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "name": "send_chat_message",
             "description": (
                 "Send a user-facing web chat message for questions, blockers, config changes, or findings. "
-                "After an acknowledgement, do not send routine progress narration such as what you will do next, "
+                "Do not narrate what you will do next after an acknowledgement, and do not send routine progress narration such as "
                 "tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {

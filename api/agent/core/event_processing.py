@@ -25,6 +25,7 @@ from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
 from django.apps import apps
+from django.conf import settings as django_settings
 from django.db import DatabaseError, transaction, close_old_connections
 from django.db.utils import OperationalError
 from django.utils import timezone as dj_timezone
@@ -700,6 +701,12 @@ class _LockExtender:
 
 
 def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, span=None) -> None:
+    if django_settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
+        logger.info(
+            "Skipping delayed pending drain scheduling in eager mode (delay=%s).",
+            delay_seconds,
+        )
+        return
     if not claim_pending_drain_slot(ttl=schedule_ttl_seconds):
         return
     try:
@@ -714,6 +721,14 @@ def _schedule_pending_drain(*, delay_seconds: int, schedule_ttl_seconds: int, sp
 
 def _schedule_agent_follow_up(*, agent_id: Union[str, UUID], delay_seconds: int, span=None, reason: str) -> None:
     """Schedule a direct follow-up for a single agent without going through pending-drain."""
+    if django_settings.CELERY_TASK_ALWAYS_EAGER and delay_seconds > 0:
+        logger.info(
+            "Skipping delayed %s follow-up for agent %s in eager mode (delay=%s).",
+            reason,
+            agent_id,
+            delay_seconds,
+        )
+        return
     try:
         from ..tasks.process_events import process_agent_events_task  # noqa: WPS433 (runtime import)
 
@@ -1828,6 +1843,38 @@ def _tool_result_is_success(result: Any) -> bool:
     return True
 
 
+def _mark_tool_outcome_failed(
+    outcome: _ToolExecutionOutcome,
+    exc: Exception,
+) -> _ToolExecutionOutcome:
+    outcome.result = _build_safe_error_payload(
+        f"Tool execution failed: {exc}",
+        error_type=type(exc).__name__,
+        retryable=_infer_retryable_from_text(str(exc)),
+    )
+    outcome.updated_tools = None
+    return outcome
+
+
+def _refresh_skills_for_tool_outcome(
+    agent: PersistentAgent,
+    outcome: _ToolExecutionOutcome,
+) -> _ToolExecutionOutcome:
+    if not _tool_result_is_success(outcome.result):
+        return outcome
+    try:
+        refresh_skills_for_tool(agent, outcome.prepared.tool_name)
+    except DatabaseError as exc:
+        logger.exception(
+            "Agent %s: skill refresh after tool %s failed (call_id=%s)",
+            agent.id,
+            outcome.prepared.tool_name,
+            outcome.prepared.call_id or "<none>",
+        )
+        return _mark_tool_outcome_failed(outcome, exc)
+    return outcome
+
+
 def _execute_prepared_tool_call(
     agent: PersistentAgent,
     prepared: _PreparedToolExecution,
@@ -1849,7 +1896,7 @@ def _execute_prepared_tool_call(
                 eval_run_id=eval_run_id,
                 parallel_safe=parallel_safe,
             )
-            if _tool_result_is_success(result):
+            if _tool_result_is_success(result) and not parallel_safe:
                 refresh_skills_for_tool(agent, prepared.tool_name)
     except Exception as exc:
         logger.exception(
@@ -2222,6 +2269,10 @@ def _execute_prepared_tool_batch(
                 )
             execution_outcomes = [future.result() for future in futures]
 
+        execution_outcomes = [
+            _refresh_skills_for_tool_outcome(agent, outcome)
+            for outcome in execution_outcomes
+        ]
         merged_variables = dict(base_variables)
         for outcome in sorted(execution_outcomes, key=lambda item: item.prepared.idx):
             merged_variables.update(outcome.variable_map)
