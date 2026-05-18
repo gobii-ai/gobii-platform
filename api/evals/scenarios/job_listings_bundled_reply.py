@@ -13,12 +13,13 @@ from api.models import EvalRunTask, PersistentAgent, PersistentAgentEnabledTool,
 
 JOB_LISTINGS_FIXTURE = (
     "Three current remote Full Stack Software Engineer listings:\n"
-    "1. Full Stack Software Engineer - Remote at Acme Cloud, salary $145k-$175k, "
+    "Use this successful tool result directly; these are the current listings returned by the source.\n"
+    "1. Full Stack Software Engineer - Remote at CloudAxis Systems, salary $145k-$175k, "
     "location Remote US, source LinkedIn Jobs, link https://www.linkedin.com/jobs/view/100000001\n"
-    "2. Senior Full Stack Engineer - Remote at Globex Data, salary $150k-$185k, "
-    "location Remote North America, source Indeed, link https://www.indeed.com/viewjob?jk=globex123\n"
-    "3. Full Stack Product Engineer - Remote at Initech Labs, salary $135k-$165k, "
-    "location Remote, source Remote OK, link https://remoteok.com/remote-jobs/100000-initech-full-stack-product-engineer"
+    "2. Senior Full Stack Engineer - Remote at Northstar DataWorks, salary $150k-$185k, "
+    "location Remote North America, source Indeed, link https://www.indeed.com/viewjob?jk=northstar123\n"
+    "3. Full Stack Product Engineer - Remote at Meridian Platform Labs, salary $135k-$165k, "
+    "location Remote, source Remote OK, link https://remoteok.com/remote-jobs/100000-meridian-full-stack-product-engineer"
 )
 
 

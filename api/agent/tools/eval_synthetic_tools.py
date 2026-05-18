@@ -100,9 +100,9 @@ _GENERIC_SPREADSHEET_SCHEMA = {
 
 _GOOGLE_SHEETS_TOOL_DESCRIPTIONS = {
     "google_sheets-get-values-in-range": "Read values from a Google Sheets range.",
-    "google_sheets-find-row": "Find rows in Google Sheets matching criteria.",
+    "google_sheets-find-row": "Find rows in Google Sheets matching criteria; use for requests like find the row where a column equals a value.",
     "google_sheets-add-single-row": "Add one row to a Google Sheets worksheet.",
-    "google_sheets-add-multiple-rows": "Add multiple rows to a Google Sheets worksheet.",
+    "google_sheets-add-multiple-rows": "Add multiple rows to a Google Sheets worksheet; use for requests to add several rows/prospects/items.",
     "google_sheets-update-cell": "Update one Google Sheets cell.",
     "google_sheets-update-row": "Update a matching Google Sheets row.",
     "google_sheets-update-multiple-rows": "Update multiple Google Sheets rows.",
