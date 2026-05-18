@@ -11,6 +11,7 @@ from api.services.discord_bot import (
     DiscordBotIntegrationError,
     disable_subscription,
     discover_channels,
+    discord_setup_required_response,
     ensure_subscription,
     latest_selected_guild,
     list_claimed_guilds,
@@ -90,18 +91,10 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
         if action == "list_guilds":
             guilds = list_claimed_guilds(agent)
             if not guilds:
-                discovery = discover_channels(agent, limit=1)
-                if discovery.get("status") == "action_required":
-                    return _result_with_sleep(
-                        {
-                            "status": "action_required",
-                            "message": discovery.get("message", ""),
-                            "connect_url": discovery.get("connect_url", ""),
-                            "bot_invite_url": discovery.get("bot_invite_url", ""),
-                            "guilds": [],
-                        },
-                        params,
-                    )
+                setup_required = discord_setup_required_response(agent)
+                setup_required.pop("channels", None)
+                setup_required["guilds"] = []
+                return _result_with_sleep(setup_required, params)
             result = {"status": "success", "guilds": guilds}
             selected_guild = latest_selected_guild(agent)
             if selected_guild:

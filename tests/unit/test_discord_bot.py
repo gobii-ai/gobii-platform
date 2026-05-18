@@ -6,6 +6,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import requests
 from django.contrib.auth import get_user_model
+from django.db import connection
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
@@ -129,6 +130,39 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Discord connection completed", system_step.step.description)
         self.assertIn("discover_channels", system_step.step.description)
         self.assertIn('"selected_guild_id":"100"', system_step.notes)
+        delay_mock.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
+    @patch("api.services.discord_bot._fetch_oauth_guilds")
+    @patch("api.services.discord_bot._exchange_oauth_code")
+    def test_oauth_callback_performs_discord_requests_outside_db_transaction(
+        self,
+        exchange_mock,
+        fetch_guilds_mock,
+        delay_mock,
+    ):
+        start_discord_oauth(self.agent, self.user)
+        session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
+        baseline_atomic_depth = len(connection.atomic_blocks)
+
+        def exchange_code(_code):
+            self.assertEqual(len(connection.atomic_blocks), baseline_atomic_depth)
+            return "oauth-token"
+
+        def fetch_guilds(_access_token):
+            self.assertEqual(len(connection.atomic_blocks), baseline_atomic_depth)
+            return [{"id": "100", "name": "Claimed", "icon": "abc", "permissions": str(0x20)}]
+
+        exchange_mock.side_effect = exchange_code
+        fetch_guilds_mock.side_effect = fetch_guilds
+
+        with self.captureOnCommitCallbacks(execute=True):
+            result = handle_discord_oauth_callback(state=session.state, code="code-1")
+
+        self.assertEqual(result.claimed_count, 1)
+        exchange_mock.assert_called_once_with("code-1")
+        fetch_guilds_mock.assert_called_once_with("oauth-token")
         delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
@@ -600,6 +634,19 @@ class NativeDiscordBotTests(TestCase):
             result["bot_invite_url"],
             "https://discord.com/oauth2/authorize?client_id=discord-client&scope=bot+applications.commands&permissions=536939520",
         )
+        self.assertTrue(result["auto_sleep_ok"])
+
+    @tag("batch_agent_webhooks")
+    def test_subscription_tool_list_guilds_returns_action_required_connect_url_without_claimed_guild(self):
+        result = execute_discord_channel_subscriptions(
+            self.agent,
+            {"action": "list_guilds", "will_continue_work": False},
+        )
+
+        self.assertEqual(result["status"], "action_required")
+        self.assertEqual(result["guilds"], [])
+        self.assertIn("single setup link", result["message"])
+        self.assertIn("/console/api/discord/oauth/start/", result["connect_url"])
         self.assertTrue(result["auto_sleep_ok"])
 
     @tag("batch_agent_webhooks")

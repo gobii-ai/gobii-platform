@@ -79,23 +79,6 @@ def discord_channel_source_label(channel_id: str, channel_name: str = "") -> str
     return display_name_for_channel(channel_id, channel_name)
 
 
-def discord_conversation_address_for_channel(agent: PersistentAgent, channel_id: str) -> str:
-    existing = (
-        PersistentAgentConversation.objects
-        .filter(
-            owner_agent=agent,
-            channel=CommsChannel.DISCORD,
-            address__startswith=f"discord://agent/{agent.id}/",
-            address__endswith=f"/channel/{channel_id}",
-        )
-        .order_by("-id")
-        .first()
-    )
-    if existing:
-        return existing.address
-    return discord_conversation_address(agent.id, "unknown", channel_id)
-
-
 def get_or_create_discord_conversation(
     agent: PersistentAgent,
     *,

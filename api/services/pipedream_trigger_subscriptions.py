@@ -34,7 +34,6 @@ from api.services.discord_messages import (
     discord_channel_address as _discord_channel_address,
     discord_channel_source_label as _discord_channel_source_label,
     discord_conversation_address as _discord_conversation_address,
-    display_name_for_channel as _display_name_for_channel,
     ensure_discord_agent_endpoint as _ensure_discord_agent_endpoint,
     ensure_discord_conversation_participants as _ensure_discord_conversation_participants,
     find_recent_discord_outbound,

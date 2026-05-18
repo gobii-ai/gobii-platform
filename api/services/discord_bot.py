@@ -141,6 +141,19 @@ def build_discord_bot_invite_url() -> str:
     return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
 
 
+def discord_setup_required_response(agent: PersistentAgent) -> dict[str, Any]:
+    return {
+        "status": "action_required",
+        "message": (
+            "Connect Discord to Gobii. This single setup link authorizes Discord guild access "
+            "and installs the Gobii bot in the selected server."
+        ),
+        "connect_url": build_discord_oauth_start_url(agent),
+        "bot_invite_url": build_discord_bot_invite_url(),
+        "channels": [],
+    }
+
+
 def start_discord_oauth(agent: PersistentAgent, initiated_by) -> str:
     if not settings.DISCORD_CLIENT_ID or not settings.DISCORD_CLIENT_SECRET:
         raise DiscordBotIntegrationError("Discord OAuth is not configured.")
@@ -306,7 +319,6 @@ def _queue_discord_oauth_completion_processing(
     transaction.on_commit(_trigger_processing)
 
 
-@transaction.atomic
 def handle_discord_oauth_callback(
     *,
     state: str,
@@ -314,10 +326,7 @@ def handle_discord_oauth_callback(
     selected_guild_id: str = "",
     selected_permissions: str = "",
 ) -> DiscordGuildClaimResult:
-    session = (
-        PersistentAgentDiscordOAuthSession.objects.select_for_update()
-        .get(state=state)
-    )
+    session = PersistentAgentDiscordOAuthSession.objects.get(state=state)
     if session.completed_at:
         raise DiscordBotIntegrationError("This Discord authorization has already been used.")
     if session.is_expired():
@@ -331,47 +340,57 @@ def handle_discord_oauth_callback(
     selected_permissions = selected_permissions.strip()
     selected_guild: dict[str, str] | None = None
 
-    for guild in claimable_guilds:
-        guild_id = str(guild.get("id") or "").strip()
-        if not guild_id:
-            continue
-        defaults = {
-            "name": str(guild.get("name") or guild_id)[:255],
-            "icon_hash": str(guild.get("icon") or "")[:128],
-            "owner_user": session.owner_user,
-            "organization": session.organization,
-            "claimed_by": session.initiated_by,
-            "is_active": True,
-            "last_synced_at": timezone.now(),
-        }
-        guild_claim = _claim_discord_guild_for_session(
-            session,
-            guild_id=guild_id,
-            defaults=defaults,
+    with transaction.atomic():
+        session = (
+            PersistentAgentDiscordOAuthSession.objects.select_for_update()
+            .get(state=state)
         )
-        if guild_claim is None:
-            continue
-        claimed.append(
-            {
-                "id": guild_claim.guild_id,
-                "name": guild_claim.name,
-                "icon_hash": guild_claim.icon_hash,
-            }
-        )
-        if selected_guild_id and guild_claim.guild_id == selected_guild_id:
-            selected_guild = claimed[-1]
+        if session.completed_at:
+            raise DiscordBotIntegrationError("This Discord authorization has already been used.")
+        if session.is_expired():
+            raise DiscordBotIntegrationError("This Discord authorization has expired. Start the connection again.")
 
-    session.completed_at = timezone.now()
-    session.selected_guild_id = selected_guild_id if selected_guild else ""
-    session.selected_permissions = selected_permissions[:64]
-    session.save(update_fields=["completed_at", "selected_guild_id", "selected_permissions"])
-    result = DiscordGuildClaimResult(
-        claimed_count=len(claimed),
-        guilds=claimed,
-        selected_guild_id=session.selected_guild_id,
-        selected_guild=selected_guild,
-    )
-    _queue_discord_oauth_completion_processing(session, result)
+        for guild in claimable_guilds:
+            guild_id = str(guild.get("id") or "").strip()
+            if not guild_id:
+                continue
+            defaults = {
+                "name": str(guild.get("name") or guild_id)[:255],
+                "icon_hash": str(guild.get("icon") or "")[:128],
+                "owner_user": session.owner_user,
+                "organization": session.organization,
+                "claimed_by": session.initiated_by,
+                "is_active": True,
+                "last_synced_at": timezone.now(),
+            }
+            guild_claim = _claim_discord_guild_for_session(
+                session,
+                guild_id=guild_id,
+                defaults=defaults,
+            )
+            if guild_claim is None:
+                continue
+            claimed.append(
+                {
+                    "id": guild_claim.guild_id,
+                    "name": guild_claim.name,
+                    "icon_hash": guild_claim.icon_hash,
+                }
+            )
+            if selected_guild_id and guild_claim.guild_id == selected_guild_id:
+                selected_guild = claimed[-1]
+
+        session.completed_at = timezone.now()
+        session.selected_guild_id = selected_guild_id if selected_guild else ""
+        session.selected_permissions = selected_permissions[:64]
+        session.save(update_fields=["completed_at", "selected_guild_id", "selected_permissions"])
+        result = DiscordGuildClaimResult(
+            claimed_count=len(claimed),
+            guilds=claimed,
+            selected_guild_id=session.selected_guild_id,
+            selected_guild=selected_guild,
+        )
+        _queue_discord_oauth_completion_processing(session, result)
     return result
 
 
@@ -436,16 +455,7 @@ def _validate_subscription_channel(subscription: PersistentAgentDiscordChannelSu
 def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str = "", limit: int = 100) -> dict[str, Any]:
     claimed = list(_claimed_guild_queryset(agent).order_by("name", "guild_id"))
     if not claimed:
-        return {
-            "status": "action_required",
-            "message": (
-                "Connect Discord to Gobii. This single setup link authorizes Discord guild access "
-                "and installs the Gobii bot in the selected server."
-            ),
-            "connect_url": build_discord_oauth_start_url(agent),
-            "bot_invite_url": build_discord_bot_invite_url(),
-            "channels": [],
-        }
+        return discord_setup_required_response(agent)
 
     query_lc = query.strip().lower()
     requested_guild_id = guild_id.strip()
