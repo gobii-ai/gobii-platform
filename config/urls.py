@@ -196,6 +196,7 @@ from console.email_settings.views import (
     AgentEmailSettingsEnsureAccountAPIView,
     AgentEmailSettingsTestAPIView,
 )
+from console.discord_api import DiscordOAuthCallbackView, DiscordOAuthStartView
 from console.usage_views import (
     UsageSummaryAPIView,
     UsageBurnRateSnapshotAPIView,
@@ -230,6 +231,7 @@ from console.views import (
     PersistentAgentChatShellView,
     AgentAvatarProxyView,
     AgentAvatarThumbnailProxyView,
+    PublicAgentAvatarThumbnailView,
     AgentCreateContactView,
     AgentQuickSpawnView,
     AgentDetailView,
@@ -337,6 +339,8 @@ urlpatterns = [
 
     # Pipedream JIT connect redirect - generates fresh auth links on-demand
     path("connect/pipedream/<uuid:agent_id>/<slug:app_slug>/", PipedreamConnectRedirectView.as_view(), name="pipedream_jit_connect"),
+    path("console/api/discord/oauth/start/", DiscordOAuthStartView.as_view(), name="discord_oauth_start"),
+    path("console/api/discord/oauth/callback/", DiscordOAuthCallbackView.as_view(), name="discord_oauth_callback"),
 
     # Plan landing pages (must be before console to avoid conflict)
     path("plans/<slug:plan>/", PaidPlanLanding.as_view(), name="plan_landing"),
@@ -390,6 +394,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/chat/files/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell_files"),
     path("console/agents/<uuid:pk>/avatar/thumb/", AgentAvatarThumbnailProxyView.as_view(), name="agent_avatar_thumbnail"),
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
+    path("public/agents/<uuid:pk>/avatar/thumb/", PublicAgentAvatarThumbnailView.as_view(), name="agent_avatar_public_thumbnail"),
     path("console/api/agents/roster/", AgentChatRosterAPIView.as_view(), name="console_agent_roster"),
     path("console/api/agents/create/", AgentQuickCreateAPIView.as_view(), name="console_agent_quick_create"),
     path("console/api/agents/spawn-intent/", AgentSpawnIntentAPIView.as_view(), name="console_agent_spawn_intent"),

@@ -19,6 +19,7 @@ dependencies = [
   "django-htmx~=1.27.0",
   "django-storages~=1.14.6",
   "django==6.0",
+  "discord.py>=2.4.0,<3.0",
   "djangorestframework~=3.16.1",
   "celery-redbeat~=2.3.2",
   "django-anymail[postmark]>=14.0",

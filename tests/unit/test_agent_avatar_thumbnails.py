@@ -12,6 +12,7 @@ from django.utils import timezone
 from PIL import Image
 
 from api.models import BrowserUseAgent, PersistentAgent
+from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
 from console.views import AGENT_AVATAR_THUMBNAIL_SIZE, _agent_avatar_thumbnail_name
 
 
@@ -54,6 +55,7 @@ class AgentAvatarThumbnailTests(TestCase):
             username="avatar-thumb-owner",
             email="avatar-thumb-owner@example.com",
             password="password123",
+            is_staff=True,
         )
         self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Avatar Thumb Browser")
         self.agent = PersistentAgent.objects.create(
@@ -109,6 +111,33 @@ class AgentAvatarThumbnailTests(TestCase):
 
     def test_thumbnail_endpoint_returns_404_without_avatar(self):
         response = self.client.get(reverse("agent_avatar_thumbnail", kwargs={"pk": self.agent.id}))
+
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
+    def test_public_thumbnail_url_serves_anonymous_signed_thumbnail(self):
+        self._save_avatar()
+
+        public_url = build_public_agent_avatar_thumbnail_url(self.agent)
+
+        self.assertTrue(public_url.startswith("https://app.example.test/public/agents/"))
+        self.assertIn("/avatar/thumb/?token=", public_url)
+
+        anonymous_client = Client()
+        response = anonymous_client.get(public_url.removeprefix("https://app.example.test"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "image/png")
+        self.assertEqual(response["Cache-Control"], "public, max-age=86400")
+        self.assertTrue(_response_bytes(response))
+
+    def test_public_thumbnail_url_rejects_invalid_token(self):
+        self._save_avatar()
+
+        response = Client().get(
+            reverse("agent_avatar_public_thumbnail", kwargs={"pk": self.agent.id}),
+            {"token": "invalid"},
+        )
 
         self.assertEqual(response.status_code, 404)
 

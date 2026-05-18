@@ -427,7 +427,7 @@ def process_discord_inbound_debounce_task(
     persistent_agent_id: str,
 ) -> None:  # noqa: D401, ANN001
     """Wake an agent after Discord inbound messages have been quiet long enough."""
-    from api.services.pipedream_trigger_subscriptions import process_discord_inbound_debounce
+    from api.services.discord_messages import process_discord_inbound_debounce
 
     process_discord_inbound_debounce(persistent_agent_id)
 

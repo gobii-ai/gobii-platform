@@ -256,11 +256,12 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key="connected_app_channels",
     name="Connected App Channels",
     search_summary="Provision inbound message subscriptions for connected apps like Discord.",
-    tool_names=("pipedream_trigger_subscriptions",),
+    tool_names=("discord_channel_subscriptions", "discord_send_message"),
     enables=(
-        "receive Discord channel messages through Pipedream Connect triggers",
-        "inspect active connected-app trigger subscriptions",
-        "disable connected-app trigger subscriptions",
+        "receive Discord channel messages through the native Gobii Discord bot",
+        "discover Discord guild channels claimed by the agent owner",
+        "send Discord replies through Gobii bot webhooks using the agent name and avatar",
+        "inspect and disable connected-app channel subscriptions",
         "turn selected app channels into agent conversations",
     ),
     use_when=(
@@ -273,30 +274,32 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     query_aliases=(
         "discord",
         "connected app messages",
-        "pipedream triggers",
         "slack receive",
         "slack messages",
     ),
-    pipedream_app_slugs=("discord",),
     prompt_instructions=(
-        "Use normal Pipedream app tools for outbound actions such as sending Discord messages.\n"
-        "When calling Discord send-message tools, pass the selected Discord channel ID as `channel`, the text as `message`, "
-        "and the correct `will_continue_work` value. The backend supplies default Discord presentation fields unless you explicitly override them.\n"
-        "Use `pipedream_trigger_subscriptions` only to manage inbound app event subscriptions that wake this agent.\n"
-        "V1 supports Discord `message.created` subscriptions for selected channel IDs. Do not create all-channel or mention-only subscriptions.\n"
-        "Before asking the user for a Discord channel ID, call `pipedream_trigger_subscriptions` with `action=\"discover_targets\"` to list available channels. "
-        "For Discord channel discovery, prefer this tool over Pipedream `retrieve_options` or `configure_component`.\n"
-        "If several channels are returned, ask the user to choose by channel name, then call `ensure` with the selected target value as `channel_ids`. "
-        "Include `channel_names` when you know human-readable names. "
-        "Do not treat Discord channel setup as complete after discovery or outbound sending; after the channel is selected, call `ensure` so future channel messages wake this agent. "
-        "Skip `ensure` only when the user clearly asks for a one-time outbound-only Discord post and does not expect replies, monitoring, or ongoing interaction.\n"
-        "Only ask the user for a raw channel ID in normal conversation if target discovery fails or returns no useful choices. "
-        "Do not request Discord server IDs or channel IDs as secrets. Server ID is not required for v1 setup.\n"
-        "If the tool returns `action_required`, provide the connect URL to the user and stop until authorization completes.\n"
-        "If `ensure` succeeds, then use the normal Discord send-message tool for any outbound message the user requested. "
-        "If outbound sending succeeds but `ensure` has not succeeded, the agent will not receive Discord replies.\n"
-        "Use `list` before creating duplicates when the current subscription state is unclear.\n"
-        "Use `disable` only when the user asks to stop receiving messages from a subscribed app channel."
+        "Use the native Gobii Discord bot tools for Discord setup and replies.\n"
+        "When the user asks to connect, set up, enable, or test Discord, immediately call `discord_channel_subscriptions` "
+        "with `action=\"list_guilds\"` or `action=\"discover_channels\"`; do not ask whether to start setup first. "
+        "Never invent Discord setup links or format separate setup steps yourself; only send URLs returned by the tool.\n"
+        "Use `discord_channel_subscriptions` to manage inbound Discord server-channel subscriptions that wake this agent. "
+        "V1 supports server channels only. Multiple agents may subscribe to the same guild/channel; each subscribed agent receives inbound channel messages. "
+        "Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
+        "Before asking the user for Discord IDs, call `discord_channel_subscriptions` with `action=\"list_guilds\"` or `action=\"discover_channels\"`. "
+        "If the tool returns `action_required`, send the returned Gobii Discord `connect_url` as the single setup link. "
+        "That link authorizes Discord guild access and installs the Gobii bot in the selected server. "
+        "Do not present setup as separate connect and invite steps unless channel discovery later says the bot cannot list channels.\n"
+        "After the user says Discord setup is complete, call `list_guilds` or `discover_channels` again. "
+        "If the tool returns `selected_guild`, use that server and continue to channel discovery; do not ask the user to choose the server again.\n"
+        "After guilds are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
+        "then call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name` so future channel messages wake this agent.\n"
+        "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
+        "Do not request Discord server IDs or channel IDs as secrets.\n"
+        "Use `discord_send_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
+        "To upload files, pass filespace paths or $[/path] variables in `attachments`; do not paste attachment paths into `message`. "
+        "The backend sends through a channel webhook using the agent's name and avatar.\n"
+        "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
+        "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
     ),
 )
 
