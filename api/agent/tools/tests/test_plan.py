@@ -31,9 +31,11 @@ class UpdatePlanValidationTests(SimpleTestCase):
         description = tool["function"]["description"]
 
         self.assertIn("full current active plan", description)
+        self.assertIn("usually 3-6 active steps", description)
         self.assertIn("omit stale prior-task or prior-run steps", description)
         self.assertIn("new scheduled run", description)
         self.assertIn("do not create one step per day, hour, or recurrence slot", description)
+        self.assertIn("represent the current run with compact reusable phases", description)
 
     def test_invalid_message_deliverable_feedback_explains_user_facing_only(self):
         result = execute_update_plan(

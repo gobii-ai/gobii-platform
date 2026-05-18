@@ -79,8 +79,10 @@ def get_update_plan_tool() -> dict[str, Any]:
                 "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
                 "Every call replaces the full current active plan, including the deliverable references. "
+                "Keep plans short: usually 3-6 active steps. "
                 "When starting a new task, new iteration, or new scheduled run, omit stale prior-task or prior-run steps. "
-                "For recurring or hourly work, do not create one step per day, hour, or recurrence slot."
+                "For recurring or hourly work, do not create one step per day, hour, or recurrence slot; "
+                "instead, represent the current run with compact reusable phases."
             ),
             "parameters": {
                 "type": "object",
