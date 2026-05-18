@@ -611,6 +611,21 @@ class NativeDiscordBotTests(TestCase):
             channel_id="10",
             channel_name="general",
         )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="old-wh",
+            name="Old Gobii",
+        )
+        expired_marker = PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="old-wh",
+            signature_hash="expired",
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
         def post_side_effect(url, **_kwargs):
             if "/channels/" in url:
                 return _response({"id": "wh1", "token": "token1", "name": "Gobii"})
@@ -630,6 +645,7 @@ class NativeDiscordBotTests(TestCase):
         webhook = PersistentAgentDiscordWebhook.objects.get(channel_id="10")
         self.assertEqual(webhook.webhook_id, "wh1")
         marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
+        self.assertNotEqual(marker.id, expired_marker.id)
         self.assertEqual(marker.discord_message_id, "discord-message-1")
         self.assertEqual(message.raw_payload["webhook_echo_marker_id"], str(marker.id))
         send_call = post_mock.call_args_list[1]

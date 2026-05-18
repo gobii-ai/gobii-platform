@@ -28,6 +28,7 @@ DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:discord-inbound-debounce:{agent_i
 DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:discord-inbound-debounce:{agent_id}:scheduled"
 DISCORD_INBOUND_TYPING_CHANNEL_KEY = "agent:discord-inbound-debounce:{agent_id}:typing-channel"
 DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS = 2
 
 
 def discord_channel_address(guild_id: str, channel_id: str) -> str:
@@ -231,7 +232,7 @@ def send_discord_typing_indicator(channel_id: str) -> bool:
         response = requests.post(
             f"{DISCORD_API_BASE}/channels/{normalized_channel_id}/typing",
             headers={"Authorization": f"Bot {settings.DISCORD_BOT_TOKEN}"},
-            timeout=10,
+            timeout=DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
     except requests.RequestException as exc:

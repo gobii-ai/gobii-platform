@@ -734,6 +734,7 @@ def _create_webhook_echo_marker(
     subscription: PersistentAgentDiscordChannelSubscription,
     signature_hash: str,
 ) -> PersistentAgentDiscordWebhookEcho:
+    PersistentAgentDiscordWebhookEcho.objects.filter(expires_at__lte=timezone.now()).delete()
     return PersistentAgentDiscordWebhookEcho.objects.create(
         agent=agent,
         webhook=webhook,

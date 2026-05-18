@@ -30,6 +30,7 @@ from api.services.pipedream_trigger_subscriptions import (
     process_discord_inbound_debounce,
     schedule_discord_inbound_processing,
 )
+from api.services.discord_messages import DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS
 
 
 def _response(payload=None, status_code=200, content=b"", headers=None):
@@ -712,6 +713,17 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         mock_debounce_apply_async.assert_not_called()
         mock_process_delay.assert_called_once_with(str(self.agent.id))
         self.assertEqual(fake_redis.values, {})
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_BOT_TOKEN="bot-token")
+    @patch("api.services.discord_messages.requests.post")
+    def test_discord_typing_indicator_uses_short_timeout(self, mock_post):
+        from api.services.discord_messages import send_discord_typing_indicator
+
+        mock_post.return_value = _response()
+
+        self.assertTrue(send_discord_typing_indicator("12345"))
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS)
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
