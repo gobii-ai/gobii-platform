@@ -557,6 +557,20 @@ class InboundAgentWebhookEndpointTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_inbound_webhook_rejects_agent_from_other_environment(self, mock_delay):
+        with patch("api.webhooks.settings.GOBII_RELEASE_ENV", "other-env"):
+            response = self.client.post(
+                f"{reverse('api:inbound_agent_webhook', args=[self.webhook.id])}?t={self.webhook.secret}",
+                data='{"status":"ok"}',
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent).exists())
+        mock_delay.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     def test_inbound_webhook_rejects_inactive_webhook(self):
         self.webhook.is_active = False
         self.webhook.save(update_fields=["is_active"])

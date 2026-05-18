@@ -374,7 +374,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(stored.raw_payload["discord_message_id"], "500")
         self.assertEqual(PersistentAgentMessageAttachment.objects.filter(message=stored).count(), 1)
         self.assertEqual(stored.conversation.channel, CommsChannel.DISCORD)
-        schedule_mock.assert_called_once_with(str(self.agent.id))
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -434,6 +434,56 @@ class NativeDiscordBotTests(TestCase):
         )
 
     @tag("batch_agent_webhooks")
+    @override_settings(GOBII_RELEASE_ENV="local")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_message_skips_agents_from_other_environment(self, schedule_mock):
+        self.agent.execution_environment = "local"
+        self.agent.save(update_fields=["execution_environment", "updated_at"])
+        guild = self._guild()
+        foreign_browser = BrowserUseAgent.objects.create(user=self.user, name="Staging Browser")
+        foreign_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Staging Agent",
+            charter="Handle Discord messages somewhere else.",
+            browser_use_agent=foreign_browser,
+            execution_environment="staging",
+        )
+        active_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=foreign_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="hello local agents",
+            attachments=[],
+            embeds=[],
+        )
+
+        result = ingest_gateway_message(message)
+
+        self.assertFalse(result["ignored"])
+        self.assertEqual(result["subscription_count"], 1)
+        self.assertEqual(result["deliveries"][0]["subscription_id"], str(active_subscription.id))
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=foreign_agent).exists())
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+
+    @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
     def test_inbound_gateway_ignores_bot_messages_but_ingests_third_party_webhooks(self, schedule_mock):
         guild = self._guild()
@@ -477,7 +527,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(PersistentAgentMessage.objects.count(), 1)
         stored = PersistentAgentMessage.objects.get()
         self.assertEqual(stored.raw_payload["discord_webhook_id"], "wh")
-        schedule_mock.assert_called_once_with(str(self.agent.id))
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -546,7 +596,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(result["deliveries"][0]["subscription_id"], str(second_subscription.id))
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).count(), 0)
         self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=second_agent, is_outbound=False).count(), 1)
-        schedule_mock.assert_called_once_with(str(second_agent.id))
+        schedule_mock.assert_called_once_with(str(second_agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
