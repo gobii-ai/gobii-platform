@@ -49,6 +49,8 @@ DISCORD_MANAGE_GUILD_PERMISSION = 0x20
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 DISCORD_TEXT_CHANNEL_TYPES = {0, 5}
 DISCORD_WEBHOOK_MAX_FILES = 10
+DISCORD_OAUTH_USER_SCOPES = ("identify", "guilds")
+DISCORD_OAUTH_BOT_INSTALL_SCOPES = ("bot", "applications.commands")
 
 
 class DiscordBotIntegrationError(RuntimeError):
@@ -129,7 +131,7 @@ def build_discord_bot_invite_url() -> str:
         return ""
     params = {
         "client_id": settings.DISCORD_CLIENT_ID,
-        "scope": "bot applications.commands",
+        "scope": " ".join(DISCORD_OAUTH_BOT_INSTALL_SCOPES),
         "permissions": str(settings.DISCORD_BOT_INVITE_PERMISSIONS),
     }
     return f"{DISCORD_OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
@@ -152,7 +154,8 @@ def start_discord_oauth(agent: PersistentAgent, initiated_by) -> str:
         "client_id": settings.DISCORD_CLIENT_ID,
         "redirect_uri": _oauth_redirect_uri(),
         "response_type": "code",
-        "scope": "identify guilds",
+        "scope": " ".join((*DISCORD_OAUTH_USER_SCOPES, *DISCORD_OAUTH_BOT_INSTALL_SCOPES)),
+        "permissions": str(settings.DISCORD_BOT_INVITE_PERMISSIONS),
         "state": session.state,
         "prompt": "consent",
     }
@@ -282,7 +285,10 @@ def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str 
     if not claimed:
         return {
             "status": "action_required",
-            "message": "Connect Discord to Gobii and invite the Gobii bot before selecting channels.",
+            "message": (
+                "Connect Discord to Gobii. This single setup link authorizes Discord guild access "
+                "and installs the Gobii bot in the selected server."
+            ),
             "connect_url": build_discord_oauth_start_url(agent),
             "bot_invite_url": build_discord_bot_invite_url(),
             "channels": [],
@@ -366,12 +372,15 @@ def ensure_subscription(
     guild = _claimed_guild_queryset(agent).select_for_update().get(guild_id=guild_id, is_active=True)
     existing = (
         PersistentAgentDiscordChannelSubscription.objects.select_for_update()
-        .filter(guild=guild, channel_id=channel_id, status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
+        .filter(
+            agent=agent,
+            guild=guild,
+            channel_id=channel_id,
+            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
         .first()
     )
     if existing:
-        if existing.agent_id != agent.id:
-            raise DiscordBotIntegrationError("Another active agent is already subscribed to that Discord channel.")
         updates = []
         if channel_name and existing.channel_name != channel_name:
             existing.channel_name = channel_name
@@ -389,7 +398,7 @@ def ensure_subscription(
             channel_name=channel_name,
         )
     except IntegrityError as exc:
-        raise DiscordBotIntegrationError("Another active agent is already subscribed to that Discord channel.") from exc
+        raise DiscordBotIntegrationError("This agent is already subscribed to that Discord channel.") from exc
     return {"subscription": serialize_subscription(subscription), "created": True, "reused": False}
 
 
@@ -420,26 +429,10 @@ def _attachment_downloads(attachments: list[dict[str, Any]]) -> list[dict[str, s
     return downloads
 
 
-def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
-    if message.author_is_bot or message.webhook_id:
-        return {"ignored": True, "reason": "bot_or_webhook"}
-    if not message.guild_id or not message.channel_id or not message.message_id:
-        return {"ignored": True, "reason": "missing_discord_ids"}
-    if not message.content and not message.attachments and not message.embeds:
-        return {"ignored": True, "reason": "empty_message"}
-
-    subscription = (
-        PersistentAgentDiscordChannelSubscription.objects.select_related("agent", "guild")
-        .filter(
-            guild__guild_id=message.guild_id,
-            channel_id=message.channel_id,
-            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
-        )
-        .first()
-    )
-    if not subscription:
-        return {"ignored": True, "reason": "no_subscription"}
-
+def _ingest_gateway_message_for_subscription(
+    message: DiscordGatewayMessage,
+    subscription: PersistentAgentDiscordChannelSubscription,
+) -> dict[str, Any]:
     agent = subscription.agent
     platform_channel_address = discord_channel_address(message.guild_id, message.channel_id)
     conversation_address = discord_conversation_address(agent.id, message.guild_id, message.channel_id)
@@ -492,11 +485,48 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
     debounce_result = schedule_discord_inbound_processing(str(agent.id))
     subscription.record_message()
     return {
-        "ignored": False,
+        "agent_id": str(agent.id),
+        "subscription_id": str(subscription.id),
         "message_id": str(info.message.id),
         "conversation_id": str(info.message.conversation_id) if info.message.conversation_id else "",
         "debounced": bool(debounce_result.get("debounced")),
         "debounce_seconds": debounce_result.get("debounce_seconds", 0),
+    }
+
+
+def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
+    if message.author_is_bot or message.webhook_id:
+        return {"ignored": True, "reason": "bot_or_webhook"}
+    if not message.guild_id or not message.channel_id or not message.message_id:
+        return {"ignored": True, "reason": "missing_discord_ids"}
+    if not message.content and not message.attachments and not message.embeds:
+        return {"ignored": True, "reason": "empty_message"}
+
+    subscriptions = list(
+        PersistentAgentDiscordChannelSubscription.objects.select_related("agent", "guild")
+        .filter(
+            guild__guild_id=message.guild_id,
+            channel_id=message.channel_id,
+            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+        )
+        .order_by("created_at", "id")
+    )
+    if not subscriptions:
+        return {"ignored": True, "reason": "no_subscription"}
+
+    deliveries = [
+        _ingest_gateway_message_for_subscription(message, subscription)
+        for subscription in subscriptions
+    ]
+    first_delivery = deliveries[0]
+    return {
+        "ignored": False,
+        "message_id": first_delivery["message_id"],
+        "conversation_id": first_delivery["conversation_id"],
+        "debounced": first_delivery["debounced"],
+        "debounce_seconds": first_delivery["debounce_seconds"],
+        "subscription_count": len(deliveries),
+        "deliveries": deliveries,
     }
 
 

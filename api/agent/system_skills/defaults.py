@@ -280,10 +280,12 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     prompt_instructions=(
         "Use the native Gobii Discord bot tools for Discord setup and replies.\n"
         "Use `discord_channel_subscriptions` to manage inbound Discord server-channel subscriptions that wake this agent. "
-        "V1 supports server channels only, with one active agent per guild/channel. Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
+        "V1 supports server channels only. Multiple agents may subscribe to the same guild/channel; each subscribed agent receives inbound channel messages. "
+        "Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
         "Before asking the user for Discord IDs, call `discord_channel_subscriptions` with `action=\"list_guilds\"` or `action=\"discover_channels\"`. "
-        "If the tool returns `action_required`, send the returned Gobii Discord connect URL and Discord bot invite URL to the user, explain which one to use, "
-        "and stop until authorization or installation completes.\n"
+        "If the tool returns `action_required`, send the returned Gobii Discord `connect_url` as the single setup link. "
+        "That link authorizes Discord guild access and installs the Gobii bot in the selected server. "
+        "Do not present setup as separate connect and invite steps unless channel discovery later says the bot cannot list channels.\n"
         "After guilds are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
         "then call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name` so future channel messages wake this agent.\n"
         "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
@@ -292,7 +294,7 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
         "To upload files, pass filespace paths or $[/path] variables in `attachments`; do not paste attachment paths into `message`. "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
-        "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` and ask the user to install the bot in the target server before retrying discovery."
+        "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
     ),
 )
 

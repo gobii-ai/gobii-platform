@@ -1,10 +1,10 @@
 import json
 import os
 from unittest.mock import MagicMock, patch
+from urllib.parse import parse_qs, urlsplit
 
 import requests
 from django.contrib.auth import get_user_model
-from django.db import IntegrityError
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 
@@ -82,6 +82,13 @@ class NativeDiscordBotTests(TestCase):
     def test_oauth_callback_claims_manageable_guilds_for_agent_owner(self, post_mock, get_mock):
         auth_url = start_discord_oauth(self.agent, self.user)
         self.assertIn("client_id=discord-client", auth_url)
+        auth_query = parse_qs(urlsplit(auth_url).query)
+        self.assertEqual(
+            auth_query["scope"],
+            ["identify guilds bot applications.commands"],
+        )
+        self.assertEqual(auth_query["permissions"], ["536939520"])
+        self.assertEqual(auth_query["response_type"], ["code"])
         session = PersistentAgentDiscordOAuthSession.objects.get(agent=self.agent)
         post_mock.return_value = _response({"access_token": "oauth-token"})
         get_mock.return_value = _response(
@@ -155,25 +162,49 @@ class NativeDiscordBotTests(TestCase):
         get_mock.assert_called_once()
 
     @tag("batch_agent_webhooks")
-    def test_subscription_uniqueness_allows_only_one_active_agent_per_channel(self):
+    def test_subscription_uniqueness_allows_multiple_agents_per_channel(self):
         guild = self._guild()
         result = ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
         self.assertTrue(result["created"])
 
-        second_user = get_user_model().objects.create_user(username="second-discord-owner")
-        second_browser = BrowserUseAgent.objects.create(user=second_user, name="Second Browser")
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
         second_agent = PersistentAgent.objects.create(
-            user=second_user,
+            user=self.user,
             name="Second Agent",
             charter="Other",
             browser_use_agent=second_browser,
         )
-        with self.assertRaises(IntegrityError):
-            PersistentAgentDiscordChannelSubscription.objects.create(
-                agent=second_agent,
+        second_result = ensure_subscription(second_agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
+
+        self.assertTrue(second_result["created"])
+        self.assertNotEqual(result["subscription"]["id"], second_result["subscription"]["id"])
+        self.assertEqual(
+            PersistentAgentDiscordChannelSubscription.objects.filter(
                 guild=guild,
                 channel_id="10",
-            )
+                status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+            ).count(),
+            2,
+        )
+
+    @tag("batch_agent_webhooks")
+    def test_subscription_uniqueness_reuses_same_agent_channel(self):
+        guild = self._guild()
+        result = ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
+
+        reused = ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general-renamed")
+
+        self.assertTrue(reused["reused"])
+        self.assertEqual(result["subscription"]["id"], reused["subscription"]["id"])
+        self.assertEqual(
+            PersistentAgentDiscordChannelSubscription.objects.filter(
+                agent=self.agent,
+                guild=guild,
+                channel_id="10",
+                status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+            ).count(),
+            1,
+        )
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
@@ -216,6 +247,63 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(PersistentAgentMessageAttachment.objects.filter(message=stored).count(), 1)
         self.assertEqual(stored.conversation.channel, CommsChannel.DISCORD)
         schedule_mock.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_message_fans_out_to_all_active_channel_agents(self, schedule_mock):
+        guild = self._guild()
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second Agent",
+            charter="Also handle Discord messages.",
+            browser_use_agent=second_browser,
+        )
+        first_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        second_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=second_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="hello both agents",
+            attachments=[],
+            embeds=[],
+        )
+
+        result = ingest_gateway_message(message)
+
+        self.assertFalse(result["ignored"])
+        self.assertEqual(result["subscription_count"], 2)
+        self.assertEqual(len(result["deliveries"]), 2)
+        self.assertCountEqual(
+            [delivery["subscription_id"] for delivery in result["deliveries"]],
+            [str(first_subscription.id), str(second_subscription.id)],
+        )
+        stored_messages = PersistentAgentMessage.objects.order_by("owner_agent_id")
+        self.assertEqual(stored_messages.count(), 2)
+        self.assertCountEqual(
+            [str(stored.owner_agent_id) for stored in stored_messages],
+            [str(self.agent.id), str(second_agent.id)],
+        )
+        self.assertCountEqual(
+            [call.args[0] for call in schedule_mock.call_args_list],
+            [str(self.agent.id), str(second_agent.id)],
+        )
 
     @tag("batch_agent_webhooks")
     def test_inbound_gateway_ignores_bot_and_webhook_echo_messages(self):
@@ -368,6 +456,7 @@ class NativeDiscordBotTests(TestCase):
         )
 
         self.assertEqual(result["status"], "action_required")
+        self.assertIn("single setup link", result["message"])
         self.assertIn("/console/api/discord/oauth/start/", result["connect_url"])
         self.assertEqual(
             result["bot_invite_url"],
@@ -383,7 +472,8 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("discord_send_message", skill.tool_names)
         self.assertNotIn("pipedream_trigger_subscriptions", skill.tool_names)
         self.assertIn("Use the native Gobii Discord bot tools", skill.prompt_instructions)
-        self.assertIn("Discord bot invite URL", skill.prompt_instructions)
+        self.assertIn("single setup link", skill.prompt_instructions)
+        self.assertIn("fallback repair link", skill.prompt_instructions)
         self.assertIn("attachments", skill.prompt_instructions)
 
     @tag("batch_agent_webhooks")

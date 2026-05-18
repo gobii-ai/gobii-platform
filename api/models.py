@@ -9525,9 +9525,9 @@ class PersistentAgentDiscordChannelSubscription(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["guild", "channel_id"],
+                fields=["agent", "guild", "channel_id"],
                 condition=Q(status="active"),
-                name="uniq_active_discord_channel_sub",
+                name="uniq_active_discord_agent_channel_sub",
             ),
         ]
         indexes = [

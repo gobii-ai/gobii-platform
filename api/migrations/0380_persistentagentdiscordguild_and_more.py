@@ -111,7 +111,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddConstraint(
             model_name='persistentagentdiscordchannelsubscription',
-            constraint=models.UniqueConstraint(condition=models.Q(('status', 'active')), fields=('guild', 'channel_id'), name='uniq_active_discord_channel_sub'),
+            constraint=models.UniqueConstraint(condition=models.Q(('status', 'active')), fields=('agent', 'guild', 'channel_id'), name='uniq_active_discord_agent_channel_sub'),
         ),
         migrations.AddIndex(
             model_name='persistentagentdiscordoauthsession',
