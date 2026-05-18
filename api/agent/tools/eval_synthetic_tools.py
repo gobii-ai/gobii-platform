@@ -65,11 +65,28 @@ _GENERIC_WEB_DATA_SCHEMA = {
     "additionalProperties": True,
 }
 
+_LINKEDIN_PEOPLE_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+        "company": {"type": "string"},
+        "title": {"type": "string"},
+        "location": {"type": "string"},
+        "keywords": {
+            "type": "array",
+            "items": {"type": "string"},
+        },
+    },
+    "additionalProperties": True,
+}
+
 _GENERIC_SPREADSHEET_SCHEMA = {
     "type": "object",
     "properties": {
         "spreadsheet_id": {"type": "string"},
+        "spreadsheetId": {"type": "string"},
         "worksheet": {"type": "string"},
+        "worksheetId": {"type": "string"},
         "range": {"type": "string"},
         "row": {"type": "object", "additionalProperties": True},
         "rows": {
@@ -134,7 +151,7 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "mcp_brightdata_web_data_linkedin_people_search": {
         "description": "Search LinkedIn people data with structured criteria when a profile URL is unknown; use this before person-profile lookup for name/company searches.",
-        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+        "parameters": _LINKEDIN_PEOPLE_SEARCH_SCHEMA,
     },
     "mcp_brightdata_web_data_linkedin_posts": {
         "description": "Fetch structured LinkedIn post data; prefer this over generic web search for recent LinkedIn posts or updates.",
@@ -162,7 +179,10 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     **{
         tool_name: {
-            "description": description,
+            "description": (
+                "Currently enabled Google Sheets tool. "
+                f"Use this directly; do not call search_tools first. {description}"
+            ),
             "parameters": _GENERIC_SPREADSHEET_SCHEMA,
         }
         for tool_name, description in _GOOGLE_SHEETS_TOOL_DESCRIPTIONS.items()

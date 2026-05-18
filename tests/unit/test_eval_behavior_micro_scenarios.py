@@ -20,6 +20,7 @@ from api.evals.scenarios.behavior_micro import (
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
+    GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
@@ -59,6 +60,7 @@ from api.models import (
     PersistentAgentHumanInputRequest,
     PersistentAgentMessage,
     PersistentAgentStep,
+    PersistentAgentSystemStep,
     PersistentAgentToolCall,
 )
 
@@ -135,6 +137,8 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
+        self.assertTrue(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
@@ -162,6 +166,15 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(by_slug["common_use_case_077_create_bar_chart"].allowed_preamble_tools, ("sqlite_batch",))
         self.assertIn("Jan 120", by_slug["common_use_case_079_create_report_with_chart"].prompt)
         self.assertIn("already has accounts and contacts", by_slug["common_use_case_085_sqlite_join_tables"].prompt)
+        self.assertIn("Jordan Lee at Acme AI", by_slug["common_use_case_031_linkedin_person_profile"].prompt)
+        self.assertIn("Acme AI", by_slug["common_use_case_032_linkedin_company_profile"].prompt)
+        self.assertIn("Search LinkedIn", by_slug["common_use_case_034_linkedin_people_search"].prompt)
+        self.assertIn("beta launched", by_slug["common_use_case_073_create_status_pdf"].prompt)
+        self.assertIn("site plan", by_slug["common_use_case_074_create_permit_pdf"].prompt)
+        self.assertIn("Run a SQLite query", by_slug["common_use_case_086_sqlite_export_query_csv"].prompt)
+        self.assertIn("https://status.example.test/support", by_slug["common_use_case_092_schedule_hourly_monitor"].prompt)
+        self.assertIn("BTC-USD", by_slug["common_use_case_096_schedule_price_alert"].prompt)
+        self.assertIn("https://borough.example.test/permits/decks", by_slug["common_use_case_097_schedule_permit_check"].prompt)
         self.assertEqual(
             by_slug["common_use_case_089_enable_database"].accepted_tool_alternatives,
             {"enable_database": ("sqlite_batch",)},
@@ -182,9 +195,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"mcp_brightdata_search_engine": ("mcp_brightdata_web_data_reddit_posts",)},
         )
         self.assertEqual(
-            by_slug["common_use_case_091_schedule_daily_digest"].accepted_tool_alternatives,
-            {"update_schedule": ("sqlite_batch",)},
+            by_slug["common_use_case_091_schedule_daily_digest"].expected_tools,
+            ("sqlite_batch",),
         )
+        self.assertEqual(by_slug["common_use_case_094_update_agent_charter"].expected_tools, ("sqlite_batch",))
         self.assertIn(
             "google_sheets-get-spreadsheet-by-id",
             by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
@@ -395,6 +409,69 @@ class BehaviorMicroHelperTests(TestCase):
         policy = scenario._build_eval_stop_policy()
 
         self.assertIn("search_tools", policy["allowed_tool_names"])
+
+    def test_google_sheets_eval_synthetic_tools_are_defined(self):
+        for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
+            self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
+            self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+    @patch("api.agent.tools.tool_manager._get_manager")
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_eval_synthetic_tool_definition_overrides_same_named_mcp_tool(
+        self,
+        _mock_sandbox_compute_enabled,
+        mock_get_manager,
+    ):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        tool_name = "google_sheets-get-values-in-range"
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_name,
+            tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+            tool_name=tool_name,
+        )
+        mock_manager = MagicMock()
+        mock_manager.get_enabled_tools_definitions.return_value = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Real integration schema requiring worksheet IDs.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"worksheetId": {"type": "integer"}},
+                        "required": ["worksheetId"],
+                    },
+                },
+            }
+        ]
+        mock_get_manager.return_value = mock_manager
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        matching = [
+            definition["function"]
+            for definition in definitions
+            if definition["function"]["name"] == tool_name
+        ]
+
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]["description"], EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+        self.assertEqual(matching[0]["parameters"].get("required", []), [])
+        self.assertEqual(matching[0]["parameters"]["properties"]["worksheetId"]["type"], "string")
+
+    def test_seed_completed_process_run_disables_first_run_once(self):
+        scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
+
+        scenario._seed_completed_process_run(self.agent.id)
+        scenario._seed_completed_process_run(self.agent.id)
+
+        process_steps = PersistentAgentSystemStep.objects.filter(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
+            step__description="Process events",
+        )
+        self.assertEqual(process_steps.count(), 1)
 
     @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=False)
     @patch("api.agent.tools.search_tools.enable_tools")

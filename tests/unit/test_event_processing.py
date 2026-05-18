@@ -996,7 +996,7 @@ class PromptContextBuilderTests(TestCase):
         content = user_message["content"]
 
         self.assertIn(
-            "Use sqlite_batch to query __tool_results and __files when you need prior tool outputs or recent file metadata.",
+            "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata.",
             content,
         )
         self.assertNotIn("Query __tool_results and __files with sqlite_batch (not read_file).", content)
@@ -1167,7 +1167,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("# Attachment pre-flight", content)
         self.assertIn("RIGHT: send_email(..., attachments=[result.attach])", content)
-        self.assertIn("Prior sends: verify via __messages.attachment_count", content)
+        self.assertIn("For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count", content)
         self.assertIn("__messages.rejected_attachments_json", content)
 
     def test_prompt_does_not_add_attachment_suffix_to_inbound_messages(self):

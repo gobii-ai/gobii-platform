@@ -170,7 +170,9 @@ class AgentCapabilitiesPromptTests(TestCase):
         description = tool["function"]["description"]
         will_continue_description = tool["function"]["parameters"]["properties"]["will_continue_work"]["description"]
 
-        self.assertIn("questions, blockers, config changes, or findings", description)
+        self.assertIn("non-blocking context, config changes, or findings", description)
+        self.assertIn("Do not use this for questions that block the task", description)
+        self.assertIn("use request_human_input so the question is tracked", description)
         self.assertIn("Do not narrate what you will do next", description)
         self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 

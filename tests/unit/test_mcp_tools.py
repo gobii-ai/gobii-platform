@@ -3604,8 +3604,8 @@ class MCPToolExecutorsTests(TestCase):
         self.assertNotIn("will_continue_work", tool_def["function"]["parameters"]["properties"])
         self.assertEqual(tool_def["function"]["parameters"]["required"], ["query"])
         description = tool_def["function"]["description"]
-        self.assertIn("structured extractors", description)
-        self.assertIn("web search", description)
+        self.assertIn("no currently enabled tool clearly fits", description)
+        self.assertIn("do not rediscover", description)
         self.assertNotIn("NOT for web search", description)
         
     @patch('api.agent.tools.search_tools.search_tools')
