@@ -1939,11 +1939,39 @@ def dismiss_human_input_request(
     request_obj: PersistentAgentHumanInputRequest,
     *,
     actor_user_id: int | str | None = None,
-) -> PersistentAgentMessage:
+    continue_without_answer: bool = False,
+) -> PersistentAgentMessage | None:
     if _mark_human_input_request_expired_if_needed(request_obj):
         raise ValueError("This request is no longer pending.")
     if request_obj.status != PersistentAgentHumanInputRequest.Status.PENDING:
         raise ValueError("This request is no longer pending.")
+
+    if not continue_without_answer:
+        with transaction.atomic():
+            request_obj.selected_option_key = ""
+            request_obj.selected_option_title = ""
+            request_obj.free_text = ""
+            request_obj.raw_reply_text = ""
+            request_obj.raw_reply_message = None
+            request_obj.resolution_source = PersistentAgentHumanInputRequest.ResolutionSource.DIRECT
+            request_obj.resolved_at = timezone.now()
+            request_obj.status = PersistentAgentHumanInputRequest.Status.CANCELLED
+            request_obj.save(
+                update_fields=[
+                    "selected_option_key",
+                    "selected_option_title",
+                    "free_text",
+                    "raw_reply_text",
+                    "raw_reply_message",
+                    "resolution_source",
+                    "resolved_at",
+                    "status",
+                    "updated_at",
+                ]
+            )
+            transaction.on_commit(lambda: _emit_pending_human_input_updates(request_obj.agent_id))
+
+        return None
 
     response_target = _build_console_response_target(request_obj.agent, actor_user_id)
     if response_target is None:

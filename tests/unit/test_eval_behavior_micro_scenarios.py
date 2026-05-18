@@ -23,6 +23,7 @@ from api.evals.scenarios.behavior_micro import (
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
+    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
@@ -950,6 +951,38 @@ class BehaviorMicroHelperTests(TestCase):
         requests = get_pending_human_input_requests(self.agent.id, self.run.id)
 
         self.assertEqual(requests, [expected])
+
+    def test_planning_dismiss_after_greeting_scenario_covers_no_resume(self):
+        scenario = ScenarioRegistry.get(PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME)
+        self.run.scenario_slug = scenario.slug
+        self.run.save(update_fields=["scenario_slug"])
+        for sequence, task in enumerate(scenario.tasks, start=1):
+            EvalRunTask.objects.create(
+                run=self.run,
+                sequence=sequence,
+                name=task.name,
+                assertion_type=task.assertion_type,
+            )
+
+        with (
+            patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates"),
+            patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay,
+        ):
+            scenario.run(self.run.id, self.agent.id)
+
+        self.assertEqual(
+            list(self.run.tasks.order_by("sequence").values_list("status", flat=True)),
+            [
+                EvalRunTask.Status.PASSED,
+                EvalRunTask.Status.PASSED,
+                EvalRunTask.Status.PASSED,
+            ],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
+        self.assertIsNone(request_obj.raw_reply_message_id)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
+        mock_delay.assert_not_called()
 
     def test_all_requests_have_options_requires_nonempty_options(self):
         with_options = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])
