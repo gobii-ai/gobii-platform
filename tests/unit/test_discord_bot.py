@@ -11,6 +11,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.system_skills.registry import get_system_skill_definition
+from api.agent.files.attachment_helpers import ResolvedAttachment
 from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
 from api.agent.tools.discord_send_message import execute_discord_send_message
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -27,6 +28,7 @@ from api.models import (
     PersistentAgentSystemStep,
 )
 from api.services.discord_bot import (
+    DiscordBotIntegrationError,
     DiscordGatewayMessage,
     discover_channels,
     ensure_subscription,
@@ -237,7 +239,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Do not ask the user to choose a server again", result["message"])
 
     @tag("batch_agent_webhooks")
-    def test_subscription_uniqueness_allows_multiple_agents_per_channel(self):
+    @patch("api.services.discord_bot.requests.get")
+    def test_subscription_uniqueness_allows_multiple_agents_per_channel(self, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         result = ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
         self.assertTrue(result["created"])
@@ -263,7 +267,9 @@ class NativeDiscordBotTests(TestCase):
         )
 
     @tag("batch_agent_webhooks")
-    def test_subscription_uniqueness_reuses_same_agent_channel(self):
+    @patch("api.services.discord_bot.requests.get")
+    def test_subscription_uniqueness_reuses_same_agent_channel(self, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         result = ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
 
@@ -280,6 +286,17 @@ class NativeDiscordBotTests(TestCase):
             ).count(),
             1,
         )
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_ensure_subscription_rejects_channel_outside_claimed_guild(self, get_mock):
+        get_mock.return_value = _response([{"id": "99", "name": "other", "type": 0}])
+        guild = self._guild()
+
+        with self.assertRaisesRegex(DiscordBotIntegrationError, "not found in the selected server"):
+            ensure_subscription(self.agent, guild_id=guild.guild_id, channel_id="10", channel_name="general")
+
+        self.assertFalse(PersistentAgentDiscordChannelSubscription.objects.exists())
 
     @tag("batch_agent_webhooks")
     @patch("api.agent.comms.message_service.requests.head")
@@ -415,8 +432,10 @@ class NativeDiscordBotTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
-    def test_webhook_outbound_send_uses_agent_identity_and_persists_metadata(self, post_mock):
+    def test_webhook_outbound_send_uses_agent_identity_and_persists_metadata(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
             agent=self.agent,
@@ -444,8 +463,10 @@ class NativeDiscordBotTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.build_public_agent_avatar_thumbnail_url", return_value="https://app.example.test/public/agents/avatar.png")
+    @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
-    def test_webhook_outbound_send_uses_public_agent_avatar_thumbnail(self, post_mock, avatar_url_mock):
+    def test_webhook_outbound_send_uses_public_agent_avatar_thumbnail(self, post_mock, get_mock, avatar_url_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
             agent=self.agent,
@@ -467,8 +488,10 @@ class NativeDiscordBotTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.broadcast_message_attachment_update")
+    @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
-    def test_send_message_tool_uploads_filespace_attachments(self, post_mock, broadcast_mock):
+    def test_send_message_tool_uploads_filespace_attachments(self, post_mock, get_mock, broadcast_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
         guild = self._guild()
         PersistentAgentDiscordChannelSubscription.objects.create(
             agent=self.agent,
@@ -522,6 +545,46 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(send_call.kwargs["files"][0][1][2], "text/plain")
         self.assertNotIn("json", send_call.kwargs)
         broadcast_mock.assert_called_once_with(str(message.id))
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_send_rejects_subscription_channel_not_in_claimed_guild(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "99", "name": "other", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+
+        with self.assertRaisesRegex(DiscordBotIntegrationError, "not found in the selected server"):
+            send_channel_message(self.agent, channel_id="10", body="hello discord")
+
+        post_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_WEBHOOK_MAX_TOTAL_ATTACHMENT_BYTES=10)
+    def test_webhook_send_rejects_total_attachment_size_over_limit(self):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        attachment = ResolvedAttachment(
+            node=MagicMock(),
+            path="/exports/big.bin",
+            filename="big.bin",
+            content_type="application/octet-stream",
+            size_bytes=11,
+        )
+
+        with self.assertRaisesRegex(ValueError, "configured total upload limit"):
+            send_channel_message(self.agent, channel_id="10", body="", attachments=[attachment])
 
     @tag("batch_agent_webhooks")
     def test_subscription_tool_returns_action_required_connect_url_without_claimed_guild(self):

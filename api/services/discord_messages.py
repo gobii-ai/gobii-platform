@@ -255,8 +255,11 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
 
     try:
         redis_client = get_redis_client()
-        redis_client.set(deadline_key, f"{deadline:.6f}", ex=ttl)
-        scheduled = bool(redis_client.set(scheduled_key, "1", ex=ttl, nx=True))
+        pipeline = redis_client.pipeline(transaction=True)
+        pipeline.set(deadline_key, f"{deadline:.6f}", ex=ttl)
+        pipeline.set(scheduled_key, "1", ex=ttl, nx=True)
+        _deadline_set, scheduled_result = pipeline.execute()
+        scheduled = bool(scheduled_result)
     except redis.exceptions.RedisError:
         logger.exception(
             "Failed scheduling Discord inbound debounce for agent %s; falling back to delayed processing.",

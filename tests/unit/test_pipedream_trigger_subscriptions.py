@@ -56,6 +56,25 @@ class FakeRedis:
     def __init__(self):
         self.values = {}
 
+    class Pipeline:
+        def __init__(self, redis_client):
+            self.redis_client = redis_client
+            self.commands = []
+
+        def set(self, *args, **kwargs):
+            self.commands.append(("set", args, kwargs))
+            return self
+
+        def execute(self):
+            results = []
+            for command, args, kwargs in self.commands:
+                if command == "set":
+                    results.append(self.redis_client.set(*args, **kwargs))
+            return results
+
+    def pipeline(self, transaction=True):
+        return self.Pipeline(self)
+
     def set(self, key, value, ex=None, nx=False):
         if nx and key in self.values:
             return False

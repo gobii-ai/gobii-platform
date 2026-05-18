@@ -207,6 +207,61 @@ def _can_manage_guild(guild: Mapping[str, Any]) -> bool:
     return bool(permissions & DISCORD_ADMINISTRATOR_PERMISSION or permissions & DISCORD_MANAGE_GUILD_PERMISSION)
 
 
+def _owner_matches_discord_guild_claim(
+    guild_claim: PersistentAgentDiscordGuild,
+    session: PersistentAgentDiscordOAuthSession,
+) -> bool:
+    return (
+        guild_claim.owner_user_id == session.owner_user_id
+        and guild_claim.organization_id == session.organization_id
+    )
+
+
+def _update_discord_guild_claim(
+    guild_claim: PersistentAgentDiscordGuild,
+    defaults: Mapping[str, Any],
+) -> PersistentAgentDiscordGuild:
+    updates = []
+    for field, value in defaults.items():
+        if getattr(guild_claim, field) != value:
+            setattr(guild_claim, field, value)
+            updates.append(field)
+    if updates:
+        updates.append("updated_at")
+        guild_claim.save(update_fields=updates)
+    return guild_claim
+
+
+def _claim_discord_guild_for_session(
+    session: PersistentAgentDiscordOAuthSession,
+    *,
+    guild_id: str,
+    defaults: Mapping[str, Any],
+) -> PersistentAgentDiscordGuild | None:
+    existing = (
+        PersistentAgentDiscordGuild.objects.select_for_update()
+        .filter(guild_id=guild_id, is_active=True)
+        .first()
+    )
+    if existing:
+        if not _owner_matches_discord_guild_claim(existing, session):
+            return None
+        return _update_discord_guild_claim(existing, defaults)
+
+    try:
+        with transaction.atomic():
+            return PersistentAgentDiscordGuild.objects.create(guild_id=guild_id, **defaults)
+    except IntegrityError:
+        existing = (
+            PersistentAgentDiscordGuild.objects.select_for_update()
+            .filter(guild_id=guild_id, is_active=True)
+            .first()
+        )
+        if not existing or not _owner_matches_discord_guild_claim(existing, session):
+            return None
+        return _update_discord_guild_claim(existing, defaults)
+
+
 def _queue_discord_oauth_completion_processing(
     session: PersistentAgentDiscordOAuthSession,
     result: DiscordGuildClaimResult,
@@ -289,16 +344,13 @@ def handle_discord_oauth_callback(
             "is_active": True,
             "last_synced_at": timezone.now(),
         }
-        existing = PersistentAgentDiscordGuild.objects.filter(guild_id=guild_id, is_active=True).first()
-        if existing and (
-            existing.owner_user_id != session.owner_user_id
-            or existing.organization_id != session.organization_id
-        ):
-            continue
-        guild_claim, _created = PersistentAgentDiscordGuild.objects.update_or_create(
+        guild_claim = _claim_discord_guild_for_session(
+            session,
             guild_id=guild_id,
             defaults=defaults,
         )
+        if guild_claim is None:
+            continue
         claimed.append(
             {
                 "id": guild_claim.guild_id,
@@ -361,6 +413,24 @@ def _fetch_bot_channels(guild_id: str) -> list[Mapping[str, Any]]:
     if not isinstance(payload, list):
         raise DiscordBotIntegrationError("Discord channel lookup returned an invalid response.")
     return [channel for channel in payload if isinstance(channel, Mapping)]
+
+
+def _validate_text_channel_in_guild(*, guild_id: str, channel_id: str) -> Mapping[str, Any]:
+    normalized_channel_id = channel_id.strip()
+    for channel in _fetch_bot_channels(guild_id):
+        if str(channel.get("id") or "").strip() != normalized_channel_id:
+            continue
+        if channel.get("type") not in DISCORD_TEXT_CHANNEL_TYPES:
+            raise DiscordBotIntegrationError("Discord channel is not a text channel the Gobii bot can use.")
+        return channel
+    raise DiscordBotIntegrationError("Discord channel was not found in the selected server.")
+
+
+def _validate_subscription_channel(subscription: PersistentAgentDiscordChannelSubscription) -> Mapping[str, Any]:
+    return _validate_text_channel_in_guild(
+        guild_id=subscription.guild.guild_id,
+        channel_id=subscription.channel_id,
+    )
 
 
 def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str = "", limit: int = 100) -> dict[str, Any]:
@@ -450,7 +520,6 @@ def list_subscriptions(agent: PersistentAgent) -> list[dict[str, str]]:
     return [serialize_subscription(subscription) for subscription in subscriptions]
 
 
-@transaction.atomic
 def ensure_subscription(
     agent: PersistentAgent,
     *,
@@ -458,37 +527,43 @@ def ensure_subscription(
     channel_id: str,
     channel_name: str = "",
 ) -> dict[str, Any]:
-    guild = _claimed_guild_queryset(agent).select_for_update().get(guild_id=guild_id, is_active=True)
-    existing = (
-        PersistentAgentDiscordChannelSubscription.objects.select_for_update()
-        .filter(
-            agent=agent,
-            guild=guild,
-            channel_id=channel_id,
-            status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
-        )
-        .first()
-    )
-    if existing:
-        updates = []
-        if channel_name and existing.channel_name != channel_name:
-            existing.channel_name = channel_name
-            updates.append("channel_name")
-        if updates:
-            updates.append("updated_at")
-            existing.save(update_fields=updates)
-        return {"subscription": serialize_subscription(existing), "created": False, "reused": True}
+    channel_id = channel_id.strip()
+    guild = _claimed_guild_queryset(agent).get(guild_id=guild_id, is_active=True)
+    discord_channel = _validate_text_channel_in_guild(guild_id=guild.guild_id, channel_id=channel_id)
+    canonical_channel_name = str(discord_channel.get("name") or channel_name or channel_id).strip()
 
-    try:
-        subscription = PersistentAgentDiscordChannelSubscription.objects.create(
-            agent=agent,
-            guild=guild,
-            channel_id=channel_id,
-            channel_name=channel_name,
+    with transaction.atomic():
+        guild = _claimed_guild_queryset(agent).select_for_update().get(guild_id=guild_id, is_active=True)
+        existing = (
+            PersistentAgentDiscordChannelSubscription.objects.select_for_update()
+            .filter(
+                agent=agent,
+                guild=guild,
+                channel_id=channel_id,
+                status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
+            )
+            .first()
         )
-    except IntegrityError as exc:
-        raise DiscordBotIntegrationError("This agent is already subscribed to that Discord channel.") from exc
-    return {"subscription": serialize_subscription(subscription), "created": True, "reused": False}
+        if existing:
+            updates = []
+            if canonical_channel_name and existing.channel_name != canonical_channel_name:
+                existing.channel_name = canonical_channel_name
+                updates.append("channel_name")
+            if updates:
+                updates.append("updated_at")
+                existing.save(update_fields=updates)
+            return {"subscription": serialize_subscription(existing), "created": False, "reused": True}
+
+        try:
+            subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+                agent=agent,
+                guild=guild,
+                channel_id=channel_id,
+                channel_name=canonical_channel_name,
+            )
+        except IntegrityError as exc:
+            raise DiscordBotIntegrationError("This agent is already subscribed to that Discord channel.") from exc
+        return {"subscription": serialize_subscription(subscription), "created": True, "reused": False}
 
 
 def disable_subscription(agent: PersistentAgent, subscription_id: str) -> dict[str, str]:
@@ -627,6 +702,7 @@ def _agent_avatar_url(agent: PersistentAgent) -> str:
 
 
 def _get_or_create_channel_webhook(subscription: PersistentAgentDiscordChannelSubscription) -> PersistentAgentDiscordWebhook:
+    _validate_subscription_channel(subscription)
     webhook = PersistentAgentDiscordWebhook.objects.filter(
         guild=subscription.guild,
         channel_id=subscription.channel_id,
@@ -690,6 +766,15 @@ def send_channel_message(
         raise ValueError("message is required when attachments is empty.")
     if len(resolved_attachments) > DISCORD_WEBHOOK_MAX_FILES:
         raise ValueError(f"Discord supports at most {DISCORD_WEBHOOK_MAX_FILES} attachments per message.")
+    total_attachment_bytes = sum(max(0, int(attachment.size_bytes or 0)) for attachment in resolved_attachments)
+    if (
+        settings.DISCORD_WEBHOOK_MAX_TOTAL_ATTACHMENT_BYTES > 0
+        and total_attachment_bytes > settings.DISCORD_WEBHOOK_MAX_TOTAL_ATTACHMENT_BYTES
+    ):
+        raise ValueError(
+            "Discord attachments exceed the configured total upload limit "
+            f"({total_attachment_bytes} bytes > {settings.DISCORD_WEBHOOK_MAX_TOTAL_ATTACHMENT_BYTES} bytes)."
+        )
 
     subscription = (
         PersistentAgentDiscordChannelSubscription.objects.select_related("guild")
