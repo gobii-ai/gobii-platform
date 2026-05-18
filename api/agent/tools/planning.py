@@ -13,8 +13,8 @@ def get_end_planning_tool() -> Dict[str, Any]:
             "description": (
                 "Complete planning mode once the user's need, scope, desired outcome, "
                 "constraints, assumptions, and success criteria are clear in plain language. "
-                "Call this before doing substantive task work; planning mode should not execute "
-                "the actual task until this tool has been used."
+                "When the user asks to execute now and the scope is clear, call this first; "
+                "planning mode should not execute or discover task tools until this has been used."
             ),
             "parameters": {
                 "type": "object",

@@ -22,6 +22,19 @@ JOB_LISTINGS_FIXTURE = (
     "location Remote, source Remote OK, link https://remoteok.com/remote-jobs/100000-meridian-full-stack-product-engineer"
 )
 
+LINKEDIN_JOB_FIXTURE = (
+    "Current LinkedIn Jobs result: Full Stack Software Engineer - Remote at CloudAxis Systems, "
+    "salary $145k-$175k, location Remote US, link https://www.linkedin.com/jobs/view/100000001"
+)
+INDEED_JOB_FIXTURE = (
+    "Current Indeed result: Senior Full Stack Engineer - Remote at Northstar DataWorks, "
+    "salary $150k-$185k, location Remote North America, link https://www.indeed.com/viewjob?jk=northstar123"
+)
+REMOTEOK_JOB_FIXTURE = (
+    "Current Remote OK result: Full Stack Product Engineer - Remote at Meridian Platform Labs, "
+    "salary $135k-$165k, location Remote, link https://remoteok.com/remote-jobs/100000-meridian-full-stack-product-engineer"
+)
+
 
 @register_scenario
 class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
@@ -64,8 +77,24 @@ class JobListingsBundledReplyScenario(EvalScenario, ScenarioExecutionTools):
         )
         mock_config = {
             "mcp_brightdata_search_engine": {
-                "status": "ok",
-                "content": JOB_LISTINGS_FIXTURE,
+                "rules": [
+                    {
+                        "param_contains": {"query": "linkedin.com/jobs"},
+                        "result": {"status": "ok", "content": LINKEDIN_JOB_FIXTURE},
+                    },
+                    {
+                        "param_contains": {"query": "indeed.com"},
+                        "result": {"status": "ok", "content": INDEED_JOB_FIXTURE},
+                    },
+                    {
+                        "param_contains": {"query": ["remoteok", "remote"]},
+                        "result": {"status": "ok", "content": REMOTEOK_JOB_FIXTURE},
+                    },
+                ],
+                "default": {
+                    "status": "ok",
+                    "content": JOB_LISTINGS_FIXTURE,
+                },
             },
             "mcp_brightdata_scrape_as_markdown": {
                 "status": "ok",

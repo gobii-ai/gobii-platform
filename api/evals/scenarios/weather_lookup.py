@@ -8,6 +8,16 @@ from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolC
 FREDERICK_MD_LATITUDE = 39.4143
 FREDERICK_MD_LONGITUDE = -77.4105
 COORDINATE_TOLERANCE_DEGREES = 0.5
+MOCK_WEATHER_RESULT = {
+    "current_weather": "72F, Sunny",
+    "temperature_f": 72,
+    "condition": "Sunny",
+    "location": "Frederick, MD",
+    "forecast": [
+        {"day": "today", "high_f": 74, "low_f": 58, "condition": "Sunny"},
+        {"day": "tomorrow", "high_f": 76, "low_f": 60, "condition": "Mostly sunny"},
+    ],
+}
 
 
 def _query_float(query, key):
@@ -160,7 +170,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                 ],
                 "default": {
                     "status": "ok",
-                    "content": '{"current_weather": "72F, Sunny"}',
+                    "content": MOCK_WEATHER_RESULT,
                     "status_code": 200,
                 },
             },

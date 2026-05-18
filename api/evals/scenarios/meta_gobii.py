@@ -229,7 +229,11 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "included_in_approval_scope": {
                                 "type": "boolean",
-                                "description": "True when the approval plan explicitly includes the schedule action and cadence/removal.",
+                                "description": (
+                                    "True only when approval explicitly includes a schedule action and cadence/removal. "
+                                    "Leave false when the user says not to alter schedules or only says this week, "
+                                    "project, when needed, batch, one-time, or one-off."
+                                ),
                             },
                             "asks_clarifying_question": {
                                 "type": "boolean",

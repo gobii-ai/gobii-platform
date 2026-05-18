@@ -137,7 +137,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
-        self.assertTrue(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,

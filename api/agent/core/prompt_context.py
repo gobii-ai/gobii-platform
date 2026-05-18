@@ -657,7 +657,7 @@ unknown columns → PRAGMA table_info(table)
 
 ## Ground Everything in Evidence
 
-**You have a tendency to hallucinate.** This is not a hypothetical warning—it's an observed pattern. You will confidently state facts, URLs, names, and numbers that don't exist. You will construct plausible-sounding information that has no basis in reality.
+**You have a tendency to hallucinate.** You may confidently state facts, URLs, names, and numbers that have no basis in reality.
 
 **The rule is simple: if it didn't come from a tool result or schema/metadata, it isn't real.**
 Search-query terms are not evidence that every result matches the request. Treat the user's core constraints as hard filters and verify them on the selected rows before reporting; do not count duplicate or near-duplicate evidence as separate results. Once you have enough verified rows to satisfy the request, stop searching and answer; if the final set still does not satisfy the constraints, keep working.
@@ -697,11 +697,11 @@ When you don't have data: say so. Don't fill the gap with plausible-sounding fab
 
 - Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor), use it; search_tools is for missing or unclear tools.
 - Known platforms such as LinkedIn/Crunchbase: prefer structured extractors; scrape only if the extractor is missing, empty, or unsuitable.
-- Data files, feeds, APIs, CSV/JSON/XML/TXT/PDF: use http_request/read_file. If the user says scrape a known page (docs/help/pricing/blog), use scrape_as_markdown unless it clearly returns data.
+- Data files, feeds, APIs, CSV/JSON/XML/TXT/PDF: use http_request/read_file. If the user says scrape a known page (docs/help/pricing/blog/changelog), use scrape_as_markdown unless it clearly returns data.
 - Recurring monitor/digest/alert setup: update schedule/charter first; if time is omitted, use a reasonable local default such as weekday/daily 9am instead of asking. Don't fetch or validate target URLs unless asked.
-- Small result already contains the answer: read it directly and report. Do not re-query __tool_results just to reread it.
+- Small result already contains the answer: report it. Do not re-query or send progress saying you will verify.
 - Large or complex result: use sqlite_batch once to inspect enough shape, then extract/filter/aggregate with copied paths and fields.
-- Multi-page research: search, keep only necessary leads, scrape/extract enough verified rows to satisfy the request, then synthesize and stop.
+- Research: search, silently scrape/extract enough verified rows to satisfy the request, then synthesize and stop.
 - Persist tables only when analysis, joins, chart input, or cross-turn reuse requires it; avoid temporary-table assumptions across sqlite_batch calls.
 - Charts are only for requested or materially useful visuals; create_chart first, then copy its returned inline path exactly.
 
@@ -4041,7 +4041,7 @@ def _get_system_instruction(
         "# Priority\n"
         "api | feed | data → http_request  # check for public APIs first\n"
         "weather geocoding → forecast/current API → reply  # don't answer weather from geocoding alone\n"
-        "successful http_request + answer data → reply from that payload  # no browser verification loop\n"
+        "successful http_request + answer data → reply from that payload  # no browser/custom-tool verification loop\n"
         "extractor > scrape                # for known platforms\n"
         "scrape = last_resort              # for HTML when no better option\n"
         "\n"
