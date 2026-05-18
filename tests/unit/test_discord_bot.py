@@ -1,5 +1,6 @@
 import json
 import os
+from datetime import timedelta
 from unittest.mock import MagicMock, patch
 from urllib.parse import parse_qs, urlsplit
 
@@ -7,6 +8,7 @@ import requests
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
+from django.utils import timezone
 
 from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.tools.discord_channel_subscriptions import execute_discord_channel_subscriptions
@@ -22,6 +24,7 @@ from api.models import (
     PersistentAgentDiscordWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentSystemStep,
 )
 from api.services.discord_bot import (
     DiscordGatewayMessage,
@@ -77,9 +80,10 @@ class NativeDiscordBotTests(TestCase):
         )
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
-    def test_oauth_callback_claims_manageable_guilds_for_agent_owner(self, post_mock, get_mock):
+    def test_oauth_callback_claims_manageable_guilds_for_agent_owner(self, post_mock, get_mock, delay_mock):
         auth_url = start_discord_oauth(self.agent, self.user)
         self.assertIn("client_id=discord-client", auth_url)
         auth_query = parse_qs(urlsplit(auth_url).query)
@@ -98,18 +102,38 @@ class NativeDiscordBotTests(TestCase):
             ]
         )
 
-        result = handle_discord_oauth_callback(state=session.state, code="code-1")
+        with self.captureOnCommitCallbacks(execute=True):
+            result = handle_discord_oauth_callback(
+                state=session.state,
+                code="code-1",
+                selected_guild_id="100",
+                selected_permissions="536939520",
+            )
 
         self.assertEqual(result.claimed_count, 1)
+        self.assertEqual(result.selected_guild_id, "100")
+        self.assertEqual(result.selected_guild, {"id": "100", "name": "Claimed", "icon_hash": "abc"})
+        session.refresh_from_db()
+        self.assertEqual(session.selected_guild_id, "100")
+        self.assertEqual(session.selected_permissions, "536939520")
         claim = PersistentAgentDiscordGuild.objects.get(guild_id="100")
         self.assertEqual(claim.owner_user, self.user)
         self.assertEqual(claim.name, "Claimed")
         self.assertFalse(PersistentAgentDiscordGuild.objects.filter(guild_id="200").exists())
+        system_step = PersistentAgentSystemStep.objects.get(
+            step__agent=self.agent,
+            code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
+        )
+        self.assertIn("Discord connection completed", system_step.step.description)
+        self.assertIn("discover_channels", system_step.step.description)
+        self.assertIn('"selected_guild_id":"100"', system_step.notes)
+        delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
+    @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
-    def test_oauth_callback_view_claims_guild_without_nullable_for_update_join(self, post_mock, get_mock):
+    def test_oauth_callback_view_claims_guild_without_nullable_for_update_join(self, post_mock, get_mock, delay_mock):
         self.user.is_staff = True
         self.user.save(update_fields=["is_staff"])
         self.client.force_login(self.user)
@@ -120,15 +144,19 @@ class NativeDiscordBotTests(TestCase):
             [{"id": "100", "name": "Claimed", "icon": "abc", "permissions": str(0x20)}]
         )
 
-        response = self.client.get(
-            reverse("discord_oauth_callback"),
-            {"state": session.state, "code": "code-1"},
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(
+                reverse("discord_oauth_callback"),
+                {"state": session.state, "code": "code-1", "guild_id": "100", "permissions": "536939520"},
+            )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("gobii:discord_oauth_complete", response.content.decode())
         self.assertIn("window.close()", response.content.decode())
+        session.refresh_from_db()
+        self.assertEqual(session.selected_guild_id, "100")
         self.assertTrue(PersistentAgentDiscordGuild.objects.filter(guild_id="100").exists())
+        delay_mock.assert_called_once_with(str(self.agent.id))
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.get")
@@ -160,6 +188,53 @@ class NativeDiscordBotTests(TestCase):
             }
         ])
         get_mock.assert_called_once()
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.requests.get")
+    def test_discover_channels_defaults_to_recent_oauth_selected_guild(self, get_mock):
+        self._guild(guild_id="100", name="Other")
+        self._guild(guild_id="200", name="Selected")
+        PersistentAgentDiscordOAuthSession.objects.create(
+            state="selected-state",
+            agent=self.agent,
+            owner_user=self.user,
+            initiated_by=self.user,
+            expires_at=timezone.now() + timedelta(minutes=15),
+            completed_at=timezone.now(),
+            selected_guild_id="200",
+        )
+        get_mock.return_value = _response([{"id": "20", "name": "general", "type": 0}])
+
+        result = discover_channels(self.agent)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_guild"]["guild_id"], "200")
+        self.assertEqual(result["channels"][0]["guild_id"], "200")
+        self.assertEqual(result["channels"][0]["guild_name"], "Selected")
+        self.assertIn("/guilds/200/channels", get_mock.call_args.args[0])
+
+    @tag("batch_agent_webhooks")
+    def test_subscription_tool_surfaces_recent_oauth_selected_guild(self):
+        self._guild(guild_id="100", name="Other")
+        self._guild(guild_id="200", name="Selected")
+        PersistentAgentDiscordOAuthSession.objects.create(
+            state="selected-state",
+            agent=self.agent,
+            owner_user=self.user,
+            initiated_by=self.user,
+            expires_at=timezone.now() + timedelta(minutes=15),
+            completed_at=timezone.now(),
+            selected_guild_id="200",
+        )
+
+        result = execute_discord_channel_subscriptions(
+            self.agent,
+            {"action": "list_guilds", "will_continue_work": True},
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_guild"]["guild_id"], "200")
+        self.assertIn("Do not ask the user to choose a server again", result["message"])
 
     @tag("batch_agent_webhooks")
     def test_subscription_uniqueness_allows_multiple_agents_per_channel(self):
@@ -472,6 +547,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("discord_send_message", skill.tool_names)
         self.assertNotIn("pipedream_trigger_subscriptions", skill.tool_names)
         self.assertIn("Use the native Gobii Discord bot tools", skill.prompt_instructions)
+        self.assertIn("immediately call `discord_channel_subscriptions`", skill.prompt_instructions)
+        self.assertIn("do not ask whether to start setup first", skill.prompt_instructions)
+        self.assertIn("Never invent Discord setup links", skill.prompt_instructions)
         self.assertIn("single setup link", skill.prompt_instructions)
         self.assertIn("fallback repair link", skill.prompt_instructions)
         self.assertIn("attachments", skill.prompt_instructions)

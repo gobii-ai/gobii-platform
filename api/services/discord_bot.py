@@ -26,6 +26,8 @@ from api.models import (
     PersistentAgentDiscordOAuthSession,
     PersistentAgentDiscordWebhook,
     PersistentAgentMessage,
+    PersistentAgentStep,
+    PersistentAgentSystemStep,
 )
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import broadcast_message_attachment_update
@@ -61,6 +63,8 @@ class DiscordBotIntegrationError(RuntimeError):
 class DiscordGuildClaimResult:
     claimed_count: int
     guilds: list[dict[str, str]]
+    selected_guild_id: str = ""
+    selected_guild: dict[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -203,8 +207,58 @@ def _can_manage_guild(guild: Mapping[str, Any]) -> bool:
     return bool(permissions & DISCORD_ADMINISTRATOR_PERMISSION or permissions & DISCORD_MANAGE_GUILD_PERMISSION)
 
 
+def _queue_discord_oauth_completion_processing(
+    session: PersistentAgentDiscordOAuthSession,
+    result: DiscordGuildClaimResult,
+) -> None:
+    selected_name = ""
+    if result.selected_guild:
+        selected_name = str(result.selected_guild.get("name") or "")
+    selected_fragment = (
+        f" Selected server: {selected_name} ({result.selected_guild_id})."
+        if result.selected_guild_id
+        else ""
+    )
+    step = PersistentAgentStep.objects.create(
+        agent=session.agent,
+        description=(
+            "Discord connection completed through the native Gobii Discord bot."
+            f"{selected_fragment} "
+            "Continue setup now: call discord_channel_subscriptions with action=\"discover_channels\". "
+            "If selected_guild is returned, use that server and do not ask the user to choose the server again."
+        ),
+    )
+    PersistentAgentSystemStep.objects.create(
+        step=step,
+        code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
+        notes=json.dumps(
+            {
+                "source": "discord_oauth",
+                "claimed_count": result.claimed_count,
+                "selected_guild_id": result.selected_guild_id,
+                "selected_guild": result.selected_guild,
+            },
+            separators=(",", ":"),
+            sort_keys=True,
+        ),
+    )
+
+    def _trigger_processing() -> None:
+        from api.agent.tasks.process_events import process_agent_events_task
+
+        process_agent_events_task.delay(str(session.agent_id))
+
+    transaction.on_commit(_trigger_processing)
+
+
 @transaction.atomic
-def handle_discord_oauth_callback(*, state: str, code: str) -> DiscordGuildClaimResult:
+def handle_discord_oauth_callback(
+    *,
+    state: str,
+    code: str,
+    selected_guild_id: str = "",
+    selected_permissions: str = "",
+) -> DiscordGuildClaimResult:
     session = (
         PersistentAgentDiscordOAuthSession.objects.select_for_update()
         .get(state=state)
@@ -218,6 +272,9 @@ def handle_discord_oauth_callback(*, state: str, code: str) -> DiscordGuildClaim
     oauth_guilds = _fetch_oauth_guilds(access_token)
     claimable_guilds = [guild for guild in oauth_guilds if _can_manage_guild(guild)]
     claimed: list[dict[str, str]] = []
+    selected_guild_id = selected_guild_id.strip()
+    selected_permissions = selected_permissions.strip()
+    selected_guild: dict[str, str] | None = None
 
     for guild in claimable_guilds:
         guild_id = str(guild.get("id") or "").strip()
@@ -249,10 +306,21 @@ def handle_discord_oauth_callback(*, state: str, code: str) -> DiscordGuildClaim
                 "icon_hash": guild_claim.icon_hash,
             }
         )
+        if selected_guild_id and guild_claim.guild_id == selected_guild_id:
+            selected_guild = claimed[-1]
 
     session.completed_at = timezone.now()
-    session.save(update_fields=["completed_at"])
-    return DiscordGuildClaimResult(claimed_count=len(claimed), guilds=claimed)
+    session.selected_guild_id = selected_guild_id if selected_guild else ""
+    session.selected_permissions = selected_permissions[:64]
+    session.save(update_fields=["completed_at", "selected_guild_id", "selected_permissions"])
+    result = DiscordGuildClaimResult(
+        claimed_count=len(claimed),
+        guilds=claimed,
+        selected_guild_id=session.selected_guild_id,
+        selected_guild=selected_guild,
+    )
+    _queue_discord_oauth_completion_processing(session, result)
+    return result
 
 
 def serialize_guild(guild: PersistentAgentDiscordGuild) -> dict[str, str]:
@@ -265,6 +333,21 @@ def serialize_guild(guild: PersistentAgentDiscordGuild) -> dict[str, str]:
 
 def list_claimed_guilds(agent: PersistentAgent) -> list[dict[str, str]]:
     return [serialize_guild(guild) for guild in _claimed_guild_queryset(agent).order_by("name", "guild_id")]
+
+
+def latest_selected_guild(agent: PersistentAgent) -> PersistentAgentDiscordGuild | None:
+    session = (
+        PersistentAgentDiscordOAuthSession.objects.filter(
+            agent=agent,
+            completed_at__isnull=False,
+        )
+        .exclude(selected_guild_id="")
+        .order_by("-completed_at", "-created_at")
+        .first()
+    )
+    if not session:
+        return None
+    return _claimed_guild_queryset(agent).filter(guild_id=session.selected_guild_id).first()
 
 
 def _fetch_bot_channels(guild_id: str) -> list[Mapping[str, Any]]:
@@ -296,6 +379,9 @@ def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str 
 
     query_lc = query.strip().lower()
     requested_guild_id = guild_id.strip()
+    selected_guild = latest_selected_guild(agent) if not requested_guild_id else None
+    if selected_guild:
+        requested_guild_id = selected_guild.guild_id
     channels: list[dict[str, str]] = []
     for guild in claimed:
         if requested_guild_id and guild.guild_id != requested_guild_id:
@@ -336,7 +422,10 @@ def discover_channels(agent: PersistentAgent, *, guild_id: str = "", query: str 
         if len(channels) >= max(1, min(limit, 200)):
             break
 
-    return {"status": "success", "channels": channels}
+    result: dict[str, Any] = {"status": "success", "channels": channels}
+    if selected_guild:
+        result["selected_guild"] = serialize_guild(selected_guild)
+    return result
 
 
 def serialize_subscription(subscription: PersistentAgentDiscordChannelSubscription) -> dict[str, str]:

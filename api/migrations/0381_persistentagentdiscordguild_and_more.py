@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('api', '0379_persistent_agent_judge_suggestion'),
+        ('api', '0380_evalruntask_debug_artifacts'),
         migrations.swappable_dependency(settings.AUTH_USER_MODEL),
     ]
 
@@ -58,6 +58,8 @@ class Migration(migrations.Migration):
                 ('state', models.CharField(max_length=128, unique=True)),
                 ('expires_at', models.DateTimeField()),
                 ('completed_at', models.DateTimeField(blank=True, null=True)),
+                ('selected_guild_id', models.CharField(blank=True, max_length=32)),
+                ('selected_permissions', models.CharField(blank=True, max_length=64)),
                 ('created_at', models.DateTimeField(auto_now_add=True)),
                 ('agent', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='discord_oauth_sessions', to='api.persistentagent')),
                 ('initiated_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='initiated_discord_oauth_sessions', to=settings.AUTH_USER_MODEL)),

@@ -12,8 +12,10 @@ from api.services.discord_bot import (
     disable_subscription,
     discover_channels,
     ensure_subscription,
+    latest_selected_guild,
     list_claimed_guilds,
     list_subscriptions,
+    serialize_guild,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,6 +28,8 @@ def get_discord_channel_subscriptions_tool() -> Dict[str, Any]:
             "name": "discord_channel_subscriptions",
             "description": (
                 "Manage native Gobii Discord bot channel subscriptions for this agent. "
+                "For Discord setup requests, call list_guilds or discover_channels immediately; "
+                "if setup is required, this tool returns the single connect_url to send to the user. "
                 "Use this before asking for raw Discord IDs: list claimed guilds, discover visible channels, "
                 "subscribe the selected channel, inspect subscriptions, or disable one."
             ),
@@ -98,7 +102,15 @@ def execute_discord_channel_subscriptions(agent: PersistentAgent, params: Dict[s
                         },
                         params,
                     )
-            return _result_with_sleep({"status": "success", "guilds": guilds}, params)
+            result = {"status": "success", "guilds": guilds}
+            selected_guild = latest_selected_guild(agent)
+            if selected_guild:
+                result["selected_guild"] = serialize_guild(selected_guild)
+                result["message"] = (
+                    "Use selected_guild from the most recent Discord setup. "
+                    "Do not ask the user to choose a server again; discover channels for this guild next."
+                )
+            return _result_with_sleep(result, params)
 
         if action == "discover_channels":
             result = discover_channels(

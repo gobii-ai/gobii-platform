@@ -9415,6 +9415,8 @@ class PersistentAgentDiscordOAuthSession(models.Model):
     )
     expires_at = models.DateTimeField()
     completed_at = models.DateTimeField(null=True, blank=True)
+    selected_guild_id = models.CharField(max_length=32, blank=True)
+    selected_permissions = models.CharField(max_length=64, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

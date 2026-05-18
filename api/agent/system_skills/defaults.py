@@ -279,6 +279,9 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     prompt_instructions=(
         "Use the native Gobii Discord bot tools for Discord setup and replies.\n"
+        "When the user asks to connect, set up, enable, or test Discord, immediately call `discord_channel_subscriptions` "
+        "with `action=\"list_guilds\"` or `action=\"discover_channels\"`; do not ask whether to start setup first. "
+        "Never invent Discord setup links or format separate setup steps yourself; only send URLs returned by the tool.\n"
         "Use `discord_channel_subscriptions` to manage inbound Discord server-channel subscriptions that wake this agent. "
         "V1 supports server channels only. Multiple agents may subscribe to the same guild/channel; each subscribed agent receives inbound channel messages. "
         "Do not set up DMs, all-channel subscriptions, or mention-only routing.\n"
@@ -286,6 +289,8 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
         "If the tool returns `action_required`, send the returned Gobii Discord `connect_url` as the single setup link. "
         "That link authorizes Discord guild access and installs the Gobii bot in the selected server. "
         "Do not present setup as separate connect and invite steps unless channel discovery later says the bot cannot list channels.\n"
+        "After the user says Discord setup is complete, call `list_guilds` or `discover_channels` again. "
+        "If the tool returns `selected_guild`, use that server and continue to channel discovery; do not ask the user to choose the server again.\n"
         "After guilds are connected, use `discover_channels` to list channels visible to the Gobii bot. If several channels are returned, ask the user to choose by channel name, "
         "then call `ensure` with the selected `guild_id`, `channel_id`, and `channel_name` so future channel messages wake this agent.\n"
         "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "

@@ -83,7 +83,12 @@ class DiscordOAuthCallbackView(ApiLoginRequiredMixin, View):
             session = PersistentAgentDiscordOAuthSession.objects.select_related("agent").get(state=state)
             agent_id = str(session.agent_id)
             resolve_manageable_agent_for_request(request, agent_id)
-            result = handle_discord_oauth_callback(state=state, code=code)
+            result = handle_discord_oauth_callback(
+                state=state,
+                code=code,
+                selected_guild_id=str(request.GET.get("guild_id") or ""),
+                selected_permissions=str(request.GET.get("permissions") or ""),
+            )
         except PersistentAgentDiscordOAuthSession.DoesNotExist:
             return JsonResponse({"error": "Discord authorization state was not found."}, status=404)
         except PermissionDenied:
