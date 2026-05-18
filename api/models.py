@@ -9611,6 +9611,42 @@ class PersistentAgentDiscordWebhook(models.Model):
         return f"DiscordWebhook<{self.guild_id}:{self.channel_id}>"
 
 
+class PersistentAgentDiscordWebhookEcho(models.Model):
+    """Short-lived marker used to suppress an agent's own Discord webhook echo."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="discord_webhook_echo_markers",
+    )
+    webhook = models.ForeignKey(
+        PersistentAgentDiscordWebhook,
+        on_delete=models.CASCADE,
+        related_name="echo_markers",
+    )
+    channel_id = models.CharField(max_length=32)
+    discord_webhook_id = models.CharField(max_length=32)
+    signature_hash = models.CharField(max_length=64)
+    discord_message_id = models.CharField(max_length=32, blank=True)
+    expires_at = models.DateTimeField(db_index=True)
+    matched_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["discord_webhook_id", "channel_id", "signature_hash", "expires_at"],
+                name="pa_discord_echo_lookup_idx",
+            ),
+            models.Index(fields=["agent", "expires_at"], name="pa_discord_echo_agent_idx"),
+        ]
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:  # pragma: no cover - display helper
+        return f"DiscordWebhookEcho<{self.agent_id}:{self.channel_id}:{self.discord_message_id or self.signature_hash}>"
+
+
 class PersistentAgentCommsEndpoint(models.Model):
     """Channel-agnostic communication endpoint (address/number/etc.)."""
 

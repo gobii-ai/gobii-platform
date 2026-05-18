@@ -24,6 +24,7 @@ from api.models import (
     PersistentAgentDiscordGuild,
     PersistentAgentDiscordOAuthSession,
     PersistentAgentDiscordWebhook,
+    PersistentAgentDiscordWebhookEcho,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentSystemStep,
@@ -37,8 +38,8 @@ from api.services.discord_bot import (
     ingest_gateway_message,
     send_channel_message,
     start_discord_oauth,
+    _webhook_echo_signature,
 )
-from api.services.discord_messages import create_discord_outbound_message
 
 
 def _response(payload=None, status_code=200, content=b""):
@@ -501,18 +502,25 @@ class NativeDiscordBotTests(TestCase):
             channel_id="10",
             channel_name="general",
         )
-        create_discord_outbound_message(
-            self.agent,
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
             channel_id="10",
-            body="hello from agent one",
-            conversation_address=f"discord://agent/{self.agent.id}/guild/100/channel/10",
-            platform_channel_address="discord://guild/100/channel/10",
-            channel_name="general",
-            raw_payload={
-                "source": "discord_bot_webhook",
-                "discord_message_id": "502",
-                "discord_channel_id": "10",
-            },
+            webhook_id="wh",
+            name="Gobii",
+        )
+        PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="wh",
+            signature_hash=_webhook_echo_signature(
+                webhook_id="wh",
+                channel_id="10",
+                username="Discord Agent",
+                body="hello from agent one",
+                attachment_filenames=[],
+            ),
+            expires_at=timezone.now() + timedelta(minutes=10),
         )
         schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
         webhook_message = DiscordGatewayMessage(
@@ -553,10 +561,16 @@ class NativeDiscordBotTests(TestCase):
             channel_id="10",
             channel_name="general",
         )
-        post_mock.side_effect = [
-            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
-            _response({"id": "discord-message-1", "channel_id": "10"}),
-        ]
+        def post_side_effect(url, **_kwargs):
+            if "/channels/" in url:
+                return _response({"id": "wh1", "token": "token1", "name": "Gobii"})
+            marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
+            self.assertEqual(marker.discord_webhook_id, "wh1")
+            self.assertEqual(marker.discord_message_id, "")
+            self.assertEqual(marker.matched_at, None)
+            return _response({"id": "discord-message-1", "channel_id": "10"})
+
+        post_mock.side_effect = post_side_effect
 
         message = send_channel_message(self.agent, channel_id="10", body="hello discord")
 
@@ -565,6 +579,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(message.raw_payload["discord_message_id"], "discord-message-1")
         webhook = PersistentAgentDiscordWebhook.objects.get(channel_id="10")
         self.assertEqual(webhook.webhook_id, "wh1")
+        marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
+        self.assertEqual(marker.discord_message_id, "discord-message-1")
+        self.assertEqual(message.raw_payload["webhook_echo_marker_id"], str(marker.id))
         send_call = post_mock.call_args_list[1]
         self.assertEqual(send_call.kwargs["json"]["username"], "Discord Agent")
         self.assertEqual(send_call.kwargs["json"]["content"], "hello discord")
