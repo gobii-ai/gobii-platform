@@ -277,6 +277,25 @@ class AllowlistDirectionTests(TestCase):
         self.assertTrue(entry.sms_contact_permission_attested)
         self.assertIsNotNone(entry.sms_contact_permission_attested_at)
 
+    def test_sms_attestation_partial_save_persists_attestation_pair(self):
+        entry = CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+            sms_contact_permission_attested=True,
+        )
+        self.assertIsNotNone(entry.sms_contact_permission_attested_at)
+
+        entry.sms_contact_permission_attested = False
+        entry.allow_inbound = False
+        entry.save(update_fields=["allow_inbound"])
+
+        entry.refresh_from_db()
+        self.assertFalse(entry.allow_inbound)
+        self.assertFalse(entry.sms_contact_permission_attested)
+        self.assertIsNone(entry.sms_contact_permission_attested_at)
+
     @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
     def test_sms_contact_request_approval_requires_permission_attestation(self):
         request = CommsAllowlistRequest.objects.create(

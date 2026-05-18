@@ -423,6 +423,40 @@ class SmsContactPurpose(models.TextChoices):
     OTHER_OPERATIONAL = "other_operational", "Other operational"
 
 
+_SMS_CONTACT_LOADED_VALUES_ATTR = "_sms_contact_loaded_values"
+
+
+def _safe_getattr(instance, attr: str, default=None):
+    if instance is None:
+        return default
+    return getattr(instance, attr, default)
+
+
+def _record_sms_contact_loaded_values(instance, field_names, values, tracked_fields: set[str]) -> None:
+    loaded_values = {
+        field_name: values[field_names.index(field_name)]
+        for field_name in tracked_fields
+        if field_name in field_names
+    }
+    if loaded_values:
+        setattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, loaded_values)
+
+
+def _get_sms_contact_loaded_value(instance, field_name: str):
+    loaded_values = getattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, None)
+    if isinstance(loaded_values, dict) and field_name in loaded_values:
+        return loaded_values[field_name], True
+    return None, False
+
+
+def _update_sms_contact_loaded_value(instance, field_name: str) -> None:
+    loaded_values = getattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, None)
+    if not isinstance(loaded_values, dict):
+        loaded_values = {}
+        setattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, loaded_values)
+    loaded_values[field_name] = getattr(instance, field_name)
+
+
 def _normalize_sms_contact_metadata_fields(instance) -> None:
     purpose = getattr(instance, "sms_contact_purpose", None)
     details = getattr(instance, "sms_contact_purpose_details", None)
@@ -442,17 +476,21 @@ def _normalize_sms_contact_metadata_fields(instance) -> None:
 
 def _is_new_or_entering_state(instance, active_field: str, active_values: set) -> bool:
     current_is_active = getattr(instance, active_field) in active_values
+    if not current_is_active:
+        return False
     if instance._state.adding or not instance.pk:
-        return current_is_active
+        return True
 
-    previous = (
-        type(instance)
-        .objects
-        .filter(pk=instance.pk)
-        .values_list(active_field, flat=True)
-        .first()
-    )
-    return previous not in active_values and current_is_active
+    previous, has_loaded_value = _get_sms_contact_loaded_value(instance, active_field)
+    if not has_loaded_value:
+        previous = (
+            type(instance)
+            .objects
+            .filter(pk=instance.pk)
+            .values_list(active_field, flat=True)
+            .first()
+        )
+    return previous not in active_values
 
 
 def _validate_sms_contact_metadata(
@@ -489,15 +527,19 @@ def _include_sms_contact_attestation_update_fields(instance, kwargs) -> None:
     update_fields = kwargs.get("update_fields")
     if update_fields is None:
         return
+    update_fields = set(update_fields)
+    if not update_fields:
+        return
     field_names = {
         "sms_contact_permission_attested",
         "sms_contact_permission_attested_at",
     }
     if (
-        getattr(instance, "sms_contact_permission_attested", None) is True
+        _safe_getattr(instance, "sms_contact_permission_attested", None) is not None
+        or _safe_getattr(instance, "sms_contact_permission_attested_at", None) is not None
         or field_names.intersection(update_fields)
     ):
-        kwargs["update_fields"] = set(update_fields) | {"sms_contact_permission_attested_at"}
+        kwargs["update_fields"] = update_fields | field_names
 
 
 class ApiKey(models.Model):
@@ -9874,6 +9916,12 @@ class CommsAllowlistEntry(models.Model):
         ]
         ordering = ["channel", "address"]
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"is_active"})
+        return instance
+
     def clean(self):
         super().clean()
 
@@ -9942,7 +9990,9 @@ class CommsAllowlistEntry(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
         _include_sms_contact_attestation_update_fields(self, kwargs)
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "is_active")
+        return result
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
@@ -10019,6 +10069,12 @@ class AgentAllowlistInvite(models.Model):
             models.Index(fields=["agent", "status"], name="allow_invite_agent_status_idx"),
         ]
         ordering = ["-created_at"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"status"})
+        return instance
     
     def clean(self):
         super().clean()
@@ -10065,7 +10121,9 @@ class AgentAllowlistInvite(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
         _include_sms_contact_attestation_update_fields(self, kwargs)
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "status")
+        return result
     
     def is_expired(self):
         """Check if this invitation has expired."""
@@ -10518,6 +10576,12 @@ class CommsAllowlistRequest(models.Model):
             models.Index(fields=["requested_at"], name="contact_req_requested_idx"),
         ]
         ordering = ["-requested_at"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"status"})
+        return instance
     
     def clean(self):
         super().clean()
@@ -10546,7 +10610,9 @@ class CommsAllowlistRequest(models.Model):
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
         _include_sms_contact_attestation_update_fields(self, kwargs)
-        return super().save(*args, **kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "status")
+        return result
     
     def approve(self, invited_by, skip_limit_check=False, skip_invitation=True):
         """Approve this request by creating an invitation or direct allowlist entry.
