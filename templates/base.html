@@ -51,7 +51,6 @@
   <meta name="theme-color" content="#0ea5e9">
 
   <!-- Connection hints for common third-party script origins -->
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   {% if settings.GOBII_PROPRIETARY_MODE %}
@@ -350,8 +349,8 @@
 
   {% endif %}
 
-  <!-- Tailwind Play CDN -->
-  <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  <!-- Tailwind CSS -->
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
   
   <!-- Custom Fonts -->
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
