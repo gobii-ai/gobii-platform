@@ -62,8 +62,6 @@ class Command(BaseCommand):
                 return
             if client.user is not None and message.author.id == client.user.id:
                 return
-            if getattr(message, "webhook_id", None):
-                return
 
             channel = message.channel
             guild = message.guild

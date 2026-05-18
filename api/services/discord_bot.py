@@ -630,6 +630,7 @@ def _ingest_gateway_message_for_subscription(
         "discord_guild_name": message.guild_name,
         "discord_author_id": message.author_id,
         "discord_author_name": message.author_name,
+        "discord_webhook_id": message.webhook_id,
         "discord_attachments": message.attachments,
         "discord_embeds": message.embeds,
         "discord_platform_channel_address": platform_channel_address,
@@ -668,9 +669,24 @@ def _ingest_gateway_message_for_subscription(
     }
 
 
+def _is_own_webhook_echo(
+    message: DiscordGatewayMessage,
+    subscription: PersistentAgentDiscordChannelSubscription,
+) -> bool:
+    if not message.webhook_id or not message.message_id:
+        return False
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=subscription.agent,
+        is_outbound=True,
+        raw_payload__source="discord_bot_webhook",
+        raw_payload__discord_message_id=message.message_id,
+        raw_payload__discord_channel_id=message.channel_id,
+    ).exists()
+
+
 def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
-    if message.author_is_bot or message.webhook_id:
-        return {"ignored": True, "reason": "bot_or_webhook"}
+    if message.author_is_bot and not message.webhook_id:
+        return {"ignored": True, "reason": "bot"}
     if not message.guild_id or not message.channel_id or not message.message_id:
         return {"ignored": True, "reason": "missing_discord_ids"}
     if not message.content and not message.attachments and not message.embeds:
@@ -688,10 +704,20 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
     if not subscriptions:
         return {"ignored": True, "reason": "no_subscription"}
 
-    deliveries = [
-        _ingest_gateway_message_for_subscription(message, subscription)
-        for subscription in subscriptions
-    ]
+    skipped_subscription_ids = []
+    deliveries = []
+    for subscription in subscriptions:
+        if _is_own_webhook_echo(message, subscription):
+            skipped_subscription_ids.append(str(subscription.id))
+            continue
+        deliveries.append(_ingest_gateway_message_for_subscription(message, subscription))
+    if not deliveries:
+        return {
+            "ignored": True,
+            "reason": "own_webhook_echo",
+            "subscription_count": len(subscriptions),
+            "skipped_subscription_ids": skipped_subscription_ids,
+        }
     first_delivery = deliveries[0]
     return {
         "ignored": False,
@@ -701,6 +727,7 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
         "debounce_seconds": first_delivery["debounce_seconds"],
         "subscription_count": len(deliveries),
         "deliveries": deliveries,
+        "skipped_subscription_ids": skipped_subscription_ids,
     }
 
 
