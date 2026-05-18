@@ -3689,10 +3689,10 @@ class PersistentAgentAdmin(admin.ModelAdmin):
     change_list_template = "admin/persistentagent_change_list.html"
     list_display = (
         'name', 'user_email', 'ownership_scope', 'organization', 'browser_use_agent_link',
-        'is_active', 'is_deleted', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
+        'is_active', 'sms_disabled', 'is_deleted', 'execution_environment', 'schedule', 'life_state', 'last_interaction_at',
         'message_count', 'created_at'
     )
-    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'is_deleted', 'execution_environment', 'created_at')
+    list_filter = (OwnershipTypeFilter, SoftExpirationFilter, 'organization', 'is_active', 'sms_disabled', 'is_deleted', 'execution_environment', 'created_at')
     search_fields = ('name', 'user__email', 'organization__name', 'charter', 'short_description', 'visual_description')
     raw_id_fields = ('user', 'browser_use_agent')
     readonly_fields = (
@@ -3738,6 +3738,7 @@ class PersistentAgentAdmin(admin.ModelAdmin):
                 'preferred_llm_tier',
                 'schedule',
                 'is_active',
+                'sms_disabled',
                 'execution_environment',
             )
         }),

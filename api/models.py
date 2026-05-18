@@ -6523,6 +6523,10 @@ class PersistentAgent(models.Model):
         return getattr(proxy, "id", None)
 
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
+    sms_disabled = models.BooleanField(
+        default=False,
+        help_text="Disable outbound SMS for this agent without detaching its SMS number or message history.",
+    )
     daily_credit_limit = models.PositiveIntegerField(
         null=True,
         blank=True,

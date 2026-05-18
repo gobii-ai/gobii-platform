@@ -13,6 +13,8 @@ def get_agent_primary_endpoint(
     channel: str | CommsChannel,
 ) -> Optional[PersistentAgentCommsEndpoint]:
     channel_value = channel.value if isinstance(channel, CommsChannel) else channel
+    if channel_value == CommsChannel.SMS.value and getattr(agent, "sms_disabled", False):
+        return None
     return (
         agent.comms_endpoints.filter(channel=channel_value, is_primary=True).first()
         or agent.comms_endpoints.filter(channel=channel_value).first()

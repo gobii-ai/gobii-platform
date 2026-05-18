@@ -92,6 +92,9 @@ def execute_send_sms(agent: PersistentAgent, params: Dict[str, Any]) -> Dict[str
     except EmailVerificationError as e:
         return e.to_tool_response()
 
+    if agent.sms_disabled:
+        return {"status": "error", "message": "SMS sending is disabled for this agent."}
+
     to_number = params.get("to_number")
     # Clean body: decode escapes, strip control chars, then strip markdown formatting
     body = decode_unicode_escapes(params.get("body"))
