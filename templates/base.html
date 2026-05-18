@@ -60,6 +60,12 @@
   <link rel="preconnect" href="https://www.googletagmanager.com">
   {% endif %}
 
+  <!-- Critical CSS: discover render-blocking styles before analytics scripts. -->
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'css/globals.css' %}">
+  {% block early_head_styles %}{% endblock %}
+
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
   {% if settings.GOBII_PROPRIETARY_MODE %}
   <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
@@ -348,16 +354,6 @@
   <!-- End Meta Pixel Code -->
 
   {% endif %}
-
-  <!-- Tailwind CSS -->
-  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
-  
-  <!-- Custom Fonts -->
-  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
-
-  <!-- Global CSS styles -->
-  <link rel="stylesheet" href="{% static 'css/globals.css' %}">
-  
   <!-- Preload logo to prevent flicker -->
   {% if fish_collateral_enabled %}
     <link rel="preload" as="image" href="{% static 'images/gobii_fish_with_text_purple_nav.png' %}" />
