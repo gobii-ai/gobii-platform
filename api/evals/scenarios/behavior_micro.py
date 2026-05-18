@@ -216,7 +216,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_043_yahoo_finance_business", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT and return market cap.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
     {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
-    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-get-values-in-range": ["google_sheets-read-rows"]}, "plan_expected": False},
     {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "In spreadsheet sheet-123, add one row to the Leads worksheet: company Acme, priority high, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
@@ -1186,6 +1186,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _mock_success(self, tool_name):
         if tool_name == "sqlite_batch":
+            if self.case.slug == "common_use_case_079_create_report_with_chart":
+                return CommonUseCaseToolChoiceScenario._revenue_sqlite_mock_success()
             return CommonUseCaseToolChoiceScenario._sqlite_mock_success()
         if tool_name.startswith("google_sheets-"):
             return CommonUseCaseToolChoiceScenario._google_sheets_mock_success(tool_name)
@@ -1271,7 +1273,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "tool": tool_name,
             "message": (
                 f"Mocked {tool_name} result for deterministic Google Sheets eval. "
-                "The requested spreadsheet and worksheet exist; use the requested Google Sheets mutation tool next."
+                "The requested spreadsheet and worksheet exist; use the requested Google Sheets tool next."
             ),
             "content": {
                 "ok": True,
@@ -1327,6 +1329,28 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     },
                 ],
                 "next_step": "The requested eval fixture data exists; continue with the user-requested tool.",
+            },
+        }
+
+    @staticmethod
+    def _revenue_sqlite_mock_success():
+        return {
+            "status": "ok",
+            "tool": "sqlite_batch",
+            "message": "Mocked SQLite result for deterministic revenue chart eval.",
+            "content": {
+                "ok": True,
+                "tables": ["revenue_data", "__tool_results", "__files"],
+                "columns": ["month", "revenue"],
+                "rows": [
+                    {"month": "Jan", "revenue": 120},
+                    {"month": "Feb", "revenue": 135},
+                    {"month": "Mar", "revenue": 150},
+                    {"month": "Apr", "revenue": 142},
+                    {"month": "May", "revenue": 165},
+                    {"month": "Jun", "revenue": 180},
+                ],
+                "next_step": "Revenue data is ready; call create_chart next with a query over revenue_data.",
             },
         }
 
