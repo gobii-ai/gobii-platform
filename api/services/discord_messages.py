@@ -7,6 +7,7 @@ from datetime import timedelta
 from typing import Mapping
 
 import redis
+import requests
 from django.conf import settings
 from django.utils import timezone
 
@@ -25,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 DISCORD_INBOUND_DEBOUNCE_DEADLINE_KEY = "agent:discord-inbound-debounce:{agent_id}:deadline"
 DISCORD_INBOUND_DEBOUNCE_SCHEDULED_KEY = "agent:discord-inbound-debounce:{agent_id}:scheduled"
+DISCORD_INBOUND_TYPING_CHANNEL_KEY = "agent:discord-inbound-debounce:{agent_id}:typing-channel"
+DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS = 2
 
 
 def discord_channel_address(guild_id: str, channel_id: str) -> str:
@@ -212,8 +216,29 @@ def discord_inbound_debounce_keys(agent_id: str) -> tuple[str, str]:
     )
 
 
+def discord_inbound_typing_channel_key(agent_id: str) -> str:
+    return DISCORD_INBOUND_TYPING_CHANNEL_KEY.format(agent_id=agent_id)
+
+
 def discord_inbound_debounce_ttl(delay_seconds: int) -> int:
     return max(60, delay_seconds * 6)
+
+
+def send_discord_typing_indicator(channel_id: str) -> bool:
+    normalized_channel_id = str(channel_id or "").strip()
+    if not normalized_channel_id or not settings.DISCORD_BOT_TOKEN:
+        return False
+    try:
+        response = requests.post(
+            f"{DISCORD_API_BASE}/channels/{normalized_channel_id}/typing",
+            headers={"Authorization": f"Bot {settings.DISCORD_BOT_TOKEN}"},
+            timeout=DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.warning("Failed to send Discord typing indicator for channel %s: %s", normalized_channel_id, exc)
+        return False
+    return True
 
 
 def process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int = 0) -> None:
@@ -225,14 +250,18 @@ def process_agent_events_after_discord_debounce(agent_id: str, *, countdown: int
         process_agent_events_task.delay(agent_id)
 
 
-def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
+def schedule_discord_inbound_processing(agent_id: str, *, typing_channel_id: str = "") -> dict[str, object]:
     debounce_seconds = discord_inbound_debounce_seconds()
+    normalized_typing_channel_id = str(typing_channel_id or "").strip()
+    if normalized_typing_channel_id:
+        send_discord_typing_indicator(normalized_typing_channel_id)
     if debounce_seconds <= 0:
         process_agent_events_after_discord_debounce(str(agent_id))
         return {"debounced": False, "debounce_seconds": 0, "scheduled": True}
 
     normalized_agent_id = str(agent_id)
     deadline_key, scheduled_key = discord_inbound_debounce_keys(normalized_agent_id)
+    typing_channel_key = discord_inbound_typing_channel_key(normalized_agent_id)
     deadline = time.time() + debounce_seconds
     ttl = discord_inbound_debounce_ttl(debounce_seconds)
 
@@ -241,7 +270,10 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
         pipeline = redis_client.pipeline(transaction=True)
         pipeline.set(deadline_key, f"{deadline:.6f}", ex=ttl)
         pipeline.set(scheduled_key, "1", ex=ttl, nx=True)
-        _deadline_set, scheduled_result = pipeline.execute()
+        if normalized_typing_channel_id:
+            pipeline.set(typing_channel_key, normalized_typing_channel_id, ex=ttl)
+        results = pipeline.execute()
+        scheduled_result = results[1]
         scheduled = bool(scheduled_result)
     except redis.exceptions.RedisError:
         logger.exception(
@@ -258,7 +290,7 @@ def schedule_discord_inbound_processing(agent_id: str) -> dict[str, object]:
 
     if scheduled:
         if settings.CELERY_TASK_ALWAYS_EAGER:
-            redis_client.delete(deadline_key, scheduled_key)
+            redis_client.delete(deadline_key, scheduled_key, typing_channel_key)
             process_agent_events_after_discord_debounce(normalized_agent_id)
             return {
                 "debounced": False,
@@ -299,14 +331,21 @@ def process_discord_inbound_debounce(agent_id: str) -> None:
         return
 
     deadline_key, scheduled_key = discord_inbound_debounce_keys(normalized_agent_id)
+    typing_channel_key = discord_inbound_typing_channel_key(normalized_agent_id)
     now = time.time()
 
     try:
         redis_client = get_redis_client()
+        typing_channel_id = redis_client.get(typing_channel_key)
+        if isinstance(typing_channel_id, (bytes, bytearray)):
+            typing_channel_id = typing_channel_id.decode("utf-8", "ignore")
+        typing_channel_id = str(typing_channel_id or "").strip()
+        if typing_channel_id:
+            send_discord_typing_indicator(typing_channel_id)
         deadline = coerce_redis_float(redis_client.get(deadline_key))
         if deadline is not None and deadline > now:
             if settings.CELERY_TASK_ALWAYS_EAGER:
-                redis_client.delete(deadline_key, scheduled_key)
+                redis_client.delete(deadline_key, scheduled_key, typing_channel_key)
                 process_agent_events_after_discord_debounce(normalized_agent_id)
                 return
 
@@ -314,6 +353,7 @@ def process_discord_inbound_debounce(agent_id: str) -> None:
             ttl = discord_inbound_debounce_ttl(max(debounce_seconds, countdown))
             redis_client.expire(deadline_key, ttl)
             redis_client.expire(scheduled_key, ttl)
+            redis_client.expire(typing_channel_key, ttl)
             from api.agent.tasks.process_events import process_discord_inbound_debounce_task
 
             process_discord_inbound_debounce_task.apply_async(
@@ -322,7 +362,7 @@ def process_discord_inbound_debounce(agent_id: str) -> None:
             )
             return
 
-        redis_client.delete(deadline_key, scheduled_key)
+        redis_client.delete(deadline_key, scheduled_key, typing_channel_key)
     except redis.exceptions.RedisError:
         logger.exception(
             "Failed processing Discord inbound debounce for agent %s; falling back to immediate processing.",

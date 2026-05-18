@@ -24,6 +24,7 @@ from api.models import (
     PersistentAgentDiscordGuild,
     PersistentAgentDiscordOAuthSession,
     PersistentAgentDiscordWebhook,
+    PersistentAgentDiscordWebhookEcho,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentSystemStep,
@@ -37,6 +38,7 @@ from api.services.discord_bot import (
     ingest_gateway_message,
     send_channel_message,
     start_discord_oauth,
+    _webhook_echo_signature,
 )
 
 
@@ -372,7 +374,7 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(stored.raw_payload["discord_message_id"], "500")
         self.assertEqual(PersistentAgentMessageAttachment.objects.filter(message=stored).count(), 1)
         self.assertEqual(stored.conversation.channel, CommsChannel.DISCORD)
-        schedule_mock.assert_called_once_with(str(self.agent.id))
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.schedule_discord_inbound_processing")
@@ -432,7 +434,65 @@ class NativeDiscordBotTests(TestCase):
         )
 
     @tag("batch_agent_webhooks")
-    def test_inbound_gateway_ignores_bot_and_webhook_echo_messages(self):
+    @override_settings(GOBII_RELEASE_ENV="local")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_message_skips_agents_from_other_environment(self, schedule_mock):
+        self.agent.execution_environment = "local"
+        self.agent.save(update_fields=["execution_environment", "updated_at"])
+        guild = self._guild()
+        foreign_browser = BrowserUseAgent.objects.create(user=self.user, name="Staging Browser")
+        foreign_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Staging Agent",
+            charter="Handle Discord messages somewhere else.",
+            browser_use_agent=foreign_browser,
+            execution_environment="staging",
+        )
+        active_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=foreign_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        message = DiscordGatewayMessage(
+            message_id="500",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="300",
+            author_name="Human",
+            content="hello local agents",
+            attachments=[],
+            embeds=[],
+        )
+
+        result = ingest_gateway_message(message)
+
+        self.assertFalse(result["ignored"])
+        self.assertEqual(result["subscription_count"], 1)
+        self.assertEqual(result["deliveries"][0]["subscription_id"], str(active_subscription.id))
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), 1)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=foreign_agent).exists())
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_ignores_bot_messages_but_ingests_third_party_webhooks(self, schedule_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
         bot_message = DiscordGatewayMessage(
             message_id="501",
             channel_id="10",
@@ -457,12 +517,86 @@ class NativeDiscordBotTests(TestCase):
             content="ignore",
             attachments=[],
             embeds=[],
+            author_is_bot=True,
             webhook_id="wh",
         )
 
-        self.assertEqual(ingest_gateway_message(bot_message)["reason"], "bot_or_webhook")
-        self.assertEqual(ingest_gateway_message(webhook_message)["reason"], "bot_or_webhook")
-        self.assertFalse(PersistentAgentMessage.objects.exists())
+        self.assertEqual(ingest_gateway_message(bot_message)["reason"], "bot")
+        webhook_result = ingest_gateway_message(webhook_message)
+        self.assertFalse(webhook_result["ignored"])
+        self.assertEqual(PersistentAgentMessage.objects.count(), 1)
+        stored = PersistentAgentMessage.objects.get()
+        self.assertEqual(stored.raw_payload["discord_webhook_id"], "wh")
+        schedule_mock.assert_called_once_with(str(self.agent.id), typing_channel_id="10")
+
+    @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_filters_only_the_sending_agents_webhook_echo(self, schedule_mock):
+        guild = self._guild()
+        second_browser = BrowserUseAgent.objects.create(user=self.user, name="Second Browser")
+        second_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Second Agent",
+            charter="Also handle Discord messages.",
+            browser_use_agent=second_browser,
+        )
+        first_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        second_subscription = PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=second_agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="wh",
+            name="Gobii",
+        )
+        PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="wh",
+            signature_hash=_webhook_echo_signature(
+                webhook_id="wh",
+                channel_id="10",
+                username="Discord Agent",
+                body="hello from agent one",
+                attachment_filenames=[],
+            ),
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+        schedule_mock.return_value = {"debounced": True, "debounce_seconds": 15}
+        webhook_message = DiscordGatewayMessage(
+            message_id="502",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="webhook",
+            author_name="Discord Agent",
+            content="hello from agent one",
+            attachments=[],
+            embeds=[],
+            author_is_bot=True,
+            webhook_id="wh",
+        )
+
+        result = ingest_gateway_message(webhook_message)
+
+        self.assertFalse(result["ignored"])
+        self.assertEqual(result["subscription_count"], 1)
+        self.assertEqual(result["skipped_subscription_ids"], [str(first_subscription.id)])
+        self.assertEqual(result["deliveries"][0]["subscription_id"], str(second_subscription.id))
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).count(), 0)
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=second_agent, is_outbound=False).count(), 1)
+        schedule_mock.assert_called_once_with(str(second_agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
@@ -477,10 +611,31 @@ class NativeDiscordBotTests(TestCase):
             channel_id="10",
             channel_name="general",
         )
-        post_mock.side_effect = [
-            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
-            _response({"id": "discord-message-1", "channel_id": "10"}),
-        ]
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="old-wh",
+            name="Old Gobii",
+        )
+        expired_marker = PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="old-wh",
+            signature_hash="expired",
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        def post_side_effect(url, **_kwargs):
+            if "/channels/" in url:
+                return _response({"id": "wh1", "token": "token1", "name": "Gobii"})
+            marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
+            self.assertEqual(marker.discord_webhook_id, "wh1")
+            self.assertEqual(marker.discord_message_id, "")
+            self.assertEqual(marker.matched_at, None)
+            return _response({"id": "discord-message-1", "channel_id": "10"})
+
+        post_mock.side_effect = post_side_effect
 
         message = send_channel_message(self.agent, channel_id="10", body="hello discord")
 
@@ -489,6 +644,10 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(message.raw_payload["discord_message_id"], "discord-message-1")
         webhook = PersistentAgentDiscordWebhook.objects.get(channel_id="10")
         self.assertEqual(webhook.webhook_id, "wh1")
+        marker = PersistentAgentDiscordWebhookEcho.objects.get(agent=self.agent, channel_id="10")
+        self.assertNotEqual(marker.id, expired_marker.id)
+        self.assertEqual(marker.discord_message_id, "discord-message-1")
+        self.assertEqual(message.raw_payload["webhook_echo_marker_id"], str(marker.id))
         send_call = post_mock.call_args_list[1]
         self.assertEqual(send_call.kwargs["json"]["username"], "Discord Agent")
         self.assertEqual(send_call.kwargs["json"]["content"], "hello discord")

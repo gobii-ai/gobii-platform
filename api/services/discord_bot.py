@@ -1,6 +1,7 @@
 """Native Gobii Discord bot integration."""
 
 import json
+import hashlib
 import logging
 import secrets
 from contextlib import ExitStack
@@ -12,6 +13,7 @@ from urllib.parse import urlencode
 import requests
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.urls import reverse
 from django.utils import timezone
 
@@ -25,6 +27,7 @@ from api.models import (
     PersistentAgentDiscordGuild,
     PersistentAgentDiscordOAuthSession,
     PersistentAgentDiscordWebhook,
+    PersistentAgentDiscordWebhookEcho,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -630,6 +633,7 @@ def _ingest_gateway_message_for_subscription(
         "discord_guild_name": message.guild_name,
         "discord_author_id": message.author_id,
         "discord_author_name": message.author_name,
+        "discord_webhook_id": message.webhook_id,
         "discord_attachments": message.attachments,
         "discord_embeds": message.embeds,
         "discord_platform_channel_address": platform_channel_address,
@@ -656,7 +660,7 @@ def _ingest_gateway_message_for_subscription(
     display_name = f"#{message.channel_name.lstrip('#')}" if message.channel_name else f"Discord {message.channel_id}"
     if info.message.conversation_id and display_name:
         PersistentAgentConversation.objects.filter(id=info.message.conversation_id).update(display_name=display_name)
-    debounce_result = schedule_discord_inbound_processing(str(agent.id))
+    debounce_result = schedule_discord_inbound_processing(str(agent.id), typing_channel_id=message.channel_id)
     subscription.record_message()
     return {
         "agent_id": str(agent.id),
@@ -668,9 +672,117 @@ def _ingest_gateway_message_for_subscription(
     }
 
 
+def _webhook_attachment_filenames(attachments: Iterable[Mapping[str, Any]]) -> list[str]:
+    filenames = []
+    for attachment in attachments:
+        filename = str(attachment.get("filename") or "").strip()
+        if filename:
+            filenames.append(filename)
+    return filenames
+
+
+def _webhook_echo_signature(
+    *,
+    webhook_id: str,
+    channel_id: str,
+    username: str,
+    body: str,
+    attachment_filenames: Iterable[str],
+) -> str:
+    payload = {
+        "webhook_id": webhook_id,
+        "channel_id": channel_id,
+        "username": username.strip(),
+        "body": body,
+        "attachment_filenames": sorted(filename.strip() for filename in attachment_filenames if filename.strip()),
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _gateway_webhook_echo_signature(message: DiscordGatewayMessage) -> str:
+    return _webhook_echo_signature(
+        webhook_id=message.webhook_id,
+        channel_id=message.channel_id,
+        username=message.author_name,
+        body=message.content,
+        attachment_filenames=_webhook_attachment_filenames(message.attachments),
+    )
+
+
+def _outbound_webhook_echo_signature(
+    *,
+    webhook: PersistentAgentDiscordWebhook,
+    subscription: PersistentAgentDiscordChannelSubscription,
+    username: str,
+    body: str,
+    attachments: Iterable[ResolvedAttachment],
+) -> str:
+    return _webhook_echo_signature(
+        webhook_id=webhook.webhook_id,
+        channel_id=subscription.channel_id,
+        username=username,
+        body=body,
+        attachment_filenames=[attachment.filename for attachment in attachments],
+    )
+
+
+def _create_webhook_echo_marker(
+    *,
+    agent: PersistentAgent,
+    webhook: PersistentAgentDiscordWebhook,
+    subscription: PersistentAgentDiscordChannelSubscription,
+    signature_hash: str,
+) -> PersistentAgentDiscordWebhookEcho:
+    PersistentAgentDiscordWebhookEcho.objects.filter(expires_at__lte=timezone.now()).delete()
+    return PersistentAgentDiscordWebhookEcho.objects.create(
+        agent=agent,
+        webhook=webhook,
+        channel_id=subscription.channel_id,
+        discord_webhook_id=webhook.webhook_id,
+        signature_hash=signature_hash,
+        expires_at=timezone.now() + timedelta(minutes=10),
+    )
+
+
+def _own_webhook_echo_agent_ids(
+    message: DiscordGatewayMessage,
+    subscriptions: list[PersistentAgentDiscordChannelSubscription],
+) -> set[object]:
+    if not message.webhook_id or not message.message_id:
+        return set()
+
+    agent_ids = [subscription.agent_id for subscription in subscriptions]
+    if not agent_ids:
+        return set()
+
+    now = timezone.now()
+    marker_ids = []
+    own_agent_ids = set()
+    markers = (
+        PersistentAgentDiscordWebhookEcho.objects
+        .filter(
+            agent_id__in=agent_ids,
+            discord_webhook_id=message.webhook_id,
+            channel_id=message.channel_id,
+            signature_hash=_gateway_webhook_echo_signature(message),
+            expires_at__gt=now,
+            matched_at__isnull=True,
+        )
+        .filter(Q(discord_message_id="") | Q(discord_message_id=message.message_id))
+        .values_list("id", "agent_id")
+    )
+    for marker_id, agent_id in markers:
+        marker_ids.append(marker_id)
+        own_agent_ids.add(agent_id)
+    if marker_ids:
+        PersistentAgentDiscordWebhookEcho.objects.filter(id__in=marker_ids).update(matched_at=now)
+    return own_agent_ids
+
+
 def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
-    if message.author_is_bot or message.webhook_id:
-        return {"ignored": True, "reason": "bot_or_webhook"}
+    if message.author_is_bot and not message.webhook_id:
+        return {"ignored": True, "reason": "bot"}
     if not message.guild_id or not message.channel_id or not message.message_id:
         return {"ignored": True, "reason": "missing_discord_ids"}
     if not message.content and not message.attachments and not message.embeds:
@@ -681,6 +793,7 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
         .filter(
             guild__guild_id=message.guild_id,
             channel_id=message.channel_id,
+            agent__execution_environment=settings.GOBII_RELEASE_ENV,
             status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE,
         )
         .order_by("created_at", "id")
@@ -688,10 +801,21 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
     if not subscriptions:
         return {"ignored": True, "reason": "no_subscription"}
 
-    deliveries = [
-        _ingest_gateway_message_for_subscription(message, subscription)
-        for subscription in subscriptions
-    ]
+    own_echo_agent_ids = _own_webhook_echo_agent_ids(message, subscriptions)
+    skipped_subscription_ids = []
+    deliveries = []
+    for subscription in subscriptions:
+        if subscription.agent_id in own_echo_agent_ids:
+            skipped_subscription_ids.append(str(subscription.id))
+            continue
+        deliveries.append(_ingest_gateway_message_for_subscription(message, subscription))
+    if not deliveries:
+        return {
+            "ignored": True,
+            "reason": "own_webhook_echo",
+            "subscription_count": len(subscriptions),
+            "skipped_subscription_ids": skipped_subscription_ids,
+        }
     first_delivery = deliveries[0]
     return {
         "ignored": False,
@@ -701,6 +825,7 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
         "debounce_seconds": first_delivery["debounce_seconds"],
         "subscription_count": len(deliveries),
         "deliveries": deliveries,
+        "skipped_subscription_ids": skipped_subscription_ids,
     }
 
 
@@ -791,32 +916,15 @@ def send_channel_message(
         .get(agent=agent, channel_id=channel_id, status=PersistentAgentDiscordChannelSubscription.Status.ACTIVE)
     )
     webhook = _get_or_create_channel_webhook(subscription)
+    username = (agent.name or "").strip() or "Agent"
     payload: dict[str, Any] = {
         "content": body,
-        "username": (agent.name or "").strip() or "Agent",
+        "username": username,
     }
     avatar_url = _agent_avatar_url(agent)
     if avatar_url:
         payload["avatar_url"] = avatar_url
     webhook_url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}/{webhook.webhook_token}"
-    if resolved_attachments:
-        with ExitStack() as stack:
-            response = requests.post(
-                webhook_url,
-                data={"payload_json": json.dumps(payload)},
-                files=_discord_multipart_files(resolved_attachments, stack),
-                params={"wait": "true"},
-                timeout=60,
-            )
-    else:
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            params={"wait": "true"},
-            timeout=20,
-        )
-    _raise_for_discord_status(response, action="webhook send")
-    response_payload = response.json() or {}
     sent_attachments = [
         {
             "path": attachment.path,
@@ -826,10 +934,48 @@ def send_channel_message(
         }
         for attachment in resolved_attachments
     ]
+    echo_signature = _outbound_webhook_echo_signature(
+        webhook=webhook,
+        subscription=subscription,
+        username=username,
+        body=body,
+        attachments=resolved_attachments,
+    )
+    echo_marker = _create_webhook_echo_marker(
+        agent=agent,
+        webhook=webhook,
+        subscription=subscription,
+        signature_hash=echo_signature,
+    )
+    try:
+        if resolved_attachments:
+            with ExitStack() as stack:
+                response = requests.post(
+                    webhook_url,
+                    data={"payload_json": json.dumps(payload)},
+                    files=_discord_multipart_files(resolved_attachments, stack),
+                    params={"wait": "true"},
+                    timeout=60,
+                )
+        else:
+            response = requests.post(
+                webhook_url,
+                json=payload,
+                params={"wait": "true"},
+                timeout=20,
+            )
+        _raise_for_discord_status(response, action="webhook send")
+    except (requests.RequestException, DiscordBotIntegrationError):
+        echo_marker.delete()
+        raise
+    response_payload = response.json() or {}
+    discord_message_id = str(response_payload.get("id") or "")
+    echo_marker.discord_message_id = discord_message_id
+    echo_marker.save(update_fields=["discord_message_id"])
     raw_payload = {
         "source": "discord_bot_webhook",
         "source_kind": "discord",
-        "discord_message_id": str(response_payload.get("id") or ""),
+        "discord_message_id": discord_message_id,
         "discord_channel_id": subscription.channel_id,
         "discord_channel_name": subscription.channel_name,
         "discord_guild_id": subscription.guild.guild_id,
@@ -837,6 +983,8 @@ def send_channel_message(
         "discord_platform_channel_address": discord_channel_address(subscription.guild.guild_id, subscription.channel_id),
         "discord_conversation_address": discord_conversation_address(agent.id, subscription.guild.guild_id, subscription.channel_id),
         "webhook_id": webhook.webhook_id,
+        "webhook_echo_marker_id": str(echo_marker.id),
+        "webhook_echo_signature": echo_signature,
         "source_label": discord_channel_source_label(subscription.channel_id, subscription.channel_name),
         "discord_sent_attachments": sent_attachments,
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},

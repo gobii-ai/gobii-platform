@@ -45,6 +45,11 @@ from api.services.pipedream_trigger_subscriptions import (
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer("gobii.utils")
 
+
+def _agent_runs_in_current_environment(agent: PersistentAgent) -> bool:
+    return agent.execution_environment == settings.GOBII_RELEASE_ENV
+
+
 @csrf_exempt
 @require_POST
 @tracer.start_as_current_span("COMM sms_webhook")
@@ -364,6 +369,15 @@ def inbound_agent_webhook(request, webhook_id):
     )
     if webhook is None:
         return JsonResponse({"accepted": False, "error": "Webhook not found."}, status=404)
+    if not _agent_runs_in_current_environment(webhook.agent):
+        logger.info(
+            "Ignoring inbound webhook %s for agent %s: agent environment %s does not match current environment %s",
+            webhook_id,
+            webhook.agent_id,
+            webhook.agent.execution_environment,
+            settings.GOBII_RELEASE_ENV,
+        )
+        return JsonResponse({"accepted": False, "error": "Webhook not found."}, status=404)
     if not webhook.matches_secret(secret):
         return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)
     if not webhook.is_active:
@@ -442,6 +456,15 @@ def pipedream_trigger_subscription_webhook(request, subscription_id):
         .first()
     )
     if subscription is None:
+        return JsonResponse({"accepted": False, "error": "Subscription not found."}, status=404)
+    if not _agent_runs_in_current_environment(subscription.agent):
+        logger.info(
+            "Ignoring Pipedream trigger subscription %s for agent %s: agent environment %s does not match current environment %s",
+            subscription_id,
+            subscription.agent_id,
+            subscription.agent.execution_environment,
+            settings.GOBII_RELEASE_ENV,
+        )
         return JsonResponse({"accepted": False, "error": "Subscription not found."}, status=404)
     if not subscription.matches_webhook_secret(secret):
         return JsonResponse({"accepted": False, "error": "Invalid webhook secret."}, status=403)

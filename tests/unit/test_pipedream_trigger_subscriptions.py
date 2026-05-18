@@ -30,6 +30,7 @@ from api.services.pipedream_trigger_subscriptions import (
     process_discord_inbound_debounce,
     schedule_discord_inbound_processing,
 )
+from api.services.discord_messages import DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS
 
 
 def _response(payload=None, status_code=200, content=b"", headers=None):
@@ -408,6 +409,23 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     @tag("batch_agent_webhooks")
+    @patch("api.webhooks.ingest_trigger_delivery")
+    def test_webhook_rejects_agent_from_other_environment(self, mock_ingest):
+        body = b'{"event":{"id":"m1","channelID":"12345","content":"hi"}}'
+        url = f"{reverse('api:pipedream_trigger_subscription_webhook', args=[self.subscription.id])}?t={self.subscription.webhook_secret}"
+
+        with patch("api.webhooks.settings.GOBII_RELEASE_ENV", "other-env"):
+            response = self.client.post(
+                url,
+                data=body,
+                content_type="application/json",
+                HTTP_X_PD_SIGNATURE=_signature("signing-secret", body),
+            )
+
+        self.assertEqual(response.status_code, 404)
+        mock_ingest.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     def test_webhook_rejects_non_matching_discord_channel_without_disabling_subscription(self):
         body = json.dumps(
             {
@@ -660,6 +678,52 @@ class PipedreamTriggerSubscriptionWebhookTests(TestCase):
             if key.endswith(":deadline")
         ]
         self.assertEqual(deadline_values, ["120.000000"])
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
+    @patch("api.services.discord_messages.send_discord_typing_indicator")
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    @patch("api.agent.tasks.process_events.process_discord_inbound_debounce_task.apply_async")
+    @patch("api.services.discord_messages.get_redis_client")
+    def test_discord_inbound_debounce_sends_and_refreshes_typing_indicator(
+        self,
+        mock_get_redis_client,
+        mock_debounce_apply_async,
+        mock_process_delay,
+        mock_typing,
+    ):
+        fake_redis = FakeRedis()
+        mock_get_redis_client.return_value = fake_redis
+
+        with patch("api.services.discord_messages.time.time", return_value=100.0):
+            schedule_discord_inbound_processing(str(self.agent.id), typing_channel_id="12345")
+
+        mock_typing.assert_called_once_with("12345")
+        self.assertEqual(
+            fake_redis.values[f"agent:discord-inbound-debounce:{self.agent.id}:typing-channel"],
+            "12345",
+        )
+        mock_typing.reset_mock()
+        mock_debounce_apply_async.reset_mock()
+
+        with patch("api.services.discord_messages.time.time", return_value=116.0):
+            process_discord_inbound_debounce(str(self.agent.id))
+
+        mock_typing.assert_called_once_with("12345")
+        mock_debounce_apply_async.assert_not_called()
+        mock_process_delay.assert_called_once_with(str(self.agent.id))
+        self.assertEqual(fake_redis.values, {})
+
+    @tag("batch_agent_webhooks")
+    @override_settings(DISCORD_BOT_TOKEN="bot-token")
+    @patch("api.services.discord_messages.requests.post")
+    def test_discord_typing_indicator_uses_short_timeout(self, mock_post):
+        from api.services.discord_messages import send_discord_typing_indicator
+
+        mock_post.return_value = _response()
+
+        self.assertTrue(send_discord_typing_indicator("12345"))
+        self.assertEqual(mock_post.call_args.kwargs["timeout"], DISCORD_TYPING_INDICATOR_TIMEOUT_SECONDS)
 
     @tag("batch_agent_webhooks")
     @override_settings(DISCORD_INBOUND_DEBOUNCE_SECONDS=15, CELERY_TASK_ALWAYS_EAGER=False)
