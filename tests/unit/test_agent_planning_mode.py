@@ -134,9 +134,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         tool = get_end_planning_tool()
         function = tool["function"]
 
-        self.assertIn("Call this before doing substantive task work", function["description"])
+        self.assertIn("When the user asks to execute now and the scope is clear", function["description"])
         self.assertIn(
-            "planning mode should not execute the actual task until this tool has been used",
+            "planning mode should not execute or discover task tools until this has been used",
             function["description"],
         )
         self.assertIn(
