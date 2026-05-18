@@ -280,6 +280,29 @@ class NativeDiscordBotTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.build_public_agent_avatar_thumbnail_url", return_value="https://app.example.test/public/agents/avatar.png")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_outbound_send_uses_public_agent_avatar_thumbnail(self, post_mock, avatar_url_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        send_channel_message(self.agent, channel_id="10", body="hello discord")
+
+        send_call = post_mock.call_args_list[1]
+        self.assertEqual(send_call.kwargs["json"]["avatar_url"], "https://app.example.test/public/agents/avatar.png")
+        avatar_url_mock.assert_called_once_with(self.agent)
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.broadcast_message_attachment_update")
     @patch("api.services.discord_bot.requests.post")
     def test_send_message_tool_uploads_filespace_attachments(self, post_mock, broadcast_mock):

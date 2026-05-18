@@ -3875,7 +3875,7 @@ class MCPToolIntegrationTests(TestCase):
     @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')
     @patch('api.agent.tools.tool_manager.execute_mcp_tool')
-    def test_execute_enabled_tool_applies_discord_send_defaults(self, mock_execute, mock_get_manager):
+    def test_execute_enabled_tool_leaves_pipedream_discord_send_params_unchanged(self, mock_execute, mock_get_manager):
         mock_manager = MagicMock()
         mock_manager.get_tools_for_agent.return_value = [self._discord_send_tool_info()]
         mock_manager.is_tool_blacklisted.return_value = False
@@ -3895,9 +3895,9 @@ class MCPToolIntegrationTests(TestCase):
         executed_params = mock_execute.call_args.args[2]
         self.assertEqual(executed_params["channel"], "1492138162066034751")
         self.assertEqual(executed_params["message"], "hello")
-        self.assertEqual(executed_params["avatarURL"], "https://gobii.ai/static/images/gobii_fish.png")
-        self.assertEqual(executed_params["username"], self.agent.name)
-        self.assertIs(executed_params["includeSentViaPipedream"], False)
+        self.assertNotIn("avatarURL", executed_params)
+        self.assertNotIn("username", executed_params)
+        self.assertNotIn("includeSentViaPipedream", executed_params)
 
     @tag("batch_agent_tools")
     @patch('api.agent.tools.tool_manager._get_manager')

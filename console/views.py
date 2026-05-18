@@ -104,6 +104,7 @@ from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
 )
+from api.services.agent_avatar_public import validate_public_agent_avatar_thumbnail_token
 from api.services.referral_service import ReferralService
 from api.services.trial_abuse import (
     evaluate_user_trial_eligibility,
@@ -6074,6 +6075,58 @@ def _agent_avatar_thumbnail_name(agent_id: Any, avatar_version: str) -> str:
     return f"agent_avatar_thumbnails/{agent_id}/{avatar_version}.png"
 
 
+def _serve_agent_avatar_thumbnail(agent: PersistentAgent, *, cache_control: str) -> FileResponse:
+    file_field = getattr(agent, "avatar", None)
+    if not file_field or not getattr(file_field, "name", None):
+        raise Http404("Avatar not found.")
+
+    storage = file_field.storage
+    original_name = file_field.name
+    if hasattr(storage, "exists") and not storage.exists(original_name):
+        raise Http404("Avatar not found.")
+
+    avatar_version = agent.get_avatar_version()
+    if not avatar_version:
+        raise Http404("Avatar not found.")
+
+    thumbnail_version = agent.get_avatar_thumbnail_version() or avatar_version
+    thumbnail_name = _agent_avatar_thumbnail_name(agent.id, thumbnail_version)
+    if not default_storage.exists(thumbnail_name):
+        _generate_agent_avatar_thumbnail(storage, original_name, thumbnail_name)
+
+    try:
+        file_handle = default_storage.open(thumbnail_name, "rb")
+    except (FileNotFoundError, OSError):
+        raise Http404("Avatar thumbnail not found.")
+
+    response = FileResponse(file_handle, content_type=AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE)
+    response["Cache-Control"] = cache_control
+    return response
+
+
+def _generate_agent_avatar_thumbnail(storage, original_name: str, thumbnail_name: str) -> None:
+    try:
+        with storage.open(original_name, "rb") as original_file:
+            with Image.open(original_file) as image:
+                image = ImageOps.exif_transpose(image)
+                thumbnail = ImageOps.fit(
+                    image,
+                    (AGENT_AVATAR_THUMBNAIL_SIZE, AGENT_AVATAR_THUMBNAIL_SIZE),
+                    method=Image.Resampling.LANCZOS,
+                )
+                output = io.BytesIO()
+                thumbnail.convert("RGBA").save(output, format="PNG", optimize=True)
+    except (FileNotFoundError, OSError, UnidentifiedImageError):
+        raise Http404("Avatar not found.")
+
+    saved_name = default_storage.save(thumbnail_name, ContentFile(output.getvalue()))
+    if saved_name != thumbnail_name:
+        try:
+            default_storage.delete(saved_name)
+        except OSError:
+            pass
+
+
 class AgentAvatarProxyView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     model = PersistentAgent
     context_object_name = "agent"
@@ -6110,54 +6163,18 @@ class AgentAvatarThumbnailProxyView(AgentAvatarProxyView):
 
     def get(self, request, *args, **kwargs):
         agent = self.get_object()
-        file_field = getattr(agent, "avatar", None)
-        if not file_field or not getattr(file_field, "name", None):
+        return _serve_agent_avatar_thumbnail(agent, cache_control="private, max-age=86400")
+
+
+class PublicAgentAvatarThumbnailView(View):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        agent = get_object_or_404(PersistentAgent.objects.alive(), pk=kwargs.get("pk"))
+        token = str(request.GET.get("token") or "")
+        if not validate_public_agent_avatar_thumbnail_token(agent, token):
             raise Http404("Avatar not found.")
-
-        storage = file_field.storage
-        original_name = file_field.name
-        if hasattr(storage, "exists") and not storage.exists(original_name):
-            raise Http404("Avatar not found.")
-
-        avatar_version = agent.get_avatar_version()
-        if not avatar_version:
-            raise Http404("Avatar not found.")
-
-        thumbnail_version = agent.get_avatar_thumbnail_version() or avatar_version
-        thumbnail_name = _agent_avatar_thumbnail_name(agent.id, thumbnail_version)
-        if not default_storage.exists(thumbnail_name):
-            self._generate_thumbnail(storage, original_name, thumbnail_name)
-
-        try:
-            file_handle = default_storage.open(thumbnail_name, "rb")
-        except (FileNotFoundError, OSError):
-            raise Http404("Avatar thumbnail not found.")
-
-        response = FileResponse(file_handle, content_type=AGENT_AVATAR_THUMBNAIL_CONTENT_TYPE)
-        response["Cache-Control"] = "private, max-age=86400"
-        return response
-
-    def _generate_thumbnail(self, storage, original_name: str, thumbnail_name: str) -> None:
-        try:
-            with storage.open(original_name, "rb") as original_file:
-                with Image.open(original_file) as image:
-                    image = ImageOps.exif_transpose(image)
-                    thumbnail = ImageOps.fit(
-                        image,
-                        (AGENT_AVATAR_THUMBNAIL_SIZE, AGENT_AVATAR_THUMBNAIL_SIZE),
-                        method=Image.Resampling.LANCZOS,
-                    )
-                    output = io.BytesIO()
-                    thumbnail.convert("RGBA").save(output, format="PNG", optimize=True)
-        except (FileNotFoundError, OSError, UnidentifiedImageError):
-            raise Http404("Avatar not found.")
-
-        saved_name = default_storage.save(thumbnail_name, ContentFile(output.getvalue()))
-        if saved_name != thumbnail_name:
-            try:
-                default_storage.delete(saved_name)
-            except OSError:
-                pass
+        return _serve_agent_avatar_thumbnail(agent, cache_control="public, max-age=86400")
 
 
 class AgentAllowlistView(LoginRequiredMixin, TemplateView):

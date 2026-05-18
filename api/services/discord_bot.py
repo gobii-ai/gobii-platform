@@ -29,6 +29,7 @@ from api.models import (
 )
 from api.agent.files.attachment_helpers import ResolvedAttachment, create_message_attachments
 from api.agent.files.filespace_service import broadcast_message_attachment_update
+from api.services.agent_avatar_public import build_public_agent_avatar_thumbnail_url
 from api.services.discord_messages import (
     create_discord_outbound_message,
     discord_agent_address,
@@ -500,12 +501,10 @@ def ingest_gateway_message(message: DiscordGatewayMessage) -> dict[str, Any]:
 
 
 def _agent_avatar_url(agent: PersistentAgent) -> str:
-    avatar_url = agent.get_avatar_url() or ""
+    avatar_url = build_public_agent_avatar_thumbnail_url(agent)
     if not avatar_url:
         return ""
-    if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
-        return avatar_url
-    return f"{_public_base_url()}{avatar_url}"
+    return avatar_url
 
 
 def _get_or_create_channel_webhook(subscription: PersistentAgentDiscordChannelSubscription) -> PersistentAgentDiscordWebhook:
