@@ -26,6 +26,15 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("Exact UUID", message_id_description)
         self.assertIn("never use placeholders", message_id_description)
 
+    def test_tool_description_guides_plan_reset_for_new_iterations(self):
+        tool = get_update_plan_tool()
+        description = tool["function"]["description"]
+
+        self.assertIn("full current active plan", description)
+        self.assertIn("omit stale prior-task or prior-run steps", description)
+        self.assertIn("new scheduled run", description)
+        self.assertIn("do not create one step per day, hour, or recurrence slot", description)
+
     def test_invalid_message_deliverable_feedback_explains_user_facing_only(self):
         result = execute_update_plan(
             self.agent,
