@@ -207,6 +207,12 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("err on the side of creating and using one", summary)
         self.assertIn("especially strong trigger", summary)
         self.assertIn("even if the user did not explicitly ask for a custom tool or mention SQLite", summary)
+        self.assertIn("source_path='/tools/name.py'", summary)
+        self.assertIn("source_code", summary)
+        self.assertIn("exact final line `if __name__ == '__main__': main(run)`", summary)
+        self.assertIn("side_effects_completed", summary)
+        self.assertIn("do_not_repeat_manually=true", summary)
+        self.assertIn("db.row_factory = sqlite3.Row", summary)
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_distinguishes_tool_paths_from_shell_paths(self, _mock_sandbox):

@@ -171,6 +171,14 @@ def _get_eval_tool_calls(eval_run_id: str, policy: dict[str, Any]):
     return [call for call in calls if _is_relevant_call(call, policy)]
 
 
+def _tool_call_has_finished(tool_call) -> bool:
+    return str(getattr(tool_call, "status", "") or "").lower() in {"complete", "error"}
+
+
+def _tool_call_has_succeeded(tool_call) -> bool:
+    return str(getattr(tool_call, "status", "") or "").lower() == "complete"
+
+
 def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] | None) -> tuple[bool, str]:
     if not eval_run_id or not policy:
         return False, ""
@@ -189,6 +197,18 @@ def should_stop_for_eval_policy(eval_run_id: str | None, policy: dict[str, Any] 
         for call in calls:
             if call.tool_name in stop_on_tool_names:
                 return True, f"terminal tool call observed: {call.tool_name}"
+
+    stop_after_execution_tool_names = set(policy.get("stop_on_tool_names_after_execution") or ())
+    if stop_after_execution_tool_names:
+        for call in calls:
+            if call.tool_name in stop_after_execution_tool_names and _tool_call_has_succeeded(call):
+                return True, f"terminal tool call completed: {call.tool_name}"
+
+    stop_after_finish_tool_names = set(policy.get("stop_on_tool_names_after_finish") or ())
+    if stop_after_finish_tool_names:
+        for call in calls:
+            if call.tool_name in stop_after_finish_tool_names and _tool_call_has_finished(call):
+                return True, f"terminal tool call finished: {call.tool_name}"
 
     if policy.get("stop_on_unexpected_relevant_tool"):
         allowed_tool_names = set(policy.get("allowed_tool_names") or ())

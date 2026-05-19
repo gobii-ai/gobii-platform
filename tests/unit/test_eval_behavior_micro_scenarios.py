@@ -362,7 +362,7 @@ class BehaviorMicroHelperTests(TestCase):
                 for definition in get_enabled_tool_definitions(agent)
             }
 
-    def _add_tool_call(self, tool_name, params=None):
+    def _add_tool_call(self, tool_name, params=None, status="complete"):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             eval_run=self.run,
@@ -373,7 +373,7 @@ class BehaviorMicroHelperTests(TestCase):
             tool_name=tool_name,
             tool_params=params or {},
             result="{}",
-            status="complete",
+            status=status,
         )
 
     def _add_human_input_request(self, run, question):
@@ -815,6 +815,42 @@ class BehaviorMicroHelperTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
+
+    def test_eval_stop_policy_can_wait_for_tool_execution(self):
+        self._add_tool_call("custom_sync", status="pending")
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+        self.assertFalse(should_stop)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("custom_sync", status="error")
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+        self.assertFalse(should_stop)
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_finish": ["custom_sync"]},
+        )
+        self.assertTrue(should_stop)
+        self.assertIn("finished", reason)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("custom_sync", status="complete")
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("completed", reason)
 
     def test_eval_stop_policy_stops_on_unexpected_relevant_tool(self):
         self._add_tool_call("send_chat_message")

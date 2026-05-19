@@ -4,7 +4,7 @@ import json
 import time
 import contextvars
 
-from litellm.exceptions import APIError, OpenAIError
+from litellm.exceptions import APIError, BadRequestError, NotFoundError, OpenAIError, ServiceUnavailableError
 
 from api.models import (
     BrowserUseAgentTask,
@@ -25,15 +25,18 @@ from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
-_JUDGE_RETRY_DELAYS_SECONDS = (1.0, 3.0)
+_JUDGE_RETRY_DELAYS_SECONDS = (1.0, 3.0, 6.0, 10.0)
 _JUDGE_RETRYABLE_ERRORS = (
     AttributeError,
     APIError,
+    BadRequestError,
     IndexError,
     json.JSONDecodeError,
     KeyError,
     LiteLLMResponseError,
+    NotFoundError,
     OpenAIError,
+    ServiceUnavailableError,
     TypeError,
     ValueError,
 )
@@ -41,7 +44,12 @@ _JUDGE_RETRYABLE_ERRORS = (
 
 def _is_structured_judge_grammar_error(exc: Exception) -> bool:
     message = str(exc).lower()
-    return "structural_tag grammar" in message or "failed to compile structural" in message
+    return (
+        "structural_tag grammar" in message
+        or "failed to compile structural" in message
+        or "tool_choice" in message
+        or "submit_judgment" in message
+    )
 
 
 def _preview_text(value: Any, *, limit: int = 1200) -> str:

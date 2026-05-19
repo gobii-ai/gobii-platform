@@ -166,6 +166,39 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_custom_tool_guidance_requires_helpful_side_effect_results(self, _mock_sandbox):
+        create_tool_description = get_create_custom_tool_tool()["function"]["description"]
+        prompt_summary = get_custom_tools_prompt_summary(self.agent)
+
+        for text in (
+            "source_path='/tools/my_tool.py'",
+            "source_code",
+            "Exact final line: `if __name__ == '__main__': main(run)`",
+            "file_path='/tools/my_tool.py'",
+            "mime_type='text/x-python'",
+            "side_effects_completed",
+            "db.row_factory = sqlite3.Row",
+            "target resource ids/names",
+            "source filters or date ranges",
+            "per-destination",
+            "do_not_repeat_manually=true",
+            "read-only verification",
+        ):
+            self.assertIn(text, create_tool_description)
+
+        for text in (
+            "side_effects_completed",
+            "exact final line `if __name__ == '__main__': main(run)`",
+            "db.row_factory = sqlite3.Row",
+            "target resource ids/names",
+            "source filters/date ranges",
+            "per-destination rows/items written",
+            "do_not_repeat_manually=true",
+            "read-only tools",
+        ):
+            self.assertIn(text, prompt_summary)
+
     def test_normalize_custom_tool_parameters_schema_synthesizes_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(
             {
@@ -761,7 +794,9 @@ class CustomToolsTests(TestCase):
         self.assertIn("domain-scoped credential", description)
         self.assertIn("not bare `requests`/`httpx`", description)
         self.assertIn("direct HTTPS tunneling", description)
-        self.assertIn("write `/tools/my_tool.py`", description)
+        self.assertIn("source_path='/tools/my_tool.py'", description)
+        self.assertIn("file_path='/tools/my_tool.py'", description)
+        self.assertIn("content=<python source>", description)
         self.assertIn("`/exports/report.txt` are filespace paths", description)
         self.assertIn("Path('/workspace/exports/report.txt')", description)
         self.assertIn("open('/exports/report.txt', ...)", description)
@@ -780,10 +815,8 @@ class CustomToolsTests(TestCase):
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
         self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
-        self.assertEqual(
-            properties["source_path"]["description"],
-            "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
-        )
+        self.assertIn("Required filespace path", properties["source_path"]["description"])
+        self.assertIn("Still required when source_code is provided", properties["source_path"]["description"])
         self.assertNotIn("entrypoint", properties)
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
