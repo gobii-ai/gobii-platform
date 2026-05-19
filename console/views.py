@@ -7914,7 +7914,7 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         # Send invitation emails for new invitations
                         if invitations_sent:
                             from django.urls import reverse
-                            from api.models import AgentAllowlistInvite, CommsChannel
+                            from api.models import AgentAllowlistInvite
                             
                             for address in invitations_sent:
                                 # Get the invitation we just created
