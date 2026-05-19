@@ -1899,15 +1899,52 @@ class HumanInputRequestApiTests(TestCase):
         self.request_obj.refresh_from_db()
         self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.EXPIRED)
 
+    @patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates")
     @patch("api.agent.tasks.process_agent_events_task.delay")
-    def test_dismiss_endpoint_cancels_request_returns_event_and_queues_processing(self, mock_delay):
+    def test_dismiss_endpoint_cancels_request_without_message_or_processing(
+        self,
+        mock_delay,
+        mock_emit,
+    ):
+        before = get_human_inbound_generation(self.agent.id)
+        before_message_count = PersistentAgentMessage.objects.filter(owner_agent=self.agent).count()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/dismiss/",
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertNotIn("event", payload)
+        self.assertEqual(payload["pending_human_input_requests"], [])
+        self.assertEqual(payload["pending_action_requests"], [])
+
+        self.request_obj.refresh_from_db()
+        self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
+        self.assertEqual(self.request_obj.raw_reply_text, "")
+        self.assertEqual(
+            self.request_obj.resolution_source,
+            PersistentAgentHumanInputRequest.ResolutionSource.DIRECT,
+        )
+        self.assertIsNone(self.request_obj.raw_reply_message_id)
+        self.assertIsNotNone(self.request_obj.resolved_at)
+        self.assertEqual(PersistentAgentMessage.objects.filter(owner_agent=self.agent).count(), before_message_count)
+        self.assertEqual(get_human_inbound_generation(self.agent.id), before)
+        mock_delay.assert_not_called()
+        mock_emit.assert_called_once_with(self.agent.id)
+
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_dismiss_endpoint_explicit_continue_without_answer_creates_message_and_queues_processing(self, mock_delay):
         before = get_human_inbound_generation(self.agent.id)
         expected = before + 1
 
         with self.captureOnCommitCallbacks(execute=True):
             response = self.client.post(
                 f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/dismiss/",
-                data=json.dumps({}),
+                data=json.dumps({"continue_without_answer": True}),
                 content_type="application/json",
             )
 
@@ -1938,6 +1975,56 @@ class HumanInputRequestApiTests(TestCase):
             str(self.agent.id),
             inbound_generation=expected,
         )
+
+    @patch("api.agent.tasks.process_agent_events_task.delay")
+    def test_planning_completed_greeting_dismiss_does_not_resume_idle_agent(self, mock_delay):
+        self.agent.planning_state = PersistentAgent.PlanningState.COMPLETED
+        self.agent.save(update_fields=["planning_state"])
+        completion = PersistentAgentCompletion.objects.create(agent=self.agent)
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            completion=completion,
+            description="Sent greeting and planning choices.",
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            conversation=self.conversation,
+            owner_agent=self.agent,
+            body="Hi, I can help with that. Which direction should I take?",
+            raw_payload={"source": "test_greeting"},
+        )
+        self.request_obj.originating_step = step
+        self.request_obj.save(update_fields=["originating_step", "updated_at"])
+        before_generation = get_human_inbound_generation(self.agent.id)
+        before_completion_count = PersistentAgentCompletion.objects.filter(agent=self.agent).count()
+        before_inbound_message_count = PersistentAgentMessage.objects.filter(
+            owner_agent=self.agent,
+            is_outbound=False,
+        ).count()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/human-input-requests/{self.request_obj.id}/dismiss/",
+                data=json.dumps({}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.request_obj.refresh_from_db()
+        self.assertEqual(self.request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
+        self.assertIsNone(self.request_obj.raw_reply_message_id)
+        self.assertEqual(get_human_inbound_generation(self.agent.id), before_generation)
+        self.assertEqual(
+            PersistentAgentCompletion.objects.filter(agent=self.agent).count(),
+            before_completion_count,
+        )
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).count(),
+            before_inbound_message_count,
+        )
+        mock_delay.assert_not_called()
 
     def test_batch_response_endpoint_submits_group_once(self):
         step = PersistentAgentStep.objects.create(
@@ -2210,7 +2297,7 @@ class HumanInputRequestApiTests(TestCase):
                 content_type="application/json",
             )
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 200)
         payload = response.json()
         batch_action = next(
             action

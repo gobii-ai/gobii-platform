@@ -503,6 +503,7 @@ export async function respondToHumanInputRequest(
 export async function dismissHumanInputRequest(
   agentId: string,
   requestId: string,
+  options: { continueWithoutAnswer?: boolean } = {},
 ): Promise<HumanInputResponseResult> {
   const url = `/console/api/agents/${agentId}/human-input-requests/${requestId}/dismiss/`
   const response = await jsonFetch<{
@@ -512,7 +513,7 @@ export async function dismissHumanInputRequest(
   }>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(options.continueWithoutAnswer ? { continue_without_answer: true } : {}),
   })
   return {
     event: response.event,

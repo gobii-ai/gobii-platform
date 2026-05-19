@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from api.agent.comms.human_input_requests import dismiss_human_input_request
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
@@ -18,18 +20,26 @@ from api.evals.stop_policy import (
 )
 from api.models import (
     EvalRunTask,
+    CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentCompletion,
+    PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    build_web_agent_address,
+    build_web_user_address,
 )
 
 PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS = "planning_first_turn_asks_bounded_questions"
 PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_first"
 PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_planning"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
+PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -285,6 +295,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST,
     PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING,
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
+    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -847,6 +858,162 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
                 EvalRunTask.Status.PASSED,
                 task_name="verify_no_planning_state_mutations",
                 observed_summary="No schedule/config/plan mutation was attempted before end_planning.",
+            )
+
+
+@register_scenario
+class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
+    slug = PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME
+    description = "Dismissing a completed planning prompt after a greeting should clear it without resuming the agent."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "human_input", "dismissal")
+    tasks = [
+        ScenarioTask(name="seed_completed_greeting", assertion_type="manual"),
+        ScenarioTask(name="dismiss_plain_request", assertion_type="manual"),
+        ScenarioTask(name="verify_no_resume", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.COMPLETED)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="seed_completed_greeting")
+        user_address = build_web_user_address(agent.user_id, agent.id)
+        agent_address = build_web_agent_address(agent.id)
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=agent_address,
+            defaults={"owner_agent": agent, "is_primary": True},
+        )
+        if agent_endpoint.owner_agent_id is None:
+            agent_endpoint.owner_agent = agent
+            agent_endpoint.is_primary = True
+            agent_endpoint.save(update_fields=["owner_agent", "is_primary"])
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        completion = PersistentAgentCompletion.objects.create(
+            agent=agent,
+            eval_run_id=run_id,
+            llm_model="seeded-completed-greeting",
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            eval_run_id=run_id,
+            completion=completion,
+            description="Seed completed greeting with planning options.",
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            conversation=conversation,
+            owner_agent=agent,
+            body="Hi. I can help with that. Which setup option should I use?",
+            raw_payload={"source": "eval_seed_completed_greeting"},
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.create(
+            agent=agent,
+            conversation=conversation,
+            originating_step=step,
+            question="Which setup option should I use?",
+            options_json=[
+                {"key": "a", "title": "Option A", "description": "Continue with option A."},
+                {"key": "b", "title": "Option B", "description": "Continue with option B."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="seed_completed_greeting",
+            observed_summary="Seeded a completed planning greeting with one pending human-input request.",
+        )
+
+        before_generation = get_human_inbound_generation(agent_id)
+        before_inbound_messages = PersistentAgentMessage.objects.filter(
+            owner_agent_id=agent_id,
+            is_outbound=False,
+        ).count()
+        before_completions = PersistentAgentCompletion.objects.filter(agent_id=agent_id).count()
+        before_tool_calls = PersistentAgentToolCall.objects.filter(step__agent_id=agent_id).count()
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="dismiss_plain_request")
+        message = dismiss_human_input_request(request_obj, actor_user_id=agent.user_id)
+        request_obj.refresh_from_db()
+        if message is None and request_obj.status == PersistentAgentHumanInputRequest.Status.CANCELLED:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="dismiss_plain_request",
+                observed_summary="Plain dismiss cancelled the request without producing an inbound continuation message.",
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="dismiss_plain_request",
+                observed_summary=(
+                    "Plain dismiss should return no message and cancel the request; "
+                    f"message_created={message is not None}, status={request_obj.status}."
+                ),
+            )
+            return
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_no_resume")
+        after_generation = get_human_inbound_generation(agent_id)
+        after_inbound_messages = PersistentAgentMessage.objects.filter(
+            owner_agent_id=agent_id,
+            is_outbound=False,
+        ).count()
+        after_completions = PersistentAgentCompletion.objects.filter(agent_id=agent_id).count()
+        after_tool_calls = PersistentAgentToolCall.objects.filter(step__agent_id=agent_id).count()
+        pending_requests = PersistentAgentHumanInputRequest.objects.filter(
+            agent_id=agent_id,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        ).count()
+        if (
+            after_generation == before_generation
+            and after_inbound_messages == before_inbound_messages
+            and after_completions == before_completions
+            and after_tool_calls == before_tool_calls
+            and pending_requests == 0
+            and request_obj.raw_reply_message_id is None
+        ):
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_no_resume",
+                observed_summary=(
+                    "Dismissal cleared the pending request without inbound generation, message, "
+                    "completion, or tool-call growth."
+                ),
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_no_resume",
+                observed_summary=(
+                    "Plain dismiss resumed or left work pending: "
+                    f"generation {before_generation}->{after_generation}, "
+                    f"inbound_messages {before_inbound_messages}->{after_inbound_messages}, "
+                    f"completions {before_completions}->{after_completions}, "
+                    f"tool_calls {before_tool_calls}->{after_tool_calls}, "
+                    f"pending_requests={pending_requests}, raw_reply_message={request_obj.raw_reply_message_id}."
+                ),
             )
 
 

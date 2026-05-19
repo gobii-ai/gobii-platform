@@ -3834,17 +3834,36 @@ class AgentHumanInputRequestDismissAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "This request is no longer pending."}, status=400)
 
         try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+        if not isinstance(body, dict):
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        continue_without_answer_value = body.get("continue_without_answer", False)
+        if continue_without_answer_value is not False and continue_without_answer_value is not True:
+            return JsonResponse(
+                {"error": "continue_without_answer must be a boolean."},
+                status=400,
+            )
+
+        try:
             message = dismiss_human_input_request(
                 human_input_request,
                 actor_user_id=request.user.id,
+                continue_without_answer=continue_without_answer_value,
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
+        payload = _pending_action_payload(agent, request.user)
+        if message is None:
+            return JsonResponse(payload, status=200)
+
         return JsonResponse(
             {
                 "event": serialize_message_event(message),
-                **_pending_action_payload(agent, request.user),
+                **payload,
             },
             status=201,
         )
