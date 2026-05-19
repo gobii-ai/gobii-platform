@@ -4221,6 +4221,7 @@ export function AgentChatPage({
       allowInbound: boolean
       allowOutbound: boolean
       canConfigure: boolean
+      smsContactPermissionAttested?: boolean
     }>,
   ) => {
     if (!activeAgentId) {
@@ -4233,6 +4234,7 @@ export function AgentChatPage({
         allow_inbound: response.allowInbound,
         allow_outbound: response.allowOutbound,
         can_configure: response.canConfigure,
+        sms_contact_permission_attested: response.smsContactPermissionAttested ?? null,
       })),
     })
     replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)

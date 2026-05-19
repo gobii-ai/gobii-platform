@@ -200,14 +200,14 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_017_search_local_events", "category": "web_research", "prompt": "Search the web for upcoming data science meetups in Austin and return two dates.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_018_search_product_launches", "category": "web_research", "prompt": "Search the web for new product launches from Contoso Health and summarize one.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_019_search_public_filings", "category": "web_research", "prompt": "Search the web for ExampleCo SEC enforcement press releases and return one link.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_search_engine": ["mcp_brightdata_web_data_reddit_posts"]}, "plan_expected": True},
+    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_search_engine": ["mcp_brightdata_web_data_reddit_posts"]}, "plan_expected": False},
     {"slug": "common_use_case_021_scrape_known_article", "category": "web_scrape", "prompt": "Scrape https://news.example.test/article-42 and return the headline.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_022_scrape_known_blog", "category": "web_scrape", "prompt": "Scrape https://blog.example.test/q2-roadmap and return the author name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_023_scrape_known_pricing_page", "category": "web_scrape", "prompt": "Scrape https://vendor.example.test/pricing and return the starter plan price.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_024_scrape_known_docs_page", "category": "web_scrape", "prompt": "Scrape https://docs.example.test/api/auth and return the required header name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_025_scrape_known_permit_page", "category": "web_scrape", "prompt": "Scrape https://borough.example.test/permits/zoning and return the filing fee.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_026_scrape_known_jobs_page", "category": "web_scrape", "prompt": "Scrape https://careers.example.test/jobs and return the first listed role.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_027_scrape_known_changelog", "category": "web_scrape", "prompt": "Scrape https://app.example.test/changelog and return the latest release date.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_027_scrape_known_changelog", "category": "web_scrape", "prompt": "Scrape https://app.example.test/changelog and return the latest release date.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_scrape_as_markdown": ["http_request"]}, "plan_expected": False},
     {"slug": "common_use_case_028_scrape_known_directory", "category": "web_scrape", "prompt": "Scrape https://directory.example.test/vendors and return the first vendor name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_029_scrape_known_support_page", "category": "web_scrape", "prompt": "Scrape https://support.example.test/status and return the support email.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_030_scrape_known_event_page", "category": "web_scrape", "prompt": "Scrape https://events.example.test/summit and return the venue.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
@@ -226,10 +226,10 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_043_yahoo_finance_business", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT and return market cap.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
     {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
-    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-get-values-in-range": ["google_sheets-read-rows"]}, "plan_expected": False},
     {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "In spreadsheet sheet-123, add one row to the Leads worksheet: company Acme, priority high, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123: Acme priority high owner Sam; Globex priority medium owner Priya; Initech priority low owner Lee.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_050_sheets_update_cell", "category": "sheets", "prompt": "Update cell C8 in spreadsheet sheet-123 to Qualified.", "expected_tools": ["google_sheets-update-cell"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_051_sheets_update_row", "category": "sheets", "prompt": "In spreadsheet sheet-123 Leads worksheet, update the row where company is Globex so status is Contacted.", "expected_tools": ["google_sheets-update-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_052_sheets_update_multiple_rows", "category": "sheets", "prompt": "In spreadsheet sheet-123 Pipeline worksheet, update rows 12, 13, and 14 so follow_up_due is today.", "expected_tools": ["google_sheets-update-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
@@ -1353,6 +1353,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _mock_success(self, tool_name):
         if tool_name == "sqlite_batch":
+            if self.case.slug == "common_use_case_079_create_report_with_chart":
+                return CommonUseCaseToolChoiceScenario._revenue_sqlite_mock_success()
             return CommonUseCaseToolChoiceScenario._sqlite_mock_success()
         if tool_name.startswith("google_sheets-"):
             return CommonUseCaseToolChoiceScenario._google_sheets_mock_success(tool_name)
@@ -1380,6 +1382,31 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                             ),
                         }
                     ],
+                },
+            }
+        if self.case.slug == "common_use_case_020_search_reddit_mentions" and tool_name in {
+            "mcp_brightdata_search_engine",
+            "mcp_brightdata_web_data_reddit_posts",
+        }:
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Reddit mention results for deterministic common-use-case eval.",
+                "content": {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": "BiomeBoost Pro first week notes",
+                            "url": "https://www.reddit.com/r/Supplements/comments/biomeboost_first_week/",
+                            "snippet": "Mixed sentiment: some users reported less bloating, while others disliked the price.",
+                        },
+                        {
+                            "title": "Anyone try BiomeBoost Pro?",
+                            "url": "https://www.reddit.com/r/guthealth/comments/biomeboost_try/",
+                            "snippet": "Positive mentions focused on digestion; skeptical replies asked for clearer ingredient evidence.",
+                        },
+                    ],
+                    "sentiment_hint": "mixed-positive with price and evidence concerns",
                 },
             }
         if tool_name == "mcp_brightdata_web_data_linkedin_company_profile":
@@ -1438,7 +1465,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "tool": tool_name,
             "message": (
                 f"Mocked {tool_name} result for deterministic Google Sheets eval. "
-                "The requested spreadsheet and worksheet exist; use the requested Google Sheets mutation tool next."
+                "The requested spreadsheet and worksheet exist; use the requested Google Sheets tool next."
             ),
             "content": {
                 "ok": True,
@@ -1494,6 +1521,28 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     },
                 ],
                 "next_step": "The requested eval fixture data exists; continue with the user-requested tool.",
+            },
+        }
+
+    @staticmethod
+    def _revenue_sqlite_mock_success():
+        return {
+            "status": "ok",
+            "tool": "sqlite_batch",
+            "message": "Mocked SQLite result for deterministic revenue chart eval.",
+            "content": {
+                "ok": True,
+                "tables": ["revenue_data", "__tool_results", "__files"],
+                "columns": ["month", "revenue"],
+                "rows": [
+                    {"month": "Jan", "revenue": 120},
+                    {"month": "Feb", "revenue": 135},
+                    {"month": "Mar", "revenue": 150},
+                    {"month": "Apr", "revenue": 142},
+                    {"month": "May", "revenue": 165},
+                    {"month": "Jun", "revenue": 180},
+                ],
+                "next_step": "Revenue data is ready; call create_chart next with a query over revenue_data.",
             },
         }
 

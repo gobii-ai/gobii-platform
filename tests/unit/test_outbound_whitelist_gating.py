@@ -154,3 +154,19 @@ class OutboundWhitelistGatingTests(TransactionTestCase):
         blocked = execute_send_sms(self.agent, {"to_number": "+15557779999", "body": "yo"})
         self.assertEqual(blocked.get("status"), "error")
         mock_deliver_sms.assert_not_called()  # Should not deliver to blocked number
+
+    @patch("api.agent.tools.sms_sender.deliver_agent_sms")
+    @tag("batch_sms")
+    def test_sms_execute_respects_agent_sms_disabled(self, mock_deliver_sms, mock_close_old_connections):
+        self.agent.sms_disabled = True
+        self.agent.save(update_fields=["sms_disabled"])
+
+        result = execute_send_sms(self.agent, {
+            "to_number": "+15551110000",
+            "body": "hello",
+            "will_continue_work": False,
+        })
+
+        self.assertEqual(result.get("status"), "error")
+        self.assertIn("SMS sending is disabled", result.get("message", ""))
+        mock_deliver_sms.assert_not_called()

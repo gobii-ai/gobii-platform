@@ -85,14 +85,17 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         _get_sleep_tool(),
         get_update_plan_tool(),
         get_send_email_tool(),
-        get_send_sms_tool(),
+    ]
+    if not agent or not agent.sms_disabled:
+        static_tools.append(get_send_sms_tool())
+    static_tools.extend([
         get_send_chat_tool(),
         get_spawn_web_task_tool(agent),
         get_search_tools_tool(),
         get_request_human_input_tool(),
         get_request_contact_permission_tool(),
         get_secure_credentials_request_tool(),
-    ]
+    ])
 
     if not agent:
         return static_tools

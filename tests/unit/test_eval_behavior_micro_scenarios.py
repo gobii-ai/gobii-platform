@@ -138,7 +138,7 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
-        self.assertTrue(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
@@ -205,12 +205,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
         )
         self.assertEqual(
+            by_slug["common_use_case_046_sheets_read_range"].accepted_tool_alternatives,
+            {"google_sheets-get-values-in-range": ("google_sheets-read-rows",)},
+        )
+        self.assertEqual(
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
         sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success(
             "google_sheets-get-spreadsheet-by-id"
         )
+        self.assertIn("use the requested Google Sheets tool next", sheets_mock["message"])
+        self.assertNotIn("mutation tool", sheets_mock["message"])
         self.assertIn("Tasks", sheets_mock["content"]["worksheets"])
         self.assertIn(
             "mcp_brightdata_search_engine",
@@ -415,6 +421,17 @@ class BehaviorMicroHelperTests(TestCase):
         for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+    def test_revenue_chart_eval_sqlite_mock_returns_revenue_rows(self):
+        scenario = ScenarioRegistry.get("common_use_case_079_create_report_with_chart")
+
+        mock_config = scenario._build_mock_config()
+
+        sqlite_mock = mock_config["sqlite_batch"]
+        self.assertIn("revenue_data", sqlite_mock["content"]["tables"])
+        self.assertEqual(sqlite_mock["content"]["columns"], ["month", "revenue"])
+        self.assertEqual(sqlite_mock["content"]["rows"][0], {"month": "Jan", "revenue": 120})
+        self.assertIn("call create_chart next", sqlite_mock["content"]["next_step"])
 
     @patch("api.agent.tools.tool_manager._get_manager")
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)

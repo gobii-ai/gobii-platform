@@ -14,7 +14,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
-from waffle.testutils import override_flag
+from waffle.testutils import override_flag, override_switch
 
 from api.agent.files.attachment_helpers import resolve_filespace_attachments
 from api.agent.files.filespace_service import write_bytes_to_dir
@@ -52,6 +52,7 @@ from api.models import (
     Organization,
     OrganizationMembership,
     PipedreamAppSelection,
+    SmsContactPurpose,
     build_web_agent_address,
     build_web_user_address,
 )
@@ -78,6 +79,7 @@ from util.onboarding import (
 from util.personal_signup_preview import SIGNUP_PREVIEW_EXISTING_AGENT_MESSAGE
 from util.trial_enforcement import PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE
 from util.analytics import AnalyticsEvent
+from constants.feature_flags import SMS_CONTACT_PURPOSE_REQUIRED
 
 CHANNEL_LAYER_SETTINGS = {
     "default": {"BACKEND": "channels.layers.InMemoryChannelLayer"}
@@ -206,7 +208,7 @@ class AgentChatAPITests(TestCase):
             data=json.dumps({"message": message_text, "preferred_llm_tier": "standard"}),
             content_type="application/json",
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
 
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
@@ -246,7 +248,7 @@ class AgentChatAPITests(TestCase):
                 },
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         payload = response.json()
         created_agent = PersistentAgent.objects.get(id=payload["agent_id"])
         seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
@@ -272,7 +274,7 @@ class AgentChatAPITests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         created_agent = PersistentAgent.objects.get(id=response.json()["agent_id"])
         seeded_message = PersistentAgentMessage.objects.get(owner_agent=created_agent, body=message_text)
         self.assertEqual(seeded_message.attachments.count(), 0)
@@ -2214,7 +2216,7 @@ class AgentChatAPITests(TestCase):
                 content_type="application/json",
             )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 200, response.content)
         request_obj.refresh_from_db()
         self.assertEqual(request_obj.status, CommsAllowlistRequest.RequestStatus.APPROVED)
         allowlist_entry = self.agent.manual_allowlist.get(
@@ -2225,6 +2227,70 @@ class AgentChatAPITests(TestCase):
         self.assertTrue(allowlist_entry.allow_outbound)
         self.assertTrue(allowlist_entry.can_configure)
         self.assertEqual(response.json().get("pending_action_requests"), [])
+        mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @tag("batch_agent_chat")
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    @patch("console.api_views.Analytics.track_event")
+    @patch("console.api_views.process_agent_events_task.delay")
+    def test_contact_request_resolve_api_records_sms_permission_attestation(
+        self,
+        mock_delay,
+        mock_track_event,
+    ):
+        request_obj = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            reason="Need to notify the team when action items are assigned.",
+            purpose="Action item notifications",
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+            sms_contact_purpose_details="Operational team alerts only.",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/contact-requests/resolve/",
+                data=json.dumps(
+                    {
+                        "responses": [
+                            {
+                                "request_id": str(request_obj.id),
+                                "decision": "approve",
+                                "allow_inbound": True,
+                                "allow_outbound": True,
+                                "can_configure": False,
+                                "sms_contact_permission_attested": True,
+                            }
+                        ]
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 200)
+        request_obj.refresh_from_db()
+        self.assertTrue(request_obj.sms_contact_permission_attested)
+        self.assertIsNotNone(request_obj.sms_contact_permission_attested_at)
+        allowlist_entry = self.agent.manual_allowlist.get(
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+        )
+        self.assertTrue(allowlist_entry.sms_contact_permission_attested)
+        self.assertIsNotNone(allowlist_entry.sms_contact_permission_attested_at)
+
+        sms_event_calls = [
+            call for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.AGENT_SMS_CONTACT_APPROVED
+        ]
+        self.assertEqual(len(sms_event_calls), 1)
+        properties = sms_event_calls[0].kwargs["properties"]
+        self.assertEqual(properties["sms_contact_purpose"], SmsContactPurpose.TEAM_OPERATIONAL)
+        self.assertTrue(properties["sms_contact_permission_attested"])
+        self.assertTrue(properties["allow_inbound"])
+        self.assertTrue(properties["allow_outbound"])
+        self.assertIn("contact_address_fingerprint", properties)
+        self.assertNotIn("address", properties)
         mock_delay.assert_called_once_with(str(self.agent.id))
 
 

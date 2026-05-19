@@ -549,6 +549,8 @@ def create_persistent_agent_from_charter(
 def enable_agent_sms_contact(agent: PersistentAgent, phone) -> tuple[PersistentAgentCommsEndpoint, PersistentAgentCommsEndpoint]:
     if not phone or not phone.is_verified:
         raise ValidationError("Please verify a phone number before enabling SMS.")
+    if agent.sms_disabled:
+        raise ValidationError("SMS has been disabled for this agent.")
 
     with transaction.atomic():
         existing_agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()

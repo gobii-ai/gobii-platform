@@ -37,6 +37,25 @@
           {% if form.address.help_text %}<p class="text-sm text-gray-500">{{ form.address.help_text }}</p>{% endif %}
           {% for e in form.address.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
         </div>
+        <div class="mb-3">
+          {{ form.sms_contact_purpose.label_tag }}
+          {{ form.sms_contact_purpose }}
+          {% if form.sms_contact_purpose.help_text %}<p class="text-sm text-gray-500">{{ form.sms_contact_purpose.help_text }}</p>{% endif %}
+          {% for e in form.sms_contact_purpose.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div class="mb-3">
+          {{ form.sms_contact_purpose_details.label_tag }}
+          {{ form.sms_contact_purpose_details }}
+          {% for e in form.sms_contact_purpose_details.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+        </div>
+        <div class="mb-3 flex items-start gap-2">
+          {{ form.sms_contact_permission_attested }}
+          <div>
+            {{ form.sms_contact_permission_attested.label_tag }}
+            {% if form.sms_contact_permission_attested.help_text %}<p class="text-sm text-gray-500">{{ form.sms_contact_permission_attested.help_text }}</p>{% endif %}
+            {% for e in form.sms_contact_permission_attested.errors %}<p class="text-sm text-red-600">{{ e }}</p>{% endfor %}
+          </div>
+        </div>
         <button type="submit" class="inline-flex items-center px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg">Add</button>
       </form>
     </div>

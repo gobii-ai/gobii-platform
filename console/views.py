@@ -246,6 +246,10 @@ def _format_validation_error(error: ValidationError) -> str:
     return str(error)
 
 
+def _posted_bool(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+
+
 def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> None:
     if (
         agent.organization_id is None
@@ -398,6 +402,7 @@ from .forms import (
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST, require_http_methods
 from util.analytics import Analytics, AnalyticsCTAs, AnalyticsEvent, AnalyticsSource
+from api.services.sms_contact_purpose import track_sms_contact_approval
 from django.core.paginator import Paginator
 from waffle.mixins import WaffleFlagMixin
 from constants.feature_flags import (
@@ -3600,6 +3605,13 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                     'address': entry.address,
                     'allowInbound': entry.allow_inbound,
                     'allowOutbound': entry.allow_outbound,
+                    'smsContactPurpose': entry.sms_contact_purpose,
+                    'smsContactPurposeDetails': entry.sms_contact_purpose_details,
+                    'smsContactPermissionAttested': entry.sms_contact_permission_attested,
+                    'smsContactPermissionAttestedAt': (
+                        entry.sms_contact_permission_attested_at.isoformat()
+                        if entry.sms_contact_permission_attested_at else None
+                    ),
                 }
                 for entry in entries_list
             ],
@@ -3610,6 +3622,13 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                     'address': invite.address,
                     'allowInbound': invite.allow_inbound,
                     'allowOutbound': invite.allow_outbound,
+                    'smsContactPurpose': invite.sms_contact_purpose,
+                    'smsContactPurposeDetails': invite.sms_contact_purpose_details,
+                    'smsContactPermissionAttested': invite.sms_contact_permission_attested,
+                    'smsContactPermissionAttestedAt': (
+                        invite.sms_contact_permission_attested_at.isoformat()
+                        if invite.sms_contact_permission_attested_at else None
+                    ),
                 }
                 for invite in pending_list
             ],
@@ -4190,6 +4209,13 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
             if action == 'add_allowlist':
                 channel = request.POST.get('channel', 'email')
                 address = request.POST.get('address', '').strip()
+                sms_contact_purpose = (request.POST.get('sms_contact_purpose') or '').strip() or None
+                sms_contact_purpose_details = (
+                    request.POST.get('sms_contact_purpose_details') or ''
+                ).strip() or None
+                sms_contact_permission_attested = _posted_bool(
+                    request.POST.get('sms_contact_permission_attested')
+                )
                 
                 if not address:
                     return JsonResponse({'success': False, 'error': 'Address is required'})
@@ -4211,11 +4237,24 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                             # Update inbound/outbound settings from POST or keep existing
                             allow_inbound = request.POST.get('allow_inbound')
                             allow_outbound = request.POST.get('allow_outbound')
+                            update_fields = ['is_active', 'allow_inbound', 'allow_outbound']
                             if allow_inbound is not None:
                                 existing_entry.allow_inbound = allow_inbound.lower() == 'true'
                             if allow_outbound is not None:
                                 existing_entry.allow_outbound = allow_outbound.lower() == 'true'
-                            existing_entry.save(update_fields=['is_active', 'allow_inbound', 'allow_outbound'])
+                            if channel == CommsChannel.SMS:
+                                if 'sms_contact_purpose' in request.POST:
+                                    existing_entry.sms_contact_purpose = sms_contact_purpose
+                                    update_fields.append('sms_contact_purpose')
+                                if 'sms_contact_purpose_details' in request.POST:
+                                    existing_entry.sms_contact_purpose_details = sms_contact_purpose_details
+                                    update_fields.append('sms_contact_purpose_details')
+                                if 'sms_contact_permission_attested' in request.POST:
+                                    existing_entry.sms_contact_permission_attested = (
+                                        sms_contact_permission_attested
+                                    )
+                                    update_fields.append('sms_contact_permission_attested')
+                            existing_entry.save(update_fields=update_fields)
                             entry = existing_entry
                     else:
                         # Directly create the allowlist entry (skip invitation process)
@@ -4229,7 +4268,14 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                             address=address,
                             is_active=True,
                             allow_inbound=allow_inbound,
-                            allow_outbound=allow_outbound
+                            allow_outbound=allow_outbound,
+                            sms_contact_purpose=sms_contact_purpose if channel == CommsChannel.SMS else None,
+                            sms_contact_purpose_details=(
+                                sms_contact_purpose_details if channel == CommsChannel.SMS else None
+                            ),
+                            sms_contact_permission_attested=(
+                                sms_contact_permission_attested if channel == CommsChannel.SMS else None
+                            ),
                         )
 
                         contact_props = Analytics.with_org_properties(
@@ -4245,6 +4291,22 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                             event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
                             source=AnalyticsSource.WEB,
                             properties=contact_props.copy(),
+                        )
+
+                    if channel == CommsChannel.SMS:
+                        track_sms_contact_approval(
+                            user_id=request.user.id,
+                            agent=agent,
+                            address=entry.address,
+                            approval_source="agent_detail_allowlist_ajax",
+                            approval_action="reactivate" if existing_entry else "create",
+                            allow_inbound=entry.allow_inbound,
+                            allow_outbound=entry.allow_outbound,
+                            can_configure=entry.can_configure,
+                            sms_contact_purpose=entry.sms_contact_purpose,
+                            sms_contact_purpose_details=entry.sms_contact_purpose_details,
+                            sms_contact_permission_attested=entry.sms_contact_permission_attested,
+                            allowlist_entry_id=str(entry.id),
                         )
 
                     from api.agent.tasks.process_events import process_agent_events_task
@@ -6242,9 +6304,29 @@ class AgentAllowlistView(LoginRequiredMixin, TemplateView):
                     address=form.cleaned_data['address'],
                     allow_inbound=form.cleaned_data.get('allow_inbound', True),
                     allow_outbound=form.cleaned_data.get('allow_outbound', True),
+                    sms_contact_purpose=form.cleaned_data.get('sms_contact_purpose'),
+                    sms_contact_purpose_details=form.cleaned_data.get('sms_contact_purpose_details'),
+                    sms_contact_permission_attested=form.cleaned_data.get(
+                        'sms_contact_permission_attested'
+                    ),
                 )
                 entry.full_clean()  # This will run model validation
                 entry.save()
+                if entry.channel == CommsChannel.SMS:
+                    track_sms_contact_approval(
+                        user_id=request.user.id,
+                        agent=agent,
+                        address=entry.address,
+                        approval_source="legacy_agent_allowlist",
+                        approval_action="create",
+                        allow_inbound=entry.allow_inbound,
+                        allow_outbound=entry.allow_outbound,
+                        can_configure=entry.can_configure,
+                        sms_contact_purpose=entry.sms_contact_purpose,
+                        sms_contact_purpose_details=entry.sms_contact_purpose_details,
+                        sms_contact_permission_attested=entry.sms_contact_permission_attested,
+                        allowlist_entry_id=str(entry.id),
+                    )
 
                 messages.success(request, "Allowlist entry added.")
             except (ValidationError, IntegrityError) as e:
@@ -7727,7 +7809,12 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
 
         # Safety: agent is present beyond this point
         # Get pending requests
-        from api.models import CommsAllowlistRequest, PersistentAgentStep, PersistentAgentSystemStep
+        from api.models import (
+            CommsAllowlistEntry,
+            CommsAllowlistRequest,
+            PersistentAgentStep,
+            PersistentAgentSystemStep,
+        )
         pending_requests = CommsAllowlistRequest.objects.filter(
             agent=agent,
             status=CommsAllowlistRequest.RequestStatus.PENDING
@@ -7754,18 +7841,52 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                                 inbound_field = f'inbound_{request_obj.id}'
                                 outbound_field = f'outbound_{request_obj.id}'
                                 configure_field = f'configure_{request_obj.id}'
+                                attestation_field = f'sms_permission_attested_{request_obj.id}'
                                 allow_inbound = form.cleaned_data.get(inbound_field, True)
                                 allow_outbound = form.cleaned_data.get(outbound_field, True)
                                 can_configure = form.cleaned_data.get(configure_field, False)
+                                sms_contact_permission_attested = form.cleaned_data.get(
+                                    attestation_field,
+                                    False,
+                                )
 
                                 # Update the request's settings before approving
                                 request_obj.request_inbound = allow_inbound
                                 request_obj.request_outbound = allow_outbound
                                 request_obj.request_configure = can_configure
-                                request_obj.save(update_fields=['request_inbound', 'request_outbound', 'request_configure'])
+                                update_fields = ['request_inbound', 'request_outbound', 'request_configure']
+                                if request_obj.channel == CommsChannel.SMS:
+                                    request_obj.sms_contact_permission_attested = (
+                                        sms_contact_permission_attested
+                                    )
+                                    update_fields.append('sms_contact_permission_attested')
+                                request_obj.save(update_fields=update_fields)
                                 
                                 # Try to approve (will directly add to allowlist, skipping invitation)
                                 result = request_obj.approve(invited_by=request.user, skip_invitation=True)
+                                if request_obj.channel == CommsChannel.SMS:
+                                    sms_event_kwargs = {
+                                        "user_id": request.user.id,
+                                        "agent": agent,
+                                        "address": request_obj.address,
+                                        "approval_source": "legacy_contact_request_approval",
+                                        "approval_action": "approve",
+                                        "allow_inbound": request_obj.request_inbound,
+                                        "allow_outbound": request_obj.request_outbound,
+                                        "can_configure": request_obj.request_configure,
+                                        "sms_contact_purpose": request_obj.sms_contact_purpose,
+                                        "sms_contact_purpose_details": request_obj.sms_contact_purpose_details,
+                                        "sms_contact_permission_attested": (
+                                            request_obj.sms_contact_permission_attested
+                                        ),
+                                        "allowlist_entry_id": (
+                                            str(result.id) if isinstance(result, CommsAllowlistEntry) else None
+                                        ),
+                                        "contact_request_id": str(request_obj.id),
+                                    }
+                                    transaction.on_commit(
+                                        lambda kwargs=sms_event_kwargs: track_sms_contact_approval(**kwargs)
+                                    )
                                 approved_count += 1
                                 approved_addresses.append(f"{request_obj.name or request_obj.address}")
                                 
@@ -7793,7 +7914,7 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
                         # Send invitation emails for new invitations
                         if invitations_sent:
                             from django.urls import reverse
-                            from api.models import AgentAllowlistInvite, CommsChannel
+                            from api.models import AgentAllowlistInvite
                             
                             for address in invitations_sent:
                                 # Get the invitation we just created

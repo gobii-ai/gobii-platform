@@ -110,6 +110,15 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("send_chat_message", names)
         self.assertTrue(PLANNING_MODE_DISABLED_TOOL_NAMES.isdisjoint(names))
 
+    def test_sms_disabled_agents_do_not_receive_send_sms_tool(self):
+        self.agent.sms_disabled = True
+        self.agent.save(update_fields=["sms_disabled", "updated_at"])
+
+        names = _tool_names(get_static_tool_definitions(self.agent))
+
+        self.assertIn("send_email", names)
+        self.assertNotIn("send_sms", names)
+
     def test_planning_runtime_rejects_disallowed_tools(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
@@ -125,9 +134,9 @@ class PersistentAgentPlanningModeTests(TestCase):
         tool = get_end_planning_tool()
         function = tool["function"]
 
-        self.assertIn("Call this before doing substantive task work", function["description"])
+        self.assertIn("When the user asks to execute now and the scope is clear", function["description"])
         self.assertIn(
-            "planning mode should not execute the actual task until this tool has been used",
+            "planning mode should not execute or discover task tools until this has been used",
             function["description"],
         )
         self.assertIn(
