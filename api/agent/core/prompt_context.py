@@ -3159,6 +3159,8 @@ def _get_formatting_guidance() -> str:
     return (
         "Formatting guidance:\n"
         "Multiple channels can matter in the same run. Use the section matching the message you are producing.\n\n"
+        "Substantive messages should feel designed and scannable: use clear hierarchy, whitespace, "
+        "bold key details, compact tables or sections when useful, and enough visual variety to avoid a templated feel.\n\n"
         "<web_chat>\n"
         f"{_get_web_chat_formatting_guidance()}\n"
         "</web_chat>\n\n"
@@ -4003,7 +4005,7 @@ def _get_system_instruction(
         "```\n\n"
         f"{image_generation_skill}"
 
-        "Formatting: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs for links and copied chart result paths for images.\n"
+        "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs for links and copied chart result paths for images.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
         "Do not download or upload files unless absolutely necessary or explicitly requested by the user. "
