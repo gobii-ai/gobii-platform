@@ -8,6 +8,10 @@ from api.evals.scenarios.behavior_micro import (
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
 from api.evals.scenarios.effort_calibration import EFFORT_CALIBRATION_SCENARIO_SLUGS
+from api.evals.scenarios.custom_tool_result_contract import (
+    CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
+    CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -48,6 +52,11 @@ register_builtin_suites(
             slug=META_GOBII_EVAL_SUITE_SLUG,
             description="Meta Gobii system-skill selection, direct-tool planning, and approval-policy evals.",
             scenario_slugs=META_GOBII_EVAL_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
+            description="Small custom-tool result contract evals based on real agent trajectory failures.",
+            scenario_slugs=CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
         ),
     ]
 )

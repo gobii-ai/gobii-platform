@@ -67,10 +67,11 @@ def get_create_file_tool() -> Dict[str, Any]:
             "name": "create_file",
             "description": (
                 "Create a file from raw content or a SQLite query result and store it in the agent filespace. "
-                "Provide exactly one of content or query. "
+                "Use `file_path`, `mime_type`, and exactly one of `content` or `query`; do not use `path`, `filename`, or `text`. "
                 "For raw exports, provide content. For query exports, provide a SQLite SELECT/WITH query that "
                 "returns exactly one row and one column; that single value becomes the file content. "
-                "Recommended path: /exports/your-file.extension "
+                "Recommended path: /exports/your-file.extension. For custom tool source files, use "
+                "`file_path='/tools/my_tool.py'`, `mime_type='text/x-python'`, and `content=<python source>`. "
                 "Provide a MIME type that matches the text content. "
                 "Use create_csv for CSV/tabular exports and create_pdf for PDFs. "
                 "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders."

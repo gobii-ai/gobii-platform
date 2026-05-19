@@ -1,8 +1,10 @@
 import argparse
 import time
 import uuid
+from datetime import timedelta
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal
 
 from allauth.account.models import EmailAddress
 from django.conf import settings
@@ -24,8 +26,17 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
 from api.evals.runner import _update_suite_state
-from api.models import BrowserUseAgent, EvalRun, EvalRunTask, EvalSuiteRun, LLMRoutingProfile, PersistentAgent
+from api.models import (
+    BrowserUseAgent,
+    EvalRun,
+    EvalRunTask,
+    EvalSuiteRun,
+    LLMRoutingProfile,
+    PersistentAgent,
+    TaskCredit,
+)
 from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
+from constants.grant_types import GrantTypeChoices
 
 
 @dataclass(frozen=True)
@@ -33,6 +44,49 @@ class EvalExecutionPlan:
     effective_max_concurrency: int
     use_eager_thread_pool: bool
     warn_sqlite_serial: bool
+
+
+def ensure_local_eval_runner_credits(user, stdout=None) -> None:
+    if not settings.EVAL_LOCAL_SETUP_ENABLED:
+        return
+
+    now = timezone.now()
+    active_credits = TaskCredit.objects.filter(
+        user=user,
+        expiration_date__gte=now,
+        additional_task=False,
+        voided=False,
+    )
+    remaining = sum((credit.remaining for credit in active_credits), Decimal("0"))
+    if remaining >= Decimal("5000"):
+        return
+
+    TaskCredit.objects.create(
+        user=user,
+        credits=Decimal("20000.000"),
+        credits_used=Decimal("0.000"),
+        granted_date=now,
+        expiration_date=now + timedelta(days=30),
+        additional_task=False,
+        grant_type=GrantTypeChoices.COMPENSATION,
+        comments="Local canonical eval runner credit grant.",
+    )
+    if stdout:
+        stdout.write("Granted local eval runner task credits.")
+
+
+def ensure_local_eval_sandbox_flag(stdout=None) -> None:
+    if not settings.EVAL_LOCAL_SETUP_ENABLED or not settings.SANDBOX_COMPUTE_ENABLED:
+        return
+
+    from waffle.models import Flag
+
+    Flag.objects.update_or_create(
+        name="sandbox_compute",
+        defaults={"everyone": True},
+    )
+    if stdout:
+        stdout.write("Enabled sandbox_compute waffle flag for local evals.")
 
 
 def build_eval_execution_plan(
@@ -559,6 +613,8 @@ class Command(BaseCommand):
             email=user.email,
             defaults={"verified": True, "primary": True},
         )
+        ensure_local_eval_runner_credits(user, stdout=self.stdout)
+        ensure_local_eval_sandbox_flag(stdout=self.stdout)
 
         def _create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
             unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
