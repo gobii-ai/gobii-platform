@@ -200,7 +200,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_017_search_local_events", "category": "web_research", "prompt": "Search the web for upcoming data science meetups in Austin and return two dates.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_018_search_product_launches", "category": "web_research", "prompt": "Search the web for new product launches from Contoso Health and summarize one.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_019_search_public_filings", "category": "web_research", "prompt": "Search the web for ExampleCo SEC enforcement press releases and return one link.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_search_engine": ["mcp_brightdata_web_data_reddit_posts"]}, "plan_expected": False},
+    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_web_data_reddit_posts": ["mcp_brightdata_search_engine"]}, "plan_expected": False, "stop_after_success": False},
     {"slug": "common_use_case_021_scrape_known_article", "category": "web_scrape", "prompt": "Scrape https://news.example.test/article-42 and return the headline.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_022_scrape_known_blog", "category": "web_scrape", "prompt": "Scrape https://blog.example.test/q2-roadmap and return the author name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_023_scrape_known_pricing_page", "category": "web_scrape", "prompt": "Scrape https://vendor.example.test/pricing and return the starter plan price.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
@@ -244,7 +244,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the prepared report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch", "read_file"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
@@ -902,6 +902,7 @@ class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
             agent=agent,
             eval_run_id=run_id,
             llm_model="seeded-completed-greeting",
+            billed=True,
         )
         step = PersistentAgentStep.objects.create(
             agent=agent,
@@ -1384,29 +1385,37 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     ],
                 },
             }
-        if self.case.slug == "common_use_case_020_search_reddit_mentions" and tool_name in {
-            "mcp_brightdata_search_engine",
-            "mcp_brightdata_web_data_reddit_posts",
-        }:
+        if (
+            self.case.slug == "common_use_case_020_search_reddit_mentions"
+            and tool_name in {"mcp_brightdata_search_engine", "mcp_brightdata_web_data_reddit_posts"}
+        ):
             return {
                 "status": "ok",
                 "tool": tool_name,
-                "message": "Mocked Reddit mention results for deterministic common-use-case eval.",
+                "message": "Mocked Reddit mentions result for deterministic common-use-case eval.",
                 "content": {
                     "ok": True,
                     "results": [
                         {
-                            "title": "BiomeBoost Pro first week notes",
-                            "url": "https://www.reddit.com/r/Supplements/comments/biomeboost_first_week/",
-                            "snippet": "Mixed sentiment: some users reported less bloating, while others disliked the price.",
+                            "title": "r/Supplements thread on BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/Supplements/comments/eval1/biomeboost_pro/",
+                            "snippet": "Several users liked the gentle formula but said results took two weeks.",
+                            "sentiment": "mildly positive",
                         },
                         {
-                            "title": "Anyone try BiomeBoost Pro?",
-                            "url": "https://www.reddit.com/r/guthealth/comments/biomeboost_try/",
-                            "snippet": "Positive mentions focused on digestion; skeptical replies asked for clearer ingredient evidence.",
+                            "title": "r/GutHealth discussion: BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/GutHealth/comments/eval2/biomeboost_pro/",
+                            "snippet": "Posters questioned the price and wanted clearer strain counts.",
+                            "sentiment": "negative",
+                        },
+                        {
+                            "title": "r/Nutrition mention of BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/Nutrition/comments/eval3/biomeboost_pro/",
+                            "snippet": "A few commenters compared it favorably with cheaper probiotic blends.",
+                            "sentiment": "mixed",
                         },
                     ],
-                    "sentiment_hint": "mixed-positive with price and evidence concerns",
+                    "summary_hint": "Sentiment is mixed: efficacy comments trend positive, while price and labeling are concerns.",
                 },
             }
         if tool_name == "mcp_brightdata_web_data_linkedin_company_profile":

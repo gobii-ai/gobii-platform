@@ -9,6 +9,7 @@ from api.agent.core.prompt_context import (
     build_prompt_context,
 )
 from api.agent.tools.run_command import get_run_command_tool
+from api.agent.tools.spawn_web_task import get_spawn_web_task_tool
 from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
 from api.services.web_sessions import start_web_session
@@ -186,6 +187,13 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("use relative paths from the workspace root such as tools/foo.py", description)
         self.assertIn("absolute shell paths like /workspace/tools/foo.py", description)
         self.assertIn("Do not run /tools/foo.py", description)
+
+    def test_spawn_web_task_description_requires_browser_only_need(self):
+        tool = get_spawn_web_task_tool(self.agent)
+        description = tool["function"]["description"]
+
+        self.assertIn("search/scrape/structured-data/API tools cannot answer", description)
+        self.assertIn("rendered page state, JavaScript, login, or user interaction", description)
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_biases_toward_custom_tools_for_bulk_work(self, _mock_sandbox):

@@ -112,8 +112,7 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
             "name": "spawn_web_task",
             "description": (
                 "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. "
-                "WARNING: This is a slow, expensive headless browser. Do NOT use this for API endpoints or raw JSON feeds; use 'http_request' for pure data/API retrieval. "
-                "Use this tool when you need to read what a webpage shows (even simple HTML) or for complex sites requiring JavaScript execution, login, or user interaction. "
+                "WARNING: This is a slow, expensive headless browser. Use it only when search/scrape/structured-data/API tools cannot answer and the task requires rendered page state, JavaScript, login, or user interaction. "
                 "Be very detailed and specific in your instructions. "
                 "Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. "
                 "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "

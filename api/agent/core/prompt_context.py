@@ -695,8 +695,8 @@ When you don't have data: say so. Don't fill the gap with plausible-sounding fab
 
 ## Data Flow Patterns
 
-- Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor), use it; search_tools is for missing or unclear tools.
-- Known platforms such as LinkedIn/Crunchbase: prefer structured extractors; scrape only if the extractor is missing, empty, or unsuitable.
+- Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor/social), use it; search_tools is for missing or unclear tools.
+- Known platforms/social sites: prefer structured extractors; scrape/browser only if missing, empty, or unsuitable.
 - Data files, feeds, APIs, CSV/JSON/XML/TXT/PDF: use http_request/read_file. If the user says scrape a known page (docs/help/pricing/blog/changelog), use scrape_as_markdown unless it clearly returns data.
 - Recurring monitor/digest/alert setup: update schedule/charter first; if time is omitted, use a reasonable local default such as weekday/daily 9am instead of asking. Don't fetch or validate target URLs unless asked.
 - Small result already contains the answer: report it. Do not re-query or send progress saying you will verify.
@@ -4048,7 +4048,7 @@ def _get_system_instruction(
         "api | feed | data → http_request  # check for public APIs first\n"
         "weather geocoding → forecast/current API → reply  # don't answer weather from geocoding alone\n"
         "successful http_request + answer data → reply from that payload  # no browser/custom-tool verification loop\n"
-        "extractor > scrape                # for known platforms\n"
+        "extractor > browser/scrape        # known platforms/social sites\n"
         "scrape = last_resort              # for HTML when no better option\n"
         "\n"
         "# Selection / discovery\n"

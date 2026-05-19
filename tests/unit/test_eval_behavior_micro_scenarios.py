@@ -139,7 +139,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
         self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].stop_after_success)
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
+        self.assertIn("API latency stayed under 120 ms", by_slug["common_use_case_064_send_digest_email"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
@@ -193,7 +195,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("ET schedule", by_slug["common_use_case_093_schedule_weekly_report"].prompt)
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
-            {"mcp_brightdata_search_engine": ("mcp_brightdata_web_data_reddit_posts",)},
+            {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_020_search_reddit_mentions"].expected_tools,
+            ("mcp_brightdata_web_data_reddit_posts",),
         )
         self.assertEqual(
             by_slug["common_use_case_091_schedule_daily_digest"].expected_tools,
@@ -432,6 +438,24 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(sqlite_mock["content"]["columns"], ["month", "revenue"])
         self.assertEqual(sqlite_mock["content"]["rows"][0], {"month": "Jan", "revenue": 120})
         self.assertIn("call create_chart next", sqlite_mock["content"]["next_step"])
+
+    def test_reddit_eval_fixture_has_terminal_structured_data(self):
+        scenario = ScenarioRegistry.get("common_use_case_020_search_reddit_mentions")
+        policy = scenario._build_eval_stop_policy()
+        result = scenario._mock_success("mcp_brightdata_web_data_reddit_posts")
+
+        self.assertNotIn("stop_when_all_seen", policy)
+        self.assertIn("spawn_web_task", policy["stop_on_tool_names"])
+        self.assertIn("BiomeBoost Pro", str(result["content"]))
+        self.assertIn("sentiment", str(result["content"]).lower())
+
+    def test_brightdata_eval_synthetic_descriptions_prefer_structured_data_over_browser(self):
+        search_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["description"]
+        reddit_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_reddit_posts"]["description"]
+
+        self.assertIn("ordinary research", search_description)
+        self.assertIn("Reddit mentions", reddit_description)
+        self.assertIn("browser automation", reddit_description)
 
     @patch("api.agent.tools.tool_manager._get_manager")
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
