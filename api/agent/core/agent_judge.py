@@ -757,6 +757,12 @@ def _build_trajectory_packet(
             "All chronology arrays are oldest-to-newest within their retained windows.",
             "Recent trajectory may include the current processing run and prior runs; use timestamps, system_step_code, and message direction to avoid overclaiming run boundaries.",
             "Distinguish directly observed facts from inferred causes. If a cause is not directly visible, phrase it as uncertainty.",
+            (
+                "Custom tools can call other tools internally, and those internal calls may appear in "
+                "tool-call history as ordinary tool calls. Do not infer redundant manual/top-level tool use "
+                "solely because ordinary tool calls appear near or after a custom_* tool call; require direct "
+                "evidence from timing, parameters, results, messages, or steps."
+            ),
         ],
         "trigger_reasons": trigger_reasons,
         "non_judge_step_count": non_judge_step_count,
