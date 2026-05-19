@@ -22,3 +22,4 @@ from .agent_avatar import (  # noqa: F401
     generate_agent_avatar_task,
     generate_agent_visual_description_task,
 )
+from .plan_credit_estimates import estimate_plan_credit_usage_task  # noqa: F401

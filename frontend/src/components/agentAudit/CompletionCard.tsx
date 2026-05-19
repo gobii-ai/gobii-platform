@@ -120,6 +120,8 @@ export function CompletionCard({
         return 'Agent Chat Suggestion'
       case 'human_input_request_matching':
         return 'Human Input Request Matching'
+      case 'plan_credit_estimate':
+        return 'Task Credit Estimation'
       case 'llm_judge':
         return 'Judge Evaluation'
       default:

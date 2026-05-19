@@ -27,6 +27,11 @@ from api.models import (
     PersistentAgentToolCall,
     PersistentAgentSystemMessage,
 )
+from api.services.plan_credit_estimates import (
+    enqueue_plan_credit_estimate,
+    serialize_estimate_for_agent,
+    sync_plan_credit_estimate_for_event,
+)
 from api.services.signup_preview import transition_agent_to_signup_preview_waiting
 from console.agent_audit.realtime import broadcast_system_message_audit, send_audit_event
 from console.agent_audit.serializers import (
@@ -52,9 +57,12 @@ from .pending_actions import (
     list_pending_action_requests,
 )
 from .timeline import (
+    CursorPayload,
+    PlanEnvelope,
     build_processing_snapshot,
     build_tool_cluster_from_steps,
     is_chat_hidden_message,
+    serialize_persisted_plan_event,
     serialize_plan_event,
     serialize_message_event,
     serialize_processing_snapshot,
@@ -679,6 +687,35 @@ def broadcast_plan_changes(agent, changes, snapshot, *, explanation: str = "") -
         )
         return
 
+    persisted_event = None
+    try:
+        persisted_event = persist_plan_event(agent, payload)
+    except Exception:
+        logger.debug(
+            "Failed to persist plan changes for agent %s",
+            getattr(agent, "id", None),
+            exc_info=True,
+        )
+
+    active_estimate = None
+    should_enqueue_estimate = False
+    if persisted_event is not None:
+        try:
+            active_estimate, should_enqueue_estimate = sync_plan_credit_estimate_for_event(
+                agent,
+                persisted_event,
+                payload.get("snapshot") if isinstance(payload.get("snapshot"), dict) else {},
+            )
+            estimate_payload = serialize_estimate_for_agent(agent, active_estimate)
+            if estimate_payload:
+                payload.setdefault("snapshot", {})["estimate"] = estimate_payload
+        except Exception:
+            logger.debug(
+                "Failed to create pending plan credit estimate for agent %s",
+                getattr(agent, "id", None),
+                exc_info=True,
+            )
+
     try:
         _send(_group_name(agent.id), "timeline_event", payload, agent_id=str(agent.id))
     except Exception:
@@ -688,11 +725,41 @@ def broadcast_plan_changes(agent, changes, snapshot, *, explanation: str = "") -
             exc_info=True,
         )
 
+    if should_enqueue_estimate and active_estimate is not None:
+        enqueue_plan_credit_estimate(str(active_estimate.id))
+
+
+def broadcast_plan_estimate_update(estimate) -> None:
+    """Rebroadcast the current plan event when an async estimate completes."""
+    agent = getattr(estimate, "agent", None)
+    if not agent or not getattr(agent, "id", None):
+        return
+
     try:
-        persist_plan_event(agent, payload)
+        latest_event = (
+            agent.kanban_events.order_by("-cursor_value", "-cursor_identifier")
+            .prefetch_related("changes", "titles")
+            .first()
+        )
+        if latest_event is None:
+            return
+        agent_name = getattr(agent, "name", None) or "Agent"
+        if " " in agent_name:
+            agent_name = agent_name.split()[0]
+        envelope = PlanEnvelope(
+            sort_key=(latest_event.cursor_value, "plan", str(latest_event.cursor_identifier)),
+            cursor=CursorPayload(
+                value=latest_event.cursor_value,
+                kind="plan",
+                identifier=str(latest_event.cursor_identifier),
+            ),
+            event=latest_event,
+        )
+        payload = serialize_persisted_plan_event(envelope, agent_name)
+        _send(_group_name(agent.id), "timeline_event", payload, agent_id=str(agent.id))
     except Exception:
         logger.debug(
-            "Failed to persist plan changes for agent %s",
+            "Failed to broadcast plan credit estimate update for agent %s",
             getattr(agent, "id", None),
             exc_info=True,
         )

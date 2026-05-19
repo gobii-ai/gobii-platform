@@ -152,6 +152,9 @@ function mergePlanDeliverablesFromCurrentSnapshot(snapshot: PlanSnapshot, curren
   if (!currentPlan) {
     return snapshot
   }
+  const snapshotWithEstimate = snapshot.estimate || !currentPlan.estimate
+    ? snapshot
+    : { ...snapshot, estimate: currentPlan.estimate }
 
   const hasSnapshotFiles = (snapshot.files?.length ?? 0) > 0
   const hasSnapshotMessages = (snapshot.messages?.length ?? 0) > 0
@@ -159,11 +162,11 @@ function mergePlanDeliverablesFromCurrentSnapshot(snapshot: PlanSnapshot, curren
   const hasCurrentMessages = (currentPlan.messages?.length ?? 0) > 0
 
   if (hasSnapshotFiles || hasSnapshotMessages || (!hasCurrentFiles && !hasCurrentMessages)) {
-    return snapshot
+    return snapshotWithEstimate
   }
 
   return {
-    ...snapshot,
+    ...snapshotWithEstimate,
     files: currentPlan.files,
     messages: currentPlan.messages,
   }

@@ -76,6 +76,7 @@ const DEFAULT_FILTERS = {
   tagGeneration: true,
   miniDescription: true,
   shortDescription: true,
+  taskCreditEstimation: true,
 } as const
 
 const AGENT_SEARCH_LIMIT = 8
@@ -106,7 +107,7 @@ type EventFilterKey =
   | 'systemSteps'
   | 'agentSteps'
 
-type CompletionFilterKey = 'tagGeneration' | 'miniDescription' | 'shortDescription'
+type CompletionFilterKey = 'tagGeneration' | 'miniDescription' | 'shortDescription' | 'taskCreditEstimation'
 
 const EVENT_TYPE_FILTERS: {
   key: EventFilterKey
@@ -130,6 +131,7 @@ const COMPLETION_TYPE_FILTERS: {
   { key: 'tagGeneration', label: 'Tag generation', matches: (completionType) => completionType === 'tag' },
   { key: 'miniDescription', label: 'Mini description', matches: (completionType) => completionType === 'mini_description' },
   { key: 'shortDescription', label: 'Short description', matches: (completionType) => completionType === 'short_description' },
+  { key: 'taskCreditEstimation', label: 'Task credit estimation', matches: (completionType) => completionType === 'plan_credit_estimate' },
 ]
 
 function formatJudgeSuggestionType(value?: string | null): string {

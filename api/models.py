@@ -7647,6 +7647,82 @@ class PersistentAgentKanbanEventChange(models.Model):
         return f"KanbanEventChange<{self.action}:{self.card_id}>"
 
 
+class PersistentAgentPlanCreditEstimate(models.Model):
+    """Base-credit estimate for a persisted agent plan event."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        COMPLETE = "complete", "Complete"
+        FAILED = "failed", "Failed"
+        STALE = "stale", "Stale"
+
+    class Frequency(models.TextChoices):
+        NONE = "none", "One-off"
+        HOURLY = "hourly", "Hourly"
+        DAILY = "daily", "Daily"
+        WEEKLY = "weekly", "Weekly"
+        MONTHLY_OR_OTHER = "monthly_or_other", "Monthly or Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="plan_credit_estimates",
+    )
+    kanban_event = models.OneToOneField(
+        PersistentAgentKanbanEvent,
+        on_delete=models.CASCADE,
+        related_name="credit_estimate",
+    )
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+    )
+    frequency = models.CharField(
+        max_length=32,
+        choices=Frequency.choices,
+        default=Frequency.NONE,
+    )
+    base_estimate = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_credits = models.DecimalField(
+        max_digits=12,
+        decimal_places=3,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(Decimal("0"))],
+    )
+    actual_started_at = models.DateTimeField(null=True, blank=True)
+    actual_completed_at = models.DateTimeField(null=True, blank=True)
+    plan_snapshot = models.JSONField(default=dict, blank=True)
+    step_estimates = models.JSONField(default=list, blank=True)
+    tool_breakdown = models.JSONField(default=list, blank=True)
+    assumptions = models.JSONField(default=list, blank=True)
+    llm_model = models.CharField(max_length=256, blank=True)
+    llm_provider = models.CharField(max_length=128, blank=True)
+    error_message = models.TextField(blank=True)
+    generated_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["agent", "status", "-created_at"], name="pa_plan_est_agent_status_idx"),
+            models.Index(fields=["agent", "-created_at"], name="pa_plan_est_agent_recent_idx"),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple display helper
+        return f"PlanCreditEstimate<{self.agent_id}:{self.status}>"
+
+
 class PersistentAgentPlanDeliverable(models.Model):
     """Current plan deliverable referenced by an agent."""
 
@@ -11793,6 +11869,7 @@ class PersistentAgentCompletion(models.Model):
         TEMPLATE_CLONE = ("template_clone", "Template Clone")
         AGENT_CHAT_SUGGESTION = ("agent_chat_suggestion", "Agent Chat Suggestion")
         HUMAN_INPUT_REQUEST_MATCHING = ("human_input_request_matching", "Human Input Request Matching")
+        PLAN_CREDIT_ESTIMATE = ("plan_credit_estimate", "Plan Credit Estimate")
         LLM_JUDGE = ("llm_judge", "LLM Judge")
         OTHER = ("other", "Other")
 

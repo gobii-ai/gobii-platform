@@ -31,6 +31,11 @@ from api.agent.comms.adapters import EMAIL_BODY_HTML_PAYLOAD_KEY
 from api.agent.comms.cid_references import CID_SRC_REFERENCE_RE
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
 from api.agent.comms.source_metadata import get_message_source_metadata, get_webhook_timeline_metadata
+from api.services.plan_credit_estimates import (
+    get_latest_plan_estimate_for_agent,
+    get_plan_estimate_for_event,
+    serialize_estimate_for_agent,
+)
 from api.models import (
     BrowserUseAgentTask,
     BrowserUseAgentTaskQuerySet,
@@ -573,7 +578,7 @@ def _plan_file_download_url(agent_id: uuid.UUID | None, path: str | None) -> str
 
 def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | None = None) -> dict:
     snapshot = snapshot or build_plan_snapshot(agent)
-    return {
+    payload = {
         "todoCount": snapshot.todo_count,
         "doingCount": snapshot.doing_count,
         "doneCount": snapshot.done_count,
@@ -596,6 +601,11 @@ def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | Non
             for item in snapshot.messages
         ],
     }
+    if snapshot.todo_count + snapshot.doing_count + snapshot.done_count > 0:
+        estimate_payload = serialize_estimate_for_agent(agent, get_latest_plan_estimate_for_agent(agent))
+        if estimate_payload:
+            payload["estimate"] = estimate_payload
+    return payload
 
 
 def _serialize_message(env: MessageEnvelope, user_lookup: Mapping[int, str | None] | None = None) -> dict:
@@ -940,6 +950,7 @@ def _plan_event_queryset(
     limit = MAX_PAGE_SIZE * 3
     qs = (
         PersistentAgentKanbanEvent.objects.filter(agent=agent)
+        .select_related("credit_estimate")
         .prefetch_related("changes", "titles")
         .order_by("-cursor_value", "-cursor_identifier")
     )
@@ -1567,6 +1578,11 @@ def serialize_persisted_plan_event(env: PlanEnvelope, agent_name: str) -> dict:
             if isinstance(item, dict) and item.get("messageId")
         ],
     }
+    if event.todo_count + event.doing_count + event.done_count > 0:
+        estimate = get_plan_estimate_for_event(event)
+        estimate_payload = serialize_estimate_for_agent(event.agent, estimate)
+        if estimate_payload:
+            serialized_snapshot["estimate"] = estimate_payload
 
     return {
         "kind": "plan",

@@ -1,4 +1,4 @@
-import { useInfiniteQuery, type InfiniteData } from '@tanstack/react-query'
+import { keepPreviousData, useInfiniteQuery, type InfiniteData } from '@tanstack/react-query'
 
 import { fetchAgentTimeline, type TimelineResponse } from '../api/agentChat'
 import type { PlanSnapshot, TimelineEvent } from '../types/agentChat'
@@ -77,6 +77,7 @@ export function useAgentTimeline(agentId: string | null, options?: { enabled?: b
       return { direction: 'newer' as const, cursor: lastPage.newestCursor }
     },
     enabled: Boolean(agentId) && (options?.enabled !== false),
+    placeholderData: keepPreviousData,
     staleTime: TIMELINE_STALE_TIME_MS,
     refetchOnWindowFocus: false,
   })

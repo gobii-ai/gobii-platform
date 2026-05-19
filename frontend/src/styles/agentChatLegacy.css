@@ -1659,6 +1659,28 @@
   outline: none;
 }
 
+.plan-panel-credit-summary {
+  margin: auto 1rem 0;
+  padding: 0.82rem 0 1rem;
+  border-top: 1px solid rgba(221, 214, 254, 0.18);
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.plan-panel-credit-label {
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.54);
+}
+
+.plan-panel-credit-value {
+  overflow-wrap: anywhere;
+}
+
+.plan-panel-credit-cadence {
+  color: rgba(255, 255, 255, 0.52);
+}
+
 @media (min-width: 768px) {
   .agent-chat-main[data-sidebar-mode='gallery'] #agent-workspace-root {
     align-self: center;

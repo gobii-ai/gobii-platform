@@ -258,6 +258,18 @@ export type PlanMessageDeliverable = {
   label?: string | null
 }
 
+export type PlanCreditEstimate = {
+  status: 'pending' | 'complete' | 'failed' | 'stale'
+  frequency: 'none' | 'hourly' | 'daily' | 'weekly' | 'monthly_or_other'
+  baseEstimate?: number | null
+  displayEstimate?: number | null
+  actualCredits?: number | null
+  actualStartedAt?: string | null
+  actualCompletedAt?: string | null
+  tierMultiplier?: number | null
+  generatedAt?: string | null
+}
+
 export type PlanSnapshot = {
   todoCount: number
   doingCount: number
@@ -267,6 +279,7 @@ export type PlanSnapshot = {
   doneTitles: string[]
   files?: PlanFileDeliverable[]
   messages?: PlanMessageDeliverable[]
+  estimate?: PlanCreditEstimate | null
 }
 
 export type PlanEvent = {
