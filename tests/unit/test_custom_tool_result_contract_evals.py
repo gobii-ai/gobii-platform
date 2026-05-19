@@ -1,7 +1,10 @@
 import json
+import uuid
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 from django.test import TestCase, tag
+from django.utils import timezone
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.evals.registry import ScenarioRegistry
@@ -12,6 +15,7 @@ from api.evals.scenarios.custom_tool_result_contract import (
     CustomToolResultContractScenario,
 )
 from api.evals.suites import SuiteRegistry
+from api.models import EvalRunTask
 
 
 def _case(slug):
@@ -364,3 +368,38 @@ if __name__ == "__main__":
 
         self.assertIsInstance(context["custom_tool_invocation"]["result"], dict)
         self.assertEqual(context["custom_tool_invocation"]["result"]["status"], "ok")
+
+    def test_run_skips_llm_judge_when_local_checks_fail(self):
+        case = _case("dedupe_format_signals")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        create_call = _create_call(case)
+        custom_call = _custom_call(case, params={})
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append(
+                {
+                    "task_name": task_name,
+                    "status": status,
+                    "observed_summary": observed_summary,
+                }
+            )
+
+        def fail_judge(**kwargs):
+            self.fail("LLM judge should not run after prerequisite local checks fail.")
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [create_call, custom_call]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = fail_judge
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        judge_records = [
+            record for record in records if record["task_name"] == "judge_result_helpfulness"
+        ]
+        self.assertEqual(judge_records[-1]["status"], EvalRunTask.Status.SKIPPED)
+        self.assertIn("prerequisite local checks failed", judge_records[-1]["observed_summary"])
+        self.assertIn("invoke_custom_tool", judge_records[-1]["observed_summary"])

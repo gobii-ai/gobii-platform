@@ -366,6 +366,30 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 artifacts={"step": custom_call.step, "custom_tool_params": custom_call.tool_params},
             )
 
+        if not local_pass or not call_pass:
+            prerequisite_summary = self._local_prerequisite_failure_summary(
+                create_pass=local_pass,
+                create_reason=local_reason,
+                invoke_pass=call_pass,
+                invoke_reason=call_reason,
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name="judge_result_helpfulness",
+                observed_summary=(
+                    "Skipped LLM judge because prerequisite local checks failed: "
+                    f"{prerequisite_summary}"
+                ),
+                artifacts={
+                    "step": create_call.step,
+                    "create_params": create_call.tool_params,
+                    "custom_tool_params": custom_call.tool_params,
+                },
+            )
+            return
+
         self.record_task_result(
             run_id,
             None,
@@ -617,6 +641,21 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 return False, "batching-required tool source must include remaining-work or cursor handling."
 
         return True, "Agent created a custom tool with useful params, batching policy, and helpful result fields."
+
+    @staticmethod
+    def _local_prerequisite_failure_summary(
+        *,
+        create_pass: bool,
+        create_reason: str,
+        invoke_pass: bool,
+        invoke_reason: str,
+    ) -> str:
+        failures = []
+        if not create_pass:
+            failures.append(f"propose_result_contract: {create_reason}")
+        if not invoke_pass:
+            failures.append(f"invoke_custom_tool: {invoke_reason}")
+        return "; ".join(failures)
 
     @staticmethod
     def _local_custom_call_check(
