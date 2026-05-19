@@ -325,8 +325,11 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
     use_when=(
         "the user asks to create a team of Gobiis",
         "the user asks to deploy Gobiis or request a specialist Gobii",
+        "the user asks to make, create, deploy, prototype, or set up any Gobii, even for one batch or one-off work",
         "the user asks to create, manage, configure, supervise, or restructure Gobiis",
         "the user asks to build or restructure an agent graph",
+        "the user asks to audit, rewire, relink, or brief a Gobii graph",
+        "the user asks to archive Gobiis or change daily credit limits, resource limits, schedules, or intelligence tiers",
         "the user asks to manage the Gobii graph or control plane",
         "the user asks a Gobii to manage other Gobiis or act as a manager Gobii",
         "the user asks to link Gobiis together and brief them",
@@ -361,6 +364,9 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "Use these tools only when the user is asking you to create, configure, link, brief, or maintain persistent "
         "Gobiis in this same owner or organization scope. Do not use them for ordinary research, writing, support, "
         "or content tasks that merely mention Gobii.\n"
+        "Creating or making any Gobii is control-plane work even when the requested Gobii is temporary, one-off, "
+        "prototype, exploratory, or for a single batch. Archiving Gobiis, changing daily credit/resource limits, "
+        "and rewiring or briefing a Gobii graph are also control-plane work.\n"
         "Authorization boundary: every tool is scoped to the invoking Gobii's personal owner scope or organization. "
         "Never attempt to manage agents outside that accessible scope.\n"
         "Human approval boundary: before making any control-plane mutation, ask the human to approve a concise "

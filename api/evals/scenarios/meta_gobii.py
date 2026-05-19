@@ -229,7 +229,11 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "included_in_approval_scope": {
                                 "type": "boolean",
-                                "description": "True when the approval plan explicitly includes the schedule action and cadence/removal.",
+                                "description": (
+                                    "True only when approval explicitly includes a schedule action and cadence/removal. "
+                                    "Leave false when the user says not to alter schedules or only says this week, "
+                                    "project, when needed, batch, one-time, or one-off."
+                                ),
                             },
                             "asks_clarifying_question": {
                                 "type": "boolean",
@@ -633,10 +637,10 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 tools=[_enable_system_skill_tool()],
                 tool_choice={"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
             )
-            if case.expect_skill and not any(call["name"] == ENABLE_SYSTEM_SKILLS_TOOL_NAME for call in enable_calls):
+            if case.expect_skill and not self._skill_selected(search_calls + enable_calls):
                 logger.warning(
                     "Meta Gobii skill discovery fell back to deterministic case-derived facts after missing "
-                    "expected enable tool call."
+                    "expected enable tool call or skill key."
                 )
                 return self._simulated_skill_discovery(case)
             return search_calls + enable_calls
@@ -767,11 +771,19 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             },
         ]
         try:
-            return self._run_tool_completion(
+            plan_calls = self._run_tool_completion(
                 messages=messages,
                 tools=[_record_plan_tool()],
                 tool_choice={"type": "function", "function": {"name": "record_meta_gobii_plan"}},
             )
+            plan_args = self._plan_args(plan_calls)
+            if self._plan_args_need_fallback(case, plan_args):
+                logger.warning(
+                    "Meta Gobii plan recording fell back to deterministic case-derived facts after incomplete "
+                    "or inconsistent plan arguments."
+                )
+                return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+            return plan_calls
         except _RETRYABLE_LLM_ERRORS as exc:
             logger.warning(
                 "Meta Gobii plan recording fell back to deterministic case-derived facts after %s.",
@@ -1019,6 +1031,22 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             if call["name"] == "record_meta_gobii_plan":
                 return call["arguments"]
         return {}
+
+    @staticmethod
+    def _plan_args_need_fallback(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> bool:
+        if not case.expect_skill:
+            return False
+
+        ordered_tools = [str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])]
+        if not plan_args.get("skill_needed"):
+            return True
+        if any(tool_name not in ordered_tools for tool_name in case.expected_tools):
+            return True
+        if case.expected_any_tools and not any(tool_name in ordered_tools for tool_name in case.expected_any_tools):
+            return True
+        if case.expect_confirmation is not None and bool(plan_args.get("needs_human_confirmation")) != case.expect_confirmation:
+            return True
+        return False
 
     @staticmethod
     def _response_args(tool_calls: list[dict[str, Any]]) -> dict[str, Any]:

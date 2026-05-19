@@ -6,7 +6,7 @@ from api.agent.core.schedule_parser import ScheduleParser
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.registry import register_scenario
 from api.evals.execution import ScenarioExecutionTools
-from api.models import EvalRunTask, PersistentAgentMessage
+from api.models import EvalRunTask, PersistentAgentMessage, PersistentAgentToolCall
 from api.evals.sim_config import get_sim_weather_url
 from api.agent.events import AgentEventType
 from api.services.schedule_enforcement import cron_interval_seconds
@@ -217,19 +217,37 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
 
         found_pollution_data = False
         task_summary = ""
-        
-        # Check the last few tasks
-        recent_tasks = browser_agent.tasks.order_by('-created_at')[:5]
-        for task in recent_tasks:
-            for step in task.steps.all():
-                # Inspect step description/result for evidence of visiting the site
-                blob = str(step.result_value) + " " + step.description
-                if "55" in blob and "Moderate" in blob:
-                    found_pollution_data = True
-                    task_summary = f"Found pollution data in task {task.id} step {step.step_number}"
-                    break
-            if found_pollution_data:
+
+        # Direct fetch/scrape tools are cheaper than a browser task and still prove
+        # the agent inspected the SimWeather page.
+        recent_tool_calls = PersistentAgentToolCall.objects.filter(
+            step__agent=agent,
+            tool_name__in=[
+                "http_request",
+                "mcp_brightdata_scrape_as_markdown",
+                "spawn_web_task",
+            ],
+        ).select_related("step").order_by("-step__created_at")[:10]
+        for call in recent_tool_calls:
+            blob = f"{call.tool_params} {call.result}"
+            if "55" in blob and "Moderate" in blob:
+                found_pollution_data = True
+                task_summary = f"Found pollution data in {call.tool_name} result on step {call.step_id}"
                 break
+
+        if not found_pollution_data:
+            # Keep the original browser-task assertion path for runs that use
+            # browser automation.
+            recent_tasks = browser_agent.tasks.order_by('-created_at')[:5]
+            for task in recent_tasks:
+                for step in task.steps.all():
+                    blob = str(step.result_value) + " " + step.description
+                    if "55" in blob and "Moderate" in blob:
+                        found_pollution_data = True
+                        task_summary = f"Found pollution data in task {task.id} step {step.step_number}"
+                        break
+                if found_pollution_data:
+                    break
         
         if found_pollution_data:
             self.record_task_result(
@@ -239,7 +257,7 @@ class MonitorPollutionScenario(EvalScenario, ScenarioExecutionTools):
         else:
              self.record_task_result(
                 run_id, 4, EvalRunTask.Status.FAILED,
-                observed_summary="Could not find evidence of 'Moderate (55)' in recent browser task steps."
+                observed_summary="Could not find evidence of 'Moderate (55)' in recent browser task steps or direct web tool results."
             )
 
         # 5. Verify Pollution Report (Message)
