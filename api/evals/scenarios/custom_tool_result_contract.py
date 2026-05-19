@@ -445,6 +445,17 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         return {alias for alias in aliases if alias in available}
 
     @staticmethod
+    def _decoded_tool_result(value: Any) -> Any:
+        if isinstance(value, (dict, list)):
+            return value
+        if isinstance(value, str) and value.strip():
+            try:
+                return json.loads(value)
+            except json.JSONDecodeError:
+                return value
+        return value
+
+    @staticmethod
     def _source_code_origin(create_call: PersistentAgentToolCall, source_code: str | None) -> str:
         params = create_call.tool_params or {}
         if str(params.get("source_code") or "").strip():
@@ -479,7 +490,8 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             if create_time is not None and call_time is not None and call_time > create_time:
                 continue
             call_params = tool_call.tool_params or {}
-            call_result = tool_call.result if isinstance(tool_call.result, dict) else {}
+            decoded_result = cls._decoded_tool_result(tool_call.result)
+            call_result = decoded_result if isinstance(decoded_result, dict) else {}
             file_path = call_params.get("file_path") or call_params.get("path")
             result_ref = call_result.get("file") or call_result.get("attach")
             if file_path != source_path and result_ref != f"$[{source_path}]":
@@ -612,7 +624,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         custom_call: PersistentAgentToolCall,
     ) -> tuple[bool, str]:
         params = custom_call.tool_params or {}
-        result = custom_call.result if isinstance(custom_call.result, dict) else {}
+        decoded_result = CustomToolResultContractScenario._decoded_tool_result(custom_call.result)
+        result = decoded_result if isinstance(decoded_result, dict) else {}
+        if str(getattr(custom_call, "status", "") or "").lower() == "error":
+            return False, f"custom tool invocation errored: {result.get('message') or 'unknown error'}"
         if str(result.get("status") or "").lower() == "error":
             return False, f"custom tool invocation errored: {result.get('message') or 'unknown error'}"
 
@@ -644,7 +659,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             else create_params.get("source_code")
         )
         custom_params = custom_call.tool_params if custom_call is not None else None
-        custom_result = custom_call.result if custom_call is not None else None
+        custom_result = cls._decoded_tool_result(custom_call.result) if custom_call is not None else None
         return json.dumps(
             {
                 "case": {

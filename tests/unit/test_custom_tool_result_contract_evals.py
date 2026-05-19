@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 from django.test import TestCase, tag
@@ -223,6 +224,20 @@ class CustomToolResultContractEvalTests(TestCase):
         self.assertTrue(ok, reason)
         self.assertEqual(source_code, _source_code())
 
+    def test_source_lookup_accepts_json_string_create_file_result(self):
+        case = _case("linkedin_post_urls")
+        create_call = _create_call(case)
+        create_call.tool_params.pop("source_code")
+        create_file_call = _create_file_call(case)
+        create_file_call.result = json.dumps(create_file_call.result)
+
+        source_code = CustomToolResultContractScenario._source_code_for_create_call(
+            [create_file_call, create_call],
+            create_call,
+        )
+
+        self.assertEqual(source_code, _source_code())
+
     def test_source_lookup_applies_file_str_replace_before_registration(self):
         case = _case("linkedin_post_urls")
         create_call = _create_call(case)
@@ -301,12 +316,23 @@ if __name__ == "__main__":
     def test_local_custom_call_check_catches_runtime_error_results(self):
         case = _case("sheets_backlog_sync")
         custom_call = _custom_call(case)
-        custom_call.result = {"status": "error", "message": "TypeError: bad row conversion"}
+        custom_call.result = json.dumps({"status": "error", "message": "TypeError: bad row conversion"})
 
         ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
 
         self.assertFalse(ok)
         self.assertIn("errored", reason)
+
+    def test_local_custom_call_check_catches_persisted_error_status(self):
+        case = _case("sheets_backlog_sync")
+        custom_call = _custom_call(case)
+        custom_call.status = "error"
+        custom_call.result = json.dumps({"message": "sandbox failed"})
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertFalse(ok)
+        self.assertIn("sandbox failed", reason)
 
     def test_agent_judge_context_includes_actual_tool_calls_and_rubric(self):
         case = _case("chunked_mcp_fanout")
@@ -322,3 +348,19 @@ if __name__ == "__main__":
         self.assertIn("helpful_param_concepts", context)
         self.assertIn("must include bounded batch params", context)
         self.assertIn("The agent must use create_custom_tool", context)
+
+    def test_agent_judge_context_decodes_json_string_custom_result(self):
+        case = _case("chunked_mcp_fanout")
+        custom_call = _custom_call(case)
+        custom_call.result = json.dumps(custom_call.result)
+
+        context = json.loads(
+            CustomToolResultContractScenario._agent_judge_context(
+                case,
+                _create_call(case),
+                custom_call,
+            )
+        )
+
+        self.assertIsInstance(context["custom_tool_invocation"]["result"], dict)
+        self.assertEqual(context["custom_tool_invocation"]["result"]["status"], "ok")
