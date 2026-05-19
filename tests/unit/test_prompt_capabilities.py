@@ -8,6 +8,7 @@ from api.agent.core.prompt_context import (
     _get_sandbox_prompt_summary,
     build_prompt_context,
 )
+from api.agent.tools.run_command import get_run_command_tool
 from api.agent.tools.web_chat_sender import get_send_chat_tool
 from api.models import BrowserUseAgent, CommsAllowlistEntry, PersistentAgent
 from api.services.web_sessions import start_web_session
@@ -176,6 +177,16 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Do not narrate what you will do next", description)
         self.assertIn("Never send a message solely to justify continuing work", will_continue_description)
 
+    def test_run_command_tool_description_distinguishes_shell_paths(self):
+        tool = get_run_command_tool()
+        description = tool["function"]["description"]
+
+        self.assertIn("Gobii filespace paths like /tools/foo.py", description)
+        self.assertIn("are for Gobii tool arguments, not shell paths", description)
+        self.assertIn("use relative paths from the workspace root such as tools/foo.py", description)
+        self.assertIn("absolute shell paths like /workspace/tools/foo.py", description)
+        self.assertIn("Do not run /tools/foo.py", description)
+
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_biases_toward_custom_tools_for_bulk_work(self, _mock_sandbox):
         summary = _get_sandbox_prompt_summary(self.agent)
@@ -188,6 +199,19 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("err on the side of creating and using one", summary)
         self.assertIn("especially strong trigger", summary)
         self.assertIn("even if the user did not explicitly ask for a custom tool or mention SQLite", summary)
+
+    @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_sandbox_summary_distinguishes_tool_paths_from_shell_paths(self, _mock_sandbox):
+        summary = _get_sandbox_prompt_summary(self.agent)
+
+        self.assertIn("Path rules: Gobii tool arguments", summary)
+        self.assertIn("`read_file.path`, `create_custom_tool.source_path`, and message attachments", summary)
+        self.assertIn("use filespace paths like `/tools/foo.py`", summary)
+        self.assertIn("`run_command.command` is a shell command", summary)
+        self.assertIn("relative paths from the workspace root such as `tools/foo.py`", summary)
+        self.assertIn("absolute shell paths like `/workspace/tools/foo.py`", summary)
+        self.assertIn("do not run `/tools/foo.py` directly", summary)
+        self.assertIn("use `.` or omit it for the root", summary)
         self.assertIn("Prefer `ALL_PROXY` as the canonical proxy path", summary)
         self.assertIn("direct HTTPS tunneling", summary)
         self.assertIn("ctx.requests_proxies()", summary)
