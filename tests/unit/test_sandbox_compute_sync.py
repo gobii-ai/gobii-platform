@@ -918,6 +918,52 @@ class SandboxComputeSyncTests(TestCase):
         session.refresh_from_db()
         self.assertGreater(session.last_filespace_sync_at, cursor)
 
+    def test_sync_custom_tool_workspace_push_rejects_malformed_sqlite_without_replacing_host_db(self):
+        backend = _DummyBackend()
+        service = SandboxComputeService(backend=backend)
+        session = AgentComputeSession.objects.create(
+            agent=self.agent,
+            state=AgentComputeSession.State.RUNNING,
+            last_filespace_sync_at=timezone.now() - timedelta(minutes=5),
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = f"{tmp_dir}/state.db"
+            self._create_sqlite_db_file(db_path, rows=[("test", "Test")])
+            malformed_bytes = b"this is not a sqlite database"
+
+            def _sync_filespace(agent, session, *, direction, payload=None):
+                if direction == "push":
+                    return {
+                        "status": "ok",
+                        "changes": [
+                            {
+                                "path": CUSTOM_TOOL_SQLITE_FILESPACE_PATH,
+                                "content_b64": base64.b64encode(malformed_bytes).decode("ascii"),
+                                "mime_type": "application/vnd.sqlite3",
+                            }
+                        ],
+                    }
+                return {"status": "ok", "applied": 0, "skipped": 0, "conflicts": 0}
+
+            backend.sync_filespace = _sync_filespace
+
+            result = service._sync_custom_tool_workspace_push(self.agent, session, db_path)
+
+            self.assertEqual(result.get("status"), "error")
+            self.assertIn("malformed database", result.get("message", ""))
+            conn = sqlite3.connect(db_path)
+            try:
+                rows = conn.execute(
+                    "SELECT coin_id, name FROM crypto_prices ORDER BY coin_id"
+                ).fetchall()
+                integrity = conn.execute("PRAGMA integrity_check;").fetchone()[0]
+            finally:
+                conn.close()
+
+        self.assertEqual(rows, [("test", "Test")])
+        self.assertEqual(integrity, "ok")
+
     def test_sync_custom_tool_workspace_push_applies_exports_when_sqlite_is_deleted(self):
         backend = _DummyBackend()
         service = SandboxComputeService(backend=backend)
