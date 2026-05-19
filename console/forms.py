@@ -26,7 +26,11 @@ from api.services.mcp_config_validation import (
     validate_environment_mapping,
     validate_mcp_metadata_environment_references,
 )
-from api.models import CommsChannel
+from api.models import CommsChannel, SmsContactPurpose
+from api.services.sms_contact_purpose import (
+    SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
+    sms_contact_purpose_required,
+)
 from util import sms
 import logging
 
@@ -641,6 +645,32 @@ class AllowlistEntryForm(forms.Form):
         label='Allow Outbound',
         help_text='Allow the agent to send messages to this contact'
     )
+    sms_contact_purpose = forms.ChoiceField(
+        choices=[("", "Select a purpose")] + list(SmsContactPurpose.choices),
+        required=False,
+        label="SMS Purpose",
+        help_text="Required for SMS contacts when the rollout switch is enabled.",
+        widget=forms.Select(attrs={
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        }),
+    )
+    sms_contact_purpose_details = forms.CharField(
+        required=False,
+        label="SMS Purpose Details",
+        widget=forms.Textarea(attrs={
+            'rows': 2,
+            'placeholder': 'Optional operational context for this SMS contact',
+            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
+        }),
+    )
+    sms_contact_permission_attested = forms.BooleanField(
+        required=False,
+        label=SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
+        help_text="Required for SMS contacts when the rollout switch is enabled.",
+        widget=forms.CheckboxInput(attrs={
+            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
+        }),
+    )
 
     def clean(self):
         cleaned = super().clean()
@@ -663,8 +693,30 @@ class AllowlistEntryForm(forms.Form):
                     self.add_error('address', 'Phone numbers from this country are not yet supported.')
                 else:
                     self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
+            cleaned['sms_contact_purpose'] = (cleaned.get('sms_contact_purpose') or '').strip() or None
+            cleaned['sms_contact_purpose_details'] = (
+                cleaned.get('sms_contact_purpose_details') or ''
+            ).strip() or None
+            cleaned['sms_contact_permission_attested'] = bool(
+                cleaned.get('sms_contact_permission_attested')
+            )
+            if sms_contact_purpose_required() and not cleaned['sms_contact_purpose']:
+                self.add_error('sms_contact_purpose', 'Select an operational purpose for this SMS contact.')
+            if sms_contact_purpose_required() and not cleaned['sms_contact_permission_attested']:
+                self.add_error(
+                    'sms_contact_permission_attested',
+                    'Confirm you have permission to contact this number by SMS.',
+                )
         else:
             self.add_error('channel', 'Unsupported channel.')
+            cleaned['sms_contact_purpose'] = None
+            cleaned['sms_contact_purpose_details'] = None
+            cleaned['sms_contact_permission_attested'] = None
+
+        if channel != CommsChannel.SMS:
+            cleaned['sms_contact_purpose'] = None
+            cleaned['sms_contact_purpose_details'] = None
+            cleaned['sms_contact_permission_attested'] = None
 
         return cleaned
 
@@ -1209,6 +1261,17 @@ class ContactRequestApprovalForm(forms.Form):
                     'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
                 })
             )
+
+            if request.channel == CommsChannel.SMS:
+                attestation_field_name = f'sms_permission_attested_{request.id}'
+                self.fields[attestation_field_name] = forms.BooleanField(
+                    required=False,
+                    initial=False,
+                    label=SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
+                    widget=forms.CheckboxInput(attrs={
+                        'class': 'w-4 h-4 text-amber-600 bg-gray-100 border-gray-300 rounded focus:ring-amber-500'
+                    }),
+                )
 
 
 class PhoneAddForm(forms.Form):

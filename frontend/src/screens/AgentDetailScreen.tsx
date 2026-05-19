@@ -314,6 +314,10 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
         address: entry.address,
         allowInbound: entry.allowInbound,
         allowOutbound: entry.allowOutbound,
+        smsContactPurpose: entry.smsContactPurpose,
+        smsContactPurposeDetails: entry.smsContactPurposeDetails,
+        smsContactPermissionAttested: entry.smsContactPermissionAttested,
+        smsContactPermissionAttestedAt: entry.smsContactPermissionAttestedAt,
       })),
       ...state.pendingInvites.map<AllowlistTableRow>((invite) => ({
         id: invite.id,
@@ -322,6 +326,10 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
         address: invite.address,
         allowInbound: invite.allowInbound,
         allowOutbound: invite.allowOutbound,
+        smsContactPurpose: invite.smsContactPurpose,
+        smsContactPurposeDetails: invite.smsContactPurposeDetails,
+        smsContactPermissionAttested: invite.smsContactPermissionAttested,
+        smsContactPermissionAttestedAt: invite.smsContactPermissionAttestedAt,
       })),
     ],
     pendingActions,
@@ -332,6 +340,10 @@ function buildAllowlistRows(state: AllowlistState, pendingActions: PendingAllowl
       address: action.address,
       allowInbound: action.allowInbound,
       allowOutbound: action.allowOutbound,
+      smsContactPurpose: action.smsContactPurpose,
+      smsContactPurposeDetails: action.smsContactPurposeDetails,
+      smsContactPermissionAttested: action.smsContactPermissionAttested,
+      smsContactPermissionAttestedAt: action.smsContactPermissionAttestedAt,
       temp: true,
       pendingType: 'create',
     }),
@@ -981,6 +993,15 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         formData.append('address', action.address)
         formData.append('allow_inbound', String(action.allowInbound))
         formData.append('allow_outbound', String(action.allowOutbound))
+        if (action.smsContactPurpose) {
+          formData.append('sms_contact_purpose', action.smsContactPurpose)
+        }
+        if (action.smsContactPurposeDetails) {
+          formData.append('sms_contact_purpose_details', action.smsContactPurposeDetails)
+        }
+        if (action.smsContactPermissionAttested != null) {
+          formData.append('sms_contact_permission_attested', String(action.smsContactPermissionAttested))
+        }
       } else if (action.type === 'remove') {
         formData.append('entry_id', action.id)
       } else {
@@ -1453,6 +1474,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           address: input.address.trim(),
           allowInbound: input.allowInbound,
           allowOutbound: input.allowOutbound,
+          smsContactPurpose: input.smsContactPurpose ?? null,
+          smsContactPurposeDetails: input.smsContactPurposeDetails ?? null,
+          smsContactPermissionAttested: input.smsContactPermissionAttested ?? null,
+          smsContactPermissionAttestedAt: input.smsContactPermissionAttestedAt ?? null,
         },
       ])
     },

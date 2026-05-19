@@ -908,6 +908,30 @@ class SMSThrottleNoticeTests(TestCase):
             address="+15550002222",
         )
 
+    @patch("api.agent.comms.outbound_delivery.sms.send_sms")
+    def test_deliver_agent_sms_respects_agent_sms_disabled(self, mock_send_sms):
+        self.agent.sms_disabled = True
+        self.agent.save(update_fields=["sms_disabled"])
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="Hello there",
+            raw_payload={},
+        )
+
+        result = deliver_agent_sms(message)
+
+        self.assertFalse(result)
+        mock_send_sms.assert_not_called()
+        message.refresh_from_db()
+        self.assertEqual(message.latest_status, DeliveryStatus.FAILED)
+        self.assertIn("SMS sending is disabled", message.latest_error_message)
+        attempt = OutboundMessageAttempt.objects.get(message=message)
+        self.assertEqual(attempt.status, DeliveryStatus.FAILED)
+        self.assertIn("SMS sending is disabled", attempt.error_message)
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     @patch("api.agent.comms.outbound_delivery.switch_is_active", return_value=True)
     @patch("config.redis_client.get_redis_client")

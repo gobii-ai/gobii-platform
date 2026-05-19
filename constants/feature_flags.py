@@ -136,6 +136,10 @@ STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL = (
 # switch not flag
 MULTISEND_ENABLED = "multisend_enabled"
 
+# Requires additional SMS contacts to declare compliance metadata before
+# they can be added to an agent allowlist or requested by an agent.
+SMS_CONTACT_PURPOSE_REQUIRED = "sms_contact_purpose_required"
+
 # Retry one completion when web chat session becomes active mid-iteration.
 AGENT_RETRY_COMPLETION_ON_WEB_SESSION_ACTIVATION = (
     "agent_retry_completion_on_web_session_activation"

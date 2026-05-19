@@ -415,6 +415,133 @@ class DeliveryStatus(models.TextChoices):
 class SmsProvider(models.TextChoices):
     TWILIO = "twilio", "Twilio"
 
+
+class SmsContactPurpose(models.TextChoices):
+    TEAM_OPERATIONAL = "team_operational", "Team operational"
+    OWNER_DELEGATE = "owner_delegate", "Owner delegate"
+    CUSTOMER_CARE = "customer_care", "Customer care"
+    OTHER_OPERATIONAL = "other_operational", "Other operational"
+
+
+_SMS_CONTACT_LOADED_VALUES_ATTR = "_sms_contact_loaded_values"
+
+
+def _safe_getattr(instance, attr: str, default=None):
+    if instance is None:
+        return default
+    return getattr(instance, attr, default)
+
+
+def _record_sms_contact_loaded_values(instance, field_names, values, tracked_fields: set[str]) -> None:
+    loaded_values = {
+        field_name: values[field_names.index(field_name)]
+        for field_name in tracked_fields
+        if field_name in field_names
+    }
+    if loaded_values:
+        setattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, loaded_values)
+
+
+def _get_sms_contact_loaded_value(instance, field_name: str):
+    loaded_values = getattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, None)
+    if isinstance(loaded_values, dict) and field_name in loaded_values:
+        return loaded_values[field_name], True
+    return None, False
+
+
+def _update_sms_contact_loaded_value(instance, field_name: str) -> None:
+    loaded_values = getattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, None)
+    if not isinstance(loaded_values, dict):
+        loaded_values = {}
+        setattr(instance, _SMS_CONTACT_LOADED_VALUES_ATTR, loaded_values)
+    loaded_values[field_name] = getattr(instance, field_name)
+
+
+def _normalize_sms_contact_metadata_fields(instance) -> None:
+    purpose = getattr(instance, "sms_contact_purpose", None)
+    details = getattr(instance, "sms_contact_purpose_details", None)
+    instance.sms_contact_purpose = (purpose or "").strip() or None
+    instance.sms_contact_purpose_details = (details or "").strip() or None
+    attested = getattr(instance, "sms_contact_permission_attested", None)
+    if isinstance(attested, str):
+        attested = attested.strip().lower() in {"1", "true", "t", "yes", "y", "on"}
+    elif attested is not None:
+        attested = bool(attested)
+    instance.sms_contact_permission_attested = attested
+    if attested is True and not getattr(instance, "sms_contact_permission_attested_at", None):
+        instance.sms_contact_permission_attested_at = timezone.now()
+    elif attested is not True:
+        instance.sms_contact_permission_attested_at = None
+
+
+def _is_new_or_entering_state(instance, active_field: str, active_values: set) -> bool:
+    current_is_active = getattr(instance, active_field) in active_values
+    if not current_is_active:
+        return False
+    if instance._state.adding or not instance.pk:
+        return True
+
+    previous, has_loaded_value = _get_sms_contact_loaded_value(instance, active_field)
+    if not has_loaded_value:
+        previous = (
+            type(instance)
+            .objects
+            .filter(pk=instance.pk)
+            .values_list(active_field, flat=True)
+            .first()
+        )
+    return previous not in active_values
+
+
+def _validate_sms_contact_metadata(
+    instance,
+    active_field: str,
+    active_values: set,
+    *,
+    require_attestation: bool = True,
+) -> None:
+    _normalize_sms_contact_metadata_fields(instance)
+    if getattr(instance, "channel", None) != CommsChannel.SMS:
+        instance.sms_contact_purpose = None
+        instance.sms_contact_purpose_details = None
+        instance.sms_contact_permission_attested = None
+        instance.sms_contact_permission_attested_at = None
+        return
+
+    from api.services.sms_contact_purpose import sms_contact_purpose_required
+
+    errors = {}
+    if sms_contact_purpose_required() and _is_new_or_entering_state(instance, active_field, active_values):
+        if not getattr(instance, "sms_contact_purpose", None):
+            errors["sms_contact_purpose"] = "SMS contacts require an operational purpose."
+        if require_attestation and getattr(instance, "sms_contact_permission_attested", None) is not True:
+            errors["sms_contact_permission_attested"] = (
+                "Confirm you have permission to contact this number by SMS."
+            )
+
+    if errors:
+        raise ValidationError(errors)
+
+
+def _include_sms_contact_attestation_update_fields(instance, kwargs) -> None:
+    update_fields = kwargs.get("update_fields")
+    if update_fields is None:
+        return
+    update_fields = set(update_fields)
+    if not update_fields:
+        return
+    field_names = {
+        "sms_contact_permission_attested",
+        "sms_contact_permission_attested_at",
+    }
+    if (
+        _safe_getattr(instance, "sms_contact_permission_attested", None) is not None
+        or _safe_getattr(instance, "sms_contact_permission_attested_at", None) is not None
+        or field_names.intersection(update_fields)
+    ):
+        kwargs["update_fields"] = update_fields | field_names
+
+
 class ApiKey(models.Model):
     MAX_API_KEYS_PER_USER = 50
     MAX_API_KEYS_PER_ORG = 50
@@ -6438,6 +6565,10 @@ class PersistentAgent(models.Model):
         return getattr(proxy, "id", None)
 
     is_active = models.BooleanField(default=True, help_text="Whether this agent is currently active")
+    sms_disabled = models.BooleanField(
+        default=False,
+        help_text="Disable outbound SMS for this agent without detaching its SMS number or message history.",
+    )
     daily_credit_limit = models.PositiveIntegerField(
         null=True,
         blank=True,
@@ -9748,6 +9879,28 @@ class CommsAllowlistEntry(models.Model):
         default=False,
         help_text="Whether this contact can instruct the agent to update its charter or schedule"
     )
+    sms_contact_purpose = models.CharField(
+        max_length=32,
+        choices=SmsContactPurpose.choices,
+        null=True,
+        blank=True,
+        help_text="Operational purpose for SMS contacts. Null for legacy rows and non-SMS contacts.",
+    )
+    sms_contact_purpose_details = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Optional additional context for the SMS contact purpose.",
+    )
+    sms_contact_permission_attested = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the approver confirmed permission to contact this number by SMS.",
+    )
+    sms_contact_permission_attested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When SMS contact permission was attested.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -9763,6 +9916,12 @@ class CommsAllowlistEntry(models.Model):
         ]
         ordering = ["channel", "address"]
 
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"is_active"})
+        return instance
+
     def clean(self):
         super().clean()
 
@@ -9771,6 +9930,7 @@ class CommsAllowlistEntry(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
+        _validate_sms_contact_metadata(self, "is_active", {True})
         
         # Restrict organization-owned agents to email-only allowlists for now
         if self.channel == CommsChannel.SMS and self.agent.organization_id is not None:
@@ -9829,7 +9989,10 @@ class CommsAllowlistEntry(models.Model):
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
-        return super().save(*args, **kwargs)
+        _include_sms_contact_attestation_update_fields(self, kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "is_active")
+        return result
 
     def __str__(self):
         return f"Allow<{self.channel}:{self.address}> for {self.agent_id}"
@@ -9870,6 +10033,28 @@ class AgentAllowlistInvite(models.Model):
         default=False,
         help_text="Whether this contact can instruct the agent to update its charter or schedule"
     )
+    sms_contact_purpose = models.CharField(
+        max_length=32,
+        choices=SmsContactPurpose.choices,
+        null=True,
+        blank=True,
+        help_text="Operational purpose for SMS contacts. Null for legacy rows and non-SMS contacts.",
+    )
+    sms_contact_purpose_details = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Optional additional context for the SMS contact purpose.",
+    )
+    sms_contact_permission_attested = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the inviter confirmed permission to contact this number by SMS.",
+    )
+    sms_contact_permission_attested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When SMS contact permission was attested.",
+    )
 
     class Meta:
         constraints = [
@@ -9884,6 +10069,12 @@ class AgentAllowlistInvite(models.Model):
             models.Index(fields=["agent", "status"], name="allow_invite_agent_status_idx"),
         ]
         ordering = ["-created_at"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"status"})
+        return instance
     
     def clean(self):
         super().clean()
@@ -9892,6 +10083,7 @@ class AgentAllowlistInvite(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
+        _validate_sms_contact_metadata(self, "status", {self.InviteStatus.PENDING})
         
         # Check contact limit when creating new invitation
         if self._state.adding and self.status == self.InviteStatus.PENDING:
@@ -9928,7 +10120,10 @@ class AgentAllowlistInvite(models.Model):
 
     def save(self, *args, **kwargs):
         self.full_clean(validate_unique=False, validate_constraints=False)
-        return super().save(*args, **kwargs)
+        _include_sms_contact_attestation_update_fields(self, kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "status")
+        return result
     
     def is_expired(self):
         """Check if this invitation has expired."""
@@ -9953,6 +10148,10 @@ class AgentAllowlistInvite(models.Model):
                 "allow_inbound": self.allow_inbound,
                 "allow_outbound": self.allow_outbound,
                 "can_configure": self.can_configure,
+                "sms_contact_purpose": self.sms_contact_purpose,
+                "sms_contact_purpose_details": self.sms_contact_purpose_details,
+                "sms_contact_permission_attested": self.sms_contact_permission_attested,
+                "sms_contact_permission_attested_at": self.sms_contact_permission_attested_at,
             }
         )
         
@@ -10315,6 +10514,28 @@ class CommsAllowlistRequest(models.Model):
         default=False,
         help_text="Whether to grant this contact authority to update agent charter/schedule"
     )
+    sms_contact_purpose = models.CharField(
+        max_length=32,
+        choices=SmsContactPurpose.choices,
+        null=True,
+        blank=True,
+        help_text="Operational purpose for SMS contacts. Null for legacy rows and non-SMS contacts.",
+    )
+    sms_contact_purpose_details = models.TextField(
+        null=True,
+        blank=True,
+        help_text="Optional additional context for the SMS contact purpose.",
+    )
+    sms_contact_permission_attested = models.BooleanField(
+        null=True,
+        blank=True,
+        help_text="Whether the approver confirmed permission to contact this number by SMS.",
+    )
+    sms_contact_permission_attested_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="When SMS contact permission was attested.",
+    )
 
     # Status tracking
     status = models.CharField(
@@ -10355,6 +10576,12 @@ class CommsAllowlistRequest(models.Model):
             models.Index(fields=["requested_at"], name="contact_req_requested_idx"),
         ]
         ordering = ["-requested_at"]
+
+    @classmethod
+    def from_db(cls, db, field_names, values):
+        instance = super().from_db(db, field_names, values)
+        _record_sms_contact_loaded_values(instance, field_names, values, {"status"})
+        return instance
     
     def clean(self):
         super().clean()
@@ -10363,6 +10590,12 @@ class CommsAllowlistRequest(models.Model):
             self.address = (self.address or "").strip().lower()
         else:
             self.address = (self.address or "").strip()
+        _validate_sms_contact_metadata(
+            self,
+            "status",
+            {self.RequestStatus.PENDING},
+            require_attestation=False,
+        )
     
     def is_expired(self):
         """Check if this request has expired."""
@@ -10373,6 +10606,13 @@ class CommsAllowlistRequest(models.Model):
     def can_be_approved(self):
         """Check if this request can still be approved."""
         return self.status == self.RequestStatus.PENDING and not self.is_expired()
+
+    def save(self, *args, **kwargs):
+        self.full_clean(validate_unique=False, validate_constraints=False)
+        _include_sms_contact_attestation_update_fields(self, kwargs)
+        result = super().save(*args, **kwargs)
+        _update_sms_contact_loaded_value(self, "status")
+        return result
     
     def approve(self, invited_by, skip_limit_check=False, skip_invitation=True):
         """Approve this request by creating an invitation or direct allowlist entry.
@@ -10397,6 +10637,20 @@ class CommsAllowlistRequest(models.Model):
         ).first()
         
         if existing_entry:
+            if self.channel == CommsChannel.SMS and (
+                self.sms_contact_purpose or self.sms_contact_permission_attested is True
+            ):
+                existing_entry.sms_contact_purpose = self.sms_contact_purpose
+                existing_entry.sms_contact_purpose_details = self.sms_contact_purpose_details
+                existing_entry.sms_contact_permission_attested = self.sms_contact_permission_attested
+                existing_entry.sms_contact_permission_attested_at = self.sms_contact_permission_attested_at
+                existing_entry.save(update_fields=[
+                    "sms_contact_purpose",
+                    "sms_contact_purpose_details",
+                    "sms_contact_permission_attested",
+                    "sms_contact_permission_attested_at",
+                    "updated_at",
+                ])
             # Already in allowlist, just mark as approved
             # But still switch to manual mode if needed
             if self.agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
@@ -10419,6 +10673,10 @@ class CommsAllowlistRequest(models.Model):
                 allow_inbound=self.request_inbound,
                 allow_outbound=self.request_outbound,
                 can_configure=self.request_configure,
+                sms_contact_purpose=self.sms_contact_purpose,
+                sms_contact_purpose_details=self.sms_contact_purpose_details,
+                sms_contact_permission_attested=self.sms_contact_permission_attested,
+                sms_contact_permission_attested_at=self.sms_contact_permission_attested_at,
             )
             
             # Switch agent to manual allowlist mode if not already
@@ -10465,6 +10723,10 @@ class CommsAllowlistRequest(models.Model):
             allow_inbound=self.request_inbound,
             allow_outbound=self.request_outbound,
             can_configure=self.request_configure,
+            sms_contact_purpose=self.sms_contact_purpose,
+            sms_contact_purpose_details=self.sms_contact_purpose_details,
+            sms_contact_permission_attested=self.sms_contact_permission_attested,
+            sms_contact_permission_attested_at=self.sms_contact_permission_attested_at,
             expires_at=timezone.now() + timedelta(days=7)
         )
         
