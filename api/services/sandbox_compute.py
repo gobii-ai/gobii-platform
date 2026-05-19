@@ -898,6 +898,32 @@ def _snapshot_sqlite_file_content(db_path: str) -> bytes:
             return handle.read()
 
 
+def _check_sqlite_integrity(db_path: str) -> tuple[bool, str]:
+    conn = sqlite3.connect(db_path, timeout=5)
+    try:
+        try:
+            conn.execute("PRAGMA busy_timeout=5000;")
+        except sqlite3.Error:
+            pass
+        row = conn.execute("PRAGMA integrity_check;").fetchone()
+    finally:
+        conn.close()
+
+    message = str(row[0]) if row and row[0] is not None else "empty integrity_check result"
+    return message.lower() == "ok", message
+
+
+def _validate_sqlite_file_content(content: bytes) -> tuple[bool, str]:
+    with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
+        candidate_path = os.path.join(tmp_dir, "candidate.db")
+        with open(candidate_path, "wb") as handle:
+            handle.write(content)
+        try:
+            return _check_sqlite_integrity(candidate_path)
+        except sqlite3.Error as exc:
+            return False, str(exc)
+
+
 def _restore_sqlite_file_content(db_path: str, content: bytes) -> None:
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="gobii-sqlite-sync-") as tmp_dir:
@@ -1701,7 +1727,19 @@ class SandboxComputeService:
             return {"status": "error", "message": "Sandbox SQLite sync returned invalid file content."}
 
         try:
+            valid, integrity_message = _validate_sqlite_file_content(content)
+            if not valid:
+                return {
+                    "status": "error",
+                    "message": f"Sandbox SQLite sync returned malformed database: {integrity_message}",
+                }
             _restore_sqlite_file_content(local_sqlite_db_path, content)
+            valid, integrity_message = _check_sqlite_integrity(local_sqlite_db_path)
+            if not valid:
+                return {
+                    "status": "error",
+                    "message": f"Restored synced SQLite DB failed integrity check: {integrity_message}",
+                }
         except (OSError, sqlite3.Error) as exc:
             return {"status": "error", "message": f"Failed to write synced SQLite DB: {exc}"}
 
