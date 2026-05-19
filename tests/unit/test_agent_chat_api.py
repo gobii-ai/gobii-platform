@@ -2770,6 +2770,54 @@ class AgentChatAPITests(TestCase):
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=tenth_body).exists())
 
     @tag("batch_agent_chat")
+    def test_send_chat_tool_skips_optional_followup_only_when_progress_only(self):
+        start_web_session(self.agent, self.user)
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Let me extract the data and compile the results. Any changes?",
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(
+            PersistentAgentMessage.objects.filter(
+                owner_agent=self.agent,
+                body="Let me extract the data and compile the results. Any changes?",
+            ).exists()
+        )
+
+    @tag("batch_agent_chat")
+    def test_send_chat_tool_does_not_skip_substantive_response_with_approval_ask(self):
+        start_web_session(self.agent, self.user)
+        body = (
+            "## Outreach Status: Ready to Launch\n\n"
+            "Hey Daymon! To answer your question: No, we haven't sent the emails yet.\n\n"
+            "I have 39 high-priority leads fully verified with contact info and ready for outreach.\n\n"
+            "### Proposed Outreach Template\n"
+            "Would you be open to a quick 5-minute chat next week to see how we can help?\n\n"
+            "Let me know if you'd like any changes to the template."
+        )
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": body,
+                "to_address": self.user_address,
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertNotIn("skipped", result)
+        self.assertFalse(result.get("auto_sleep_ok"))
+        self.assertTrue(PersistentAgentMessage.objects.filter(owner_agent=self.agent, body=body).exists())
+
+    @tag("batch_agent_chat")
     def test_send_chat_tool_rejects_unlisted_address(self):
         start_web_session(self.agent, self.user)
         stranger_address = build_web_user_address(self.user.id + 999, self.agent.id)
