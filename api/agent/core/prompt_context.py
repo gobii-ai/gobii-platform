@@ -4758,8 +4758,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             description_text = s.description or "No description"
             is_internal_reasoning = internal_reasoning.is_internal_reasoning_description(description_text)
             if is_internal_reasoning:
+                is_reasoning_only = internal_reasoning.is_reasoning_only_description(description_text)
                 raw_reasoning = internal_reasoning.strip_internal_reasoning_prefix(description_text)
                 shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
+                if is_reasoning_only:
+                    shrunk_reasoning = (
+                        "[reasoning-only, no user-visible action or tool call] "
+                        f"{shrunk_reasoning}"
+                    ).strip()
                 description_text = internal_reasoning.build_internal_reasoning_description(shrunk_reasoning)
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"
