@@ -1,9 +1,11 @@
+import json
 import os
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.test import TestCase, override_settings, tag
 from litellm.exceptions import APIError
@@ -28,12 +30,20 @@ from api.evals.meta_gobii import (
     score_meta_gobii_case,
 )
 from api.evals.registry import ScenarioRegistry
-from api.evals.scenarios.meta_gobii import MetaGobiiSystemSkillScenario, _is_retryable_llm_error, _record_plan_tool
+from api.evals.scenarios.meta_gobii import (
+    MetaGobiiSystemSkillScenario,
+    _enable_system_skill_tool,
+    _is_retryable_llm_error,
+    _record_plan_tool,
+)
 from api.evals.suites import SuiteRegistry
 from api.models import (
+    BrowserUseAgent,
+    EvalRun,
     EvalRunTask,
     EvalSuiteRun,
     LLMProvider,
+    PersistentAgent,
     PersistentModelEndpoint,
     ProfilePersistentTierEndpoint,
 )
@@ -77,6 +87,25 @@ def _clarifying_schedule_policy():
         "asks_clarifying_question": True,
         "rationale": "The user implied ongoing work but did not provide a cadence.",
     }
+
+
+def _tool_call_response(tool_name, arguments):
+    return SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    tool_calls=[
+                        SimpleNamespace(
+                            function=SimpleNamespace(
+                                name=tool_name,
+                                arguments=json.dumps(arguments),
+                            )
+                        )
+                    ]
+                )
+            )
+        ]
+    )
 
 
 @tag("batch_eval_fingerprint")
@@ -173,6 +202,101 @@ class MetaGobiiEvalRegistrationTests(TestCase):
             calls[1]["tool_choice"],
             {"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
         )
+
+    def test_required_tool_choice_retries_when_required_args_are_missing(self):
+        scenario = MetaGobiiSystemSkillScenario()
+        bad_response = _tool_call_response(ENABLE_SYSTEM_SKILLS_TOOL_NAME, {})
+        good_response = _tool_call_response(
+            ENABLE_SYSTEM_SKILLS_TOOL_NAME,
+            {"skill_keys": ["meta_gobii"]},
+        )
+
+        with (
+            patch(
+                "api.evals.scenarios.meta_gobii.get_llm_config_with_failover",
+                return_value=[("openrouter", "test-model", {})],
+            ),
+            patch(
+                "api.evals.scenarios.meta_gobii.run_completion",
+                side_effect=[bad_response, good_response],
+            ) as mock_run_completion,
+            patch("api.evals.scenarios.meta_gobii.time.sleep"),
+        ):
+            calls = scenario._run_tool_completion(
+                messages=[],
+                tools=[_enable_system_skill_tool()],
+                tool_choice={"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
+                retry_delays=(0,),
+            )
+
+        self.assertEqual(
+            calls,
+            [{"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME, "arguments": {"skill_keys": ["meta_gobii"]}}],
+        )
+        self.assertEqual(mock_run_completion.call_count, 2)
+
+    def test_meta_gobii_run_persists_discovery_and_plan_debug_artifacts(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="meta-artifact-user",
+            email="meta-artifact-user@example.test",
+            password="secret",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Meta Artifact Browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            name="Meta Artifact Agent",
+            charter="Test Meta Gobii artifacts.",
+            browser_use_agent=browser_agent,
+        )
+        suite_run = EvalSuiteRun.objects.create(suite_slug=META_GOBII_EVAL_SUITE_SLUG, initiated_by=user)
+        scenario = ScenarioRegistry.get("meta_gobii_no_schedule_candidate_screening_once")
+        run = EvalRun.objects.create(
+            suite_run=suite_run,
+            scenario_slug=scenario.slug,
+            scenario_version="1",
+            agent=agent,
+            initiated_by=user,
+        )
+        for index, task in enumerate(scenario.tasks, start=1):
+            EvalRunTask.objects.create(
+                run=run,
+                sequence=index,
+                name=task.name,
+                assertion_type=task.assertion_type,
+            )
+
+        discovery_calls = [
+            {"name": SKILL_SEARCH_TOOL_NAME, "arguments": {"query": "candidate-screening Gobii"}},
+            {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME, "arguments": {"skill_keys": ["meta_gobii"]}},
+        ]
+        plan_calls = [
+            {"name": "record_meta_gobii_plan", "arguments": scenario._simulated_plan_args(scenario.case)}
+        ]
+        response_calls = [
+            {"name": "record_meta_gobii_response", "arguments": scenario._simulated_response_args(scenario.case)}
+        ]
+
+        with (
+            patch.object(scenario, "_run_skill_discovery", return_value=discovery_calls),
+            patch.object(scenario, "_run_plan_intent", return_value=plan_calls),
+            patch.object(scenario, "_run_response_intent", return_value=response_calls),
+        ):
+            scenario.run(str(run.id), str(agent.id))
+
+        discover_task = EvalRunTask.objects.get(run=run, name="discover_system_skill")
+        select_task = EvalRunTask.objects.get(run=run, name="select_system_skill")
+        plan_task = EvalRunTask.objects.get(run=run, name="plan_meta_gobii_tools")
+
+        self.assertEqual(discover_task.debug_artifacts["discovery_calls"], discovery_calls)
+        self.assertEqual(select_task.debug_artifacts["discovery_calls"], discovery_calls)
+        self.assertEqual(plan_task.debug_artifacts["plan_calls"][0]["name"], "record_meta_gobii_plan")
+        self.assertEqual(
+            plan_task.debug_artifacts["plan_calls"][0]["arguments"]["ordered_tools"],
+            list(_case("no_schedule_candidate_screening_once").expected_tools),
+        )
+        self.assertEqual(plan_task.debug_artifacts["response_calls"][0]["name"], "record_meta_gobii_response")
+        self.assertIn("response_args", plan_task.debug_artifacts)
 
     def test_skill_discovery_prompt_covers_file_upload_requests(self):
         scenario = MetaGobiiSystemSkillScenario()

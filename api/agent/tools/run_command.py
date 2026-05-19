@@ -14,8 +14,10 @@ def get_run_command_tool() -> Dict[str, Any]:
                 "Use for one-shot commands that should complete and return stdout/stderr. "
                 "Sandbox proxy env vars and sandbox env_var secrets are already present in the command environment. "
                 "For ad hoc Python with third-party deps, prefer `uv run --no-project ...`. "
-                "The workspace root is /workspace; filespace paths like /reports/foo.txt map to "
-                "/workspace/reports/foo.txt. Avoid using /workspace in paths."
+                "The command runs in a shell where the workspace root is /workspace. "
+                "Gobii filespace paths like /tools/foo.py or /reports/foo.txt are for Gobii tool arguments, not shell paths. "
+                "Inside command strings, use relative paths from the workspace root such as tools/foo.py or reports/foo.txt, "
+                "or absolute shell paths like /workspace/tools/foo.py. Do not run /tools/foo.py or /reports/foo.txt directly."
             ),
             "parameters": {
                 "type": "object",

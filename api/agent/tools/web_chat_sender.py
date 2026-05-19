@@ -130,11 +130,12 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     lower = text.lower()
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
+    progress_signal = bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
     if "?" in text and _OPTIONAL_PROGRESS_QUESTION_RE.search(text):
-        return True
+        return progress_signal
     if any(marker in lower for marker in ("as requested", "you asked", "blocking", "blocked", "?")):
         return False
-    return bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
+    return progress_signal
 
 
 def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:

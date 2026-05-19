@@ -695,8 +695,8 @@ When you don't have data: say so. Don't fill the gap with plausible-sounding fab
 
 ## Data Flow Patterns
 
-- Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor), use it; search_tools is for missing or unclear tools.
-- Known platforms such as LinkedIn/Crunchbase: prefer structured extractors; scrape only if the extractor is missing, empty, or unsuitable.
+- Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor/social), use it; search_tools is for missing or unclear tools.
+- Known platforms/social sites: prefer structured extractors; scrape/browser only if missing, empty, or unsuitable.
 - Data files, feeds, APIs, CSV/JSON/XML/TXT/PDF: use http_request/read_file. If the user says scrape a known page (docs/help/pricing/blog/changelog), use scrape_as_markdown unless it clearly returns data.
 - Recurring monitor/digest/alert setup: update schedule/charter first; if time is omitted, use a reasonable local default such as weekday/daily 9am instead of asking. Don't fetch or validate target URLs unless asked.
 - Small result already contains the answer: report it. Do not re-query or send progress saying you will verify.
@@ -2658,8 +2658,10 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         "Default mode for repetitive, paginated, or bulk work: write or patch a small custom tool first. "
         "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
         "Deterministic, repeatable, data-oriented work is an especially strong trigger for a small custom tool writing to shared SQLite, even if the user did not explicitly ask for a custom tool or mention SQLite. "
-        "Filespace paths like `/reports/foo.txt` map to `/workspace/reports/foo.txt`; in tool arguments, prefer filespace paths and avoid writing `/workspace` explicitly. "
-        "For `run_command`, `cwd` is relative to the workspace root; do not pass `/workspace` as the cwd. "
+        "Path rules: Gobii tool arguments such as `read_file.path`, `create_custom_tool.source_path`, and message attachments use filespace paths like `/tools/foo.py` or `/reports/foo.txt`. "
+        "`run_command.command` is a shell command: use relative paths from the workspace root such as `tools/foo.py` or `reports/foo.txt`, "
+        "or absolute shell paths like `/workspace/tools/foo.py`; do not run `/tools/foo.py` directly. "
+        "For `run_command`, `cwd` is relative to the workspace root; use `.` or omit it for the root, and do not pass `/workspace` as the cwd. "
         "Common CLI tools available by default include `git`, `curl`, `rg`, `jq`, `less`, `unzip`, `zip`, `file`, `tree`, and `fd`/`fdfind`. "
         "For ad hoc Python with third-party deps, prefer `uv run --no-project ...`; `python_exec` itself does not install packages. "
         "Custom tools can import any pip package — declare deps with PEP 723 inline metadata and they are auto-installed via uv. "
@@ -4046,7 +4048,7 @@ def _get_system_instruction(
         "api | feed | data → http_request  # check for public APIs first\n"
         "weather geocoding → forecast/current API → reply  # don't answer weather from geocoding alone\n"
         "successful http_request + answer data → reply from that payload  # no browser/custom-tool verification loop\n"
-        "extractor > scrape                # for known platforms\n"
+        "extractor > browser/scrape        # known platforms/social sites\n"
         "scrape = last_resort              # for HTML when no better option\n"
         "\n"
         "# Selection / discovery\n"
@@ -4756,8 +4758,14 @@ def _get_unified_history_prompt(agent: PersistentAgent, history_group) -> None:
             description_text = s.description or "No description"
             is_internal_reasoning = internal_reasoning.is_internal_reasoning_description(description_text)
             if is_internal_reasoning:
+                is_reasoning_only = internal_reasoning.is_reasoning_only_description(description_text)
                 raw_reasoning = internal_reasoning.strip_internal_reasoning_prefix(description_text)
                 shrunk_reasoning = _shrink_internal_reasoning(raw_reasoning)
+                if is_reasoning_only:
+                    shrunk_reasoning = (
+                        "[reasoning-only, no user-visible action or tool call] "
+                        f"{shrunk_reasoning}"
+                    ).strip()
                 description_text = internal_reasoning.build_internal_reasoning_description(shrunk_reasoning)
             components = {
                 "description": f"[{s.created_at.isoformat()}] {description_text}"
