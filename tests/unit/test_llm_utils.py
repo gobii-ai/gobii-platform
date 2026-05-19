@@ -20,6 +20,7 @@ class RunCompletionReasoningTests(TestCase):
 
         _, kwargs = mock_completion.call_args
         self.assertNotIn("reasoning_effort", kwargs)
+        self.assertNotIn("allowed_openai_params", kwargs)
         self.assertNotIn("supports_reasoning", kwargs)
 
     @tag("batch_event_llm")
@@ -33,7 +34,22 @@ class RunCompletionReasoningTests(TestCase):
 
         _, kwargs = mock_completion.call_args
         self.assertEqual(kwargs.get("reasoning_effort"), "low")
+        self.assertEqual(kwargs.get("allowed_openai_params"), ["reasoning_effort"])
         self.assertNotIn("supports_reasoning", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_reasoning_effort_allowed_param_preserves_existing_values(self, mock_completion):
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={"supports_reasoning": True, "reasoning_effort": "low"},
+            allowed_openai_params=["extra_body"],
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertEqual(kwargs.get("reasoning_effort"), "low")
+        self.assertEqual(kwargs.get("allowed_openai_params"), ["extra_body", "reasoning_effort"])
 
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
