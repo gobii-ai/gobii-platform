@@ -33,9 +33,21 @@ def ensure_eval_local_compat_columns(stdout=None) -> int:
     tables, but it does not alter existing SQLite tables when model fields are added.
     Keep this list explicit so local schema repair stays non-destructive.
     """
-    from api.models import EvalRunTask
+    from api.models import CommsAllowlistEntry, EvalRunTask, PersistentAgent
 
-    compat_fields = ((EvalRunTask, ("debug_artifacts",)),)
+    compat_fields = (
+        (EvalRunTask, ("debug_artifacts",)),
+        (PersistentAgent, ("sms_disabled",)),
+        (
+            CommsAllowlistEntry,
+            (
+                "sms_contact_purpose",
+                "sms_contact_purpose_details",
+                "sms_contact_permission_attested",
+                "sms_contact_permission_attested_at",
+            ),
+        ),
+    )
     existing_tables = set(connection.introspection.table_names())
     missing_by_model = []
     added = 0

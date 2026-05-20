@@ -66,6 +66,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("category example choices", description)
         self.assertIn("which vendor/company", description)
         self.assertIn("choose and disclose afterward", description)
+        self.assertIn("explicitly asks you to ask for targets/scope before setup", description)
+        self.assertIn("missing targets/scope block a recurring monitor", description)
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -352,6 +354,9 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("After simple facts, prices, statuses, exact lookups", system_prompt)
         self.assertIn("a fintech company", system_prompt)
         self.assertIn("Do not turn these into company-choice surveys", system_prompt)
+        self.assertIn("call the structured local-reviews/maps tool directly", system_prompt)
+        self.assertIn("pollution/air-quality monitors", system_prompt)
+        self.assertIn("at least six-hour checks", system_prompt)
         self.assertIn("Do not use sqlite_batch to reread __tool_results", system_prompt)
         self.assertNotIn("Before ANY tool calls", system_prompt)
         self.assertNotIn("Greeting comes first, always", system_prompt)

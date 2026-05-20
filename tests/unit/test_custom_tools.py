@@ -174,14 +174,24 @@ class CustomToolsTests(TestCase):
         for text in (
             "source_path='/tools/my_tool.py'",
             "source_code",
+            "do not pass only `source_path` unless you already wrote that file",
             "Exact final line: `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "mime_type='text/x-python'",
             "side_effects_completed",
             "db.row_factory = sqlite3.Row",
+            "after the block exits the DB is closed",
             "target resource ids/names",
             "source filters or date ranges",
             "per-destination",
+            "pass concrete values on the first invocation",
+            "dedupe/format tools expose input_table, output_table, and run_date",
+            "URL/list validators expose input_table/output_table or urls plus minimum/limit params",
+            "before any `db.execute(...).fetchall()`/SELECT",
+            "setting it after fetching does not convert existing tuple rows",
+            "not `row.get(...)`",
+            "literal key next_action",
+            "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
             "read-only verification",
         ):
@@ -190,10 +200,19 @@ class CustomToolsTests(TestCase):
         for text in (
             "side_effects_completed",
             "exact final line `if __name__ == '__main__': main(run)`",
+            "do not pass only source_path unless you already wrote that file",
             "db.row_factory = sqlite3.Row",
+            "setting it after fetching does not convert existing tuple rows",
+            "not `row.get(...)`",
+            "after the block exits the DB is closed",
             "target resource ids/names",
             "source filters/date ranges",
             "per-destination rows/items written",
+            "Never invoke custom_* with empty params",
+            "dedupe/format jobs expose input_table, output_table, and run_date",
+            "URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit params",
+            "literal key next_action",
+            "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
             "read-only tools",
         ):
@@ -795,6 +814,7 @@ class CustomToolsTests(TestCase):
         self.assertIn("not bare `requests`/`httpx`", description)
         self.assertIn("direct HTTPS tunneling", description)
         self.assertIn("source_path='/tools/my_tool.py'", description)
+        self.assertIn("do not pass only `source_path` unless you already wrote that file", description)
         self.assertIn("file_path='/tools/my_tool.py'", description)
         self.assertIn("content=<python source>", description)
         self.assertIn("`/exports/report.txt` are filespace paths", description)
@@ -813,6 +833,7 @@ class CustomToolsTests(TestCase):
         self.assertIn("manual single-action tool loops", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
+        self.assertIn("after the block exits the DB is closed", description)
         self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
         self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
         self.assertIn("Required filespace path", properties["source_path"]["description"])

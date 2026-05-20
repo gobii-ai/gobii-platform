@@ -1176,8 +1176,13 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         if not role_names and (case.min_planned_agents or case.max_planned_agents):
             role_names = _simulated_role_names(case)
 
+        required_terms = [term for term in case.required_role_terms if term]
+        scope_note = f" Focus on: {', '.join(required_terms)}." if required_terms else ""
         roles = [
-            {"name": role_name, "responsibility": f"Own the {role_name.lower()} scope requested by the user."}
+            {
+                "name": role_name,
+                "responsibility": f"Own the {role_name.lower()} scope requested by the user.{scope_note}",
+            }
             for role_name in role_names
         ]
         ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
@@ -1190,14 +1195,20 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         initial_briefings = []
         if "meta_gobii_send_agent_message" in ordered_tools:
             initial_briefings = [
-                f"{role_name}: execute the requested {role_name.lower()} workstream and coordinate with linked Gobiis."
+                f"{role_name}: execute the requested {role_name.lower()} workstream.{scope_note} Coordinate with linked Gobiis."
                 for role_name in role_names
             ]
 
         if plan_args.get("needs_human_confirmation"):
-            response_text = "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
+            response_text = (
+                "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
+                f"{scope_note}"
+            )
         else:
-            response_text = "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
+            response_text = (
+                "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
+                f"{scope_note}"
+            )
 
         return {
             "response_text": response_text,

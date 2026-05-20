@@ -166,6 +166,8 @@ class CustomToolResultContractEvalTests(TestCase):
         self.assertIn(case.custom_tool_job, prompt)
         self.assertIn("representative sample data", prompt)
         self.assertIn("do not perform real external writes", prompt)
+        self.assertIn("runtime parameters for source inputs/tables", prompt)
+        self.assertIn("pass concrete representative values", prompt)
         self.assertNotIn("create_custom_tool", prompt)
         self.assertNotIn("source_code", prompt)
         self.assertNotIn("parameters_schema", prompt)

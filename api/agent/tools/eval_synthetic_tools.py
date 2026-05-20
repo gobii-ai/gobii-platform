@@ -170,7 +170,11 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_google_maps_reviews": {
-        "description": "Fetch structured Google Maps review data.",
+        "description": (
+            "Fetch structured Google Maps review data by business, category, or local-market query. "
+            "For local lead screens, use this directly; if the user omits a city, choose a representative market "
+            "or broad category query instead of asking which city."
+        ),
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_yahoo_finance_business": {

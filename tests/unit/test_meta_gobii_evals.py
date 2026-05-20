@@ -39,6 +39,7 @@ from api.evals.scenarios.meta_gobii import (
 from api.evals.suites import SuiteRegistry
 from api.models import (
     BrowserUseAgent,
+    CommsAllowlistEntry,
     EvalRun,
     EvalRunTask,
     EvalSuiteRun,
@@ -1141,6 +1142,26 @@ class MetaGobiiEvalScenarioTests(TestCase):
         self.assertTrue(response_args["proposed_links"])
         self.assertEqual(len(response_args["initial_briefings"]), 3)
 
+    def test_response_fallback_preserves_requested_scope_terms(self):
+        scenario = ScenarioRegistry.get("meta_gobii_ambiguous_support_escalation_watch")
+
+        response_args = scenario._response_args_from_plan(
+            scenario.case,
+            {
+                "ordered_tools": [
+                    "meta_gobii_create_agent",
+                    "meta_gobii_send_agent_message",
+                ],
+                "needs_human_confirmation": True,
+                "planned_role_names": ["support ops"],
+                "extra_scope_items": [],
+            },
+        )
+
+        response_blob = json.dumps(response_args).lower()
+        self.assertIn("support", response_blob)
+        self.assertIn("escalation", response_blob)
+
 
 @tag("batch_eval_fingerprint")
 class MetaGobiiLocalEvalSetupTests(TestCase):
@@ -1250,6 +1271,120 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertEqual(added, 1)
         self.assertEqual(schema_editor.added_fields[0][1].column, "debug_artifacts")
         self.assertIn("api_evalruntask.debug_artifacts", stdout.getvalue())
+
+    def test_local_eval_schema_compat_adds_missing_persistent_agent_columns(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_persistentagent"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        self.assertEqual(added, 1)
+        self.assertEqual(
+            schema_editor.added_fields[0],
+            (PersistentAgent, PersistentAgent._meta.get_field("sms_disabled")),
+        )
+        self.assertIn("api_persistentagent.sms_disabled", stdout.getvalue())
+
+    def test_local_eval_schema_compat_adds_missing_allowlist_sms_columns(self):
+        class FakeCursor:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        class FakeIntrospection:
+            def table_names(self):
+                return ["api_commsallowlistentry"]
+
+            def get_table_description(self, cursor, table_name):
+                return [SimpleNamespace(name="id")]
+
+        class FakeSchemaEditor:
+            def __init__(self):
+                self.added_fields = []
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def add_field(self, model, field):
+                self.added_fields.append((model, field))
+
+        class FakeConnection:
+            def __init__(self, schema_editor):
+                self.introspection = FakeIntrospection()
+                self._schema_editor = schema_editor
+
+            def cursor(self):
+                return FakeCursor()
+
+            def schema_editor(self):
+                return self._schema_editor
+
+        stdout = StringIO()
+        schema_editor = FakeSchemaEditor()
+
+        with patch("api.evals.local_setup.connection", FakeConnection(schema_editor)):
+            added = ensure_eval_local_compat_columns(stdout=stdout)
+
+        expected_field_names = (
+            "sms_contact_purpose",
+            "sms_contact_purpose_details",
+            "sms_contact_permission_attested",
+            "sms_contact_permission_attested_at",
+        )
+        self.assertEqual(added, len(expected_field_names))
+        self.assertEqual(
+            [field.column for _, field in schema_editor.added_fields],
+            list(expected_field_names),
+        )
+        self.assertTrue(
+            all(model == CommsAllowlistEntry for model, _ in schema_editor.added_fields)
+        )
+        self.assertIn("api_commsallowlistentry.sms_contact_purpose", stdout.getvalue())
+        self.assertIn("api_commsallowlistentry.sms_contact_permission_attested_at", stdout.getvalue())
 
     def test_local_openrouter_profile_seed_uses_env_var_name_without_secret_output(self):
         stdout = StringIO()

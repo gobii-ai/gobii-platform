@@ -445,8 +445,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             f"User task: {case.user_task}\n\n"
             f"Custom tool job: {case.custom_tool_job}\n\n"
             "Eval safety constraints: use representative sample data instead of live external data, and do not "
-            "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. Simulate "
-            "any external side effects that would normally happen."
+            "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. "
+            "Make the tool reusable with runtime parameters for source inputs/tables, destination outputs/tables, "
+            "dates/status/minimums/batch limits when relevant; when you run it, pass concrete representative values. "
+            "Simulate any external side effects that would normally happen."
         )
 
     @staticmethod
