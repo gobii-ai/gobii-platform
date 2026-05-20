@@ -25,6 +25,7 @@ from api.agent.core.prompt_context import build_prompt_context, build_prompt_con
 from api.agent.peer_comm import PeerMessagingError
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
+from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
 from util.urls import build_agent_detail_url, build_site_url
 
@@ -178,6 +179,17 @@ class ToolParamParsingTests(SimpleTestCase):
         self.assertEqual(normalized["url"], "https://api.coindesk.com/v1/bpi/currentprice/USD.json")
         self.assertTrue(normalized["will_continue_work"])
 
+    def test_brightdata_markdown_scrape_drops_extraction_prompt_when_url_is_known(self):
+        normalized = _normalize_tool_params(
+            "mcp_brightdata_scrape_as_markdown",
+            {
+                "url": "https://example.test/blog",
+                "prompt": "Extract all details about Example in warehouse automation.",
+            },
+        )
+
+        self.assertEqual(normalized, {"url": "https://example.test/blog"})
+
     def test_tool_name_normalization_strips_repeated_mcp_prefix(self):
         self.assertEqual(
             _sanitize_tool_name("mcp_brightdata_scrape_as_mcp_brightdata_scrape_as_markdown"),
@@ -189,6 +201,54 @@ class ToolParamParsingTests(SimpleTestCase):
             _looks_like_blocking_human_input_request(
                 "I'll get the RSS feed parsed and the schedule wired up now. "
                 "Any tweaks before I lock this in? Otherwise I'm off and running!"
+            )
+        )
+
+
+@tag("batch_event_processing")
+class WebChatProgressSuppressionTests(SimpleTestCase):
+    def test_suppresses_current_research_progress_with_let_me_grab(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "I have search results pointing to the YC Winter 2026 batch. "
+                "Let me grab the substantive details from the blog post and the companies page"
+            )
+        )
+
+    def test_suppresses_progress_after_context_sentence(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "The skill is already enabled. Let me fetch Frederick, MD's coordinates and then the current weather."
+            )
+        )
+
+    def test_suppresses_investigation_progress(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "Let me investigate what's happening with the API response more carefully."
+            )
+        )
+
+    def test_suppresses_proper_search_progress_after_context_sentence(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "Those earlier search results came back with placeholder data. "
+                "Let me do proper searches on real job platforms"
+            )
+        )
+
+    def test_suppresses_find_better_way_progress(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "The search tool keeps returning fabricated links, so let me find a better way to get live listings."
+            )
+        )
+
+    def test_suppresses_adverbial_search_progress(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "The search result I got back looks fabricated - generic company names and fake job IDs. "
+                "Let me actually search real job boards for current listings."
             )
         )
 

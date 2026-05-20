@@ -34,7 +34,9 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 _PROGRESS_PREFIX_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?(?:now\s+)?"
     r"(?:let me|i(?:'ll| will| am going to| want to| need to)|i'm going to)\s+"
-    r"(?:start|begin|continue|check|fetch|pull|look|search|research|extract|compile|process|analy[sz]e|verify|"
+    r"(?:(?:actually|just|quickly|then|also)\s+)?"
+    r"(?:(?:do\s+)?(?:start|begin|continue|check|fetch|find|grab|investigate|pull|look|search|research|extract|compile|process|analy[sz]e|verify)|"
+    r"do\s+(?:proper\s+|additional\s+|more\s+|some\s+|a\s+few\s+|new\s+)?(?:search(?:es)?|queries|lookups?)|"
     r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|format|summarize|structure|try)\b",
     re.IGNORECASE,
 )
@@ -42,7 +44,7 @@ _INTERNAL_PROGRESS_RE = re.compile(
     r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
-    r"real data is coming back|got what i need|let me also grab|let me send it over|let me end planning|"
+    r"real data is coming back|got what i need|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|verify|analy[sz]e|compile|process|inspect|do (?:proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?))|let me send it over|let me end planning|"
     r"i now have (?:detailed )?data|source pages|mark the research steps|deliver the synthesized|"
     r"good (?:initial )?data gathered|let me (?:now )?scrape|let me do (?:a couple|some) more|"
     r"strengthen the competitive analysis|then synthesize|synthesize the full memo|"
@@ -89,7 +91,7 @@ def _strip_trailing_optional_followup(body: str) -> str:
 
 
 _TOOL_FRUSTRATION_PROGRESS_RE = re.compile(
-    r"\b(?:fabricated test data|eval environment|stop fighting the sim|pivot hard|trying every tool|"
+    r"\b(?:fabricated(?:\b| (?:test data|links|results))|fake (?:job ids|links|data|results)|eval environment|stop fighting the sim|pivot hard|trying every tool|"
     r"same fabricated|same data set|same simulated results|simulated results|instructions say|"
     r"stop verifying|let me deliver|all done)\b",
     re.IGNORECASE,

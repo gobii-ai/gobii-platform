@@ -1783,6 +1783,11 @@ def _strip_linkified_url_artifact(value: str) -> str:
 
 
 def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
+    if tool_name == "mcp_brightdata_scrape_as_markdown" and isinstance(tool_params.get("url"), str):
+        normalized_params = dict(tool_params)
+        normalized_params.pop("prompt", None)
+        return normalized_params
+
     if tool_name != "http_request" or not isinstance(tool_params.get("url"), str):
         return tool_params
 
