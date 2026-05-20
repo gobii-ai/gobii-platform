@@ -100,6 +100,109 @@ def _parse_json_payload(request: HttpRequest) -> dict[str, Any]:
     return payload
 
 
+def _build_library_payload(
+    request: HttpRequest,
+    *,
+    category: str = "",
+    search_query: str = "",
+    limit: int = LIBRARY_DEFAULT_PAGE_SIZE,
+    offset: int = 0,
+) -> dict[str, Any]:
+    viewer_user_id = request.user.id if request.user.is_authenticated else None
+    top_categories = _get_top_categories()
+
+    normalized_category = _normalize_category(category) if category else ""
+    normalized_search_query = str(search_query or "").strip()
+    page_limit = max(1, min(limit, LIBRARY_MAX_PAGE_SIZE))
+    page_offset = max(0, offset)
+
+    library_queryset = _library_queryset().annotate(
+        normalized_category=_normalized_category_expression(),
+    )
+    library_total_agents = library_queryset.count()
+    library_total_likes = (
+        PersistentAgentTemplateLike.objects.filter(
+            template__public_profile__isnull=False,
+            template__is_active=True,
+        )
+        .exclude(template__slug="")
+        .count()
+    )
+
+    filtered_queryset = library_queryset
+    if normalized_category:
+        filtered_queryset = filtered_queryset.filter(
+            normalized_category__iexact=normalized_category
+        )
+
+    if normalized_search_query:
+        filtered_queryset = filtered_queryset.filter(
+            Q(display_name__icontains=normalized_search_query)
+            | Q(tagline__icontains=normalized_search_query)
+            | Q(description__icontains=normalized_search_query)
+            | Q(normalized_category__icontains=normalized_search_query)
+            | Q(public_profile__handle__icontains=normalized_search_query)
+        )
+
+    total_agents = filtered_queryset.count()
+    annotated_queryset = filtered_queryset.annotate(
+        like_count=Count("template_likes"),
+    )
+    if viewer_user_id is not None:
+        annotated_queryset = annotated_queryset.annotate(
+            is_liked=Exists(
+                PersistentAgentTemplateLike.objects.filter(
+                    template_id=OuterRef("pk"),
+                    user_id=viewer_user_id,
+                ),
+            )
+        )
+    else:
+        annotated_queryset = annotated_queryset.annotate(
+            is_liked=Value(False, output_field=BooleanField()),
+        )
+
+    page_templates = annotated_queryset.order_by(
+        "-like_count",
+        "priority",
+        Lower("display_name"),
+        "id",
+    )[page_offset:page_offset + page_limit]
+
+    page_agents = [
+        {
+            "id": str(template.id),
+            "name": template.display_name,
+            "tagline": template.tagline,
+            "description": template.description,
+            "category": template.normalized_category,
+            "publicProfileHandle": template.public_profile.handle,
+            "templateSlug": template.slug,
+            "templateUrl": reverse(
+                "pages:public_template_detail",
+                kwargs={
+                    "handle": template.public_profile.handle,
+                    "template_slug": template.slug,
+                },
+            ),
+            "likeCount": template.like_count,
+            "isLiked": template.is_liked,
+        }
+        for template in page_templates
+    ]
+
+    return {
+        "agents": page_agents,
+        "topCategories": top_categories,
+        "totalAgents": total_agents,
+        "libraryTotalAgents": library_total_agents,
+        "libraryTotalLikes": library_total_likes,
+        "offset": page_offset,
+        "limit": page_limit,
+        "hasMore": (page_offset + page_limit) < total_agents,
+    }
+
+
 @method_decorator(ensure_csrf_cookie, name="dispatch")
 class LibraryView(TemplateView):
     template_name = "library.html"
@@ -107,6 +210,7 @@ class LibraryView(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["page_name"] = "Agent Discovery"
+        context["library_initial_payload"] = _build_library_payload(self.request)
         return context
 
 
@@ -114,9 +218,6 @@ class LibraryAgentsAPIView(View):
     http_method_names = ["get"]
 
     def get(self, request, *args, **kwargs):
-        viewer_user_id = request.user.id if request.user.is_authenticated else None
-        top_categories = _get_top_categories()
-
         category = _normalize_category(request.GET.get("category")) if request.GET.get("category") else ""
         search_query = str(request.GET.get("q") or "").strip()
         limit = _parse_query_int(
@@ -131,92 +232,14 @@ class LibraryAgentsAPIView(View):
             min_value=0,
         )
 
-        library_queryset = _library_queryset().annotate(
-            normalized_category=_normalized_category_expression(),
-        )
-        library_total_agents = library_queryset.count()
-        library_total_likes = (
-            PersistentAgentTemplateLike.objects.filter(
-                template__public_profile__isnull=False,
-                template__is_active=True,
-            )
-            .exclude(template__slug="")
-            .count()
-        )
-
-        filtered_queryset = library_queryset
-        if category:
-            filtered_queryset = filtered_queryset.filter(
-                normalized_category__iexact=category
-            )
-
-        if search_query:
-            filtered_queryset = filtered_queryset.filter(
-                Q(display_name__icontains=search_query)
-                | Q(tagline__icontains=search_query)
-                | Q(description__icontains=search_query)
-                | Q(normalized_category__icontains=search_query)
-                | Q(public_profile__handle__icontains=search_query)
-            )
-
-        total_agents = filtered_queryset.count()
-        annotated_queryset = filtered_queryset.annotate(
-            like_count=Count("template_likes"),
-        )
-        if viewer_user_id is not None:
-            annotated_queryset = annotated_queryset.annotate(
-                is_liked=Exists(
-                    PersistentAgentTemplateLike.objects.filter(
-                        template_id=OuterRef("pk"),
-                        user_id=viewer_user_id,
-                    ),
-                )
-            )
-        else:
-            annotated_queryset = annotated_queryset.annotate(
-                is_liked=Value(False, output_field=BooleanField()),
-            )
-
-        page_templates = annotated_queryset.order_by(
-            "-like_count",
-            "priority",
-            Lower("display_name"),
-            "id",
-        )[offset:offset + limit]
-
-        page_agents = [
-            {
-                "id": str(template.id),
-                "name": template.display_name,
-                "tagline": template.tagline,
-                "description": template.description,
-                "category": template.normalized_category,
-                "publicProfileHandle": template.public_profile.handle,
-                "templateSlug": template.slug,
-                "templateUrl": reverse(
-                    "pages:public_template_detail",
-                    kwargs={
-                        "handle": template.public_profile.handle,
-                        "template_slug": template.slug,
-                    },
-                ),
-                "likeCount": template.like_count,
-                "isLiked": template.is_liked,
-            }
-            for template in page_templates
-        ]
-
         return JsonResponse(
-            {
-                "agents": page_agents,
-                "topCategories": top_categories,
-                "totalAgents": total_agents,
-                "libraryTotalAgents": library_total_agents,
-                "libraryTotalLikes": library_total_likes,
-                "offset": offset,
-                "limit": limit,
-                "hasMore": (offset + limit) < total_agents,
-            }
+            _build_library_payload(
+                request,
+                category=category,
+                search_query=search_query,
+                limit=limit,
+                offset=offset,
+            )
         )
 
 

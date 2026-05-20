@@ -27,6 +27,35 @@
       }
     }
   </script>
+  {% if library_initial_payload.agents %}
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "Popular Gobii agent templates",
+        "url": "{{ canonical_url|escapejs }}",
+        "itemListElement": [
+          {% for agent in library_initial_payload.agents %}
+            {
+              "@type": "ListItem",
+              "position": {{ forloop.counter }},
+              "item": {
+                "@type": "SoftwareApplication",
+                "name": "{{ agent.name|escapejs }}",
+                "description": "{{ agent.description|default:agent.tagline|truncatechars:160|escapejs }}",
+                "applicationCategory": "{{ agent.category|escapejs }}",
+                "creator": {
+                  "@type": "Person",
+                  "name": "{{ agent.publicProfileHandle|escapejs }}"
+                },
+                "url": "{{ request.scheme }}://{{ request.get_host }}{{ agent.templateUrl|escapejs }}"
+              }
+            }{% if not forloop.last %},{% endif %}
+          {% endfor %}
+        ]
+      }
+    </script>
+  {% endif %}
   <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -52,13 +81,17 @@
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
   <section class="mx-auto w-full max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    {{ library_initial_payload|json_script:"library-initial-payload" }}
     <div
       id="gobii-frontend-root"
       data-app="library"
+      data-props-json-id="library-initial-payload"
       data-library-list-url="{% url 'pages:library_agents_api' %}"
       data-library-like-url="{% url 'pages:library_agent_like_api' %}"
       data-library-can-like="{{ user.is_authenticated|yesno:'true,false' }}"
-    ></div>
+    >
+      {% include "library/_fallback.html" with payload=library_initial_payload %}
+    </div>
   </section>
 </div>
 {% endblock %}

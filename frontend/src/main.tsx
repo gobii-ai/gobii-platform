@@ -5,6 +5,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
+import type { LibraryAgentsPayload } from './api/library'
+import { LibraryScreen } from './screens/LibraryScreen'
 import { initializeSubscriptionStore } from './stores/subscriptionStore'
 import './index.css'
 import './styles/consoleShell.css'
@@ -17,7 +19,6 @@ const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageS
 const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
 const StaffUsersScreen = lazy(async () => ({ default: (await import('./screens/StaffUsersScreen')).StaffUsersScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
-const LibraryScreen = lazy(async () => ({ default: (await import('./screens/LibraryScreen')).LibraryScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 const SystemSettingsScreen = lazy(async () => ({ default: (await import('./screens/SystemSettingsScreen')).SystemSettingsScreen }))
 const BillingScreen = lazy(async () => ({ default: (await import('./screens/BillingScreen')).BillingScreen }))
@@ -202,7 +203,9 @@ switch (appName) {
     if (!listUrl || !likeUrl) {
       throw new Error('Library API URLs are required')
     }
-    screen = <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} />
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = propsId ? readJsonScript<LibraryAgentsPayload>(propsId) : undefined
+    screen = <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} initialData={initialData} />
     break
   }
   case 'mcp-servers': {
