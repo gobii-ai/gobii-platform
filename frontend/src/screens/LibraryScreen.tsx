@@ -9,6 +9,7 @@ type LibraryScreenProps = {
   listUrl: string
   likeUrl: string
   canLike: boolean
+  initialData?: LibraryAgentsPayload
 }
 
 type SearchInputProps = {
@@ -52,13 +53,13 @@ function SearchInput({ value, onChange, inputClassName }: SearchInputProps) {
 }
 
 function updateLikeInCachedPayload(
-  payload: InfiniteData<LibraryAgentsPayload> | undefined,
+  payload: InfiniteData<LibraryAgentsPayload, number> | undefined,
   update: {
     agentId: string
     likeCount: number
     isLiked: boolean
   },
-): InfiniteData<LibraryAgentsPayload> | undefined {
+): InfiniteData<LibraryAgentsPayload, number> | undefined {
   if (!payload) {
     return payload
   }
@@ -88,12 +89,22 @@ function updateLikeInCachedPayload(
   }
 }
 
-export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps) {
+export function LibraryScreen({ listUrl, likeUrl, canLike, initialData }: LibraryScreenProps) {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
+  const shouldUseInitialData = selectedCategory === null && normalizedSearchQuery.length === 0
+  const initialLibraryData = useMemo<InfiniteData<LibraryAgentsPayload, number> | undefined>(() => {
+    if (!initialData || !shouldUseInitialData) {
+      return undefined
+    }
+    return {
+      pages: [initialData],
+      pageParams: [0],
+    }
+  }, [initialData, shouldUseInitialData])
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -105,8 +116,15 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
     }
   }, [searchQuery])
 
-  const libraryQuery = useInfiniteQuery({
-    queryKey: ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery],
+  const libraryQueryKey = ['library-agents', listUrl, selectedCategory ?? MOST_POPULAR_KEY, normalizedSearchQuery] as const
+  const libraryQuery = useInfiniteQuery<
+    LibraryAgentsPayload,
+    Error,
+    InfiniteData<LibraryAgentsPayload, number>,
+    typeof libraryQueryKey,
+    number
+  >({
+    queryKey: libraryQueryKey,
     queryFn: ({ signal, pageParam }) =>
       fetchLibraryAgents(listUrl, {
         signal,
@@ -117,6 +135,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
       }),
     initialPageParam: 0,
     getNextPageParam: (lastPage) => (lastPage.hasMore ? lastPage.offset + lastPage.limit : undefined),
+    initialData: initialLibraryData,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
@@ -125,7 +144,7 @@ export function LibraryScreen({ listUrl, likeUrl, canLike }: LibraryScreenProps)
   const likeMutation = useMutation({
     mutationFn: (agentId: string) => toggleLibraryAgentLike(likeUrl, agentId),
     onSuccess: (result) => {
-      queryClient.setQueriesData<InfiniteData<LibraryAgentsPayload>>(
+      queryClient.setQueriesData<InfiniteData<LibraryAgentsPayload, number>>(
         { queryKey: ['library-agents', listUrl] },
         (payload) =>
           updateLikeInCachedPayload(payload, {

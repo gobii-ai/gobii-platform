@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nProvider } from 'react-aria-components'
 import { Loader2 } from 'lucide-react'
 import type { PersistentAgentsScreenProps } from './screens/PersistentAgentsScreen'
+import type { LibraryAgentsPayload } from './api/library'
 import { initializeSubscriptionStore } from './stores/subscriptionStore'
 import './index.css'
 import './styles/consoleShell.css'
@@ -17,7 +18,6 @@ const UsageScreen = lazy(async () => ({ default: (await import('./screens/UsageS
 const SystemStatusScreen = lazy(async () => ({ default: (await import('./screens/SystemStatusScreen')).SystemStatusScreen }))
 const StaffUsersScreen = lazy(async () => ({ default: (await import('./screens/StaffUsersScreen')).StaffUsersScreen }))
 const PersistentAgentsScreen = lazy(async () => ({ default: (await import('./screens/PersistentAgentsScreen')).PersistentAgentsScreen }))
-const LibraryScreen = lazy(async () => ({ default: (await import('./screens/LibraryScreen')).LibraryScreen }))
 const LlmConfigScreen = lazy(async () => ({ default: (await import('./screens/LlmConfigScreen')).LlmConfigScreen }))
 const SystemSettingsScreen = lazy(async () => ({ default: (await import('./screens/SystemSettingsScreen')).SystemSettingsScreen }))
 const BillingScreen = lazy(async () => ({ default: (await import('./screens/BillingScreen')).BillingScreen }))
@@ -43,6 +43,7 @@ if (!mountNode) {
   throw new Error('Gobii frontend mount element not found')
 }
 
+const rootNode = mountNode
 const appName = mountNode.dataset.app ?? 'agent-chat'
 const shouldInitializeSubscriptionStore = appName !== 'library'
 
@@ -89,7 +90,7 @@ const isCollaborator =
       ? false
       : null
 
-let screen: ReactElement
+let screen: ReactElement | Promise<ReactElement>
 
 function readJsonScript<T>(scriptId?: string): T {
   if (!scriptId) {
@@ -202,7 +203,11 @@ switch (appName) {
     if (!listUrl || !likeUrl) {
       throw new Error('Library API URLs are required')
     }
-    screen = <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} />
+    const propsId = mountNode.dataset.propsJsonId
+    const initialData = propsId ? readJsonScript<LibraryAgentsPayload>(propsId) : undefined
+    screen = import('./screens/LibraryScreen').then(({ LibraryScreen }) => (
+      <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} initialData={initialData} />
+    ))
     break
   }
   case 'mcp-servers': {
@@ -354,12 +359,18 @@ switch (appName) {
 const queryClient = new QueryClient()
 const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
 
-createRoot(mountNode).render(
-  <StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <I18nProvider locale={locale}>
-        <Suspense fallback={<LoadingFallback />}>{screen}</Suspense>
-      </I18nProvider>
-    </QueryClientProvider>
-  </StrictMode>,
-)
+async function renderApp() {
+  const resolvedScreen = await screen
+
+  createRoot(rootNode).render(
+    <StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <I18nProvider locale={locale}>
+          <Suspense fallback={<LoadingFallback />}>{resolvedScreen}</Suspense>
+        </I18nProvider>
+      </QueryClientProvider>
+    </StrictMode>,
+  )
+}
+
+void renderApp()
