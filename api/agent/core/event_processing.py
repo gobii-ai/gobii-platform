@@ -129,7 +129,7 @@ from ..tools.sqlite_agent_config import (
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.file_str_replace import execute_file_str_replace
-from ..tools.plan import execute_update_plan
+from ..tools.plan import build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
@@ -267,7 +267,22 @@ class OrchestratorPromptStale(RuntimeError):
 
 
 def _looks_like_blocking_human_input_request(message_text: str) -> bool:
-    normalized = " ".join((message_text or "").split())
+    tableless_text = "\n".join(
+        line
+        for line in (message_text or "").splitlines()
+        if not line.lstrip().startswith("|")
+    )
+    if "?" not in tableless_text:
+        return False
+    if len(message_text or "") > 800 and (
+        "##" in message_text
+        or "###" in message_text
+        or "Sources" in message_text
+        or "|" in message_text
+    ):
+        return False
+
+    normalized = " ".join(tableless_text.split())
     if OPTIONAL_NON_BLOCKING_QUESTION_RE.search(normalized):
         return False
     return bool("?" in normalized and any(pattern.search(normalized) for pattern in BLOCKING_HUMAN_INPUT_PATTERNS))
@@ -1977,6 +1992,7 @@ def _prepare_tool_batch(
         _get_tool_call_name(call) == "request_human_input"
         for call in tool_calls
     )
+    skipped_plan_requested_sleep = False
 
     for idx, call in enumerate(tool_calls, start=1):
         with tracer.start_as_current_span("Prepare Tool") as tool_span:
@@ -2145,6 +2161,26 @@ def _prepare_tool_batch(
                         agent.id,
                     )
 
+            if tool_name == "update_plan":
+                skipped_plan_result = build_redundant_research_plan_skip_result(agent, tool_params)
+                if skipped_plan_result is not None:
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": skipped_plan_result["message"],
+                    }
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    logger.info(
+                        "Agent %s: skipped redundant research plan update before execution.",
+                        agent.id,
+                    )
+                    if skipped_plan_result.get(AUTO_SLEEP_FLAG) is True:
+                        skipped_plan_requested_sleep = True
+                    else:
+                        followup_required = True
+                    continue
+
             parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
 
             if not _enforce_tool_rate_limit(
@@ -2257,7 +2293,9 @@ def _prepare_tool_batch(
     return _PreparedToolBatch(
         prepared_calls=prepared_calls,
         followup_required=followup_required,
-        all_calls_sleep=all_calls_sleep,
+        all_calls_sleep=all_calls_sleep or (
+            skipped_plan_requested_sleep and not prepared_calls and not followup_required
+        ),
         abort_after_execution=abort_after_execution,
         parallel_ineligible_reason=_parallel_batch_ineligible_reason(prepared_calls),
     )

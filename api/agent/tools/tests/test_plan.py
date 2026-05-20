@@ -1,8 +1,14 @@
 from types import SimpleNamespace
 
-from django.test import SimpleTestCase, tag
+from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, TestCase, tag
 
-from api.agent.tools.plan import execute_update_plan, get_update_plan_tool
+from api.agent.tools.plan import (
+    build_redundant_research_plan_skip_result,
+    execute_update_plan,
+    get_update_plan_tool,
+)
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentKanbanCard
 
 
 @tag("batch_agent_tools")
@@ -22,6 +28,7 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("not for every quick answer", messages_description)
         self.assertIn("send it first with will_continue_work=true", messages_description)
         self.assertIn("then call update_plan after the send tool returns", messages_description)
+        self.assertIn("send the final answer with will_continue_work=false", messages_description)
         self.assertIn("Do not include peer messages", messages_description)
         self.assertIn("Exact UUID", message_id_description)
         self.assertIn("never use placeholders", message_id_description)
@@ -59,4 +66,98 @@ class UpdatePlanValidationTests(SimpleTestCase):
         self.assertIn("send_sms", result["message"])
         self.assertIn("send_chat_message", result["message"])
         self.assertIn("send it first with will_continue_work=true", result["message"])
+        self.assertIn("send the final answer with will_continue_work=false", result["message"])
         self.assertIn("Do not include peer messages from send_agent_message", result["message"])
+
+
+@tag("batch_agent_tools")
+class UpdatePlanResearchSuppressionTests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(username="plan_research_suppression_user")
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Plan Research Browser")
+        self.agent = PersistentAgent.objects.create(
+            name="Plan Research Agent",
+            user=self.user,
+            browser_use_agent=self.browser_agent,
+            charter="Test agent.",
+        )
+
+    def test_redundant_research_status_update_is_skipped(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research source set",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=2,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize investment memo",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research source set", "status": "done"},
+                    {"step": "Synthesize investment memo", "status": "done"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["auto_sleep_ok"])
+
+    def test_redundant_research_status_update_with_retitled_steps_is_skipped(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research the market and competitors",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=2,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Write investment memo",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research source set", "status": "done"},
+                    {"step": "Synthesize investment memo", "status": "done"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["auto_sleep_ok"])
+
+    def test_changed_research_plan_is_not_skipped(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research source set",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research source set", "status": "done"},
+                    {"step": "Compare competitors", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIsNone(result)

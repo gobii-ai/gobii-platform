@@ -30,6 +30,9 @@ from .effort_calibration import (
     EffortDefaultableResearchNoQuestionBatteryScenario,
     EffortPartialBriefingReportsWithoutSurveyScenario,
     EffortChartRequestedSingleArtifactScenario,
+    EffortSimpleCurrentYCBatchReportScenario,
+    EffortSimpleCurrentCompanyReportScenario,
+    EffortExplicitDeepResearchRemainsCapableScenario,
 )
 from .custom_tool_result_contract import (
     CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
