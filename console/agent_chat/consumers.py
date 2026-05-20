@@ -93,6 +93,9 @@ class AgentChatConsumer(AsyncJsonWebsocketConsumer):
     async def credit_event(self, event):
         await self.send_json({"type": "credit.event", "payload": event.get("payload")})
 
+    async def credit_awareness_event(self, event):
+        await self.send_json({"type": "credit.awareness", "payload": event.get("payload")})
+
     async def agent_profile_event(self, event):
         await self.send_json({"type": "agent.profile", "payload": event.get("payload")})
 
@@ -215,6 +218,9 @@ class AgentChatSessionConsumer(AsyncJsonWebsocketConsumer):
 
     async def credit_event(self, event):
         await self._send_agent_event("credit.event", event)
+
+    async def credit_awareness_event(self, event):
+        await self._send_agent_event("credit.awareness", event)
 
     async def agent_profile_event(self, event):
         agent_id = self._extract_agent_id(event)

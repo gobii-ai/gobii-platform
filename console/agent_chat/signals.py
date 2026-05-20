@@ -318,6 +318,19 @@ def emit_tool_call_audit(step: PersistentAgentStep) -> None:
         logger.debug("Failed to broadcast audit tool call %s", getattr(step, "id", None), exc_info=True)
 
 
+def emit_credit_awareness_update(agent: PersistentAgent) -> None:
+    if not agent or not getattr(agent, "id", None):
+        return
+    try:
+        from console.credit_awareness import build_credit_awareness_payload
+
+        payload = build_credit_awareness_payload(agent, include_actions=False)
+    except Exception:
+        logger.debug("Failed to build credit awareness payload for agent %s", getattr(agent, "id", None), exc_info=True)
+        return
+    _send(_group_name(agent.id), "credit_awareness_event", payload, agent_id=str(agent.id))
+
+
 @receiver(post_save, sender=PersistentAgentMessage)
 def broadcast_new_message(sender, instance: PersistentAgentMessage, created: bool, **kwargs):  # noqa: D401
     if not created:
@@ -466,6 +479,8 @@ def broadcast_new_tool_step(sender, instance: PersistentAgentStep, created: bool
         except PersistentAgentStep.DoesNotExist:  # pragma: no cover - defensive guard
             return
         emit_tool_call_realtime(step)
+        if step.credits_cost is not None:
+            emit_credit_awareness_update(step.agent)
         try:
             tool_call = getattr(step, "tool_call", None)
             if tool_call is None and not (step.description or "").startswith("Tool call"):
@@ -696,3 +711,8 @@ def broadcast_plan_changes(agent, changes, snapshot, *, explanation: str = "") -
             getattr(agent, "id", None),
             exc_info=True,
         )
+
+    try:
+        emit_credit_awareness_update(agent)
+    except Exception:
+        logger.debug("Failed to broadcast credit awareness after plan change for agent %s", agent.id, exc_info=True)

@@ -11,6 +11,8 @@ from api.models import (
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentPlanDeliverable,
+    PersistentAgentWorkPlan,
+    PersistentAgentWorkPlanStep,
 )
 
 
@@ -217,3 +219,114 @@ class UpdatePlanToolTests(TestCase):
             list(PersistentAgentKanbanCard.objects.filter(assigned_agent=self.agent).values_list("title", flat=True)),
             ["Research sources"],
         )
+
+    def test_update_plan_creates_work_plan_on_first_call(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                    {"step": "Deliver report", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        work_plan = PersistentAgentWorkPlan.objects.get(agent=self.agent)
+        self.assertEqual(work_plan.status, PersistentAgentWorkPlan.Status.ACTIVE)
+        self.assertEqual(work_plan.title, "Research sources")
+        steps = list(work_plan.steps.order_by("position"))
+        self.assertEqual([step.title for step in steps], ["Research sources", "Deliver report"])
+        self.assertEqual(steps[0].status, PersistentAgentWorkPlanStep.Status.DOING)
+
+    def test_overlapping_update_reuses_active_work_plan(self):
+        execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                    {"step": "Deliver report", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+        work_plan = PersistentAgentWorkPlan.objects.get(agent=self.agent)
+
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "research   sources", "status": "done"},
+                    {"step": "Send report", "status": "doing"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(PersistentAgentWorkPlan.objects.filter(agent=self.agent).count(), 1)
+        work_plan.refresh_from_db()
+        self.assertEqual(work_plan.status, PersistentAgentWorkPlan.Status.ACTIVE)
+        steps = list(work_plan.steps.filter(archived_at__isnull=True).order_by("position"))
+        self.assertEqual([step.title for step in steps], ["research   sources", "Send report"])
+        self.assertEqual(steps[0].status, PersistentAgentWorkPlanStep.Status.DONE)
+
+    def test_zero_overlap_update_supersedes_previous_active_work_plan(self):
+        execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+        original_plan = PersistentAgentWorkPlan.objects.get(agent=self.agent)
+
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Draft contract", "status": "doing"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        original_plan.refresh_from_db()
+        self.assertEqual(original_plan.status, PersistentAgentWorkPlan.Status.SUPERSEDED)
+        self.assertIsNotNone(original_plan.superseded_at)
+        active_plan = PersistentAgentWorkPlan.objects.get(agent=self.agent, status=PersistentAgentWorkPlan.Status.ACTIVE)
+        self.assertNotEqual(active_plan.id, original_plan.id)
+        self.assertEqual(active_plan.title, "Draft contract")
+
+    def test_update_plan_marks_work_plan_complete_when_no_active_steps_remain(self):
+        execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "done"},
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        work_plan = PersistentAgentWorkPlan.objects.get(agent=self.agent)
+        self.assertEqual(work_plan.status, PersistentAgentWorkPlan.Status.COMPLETED)
+        self.assertIsNotNone(work_plan.completed_at)
+        step = work_plan.steps.get()
+        self.assertEqual(step.status, PersistentAgentWorkPlanStep.Status.DONE)
+        self.assertIsNotNone(step.completed_at)

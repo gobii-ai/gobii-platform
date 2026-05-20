@@ -6,7 +6,6 @@ import {
   UsagePeriodHeader,
   UsageTrendSection,
   UsageMetricsGrid,
-  UsageToolChart,
   UsageAgentLeaderboard,
   useUsageStore,
 } from '../components/usage'
@@ -311,7 +310,7 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
   const rootClassName = isEmbedded
     ? 'flex w-full flex-col gap-5'
     : 'mx-auto flex max-w-5xl flex-col gap-6 py-8'
-  const description = 'Monitor agent and API activity alongside metered consumption for the current billing cycle.'
+  const description = 'See what used credits, which agents drove spend, and the fastest ways to adjust usage.'
 
   return (
     <div className={rootClassName}>
@@ -361,6 +360,38 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
         />
       </header>
 
+      <section className={isEmbedded
+        ? 'rounded-xl border border-slate-200/20 bg-slate-950/30 p-5'
+        : 'gobii-card-base p-5'}
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          <div>
+            <div className={isEmbedded ? 'text-xs font-semibold uppercase tracking-wide text-slate-400' : 'text-xs font-semibold uppercase tracking-wide text-slate-500'}>
+              What happened
+            </div>
+            <p className={isEmbedded ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-700'}>
+              Review current billing usage and daily credit pressure.
+            </p>
+          </div>
+          <div>
+            <div className={isEmbedded ? 'text-xs font-semibold uppercase tracking-wide text-slate-400' : 'text-xs font-semibold uppercase tracking-wide text-slate-500'}>
+              Where it went
+            </div>
+            <p className={isEmbedded ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-700'}>
+              Attribute spend to agents and API usage.
+            </p>
+          </div>
+          <div>
+            <div className={isEmbedded ? 'text-xs font-semibold uppercase tracking-wide text-slate-400' : 'text-xs font-semibold uppercase tracking-wide text-slate-500'}>
+              What to do
+            </div>
+            <p className={isEmbedded ? 'mt-1 text-sm text-slate-300' : 'mt-1 text-sm text-slate-700'}>
+              Use chat settings to adjust daily limits or add task credits.
+            </p>
+          </div>
+        </div>
+      </section>
+
       <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} embedded={isEmbedded}/>
 
       <UsageTrendSection
@@ -369,14 +400,8 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
         fallbackRange={boundedSummaryRange}
         timezone={summary?.period.timezone}
         agentIds={selectedAgentArray}
-      />
-
-      <UsageToolChart
-        embedded={isEmbedded}
-        effectiveRange={boundedEffectiveRange}
-        fallbackRange={boundedSummaryRange}
-        agentIds={selectedAgentArray}
-        timezone={summary?.period.timezone}
+        quotaTotal={summary?.metrics.quota.total}
+        quotaUnlimited={summary?.metrics.quota.unlimited}
       />
 
       <UsageAgentLeaderboard

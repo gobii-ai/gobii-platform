@@ -571,6 +571,39 @@ def _plan_file_download_url(agent_id: uuid.UUID | None, path: str | None) -> str
     return f"{reverse('console_agent_fs_download', kwargs={'agent_id': agent_id})}?{query}"
 
 
+def _plan_credit_value(value) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
+
+
+def _plan_datetime_value(value) -> str | None:
+    return value.isoformat() if value else None
+
+
+def _serialize_snapshot_steps(snapshot: PlanSnapshot) -> list[dict]:
+    return [
+        {
+            "id": item.id,
+            "title": item.title,
+            "status": item.status,
+            "creditsUsed": _plan_credit_value(item.credits_used),
+            "startedAt": _plan_datetime_value(item.started_at),
+            "completedAt": _plan_datetime_value(item.completed_at),
+        }
+        for item in getattr(snapshot, "steps", ())
+    ]
+
+
+def _serialize_snapshot_usage(snapshot: PlanSnapshot) -> dict:
+    usage = getattr(snapshot, "usage", None)
+    return {
+        "totalCredits": _plan_credit_value(getattr(usage, "total_credits", 0)),
+        "currentStepCredits": _plan_credit_value(getattr(usage, "current_step_credits", 0)),
+    }
+
+
 def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | None = None) -> dict:
     snapshot = snapshot or build_plan_snapshot(agent)
     return {
@@ -595,6 +628,8 @@ def serialize_plan_snapshot(agent: PersistentAgent, snapshot: PlanSnapshot | Non
             }
             for item in snapshot.messages
         ],
+        "steps": _serialize_snapshot_steps(snapshot),
+        "usage": _serialize_snapshot_usage(snapshot),
     }
 
 
@@ -1680,6 +1715,8 @@ def serialize_plan_event(
             }
             for item in getattr(snapshot, "messages", ())
         ],
+        "steps": _serialize_snapshot_steps(snapshot),
+        "usage": _serialize_snapshot_usage(snapshot),
     }
 
     return {

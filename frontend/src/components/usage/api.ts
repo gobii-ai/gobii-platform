@@ -10,6 +10,8 @@ import type {
   UsageToolBreakdownResponse,
   UsageAgentLeaderboardQueryInput,
   UsageAgentLeaderboardResponse,
+  UsageWorkPlansQueryInput,
+  UsageWorkPlansResponse,
 } from './types'
 import { jsonFetch } from '../../api/http'
 
@@ -135,6 +137,33 @@ export const fetchUsageAgentLeaderboard = async (
 
   const suffix = search.toString()
   return jsonFetch<UsageAgentLeaderboardResponse>(`/console/api/usage/agents/leaderboard/${suffix ? `?${suffix}` : ''}`, {
+    method: 'GET',
+    signal,
+  })
+}
+
+export const fetchUsageWorkPlans = async (
+  params: UsageWorkPlansQueryInput,
+  signal: AbortSignal,
+): Promise<UsageWorkPlansResponse> => {
+  const search = new URLSearchParams()
+
+  if (params.from) {
+    search.set('from', params.from)
+  }
+
+  if (params.to) {
+    search.set('to', params.to)
+  }
+
+  if (params.agents?.length) {
+    params.agents.forEach((agentId) => {
+      search.append('agent', agentId)
+    })
+  }
+
+  const suffix = search.toString()
+  return jsonFetch<UsageWorkPlansResponse>(`/console/api/usage/work-plans/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
     signal,
   })

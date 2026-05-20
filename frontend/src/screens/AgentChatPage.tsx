@@ -25,6 +25,7 @@ import {
   dismissHumanInputRequest,
   respondToHumanInputRequest,
   respondToHumanInputRequestsBatch,
+  fetchCreditAwareness,
   skipAgentPlanning,
   markLatestAgentMessageRead,
   normalizeAgentMessageReadState,
@@ -81,7 +82,7 @@ import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
 import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
-import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
+import type { AgentMessageNotification, CreditAwarenessPayload, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
 import type { UsageBurnRateResponse, UsageSummaryResponse } from '../components/usage'
@@ -1454,8 +1455,24 @@ export function AgentChatPage({
   const handleCreditEvent = useCallback(() => {
     if (activeAgentId) {
       void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
+      void queryClient.invalidateQueries({ queryKey: ['agent-credit-awareness', activeAgentId], exact: true })
     }
     void queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
+  }, [activeAgentId, queryClient])
+  const handleCreditAwarenessEvent = useCallback((payload: CreditAwarenessPayload) => {
+    if (!payload.agentId) {
+      return
+    }
+    queryClient.setQueryData<CreditAwarenessPayload | undefined>(
+      ['agent-credit-awareness', payload.agentId],
+      (current) => ({
+        ...payload,
+        actions: payload.actions ?? current?.actions,
+      }),
+    )
+    if (payload.agentId === activeAgentId) {
+      void queryClient.invalidateQueries({ queryKey: ['usage-summary', 'agent-chat'], exact: false })
+    }
   }, [activeAgentId, queryClient])
   const handleAgentProfileEvent = useCallback(
     (rawPayload: Record<string, unknown>) => {
@@ -2463,6 +2480,7 @@ export function AgentChatPage({
   const socketSnapshot = useAgentChatSocket(desiredSocketSubscriptions, {
     contextOverride: contextReady ? effectiveContext : null,
     onCreditEvent: handleCreditEvent,
+    onCreditAwarenessEvent: handleCreditAwarenessEvent,
     onAgentProfileEvent: handleAgentProfileEvent,
     onMessageNotificationEvent: handleAgentMessageNotificationEvent,
   })
@@ -2631,6 +2649,12 @@ export function AgentChatPage({
     updateQuickSettings,
     updating: quickSettingsUpdating,
   } = useAgentQuickSettings(activeAgentId, { enabled: allowAgentPanelRequests })
+  const creditAwarenessQuery = useQuery({
+    queryKey: ['agent-credit-awareness', activeAgentId],
+    queryFn: () => fetchCreditAwareness(activeAgentId as string),
+    enabled: Boolean(activeAgentId && allowAgentPanelRequests),
+    staleTime: 20_000,
+  })
   const {
     data: addonsPayload,
     refetch: refetchAddons,
@@ -4534,6 +4558,8 @@ export function AgentChatPage({
         connectionLabel={connectionIndicator.label}
         connectionDetail={connectionIndicator.detail}
         planSnapshot={latestPlanSnapshot}
+        creditAwareness={creditAwarenessQuery.data ?? null}
+        creditAwarenessLoading={creditAwarenessQuery.isLoading}
         agentRoster={sidebarAgents}
         favoriteAgentIds={favoriteAgentIds}
         activeAgentId={activeAgentId}

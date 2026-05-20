@@ -15,6 +15,11 @@ from api.models import (
     PersistentAgentMessage,
     PersistentAgentPlanDeliverable,
 )
+from api.services.plan_usage import (
+    build_work_plan_credit_snapshot,
+    resolve_work_plan_for_update,
+    sync_work_plan_steps,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,22 @@ class PlanMessageDeliverable:
 
 
 @dataclass(frozen=True)
+class PlanStepSnapshot:
+    id: str
+    title: str
+    status: str
+    credits_used: Any
+    started_at: Any = None
+    completed_at: Any = None
+
+
+@dataclass(frozen=True)
+class PlanUsageSnapshot:
+    total_credits: Any
+    current_step_credits: Any
+
+
+@dataclass(frozen=True)
 class PlanSnapshot:
     todo_count: int
     doing_count: int
@@ -65,6 +86,8 @@ class PlanSnapshot:
     done_titles: Sequence[str]
     files: Sequence[PlanFileDeliverable] = ()
     messages: Sequence[PlanMessageDeliverable] = ()
+    steps: Sequence[PlanStepSnapshot] = ()
+    usage: PlanUsageSnapshot | None = None
 
 
 def get_update_plan_tool() -> dict[str, Any]:
@@ -191,9 +214,11 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     plan_items = validation["plan"]
     file_items = validation["files"]
     message_items = validation["messages"]
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
 
     changes: list[PlanStepChange] = []
     with transaction.atomic():
+        work_plan = resolve_work_plan_for_update(agent, plan_items)
         existing_cards = list(
             PersistentAgentKanbanCard.objects.select_for_update()
             .filter(assigned_agent=agent)
@@ -297,6 +322,12 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
             )
             card.delete()
 
+        sync_work_plan_steps(
+            work_plan=work_plan,
+            plan_items=plan_items,
+            will_continue_work=will_continue_work,
+        )
+
         PersistentAgentPlanDeliverable.objects.filter(agent=agent).delete()
         deliverables: list[PersistentAgentPlanDeliverable] = []
         position = 0
@@ -335,7 +366,6 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
         "doing_count": snapshot.doing_count,
         "done_count": snapshot.done_count,
     }
-    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
     if will_continue_work is not None:
         result["auto_sleep_ok"] = not will_continue_work
     return result
@@ -375,6 +405,23 @@ def build_plan_snapshot(agent) -> PlanSnapshot:
                 )
             )
 
+    credit_snapshot = build_work_plan_credit_snapshot(agent)
+    step_snapshots = [
+        PlanStepSnapshot(
+            id=item["id"],
+            title=item["title"],
+            status=item["status"],
+            credits_used=item["credits_used"],
+            started_at=item.get("started_at"),
+            completed_at=item.get("completed_at"),
+        )
+        for item in credit_snapshot["steps"]
+    ]
+    usage = PlanUsageSnapshot(
+        total_credits=credit_snapshot["total_credits"],
+        current_step_credits=credit_snapshot["current_step_credits"],
+    )
+
     return PlanSnapshot(
         todo_count=len(todo_titles),
         doing_count=len(doing_titles),
@@ -384,6 +431,8 @@ def build_plan_snapshot(agent) -> PlanSnapshot:
         done_titles=done_titles,
         files=files,
         messages=messages,
+        steps=step_snapshots,
+        usage=usage,
     )
 
 

@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 
 import { scheduleLoginRedirect } from '../api/http'
 import { useAgentChatStore } from '../stores/agentChatStore'
-import type { AgentMessageNotification } from '../types/agentChat'
+import type { AgentMessageNotification, CreditAwarenessPayload } from '../types/agentChat'
 import { refreshTimelineLatestInCache } from './useTimelineCacheInjector'
 import { usePageLifecycle, type PageLifecycleResumeReason, type PageLifecycleSuspendReason } from './usePageLifecycle'
 import { TIMELINE_STALE_TIME_MS, timelineQueryKey } from './useAgentTimeline'
@@ -72,6 +72,7 @@ export function useAgentChatSocket(
   options: {
     contextOverride?: AgentChatSocketContextOverride
     onCreditEvent?: (payload: Record<string, unknown>) => void
+    onCreditAwarenessEvent?: (payload: CreditAwarenessPayload) => void
     onAgentProfileEvent?: (payload: Record<string, unknown>) => void
     onMessageNotificationEvent?: (payload: AgentMessageNotification) => void
   } = {},
@@ -86,6 +87,7 @@ export function useAgentChatSocket(
   const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
+  const creditAwarenessEventRef = useRef<typeof options.onCreditAwarenessEvent | null>(options.onCreditAwarenessEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
   const messageNotificationEventRef = useRef<typeof options.onMessageNotificationEvent | null>(
     options.onMessageNotificationEvent ?? null,
@@ -102,9 +104,10 @@ export function useAgentChatSocket(
 
   useEffect(() => {
     creditEventRef.current = options.onCreditEvent ?? null
+    creditAwarenessEventRef.current = options.onCreditAwarenessEvent ?? null
     profileEventRef.current = options.onAgentProfileEvent ?? null
     messageNotificationEventRef.current = options.onMessageNotificationEvent ?? null
-  }, [options.onCreditEvent, options.onAgentProfileEvent, options.onMessageNotificationEvent])
+  }, [options.onCreditEvent, options.onCreditAwarenessEvent, options.onAgentProfileEvent, options.onMessageNotificationEvent])
 
   const retryRef = useRef(0)
   const socketRef = useRef<WebSocket | null>(null)
@@ -405,6 +408,7 @@ export function useAgentChatSocket(
             updateAgentIdentity: updateAgentIdentityRef.current,
             receiveStreamEvent: receiveStreamRef.current,
             onCreditEvent: creditEventRef.current,
+            onCreditAwarenessEvent: creditAwarenessEventRef.current,
             onAgentProfileEvent: profileEventRef.current,
             onMessageNotificationEvent: messageNotificationEventRef.current,
           })

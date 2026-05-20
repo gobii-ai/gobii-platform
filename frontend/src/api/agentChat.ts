@@ -6,6 +6,7 @@ import type {
   PendingHumanInputRequestStatus,
   PlanSnapshot,
   ProcessingSnapshot,
+  CreditAwarenessPayload,
   RequestedSecret,
   TimelineEvent,
 } from '../types/agentChat'
@@ -681,6 +682,10 @@ export type StopAgentResponse = {
 export async function fetchProcessingStatus(agentId: string): Promise<ProcessingStatusResponse> {
   const url = `/console/api/agents/${agentId}/processing/`
   return jsonFetch<ProcessingStatusResponse>(url)
+}
+
+export async function fetchCreditAwareness(agentId: string): Promise<CreditAwarenessPayload> {
+  return jsonFetch<CreditAwarenessPayload>(`/console/api/agents/${agentId}/credit-awareness/`)
 }
 
 export async function stopAgentProcessing(agentId: string): Promise<StopAgentResponse> {

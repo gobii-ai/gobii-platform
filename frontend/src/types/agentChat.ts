@@ -262,6 +262,20 @@ export type PlanMessageDeliverable = {
   label?: string | null
 }
 
+export type PlanSnapshotStep = {
+  id: string
+  title: string
+  status: 'todo' | 'doing' | 'done'
+  creditsUsed: number
+  startedAt?: string | null
+  completedAt?: string | null
+}
+
+export type PlanUsageSnapshot = {
+  totalCredits: number
+  currentStepCredits: number
+}
+
 export type PlanSnapshot = {
   todoCount: number
   doingCount: number
@@ -271,6 +285,60 @@ export type PlanSnapshot = {
   doneTitles: string[]
   files?: PlanFileDeliverable[]
   messages?: PlanMessageDeliverable[]
+  steps?: PlanSnapshotStep[]
+  usage?: PlanUsageSnapshot
+}
+
+export type CreditAwarenessPayload = {
+  agentId: string
+  currentPlan?: {
+    id: string
+    status: string
+    title?: string | null
+    startedAt?: string | null
+    completedAt?: string | null
+    creditsUsed: number
+    steps: PlanSnapshotStep[]
+  } | null
+  currentStep?: PlanSnapshotStep | null
+  dailyCredits?: import('./dailyCredits').DailyCreditsInfo | null
+  dailyCreditsStatus?: import('./dailyCredits').DailyCreditsStatus | null
+  quota?: {
+    available: number
+    total: number
+    used: number
+    used_pct: number
+    unlimited?: boolean
+  } | null
+  billingPeriod?: {
+    start: string
+    end: string
+    resetOn?: string | null
+  } | null
+  extraTasks?: { enabled: boolean } | null
+  burnRate?: {
+    owner?: {
+      window_minutes: number
+      window_total: number
+      burn_rate_per_hour: number
+      burn_rate_per_day: number
+      computed_at: string
+    } | null
+    agent?: {
+      window_minutes: number
+      window_total: number
+      burn_rate_per_hour: number
+      burn_rate_per_day: number
+      computed_at: string
+    } | null
+  } | null
+  actions?: {
+    canAdjustDailyLimit?: boolean
+    canOpenTaskPacks?: boolean
+    canOpenUsage?: boolean
+    canOpenIntelligenceSettings?: boolean
+    usageUrl?: string | null
+  } | null
 }
 
 export type PlanEvent = {

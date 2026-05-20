@@ -225,6 +225,7 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
+from console.credit_awareness import build_credit_awareness_payload
 from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, enable_agent_sms_contact
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
@@ -7448,6 +7449,24 @@ class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
                 "status": build_daily_credit_status(context),
             }
         )
+
+
+class AgentCreditAwarenessAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        can_manage = user_can_manage_agent_settings(
+            request.user,
+            agent,
+            allow_delinquent_personal_chat=True,
+        )
+        return JsonResponse(build_credit_awareness_payload(agent, can_manage=can_manage))
 
 
 class AgentSettingsAPIView(ApiLoginRequiredMixin, View):

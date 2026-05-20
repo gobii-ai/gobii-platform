@@ -15,6 +15,8 @@ from api.models import (
     PersistentAgent,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentWorkPlan,
+    PersistentAgentWorkPlanStep,
     TaskCredit,
     UserPreference,
 )
@@ -55,7 +57,7 @@ def _create_api_task(*, user, created_at: datetime, organization=None, credits_c
     return task
 
 @tag("batch_usage_api")
-@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class UsageTrendAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -65,7 +67,7 @@ class UsageTrendAPITests(TestCase):
             password="password123",
         )
         self.client.force_login(self.user)
-        _grant_task_credits(user=self.user)
+        _grant_task_credits(user=self.user, credits=Decimal("1000"))
         self.agent_primary = BrowserUseAgent.objects.create(user=self.user, name="Primary")
         self.agent_secondary = BrowserUseAgent.objects.create(user=self.user, name="Secondary")
 
@@ -209,7 +211,7 @@ class UsageTrendAPITests(TestCase):
         self.assertIn(3, current_counts)
 
 @tag("batch_usage_api")
-@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class UsageAgentLeaderboardAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -370,7 +372,7 @@ class UsageAgentLeaderboardAPITests(TestCase):
         self.assertFalse(secondary.get("is_deleted"))
 
 @tag("batch_usage_api")
-@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class UsageToolBreakdownAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -601,7 +603,7 @@ class UsageToolBreakdownAPITests(TestCase):
 
 
 @tag("batch_usage_api")
-@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class UsageAgentsAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -715,7 +717,103 @@ class UsageAgentsAPITests(TestCase):
 
 
 @tag("batch_usage_api")
-@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True)
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+class UsageWorkPlansAPITests(TestCase):
+    def setUp(self):
+        User = get_user_model()
+        self.user = User.objects.create_user(
+            username="workplans@example.com",
+            email="workplans@example.com",
+            password="password123",
+        )
+        self.client.force_login(self.user)
+        _grant_task_credits(user=self.user)
+        self.browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Plan Agent")
+        self.persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Plan Persistent Agent",
+            charter="Plan charter",
+            browser_use_agent=self.browser_agent,
+        )
+
+    def test_work_plans_api_returns_personal_plan_credit_breakdown(self):
+        work_plan = PersistentAgentWorkPlan.objects.create(
+            agent=self.persistent_agent,
+            title="Research sources",
+            status=PersistentAgentWorkPlan.Status.ACTIVE,
+        )
+        first_step = PersistentAgentWorkPlanStep.objects.create(
+            work_plan=work_plan,
+            title="Research sources",
+            normalized_title="research sources",
+            status=PersistentAgentWorkPlanStep.Status.DOING,
+            position=0,
+        )
+        second_step = PersistentAgentWorkPlanStep.objects.create(
+            work_plan=work_plan,
+            title="Deliver report",
+            normalized_title="deliver report",
+            status=PersistentAgentWorkPlanStep.Status.TODO,
+            position=1,
+        )
+        PersistentAgentStep.objects.create(
+            agent=self.persistent_agent,
+            description="Research",
+            credits_cost=Decimal("0.75"),
+            work_plan=work_plan,
+            work_plan_step=first_step,
+        )
+        PersistentAgentStep.objects.create(
+            agent=self.persistent_agent,
+            description="Draft",
+            credits_cost=Decimal("0.25"),
+            work_plan=work_plan,
+            work_plan_step=second_step,
+        )
+
+        response = self.client.get(reverse("console_usage_work_plans"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(len(payload["plans"]), 1)
+        plan = payload["plans"][0]
+        self.assertEqual(plan["id"], str(work_plan.id))
+        self.assertEqual(plan["agentId"], str(self.browser_agent.id))
+        self.assertEqual(plan["agentName"], "Plan Agent")
+        self.assertEqual(plan["status"], PersistentAgentWorkPlan.Status.ACTIVE)
+        self.assertAlmostEqual(plan["creditsUsed"], 1.0)
+        self.assertEqual([step["title"] for step in plan["steps"]], ["Research sources", "Deliver report"])
+        self.assertAlmostEqual(plan["steps"][0]["creditsUsed"], 0.75)
+
+    def test_work_plans_api_respects_agent_filter(self):
+        other_browser_agent = BrowserUseAgent.objects.create(user=self.user, name="Other Agent")
+        other_persistent_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Other Persistent Agent",
+            charter="Other charter",
+            browser_use_agent=other_browser_agent,
+        )
+        included_plan = PersistentAgentWorkPlan.objects.create(agent=self.persistent_agent, title="Included")
+        PersistentAgentWorkPlan.objects.create(agent=other_persistent_agent, title="Excluded")
+        PersistentAgentStep.objects.create(
+            agent=self.persistent_agent,
+            description="Included",
+            credits_cost=Decimal("0.5"),
+            work_plan=included_plan,
+        )
+
+        response = self.client.get(
+            reverse("console_usage_work_plans"),
+            {"agent": str(self.browser_agent.id)},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([plan["id"] for plan in payload["plans"]], [str(included_plan.id)])
+
+
+@tag("batch_usage_api")
+@override_settings(FIRST_RUN_SETUP_ENABLED=False, LLM_BOOTSTRAP_OPTIONAL=True, PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class UsageSummaryAPITests(TestCase):
     def setUp(self):
         User = get_user_model()
@@ -797,6 +895,7 @@ class UsageSummaryAPITests(TestCase):
         payload = response.json()
         self.assertEqual(payload["period"]["timezone"], "America/Los_Angeles")
         self.assertAlmostEqual(payload["metrics"]["todayCredits"]["total"], 1.5)
+        self.assertTrue(payload["metrics"]["todayCredits"]["resetAt"].startswith("2024-05-03T00:00:00-07:00"))
 
     def test_org_summary_includes_org_quota_and_reset_date(self):
         period_start, period_end = BillingService.get_current_billing_period_for_owner(self.organization)

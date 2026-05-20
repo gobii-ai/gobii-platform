@@ -5,11 +5,12 @@ import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, Me
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
+import { CreditUsageCircle } from './CreditUsageCircle'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
 import { PendingActionComposerPanel } from './PendingActionComposerPanel'
 import { HUMAN_INPUT_OTHER_OPTION_KEY } from './HumanInputComposerPanel'
 import { orderHumanInputRequests } from './humanInputOrdering'
-import type { PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
+import type { CreditAwarenessPayload, PendingActionRequest, PendingHumanInputRequest, ProcessingWebTask } from '../../types/agentChat'
 import type { InsightEvent, BurnRateMetadata, AgentSetupMetadata } from '../../types/insight'
 import { INSIGHT_TIMING } from '../../types/insight'
 import { useSubscriptionStore } from '../../stores/subscriptionStore'
@@ -333,6 +334,8 @@ type AgentComposerProps = {
   intelligenceBusy?: boolean
   intelligenceError?: string | null
   onOpenTaskPacks?: () => void
+  creditAwareness?: CreditAwarenessPayload | null
+  onCreditOpen?: () => void
   canManageAgent?: boolean
   onStopProcessing?: () => void | Promise<void>
   stopProcessingBusy?: boolean
@@ -388,6 +391,8 @@ export const AgentComposer = memo(function AgentComposer({
   intelligenceBusy = false,
   intelligenceError = null,
   onOpenTaskPacks,
+  creditAwareness = null,
+  onCreditOpen,
   canManageAgent = true,
   onStopProcessing,
   stopProcessingBusy = false,
@@ -1396,6 +1401,11 @@ export const AgentComposer = memo(function AgentComposer({
         )}
       </div>
       <div className="composer-utility-row__actions">
+        <CreditUsageCircle
+          className="composer-credit-usage"
+          creditAwareness={creditAwareness}
+          onOpen={onCreditOpen}
+        />
         {showIntelligenceSelector ? (
           <AgentIntelligenceSelector
             config={intelligenceConfig as LlmIntelligenceConfig}

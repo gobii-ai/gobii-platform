@@ -7,12 +7,18 @@ type PlanTaskItemProps = {
   title: string
   status: PlanTaskStatus
   isAgentWorking: boolean
+  creditsUsed?: number | null
 }
 
-export const PlanTaskItem = memo(function PlanTaskItem({ title, status, isAgentWorking }: PlanTaskItemProps) {
+const creditFormatter = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 1,
+})
+
+export const PlanTaskItem = memo(function PlanTaskItem({ title, status, isAgentWorking, creditsUsed = null }: PlanTaskItemProps) {
   const isDoing = status === 'doing'
   const isPausedDoing = isDoing && !isAgentWorking
   const workState = isDoing ? (isPausedDoing ? 'paused' : 'active') : undefined
+  const showCredits = typeof creditsUsed === 'number' && Number.isFinite(creditsUsed) && creditsUsed > 0
 
   return (
     <li className="plan-panel-task" data-status={status} data-work-state={workState}>
@@ -27,7 +33,12 @@ export const PlanTaskItem = memo(function PlanTaskItem({ title, status, isAgentW
           <Circle size={14} strokeWidth={2.2} />
         )}
       </span>
-      <span className="plan-panel-task-title">{title}</span>
+      <span className="plan-panel-task-copy">
+        <span className="plan-panel-task-title">{title}</span>
+        {showCredits ? (
+          <span className="plan-panel-task-credits">{creditFormatter.format(creditsUsed)} credits</span>
+        ) : null}
+      </span>
     </li>
   )
 })

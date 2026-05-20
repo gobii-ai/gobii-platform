@@ -7816,6 +7816,81 @@ class PersistentAgentKanbanEventChange(models.Model):
         return f"KanbanEventChange<{self.action}:{self.card_id}>"
 
 
+class PersistentAgentWorkPlan(models.Model):
+    """Durable user-visible work run for plan-aware usage attribution."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        COMPLETED = "completed", "Completed"
+        SUPERSEDED = "superseded", "Superseded"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    agent = models.ForeignKey(
+        PersistentAgent,
+        on_delete=models.CASCADE,
+        related_name="work_plans",
+    )
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.ACTIVE)
+    title = models.CharField(max_length=255, blank=True)
+    started_at = models.DateTimeField(default=timezone.now)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    superseded_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["agent"],
+                condition=Q(status="active"),
+                name="uniq_active_work_plan_per_agent",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["agent", "status", "-started_at"], name="pa_work_plan_status_idx"),
+            models.Index(fields=["agent", "-started_at"], name="pa_work_plan_recent_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"WorkPlan<{self.agent_id}> {self.status}"
+
+
+class PersistentAgentWorkPlanStep(models.Model):
+    """Historical plan step used for usage attribution across plan mutations."""
+
+    class Status(models.TextChoices):
+        TODO = "todo", "To Do"
+        DOING = "doing", "Doing"
+        DONE = "done", "Done"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    work_plan = models.ForeignKey(
+        PersistentAgentWorkPlan,
+        on_delete=models.CASCADE,
+        related_name="steps",
+    )
+    title = models.CharField(max_length=255)
+    normalized_title = models.CharField(max_length=255)
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.TODO)
+    position = models.PositiveSmallIntegerField(default=0)
+    started_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["position", "created_at"]
+        indexes = [
+            models.Index(fields=["work_plan", "status", "position"], name="pa_work_step_status_idx"),
+            models.Index(fields=["work_plan", "normalized_title"], name="pa_work_step_title_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"WorkPlanStep<{self.status}:{self.title}>"
+
+
 class PersistentAgentPlanDeliverable(models.Model):
     """Current plan deliverable referenced by an agent."""
 
@@ -12304,6 +12379,22 @@ class PersistentAgentStep(models.Model):
         blank=True,
         related_name="agent_steps",
     )
+    work_plan = models.ForeignKey(
+        "PersistentAgentWorkPlan",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_steps",
+        help_text="Active user-visible work plan at the time this charged step was created.",
+    )
+    work_plan_step = models.ForeignKey(
+        "PersistentAgentWorkPlanStep",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="agent_steps",
+        help_text="Active user-visible work plan step at the time this charged step was created.",
+    )
 
     # Free-form narrative or data for non-tool steps
     description = models.TextField(
@@ -12333,6 +12424,8 @@ class PersistentAgentStep(models.Model):
             models.Index(fields=["agent", "-created_at"], name="pa_step_recent_idx"),
             # Ascending order index to support compaction filter/order queries
             models.Index(fields=["agent", "created_at", "id"], name="pa_step_agent_ts_idx"),
+            models.Index(fields=["work_plan", "created_at"], name="pa_step_work_plan_idx"),
+            models.Index(fields=["work_plan_step", "created_at"], name="pa_step_work_step_idx"),
         ]
 
     def __str__(self):
@@ -12367,12 +12460,21 @@ class PersistentAgentStep(models.Model):
             should_charge = self.credits_cost is not None or completion_requires_billing
 
             if owner is not None and should_charge:
+                bypass_signup_preview = can_bypass_task_credit_for_signup_preview(self.agent)
+                if not bypass_signup_preview and self.work_plan_id is None:
+                    try:
+                        from api.services.plan_usage import attach_active_work_plan_to_step
+
+                        attach_active_work_plan_to_step(self)
+                    except (ImportError, InternalError, OperationalError, ProgrammingError):
+                        logger.debug("Failed to attach active work plan to step for agent %s", self.agent_id, exc_info=True)
+
                 if self.task_credit_id is not None:
                     # Credits were already consumed upstream (e.g., just-in-time tool gating).
                     # Do NOT consume again; keep the existing linkage for audit.
                     if completion_to_mark is not None and self.credits_cost is not None:
                         completion_mark_amount = self.credits_cost
-                elif can_bypass_task_credit_for_signup_preview(self.agent):
+                elif bypass_signup_preview:
                     # Signup preview's first reply window is intentionally free. Persist the
                     # step/completion without consuming credits so the preview can finish.
                     completion_mark_amount = None

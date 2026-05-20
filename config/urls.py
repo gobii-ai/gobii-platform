@@ -41,6 +41,7 @@ from console.api_views import (
     AgentSuggestionsAPIView,
     AgentProcessingStatusAPIView,
     AgentStopAPIView,
+    AgentCreditAwarenessAPIView,
     AgentDailyCreditsAPIView,
     AgentAddonsAPIView,
     AgentSettingsAPIView,
@@ -204,6 +205,7 @@ from console.usage_views import (
     UsageTrendAPIView,
     UsageToolBreakdownAPIView,
     UsageAgentLeaderboardAPIView,
+    UsageWorkPlansAPIView,
     UsageAgentsAPIView,
 )
 from console.insight_views import AgentInsightsAPIView
@@ -576,6 +578,7 @@ urlpatterns = [
     path("console/api/agents/<uuid:agent_id>/web-sessions/start/", AgentWebSessionStartAPIView.as_view(), name="console_agent_web_session_start"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/heartbeat/", AgentWebSessionHeartbeatAPIView.as_view(), name="console_agent_web_session_heartbeat"),
     path("console/api/agents/<uuid:agent_id>/web-sessions/end/", AgentWebSessionEndAPIView.as_view(), name="console_agent_web_session_end"),
+    path("console/api/agents/<uuid:agent_id>/credit-awareness/", AgentCreditAwarenessAPIView.as_view(), name="console_agent_credit_awareness"),
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/", AgentPipedreamAppsAPIView.as_view(), name="console-agent-pipedream-apps"),
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/", AgentPipedreamAppAPIView.as_view(), name="console-agent-pipedream-app"),
     path("console/api/agents/<uuid:agent_id>/pipedream/apps/<slug:app_slug>/connect/", AgentPipedreamAppConnectAPIView.as_view(), name="console-agent-pipedream-app-connect"),
@@ -587,6 +590,7 @@ urlpatterns = [
     path("console/api/usage/trends/", UsageTrendAPIView.as_view(), name="console_usage_trends"),
     path("console/api/usage/tools/", UsageToolBreakdownAPIView.as_view(), name="console_usage_tools"),
     path("console/api/usage/agents/leaderboard/", UsageAgentLeaderboardAPIView.as_view(), name="console_usage_agents_leaderboard"),
+    path("console/api/usage/work-plans/", UsageWorkPlansAPIView.as_view(), name="console_usage_work_plans"),
     path("console/api/evals/suites/", EvalSuiteListAPIView.as_view(), name="console_evals_suites"),
     path("console/api/evals/global-skill-launcher/", GlobalSkillEvalLauncherAPIView.as_view(), name="console_evals_global_skill_launcher"),
     path("console/api/evals/global-skill-runs/create/", GlobalSkillEvalRunCreateAPIView.as_view(), name="console_evals_global_skill_runs_create"),

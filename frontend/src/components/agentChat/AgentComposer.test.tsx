@@ -186,6 +186,60 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
   })
 
+  it('opens credit usage from the composer control row', () => {
+    const handleCreditOpen = vi.fn()
+
+    renderAgentComposer({
+      onCreditOpen: handleCreditOpen,
+      creditAwareness: {
+        agentId: 'agent-1',
+        currentPlan: null,
+        currentStep: null,
+        dailyCredits: {
+          limit: 10,
+          hardLimit: 20,
+          usage: 3,
+          remaining: 17,
+          softRemaining: 7,
+          unlimited: false,
+          percentUsed: 15,
+          softPercentUsed: 30,
+          nextResetIso: null,
+          nextResetLabel: null,
+          low: false,
+          sliderMin: 1,
+          sliderMax: 100,
+          sliderLimitMax: 50,
+          sliderStep: 1,
+          sliderValue: 10,
+          sliderEmptyValue: 100,
+          standardSliderLimit: 50,
+        },
+        quota: {
+          available: 22,
+          total: 25,
+          used: 3,
+          used_pct: 12,
+          unlimited: false,
+        },
+        burnRate: null,
+        actions: {
+          canAdjustDailyLimit: true,
+          canOpenTaskPacks: true,
+          canOpenUsage: true,
+          canOpenIntelligenceSettings: true,
+        },
+      },
+    })
+
+    const usageButton = screen.getByRole('button', { name: /Show credit usage/i })
+    expect(usageButton).toHaveAttribute('title', '30% used today. 12% used total.')
+
+    fireEvent.click(usageButton)
+
+    expect(handleCreditOpen).toHaveBeenCalledTimes(1)
+  })
+
   it('auto-expands when pending requests arrive despite a collapsed insight preference', async () => {
     const { rerender } = renderAgentComposer({
       insightsPanelExpandedPreference: false,

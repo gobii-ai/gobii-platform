@@ -35,6 +35,7 @@ export type UsageSummaryResponse = {
     todayCredits?: {
       total: number
       unit: string
+      resetAt?: string
     }
     quota: {
       available: number
@@ -87,7 +88,7 @@ export type UsageBurnRateResponse = {
 export type UsageBurnRateQueryInput = { tier?: string; window?: number }
 
 export type MetricDefinition = {
-  id: 'tasks' | 'tasks_per_day' | 'credits' | 'quota'
+  id: 'today_credits' | 'month_credits' | 'credits_remaining'
   label: string
   baseCaption: string
 }
@@ -190,3 +191,29 @@ export type UsageAgentLeaderboardResponse = {
 }
 
 export type UsageAgentLeaderboardQueryInput = UsageSummaryQueryInput
+
+export type UsageWorkPlanStep = {
+  id: string
+  title: string
+  status: 'todo' | 'doing' | 'done'
+  creditsUsed: number
+  startedAt?: string | null
+  completedAt?: string | null
+}
+
+export type UsageWorkPlan = {
+  id: string
+  agentId: string
+  agentName: string
+  status: 'active' | 'completed' | 'superseded'
+  startedAt?: string | null
+  completedAt?: string | null
+  creditsUsed: number
+  steps: UsageWorkPlanStep[]
+}
+
+export type UsageWorkPlansResponse = {
+  plans: UsageWorkPlan[]
+}
+
+export type UsageWorkPlansQueryInput = UsageSummaryQueryInput

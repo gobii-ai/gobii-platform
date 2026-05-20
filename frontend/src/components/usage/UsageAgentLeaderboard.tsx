@@ -144,6 +144,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   )
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'tasksTotal', desc: true }])
+  const [expanded, setExpanded] = useState(false)
 
   const queryInput = useMemo<UsageAgentLeaderboardQueryInput | null>(() => {
     if (!baseRange) {
@@ -328,6 +329,9 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.id,
   })
+  const sortedRows = table.getRowModel().rows
+  const visibleRows = expanded ? sortedRows : sortedRows.slice(0, 5)
+  const hasMoreRows = sortedRows.length > 5
 
   const sectionClassName = embedded
     ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
@@ -404,7 +408,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map((row) => (
+              visibleRows.map((row) => (
                 <tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <td
@@ -420,6 +424,19 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
           </tbody>
         </table>
       </div>
+      {hasMoreRows ? (
+        <div className={embedded ? 'px-6 py-4' : 'px-6 py-4'}>
+          <button
+            type="button"
+            className={embedded
+              ? 'text-sm font-semibold text-sky-300 hover:text-sky-200'
+              : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? 'Show fewer' : `Show ${sortedRows.length - 5} more`}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

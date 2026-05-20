@@ -5,11 +5,13 @@ from django.utils import timezone
 from datetime import timedelta
 from unittest.mock import patch
 
+from api.agent.tools.plan import execute_update_plan
 from api.models import (
     BrowserUseAgent,
     PersistentAgent,
     PersistentAgentCompletion,
     PersistentAgentStep,
+    PersistentAgentWorkPlanStep,
     TaskCredit,
     TaskCreditConfig,
     Organization,
@@ -39,6 +41,14 @@ class PersistentAgentStepCreditsTests(TestCase):
             name="Agent",
             charter="do things",
             browser_use_agent=self.browser_agent,
+        )
+        TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("10.000"),
+            credits_used=Decimal("0.000"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            voided=False,
         )
 
     def test_step_creation_consumes_credits_and_sets_fields(self):
@@ -202,3 +212,28 @@ class PersistentAgentStepCreditsTests(TestCase):
         self.assertIsNone(step.credits_cost)
         self.assertTrue(completion.billed)
         self.assertIsNone(completion.credits_cost)
+
+    def test_charged_step_attaches_active_work_plan_and_current_step(self):
+        result = execute_update_plan(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research sources", "status": "doing"},
+                    {"step": "Deliver report", "status": "todo"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+        self.assertEqual(result["status"], "ok")
+
+        step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Charged reasoning",
+            credits_cost=Decimal("0.25"),
+        )
+        step.refresh_from_db()
+
+        self.assertIsNotNone(step.work_plan_id)
+        self.assertIsNotNone(step.work_plan_step_id)
+        self.assertEqual(step.work_plan_step.title, "Research sources")
+        self.assertEqual(step.work_plan_step.status, PersistentAgentWorkPlanStep.Status.DOING)

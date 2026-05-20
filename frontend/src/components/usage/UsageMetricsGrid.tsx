@@ -1,6 +1,5 @@
 import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { parseDate } from '@internationalized/date'
 
 import { fetchUsageSummary } from './api'
 import { useUsageStore } from './store'
@@ -13,19 +12,19 @@ import type {
 
 const metricDefinitions: MetricDefinition[] = [
   {
-    id: 'credits',
-    label: 'Credits consumed',
-    baseCaption: 'Sum of task credits charged during this billing period.',
+    id: 'today_credits',
+    label: 'Credits used today',
+    baseCaption: 'Credits consumed since today started.',
   },
   {
-    id: 'tasks_per_day',
-    label: 'Average credits per day',
-    baseCaption: 'Average task credits billed per day in the selected billing period.',
+    id: 'month_credits',
+    label: 'Credits used this month',
+    baseCaption: 'Credits consumed in the current billing period.',
   },
   {
-    id: 'quota',
-    label: 'Current billing quota',
-    baseCaption: 'Remaining task credits for the active billing cycle (not affected by date filters).',
+    id: 'credits_remaining',
+    label: 'Credits remaining',
+    baseCaption: 'Credits left in the active billing cycle.',
   },
 ]
 
@@ -81,25 +80,40 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
 
   const resolvedSummary = data ?? summary
 
-  const periodDayCount = useMemo(() => {
-    const from = queryInput.from ?? resolvedSummary?.period.start
-    const to = queryInput.to ?? resolvedSummary?.period.end
-    if (!from || !to) {
-      return null
+  const todayResetLabel = useMemo(() => {
+    const resetAt = resolvedSummary?.metrics.todayCredits?.resetAt
+    if (!resolvedSummary?.period.timezone || !resetAt) {
+      return 'Resets at midnight'
     }
+    const reset = new Date(resetAt)
+    if (Number.isNaN(reset.getTime())) {
+      return 'Resets at midnight'
+    }
+    const resetTime = new Intl.DateTimeFormat(undefined, {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: resolvedSummary.period.timezone,
+    }).format(reset).replace('AM', 'am').replace('PM', 'pm')
+    return `Resets ${resetTime}`
+  }, [resolvedSummary?.metrics.todayCredits?.resetAt, resolvedSummary?.period.timezone])
 
-    try {
-      const startDate = parseDate(from)
-      const endDate = parseDate(to)
-      const startJulian = startDate.calendar.toJulianDay(startDate)
-      const endJulian = endDate.calendar.toJulianDay(endDate)
-      const span = endJulian - startJulian + 1
-      return span > 0 ? span : null
-    } catch (error) {
-      console.error('Failed to compute period length in days', error)
-      return null
+  const billingResetLabel = useMemo(() => {
+    const resetOn = resolvedSummary?.period.resetOn
+    if (!resetOn) {
+      return 'Reset date unavailable'
     }
-  }, [queryInput.from, queryInput.to, resolvedSummary])
+    const [year, month, day] = resetOn.split('-').map((part) => Number(part))
+    const resetDate = year && month && day
+      ? new Date(year, month - 1, day, 12)
+      : new Date(resetOn)
+    if (Number.isNaN(resetDate.getTime())) {
+      return 'Reset date unavailable'
+    }
+    return `Resets ${new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+    }).format(resetDate)}`
+  }, [resolvedSummary?.period.resetOn])
 
   const cards = useMemo<MetricCard[]>(() => {
     return metricDefinitions.map((metric) => {
@@ -118,47 +132,34 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
         caption = 'Unable to load this metric. Refresh to retry.'
       } else if (resolvedSummary) {
         switch (metric.id) {
-          case 'tasks': {
-            const completed = resolvedSummary.metrics.tasks.completed
-            const active = resolvedSummary.metrics.tasks.in_progress + resolvedSummary.metrics.tasks.pending
-            value = creditFormatter.format(resolvedSummary.metrics.tasks.count)
-            caption = `Completed ${creditFormatter.format(completed)} credits · Active ${creditFormatter.format(active)} credits`
+          case 'today_credits': {
+            value = creditFormatter.format(resolvedSummary.metrics.todayCredits?.total ?? 0)
+            caption = todayResetLabel
             break
           }
-          case 'tasks_per_day': {
-            const totalTasks = resolvedSummary.metrics.tasks.count
-            if (periodDayCount && periodDayCount > 0) {
-              const average = totalTasks / periodDayCount
-              value = creditFormatter.format(average)
-              const pluralSuffix = periodDayCount === 1 ? '' : 's'
-              caption = `${creditFormatter.format(totalTasks)} credits across ${periodDayCount} day${pluralSuffix}.`
-            } else {
-              value = '—'
-              caption = 'Unable to determine the period length for this metric.'
-            }
-            break
-          }
-          case 'credits': {
+          case 'month_credits': {
             value = creditFormatter.format(resolvedSummary.metrics.credits.total)
-            caption = 'Credits billed across all tasks in this billing period.'
+            const usedPct = resolvedSummary.metrics.quota.used_pct
+            caption = Number.isFinite(usedPct)
+              ? `${Math.round(usedPct)}% of billing credits used. ${billingResetLabel}.`
+              : billingResetLabel
             break
           }
-          case 'quota': {
+          case 'credits_remaining': {
             const available = resolvedSummary.metrics.quota.available
             const total = resolvedSummary.metrics.quota.total
             const used = resolvedSummary.metrics.quota.used
             const usedPctRaw = resolvedSummary.metrics.quota.used_pct
             const usedPct = Number.isFinite(usedPctRaw) ? Math.round(usedPctRaw) : 0
             const unlimitedQuota = total < 0 || available < 0
-            const quotaCaptionSuffix = 'Current billing cycle; date filters do not change this value.'
 
             if (unlimitedQuota) {
               value = '∞'
-              caption = `Unlimited task credits. ${quotaCaptionSuffix}`
+              caption = `Unlimited task credits. ${billingResetLabel}.`
             } else if (total > 0) {
               value = creditFormatter.format(available)
 
-              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used). ${quotaCaptionSuffix}`
+              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits. ${billingResetLabel}.`
               progressPct = Math.max(0, Math.min(100, usedPct))
               if (progressPct >= 100) {
                 progressClass = 'bg-gradient-to-r from-red-400 to-red-500'
@@ -188,7 +189,7 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
         progressClass,
       }
     })
-  }, [creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
+  }, [billingResetLabel, creditFormatter, embedded, isError, isPending, resolvedSummary, todayResetLabel])
 
   const cardClassName = embedded
     ? 'flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 bg-slate-950/35 p-5'
@@ -200,7 +201,7 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   const progressTrackClassName = embedded ? 'relative h-2 rounded-full bg-slate-900/70' : 'relative h-2 rounded-full bg-white/50'
 
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className="grid gap-4 md:grid-cols-3">
       {cards.map((card) => (
         <article
           key={card.id}

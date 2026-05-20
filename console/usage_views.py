@@ -22,12 +22,19 @@ from api.models import (
     Organization,
     PersistentAgentStep,
     PersistentAgentToolCall,
+    PersistentAgentWorkPlan,
+    PersistentAgentWorkPlanStep,
     UserPreference,
 )
 from api.agent.core.llm_config import get_credit_multiplier_for_tier
 from api.services.burn_rate_snapshots import (
     get_burn_rate_snapshot_for_owner,
     serialize_burn_rate_snapshot,
+)
+from api.services.plan_usage import (
+    decimal_to_float,
+    iso_value,
+    serialize_work_plan_step_model,
 )
 from console.context_helpers import build_console_context
 from util.constants.task_constants import TASKS_UNLIMITED
@@ -436,6 +443,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
 
         now_local = timezone.now().astimezone(tz)
         today_start_dt = datetime.combine(now_local.date(), time.min, tzinfo=tz)
+        today_reset_dt = datetime.combine(now_local.date() + timedelta(days=1), time.min, tzinfo=tz)
         today_status_credit_totals, today_persistent_credit_total = _calculate_credit_totals(
             user=request.user,
             organization=organization,
@@ -492,6 +500,7 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
                 "todayCredits": {
                     "total": float(today_credit_total),
                     "unit": "credits",
+                    "resetAt": today_reset_dt.isoformat(),
                 },
                 "quota": quota_payload,
             },
@@ -1135,6 +1144,117 @@ class UsageAgentLeaderboardAPIView(LoginRequiredMixin, View):
         }
 
         return JsonResponse(payload)
+
+
+class UsageWorkPlansAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        resolved = build_console_context(request)
+        organization = None
+        if resolved.current_context.type == "organization" and resolved.current_membership:
+            organization = resolved.current_membership.org
+
+        requested_start = _parse_query_date(request.GET.get("from"))
+        requested_end = _parse_query_date(request.GET.get("to"))
+        agent_filters_raw = request.GET.getlist("agent")
+        accessible_agents = _get_accessible_agents(request, organization)
+        (
+            filtered_agent_ids,
+            _actual_agent_ids,
+            include_api,
+            selected_agents,
+            persistent_agent_ids,
+        ) = _resolve_agent_selection(agent_filters_raw, accessible_agents)
+
+        if include_api and not persistent_agent_ids and filtered_agent_ids:
+            return JsonResponse({"plans": []})
+
+        tz = _resolve_usage_timezone(request.user)
+        if requested_start and requested_end and requested_start <= requested_end:
+            start_dt = datetime.combine(requested_start, time.min, tzinfo=tz)
+            end_dt = datetime.combine(requested_end, time.max, tzinfo=tz)
+        else:
+            owner = organization or request.user
+            period_start, period_end = BillingService.get_current_billing_period_for_owner(owner)
+            start_dt = datetime.combine(period_start, time.min, tzinfo=tz)
+            end_dt = datetime.combine(period_end, time.max, tzinfo=tz)
+
+        filters: dict[str, object] = {
+            "started_at__gte": start_dt,
+            "started_at__lte": end_dt,
+        }
+        if organization is not None:
+            filters["agent__organization"] = organization
+        else:
+            filters["agent__user"] = request.user
+            filters["agent__organization__isnull"] = True
+
+        plans_qs = PersistentAgentWorkPlan.objects.filter(**filters).select_related("agent", "agent__browser_use_agent")
+        if persistent_agent_ids:
+            plans_qs = plans_qs.filter(agent_id__in=persistent_agent_ids)
+        elif filtered_agent_ids:
+            plans_qs = PersistentAgentWorkPlan.objects.none()
+
+        persistent_to_descriptor = {
+            str(agent.persistent_agent_id): agent
+            for agent in selected_agents
+            if agent.persistent_agent_id is not None
+        }
+        zero_value = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+        plans = list(
+            plans_qs.annotate(
+                credits_used=Coalesce(Sum("agent_steps__credits_cost"), zero_value),
+            )
+            .order_by("-started_at")[:50]
+        )
+        plan_ids = [plan.id for plan in plans]
+        step_credit_rows = (
+            PersistentAgentStep.objects.filter(
+                work_plan_id__in=plan_ids,
+                work_plan_step_id__isnull=False,
+                credits_cost__isnull=False,
+            )
+            .values("work_plan_step_id")
+            .annotate(total=Coalesce(Sum("credits_cost"), zero_value))
+        )
+        step_credit_map = {
+            str(row["work_plan_step_id"]): row.get("total") or DECIMAL_ZERO
+            for row in step_credit_rows
+        }
+        steps_by_plan: dict[str, list[PersistentAgentWorkPlanStep]] = {str(plan_id): [] for plan_id in plan_ids}
+        for step in PersistentAgentWorkPlanStep.objects.filter(work_plan_id__in=plan_ids).order_by("position", "created_at"):
+            steps_by_plan.setdefault(str(step.work_plan_id), []).append(step)
+
+        payload_plans = []
+        for plan in plans:
+            descriptor = persistent_to_descriptor.get(str(plan.agent_id))
+            browser_agent = getattr(plan.agent, "browser_use_agent", None)
+            agent_id = descriptor.id if descriptor is not None else str(getattr(browser_agent, "id", plan.agent_id))
+            agent_name = descriptor.name if descriptor is not None else (plan.agent.name or "Agent")
+            serialized_steps = []
+            for step in steps_by_plan.get(str(plan.id), []):
+                serialized_steps.append(
+                    serialize_work_plan_step_model(
+                        step,
+                        credits_used=step_credit_map.get(str(step.id)),
+                    )
+                )
+            payload_plans.append(
+                {
+                    "id": str(plan.id),
+                    "agentId": agent_id,
+                    "agentName": agent_name,
+                    "status": plan.status,
+                    "startedAt": iso_value(plan.started_at),
+                    "completedAt": iso_value(plan.completed_at),
+                    "creditsUsed": decimal_to_float(getattr(plan, "credits_used", DECIMAL_ZERO)),
+                    "steps": serialized_steps,
+                    "deliverables": [],
+                }
+            )
+
+        return JsonResponse({"plans": payload_plans})
 
 
 class UsageAgentsAPIView(LoginRequiredMixin, View):

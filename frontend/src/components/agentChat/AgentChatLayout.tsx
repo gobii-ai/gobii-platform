@@ -34,6 +34,7 @@ import type {
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
+  CreditAwarenessPayload,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
 import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
@@ -161,6 +162,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
   autoFocusComposer?: boolean
   planSnapshot?: PlanSnapshot | null
+  creditAwareness?: CreditAwarenessPayload | null
+  creditAwarenessLoading?: boolean
   footer?: ReactNode
   galleryShellPage?: SelectionShellPage
   galleryShellPanel?: ReactNode
@@ -339,6 +342,8 @@ export function AgentChatLayout({
   onSidebarNotificationsEnabledChange,
   autoFocusComposer = false,
   planSnapshot,
+  creditAwareness = null,
+  creditAwarenessLoading = false,
   footer,
   galleryShellPage = 'agents',
   galleryShellPanel = null,
@@ -1635,6 +1640,8 @@ export function AgentChatLayout({
               intelligenceBusy={llmTierSaving}
               intelligenceError={llmTierError}
               onOpenTaskPacks={resolvedOpenTaskPacks}
+              creditAwareness={creditAwareness}
+              onCreditOpen={showPlanInterface ? handleOpenPlan : undefined}
               canManageAgent={canManageAgent}
               onStopProcessing={onStopProcessing}
               stopProcessingBusy={stopProcessingBusy}
@@ -1664,7 +1671,13 @@ export function AgentChatLayout({
               {showDesktopPlanPanel ? (
                 <PlanPanel
                   plan={renderedPlanSnapshot}
+                  creditAwareness={creditAwareness}
+                  creditAwarenessLoading={creditAwarenessLoading}
                   onMessageClick={handlePlanMessageClick}
+                  onOpenUsage={onOpenUsage}
+                  onOpenSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
+                  onOpenTaskPacks={resolvedOpenTaskPacks}
+                  onOpenIntelligenceSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
                   isAgentWorking={isWorkingNow}
                 />
               ) : null}
@@ -1683,7 +1696,13 @@ export function AgentChatLayout({
       >
         <PlanPanel
           plan={displayPlanSnapshot}
+          creditAwareness={creditAwareness}
+          creditAwarenessLoading={creditAwarenessLoading}
           onMessageClick={handlePlanMessageClick}
+          onOpenUsage={onOpenUsage}
+          onOpenSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
+          onOpenTaskPacks={resolvedOpenTaskPacks}
+          onOpenIntelligenceSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
           compact
           isAgentWorking={isWorkingNow}
         />

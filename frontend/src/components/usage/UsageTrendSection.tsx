@@ -20,37 +20,37 @@ import { getRangeLengthInDays } from './utils'
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
-const agentSeriesColors = [
-  '#2563eb',
-  '#f97316',
-  '#14b8a6',
-  '#6366f1',
-  '#ef4444',
-  '#0ea5e9',
-  '#facc15',
-  '#a855f7',
-  '#22c55e',
-  '#f472b6',
-  '#fb7185',
-  '#0f766e',
-]
-
 type UsageTrendSectionProps = {
   effectiveRange: DateRangeValue | null
   fallbackRange: DateRangeValue | null
   timezone?: string
   agentIds: string[]
+  quotaTotal?: number | null
+  quotaUnlimited?: boolean
   embedded?: boolean
 }
 
 type TooltipPrimitiveValue = number | string | Date | null | undefined
 type TooltipFormatterValue = TooltipPrimitiveValue | TooltipPrimitiveValue[]
 
+const agentSeriesColors = [
+  '#38bdf8',
+  '#a78bfa',
+  '#f472b6',
+  '#f59e0b',
+  '#22c55e',
+  '#ef4444',
+  '#06b6d4',
+  '#84cc16',
+]
+
 export function UsageTrendSection({
   effectiveRange,
   fallbackRange,
   timezone,
   agentIds,
+  quotaTotal = null,
+  quotaUnlimited = false,
   embedded = false,
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
@@ -62,12 +62,12 @@ export function UsageTrendSection({
 
     const lengthInDays = getRangeLengthInDays(baseRange)
     if (lengthInDays <= 1) {
-      return { mode: 'day', detail: 'Credits per hour' }
+      return { mode: 'day', detail: 'Cumulative credits' }
     }
     if (lengthInDays <= 7) {
-      return { mode: 'week', detail: 'Credits per day' }
+      return { mode: 'week', detail: 'Cumulative credits' }
     }
-    return { mode: 'month', detail: 'Credits per day' }
+    return { mode: 'month', detail: 'Cumulative credits' }
   }, [baseRange])
 
   const trendQueryInput = useMemo<UsageTrendQueryInput | null>(() => {
@@ -117,37 +117,79 @@ export function UsageTrendSection({
         : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', timeZone: tz })
 
     const categories = trendData.buckets.map((bucket: UsageTrendBucket) => dateFormatter.format(new Date(bucket.timestamp)))
-    const currentSeries = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.current)
-
-    const agentSeries = trendData.agents.map((agent, index) => {
-      const color = agentSeriesColors[index % agentSeriesColors.length]
-      const data = trendData.buckets.map((bucket: UsageTrendBucket) => bucket.agents?.[agent.id] ?? 0)
-      const agentLabel = agent.is_deleted ? `${agent.name} (Deleted)` : agent.name
-      return {
-        name: agentLabel,
-        type: 'line' as const,
-        smooth: true,
-        showSymbol: false,
-        stack: 'currentTotal',
-        emphasis: {focus: 'series' as const},
-        lineStyle: {
-          width: 1.5,
-          color,
-        },
-        itemStyle: {
-          color,
-        },
-        areaStyle: {
-          opacity: 0.2,
-        },
-        data,
+    const now = new Date()
+    let cumulative = 0
+    let lastActualIndex = -1
+    const actualSeries = trendData.buckets.map((bucket: UsageTrendBucket, index) => {
+      const bucketDate = new Date(bucket.timestamp)
+      if (bucketDate <= now) {
+        cumulative += bucket.current
+        lastActualIndex = index
+        return cumulative
       }
+      return null
     })
+    const agentSeries = trendData.agents
+      .map((agent, agentIndex) => {
+        let agentCumulative = 0
+        let hasAgentCredits = false
+        const data = trendData.buckets.map((bucket: UsageTrendBucket) => {
+          if (new Date(bucket.timestamp) > now) {
+            return null
+          }
+          const bucketCredits = bucket.agents?.[agent.id] ?? 0
+          agentCumulative += bucketCredits
+          if (agentCumulative > 0) {
+            hasAgentCredits = true
+          }
+          return agentCumulative
+        })
 
-    const palette = agentSeries.map((series) => series.itemStyle?.color as string)
+        if (!hasAgentCredits) {
+          return null
+        }
+
+        const color = agentSeriesColors[agentIndex % agentSeriesColors.length]
+        const agentLabel = agent.is_deleted ? `${agent.name} (Deleted)` : agent.name
+        return {
+          name: agentLabel,
+          type: 'line' as const,
+          smooth: true,
+          showSymbol: false,
+          emphasis: { focus: 'series' as const },
+          z: 2,
+          lineStyle: {
+            width: 1.8,
+            color,
+          },
+          itemStyle: {
+            color,
+          },
+          data,
+        }
+      })
+      .filter((series): series is NonNullable<typeof series> => series !== null)
+    const elapsedBucketCount = Math.max(lastActualIndex + 1, 1)
+    const projectedPerBucket = cumulative / elapsedBucketCount
+    const projectionSeries = trendData.buckets.map((_bucket, index) => {
+      if (lastActualIndex < 0 || index < lastActualIndex) {
+        return null
+      }
+      return cumulative + projectedPerBucket * (index - lastActualIndex)
+    })
+    const visibleValues = [
+      ...actualSeries,
+      ...projectionSeries,
+      ...agentSeries.flatMap((series) => series.data),
+    ].filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+    const visibleMax = Math.max(1, ...visibleValues)
 
     return {
-      ...(palette.length ? { color: palette } : {}),
+      color: [
+        embedded ? '#e0f2fe' : '#0f172a',
+        '#14b8a6',
+        ...agentSeriesColors,
+      ],
       textStyle: {
         color: embedded ? '#cbd5e1' : '#334155',
       },
@@ -164,8 +206,9 @@ export function UsageTrendSection({
       legend: {
         type: 'scroll',
         data: [
+          'Credits used',
+          'Projected usage',
           ...agentSeries.map((series) => series.name),
-          'Total credits',
         ],
         top: 0,
         textStyle: {
@@ -200,6 +243,7 @@ export function UsageTrendSection({
       yAxis: {
         type: 'value',
         min: 0,
+        max: Math.ceil(visibleMax * 1.15),
         axisLabel: {
           formatter: (value: number | string) => (typeof value === 'number' ? creditFormatter.format(value) : `${value}`),
           color: embedded ? '#94a3b8' : '#64748b',
@@ -211,9 +255,8 @@ export function UsageTrendSection({
         },
       },
       series: [
-        ...agentSeries,
         {
-          name: 'Total credits',
+          name: 'Credits used',
           type: 'line',
           smooth: true,
           showSymbol: false,
@@ -226,11 +269,63 @@ export function UsageTrendSection({
           itemStyle: {
             color: embedded ? '#e0f2fe' : '#0f172a',
           },
-          data: currentSeries,
+          areaStyle: {
+            opacity: 0.08,
+          },
+          data: actualSeries,
         },
+        {
+          name: 'Projected usage',
+          type: 'line',
+          smooth: true,
+          showSymbol: false,
+          z: 4,
+          lineStyle: {
+            width: 2,
+            type: 'dotted',
+            color: '#14b8a6',
+          },
+          itemStyle: {
+            color: '#14b8a6',
+          },
+          data: projectionSeries,
+        },
+        ...agentSeries,
       ],
     }
   }, [creditFormatter, embedded, timezone, trendData])
+
+  const projectionCaption = useMemo(() => {
+    if (!trendData || quotaUnlimited || typeof quotaTotal !== 'number' || !Number.isFinite(quotaTotal) || quotaTotal <= 0) {
+      return null
+    }
+    const now = new Date()
+    let cumulative = 0
+    let lastActualIndex = -1
+    trendData.buckets.forEach((bucket, index) => {
+      if (new Date(bucket.timestamp) <= now) {
+        cumulative += bucket.current
+        lastActualIndex = index
+      }
+    })
+    if (lastActualIndex < 0 || cumulative <= 0) {
+      return 'Not enough usage yet to project billing-cycle consumption.'
+    }
+    const projectedPerBucket = cumulative / Math.max(lastActualIndex + 1, 1)
+    for (let index = lastActualIndex; index < trendData.buckets.length; index += 1) {
+      const projected = cumulative + projectedPerBucket * (index - lastActualIndex)
+      if (projected >= quotaTotal) {
+        const runoutDate = new Date(trendData.buckets[index].timestamp)
+        const label = new Intl.DateTimeFormat(undefined, {
+          month: 'short',
+          day: 'numeric',
+          timeZone: trendData.timezone || timezone,
+        }).format(runoutDate)
+        return `Projected to run out around ${label} at the current pace.`
+      }
+    }
+    return 'Projected usage stays within the billing-cycle credit limit at the current pace.'
+  }, [quotaTotal, quotaUnlimited, timezone, trendData])
 
   const hasData = useMemo(() => {
     if (!trendData) {
@@ -282,9 +377,12 @@ export function UsageTrendSection({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className={titleClassName}>Task consumption trend</h2>
-          <p className={subtitleClassName}>{trendModeDetail} · Total tasks over time.</p>
+          <p className={subtitleClassName}>{trendModeDetail} · Actual and projected credits through billing reset.</p>
         </div>
       </div>
+      {projectionCaption ? (
+        <p className={subtitleClassName}>{projectionCaption}</p>
+      ) : null}
       <div className="h-80 w-full">
         {isLoading ? (
           <div className={loadingClassName}>Loading trends…</div>
