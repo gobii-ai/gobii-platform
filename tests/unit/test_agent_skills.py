@@ -413,7 +413,7 @@ class AgentSkillsPersistenceTests(TestCase):
 
         self.assertIn("System Skill: Runtime Planning", block)
         self.assertIn("Tools: update_plan", block)
-        self.assertIn("Use `update_plan` to track steps", block)
+        self.assertIn("Use `update_plan` to track substantial multi-step work", block)
         self.assertIn("usually 3-6 active steps", block)
         self.assertIn("reset it by replacing those stale steps", block)
         self.assertIn("do not create one plan step per day, hour, or recurrence slot", block)
