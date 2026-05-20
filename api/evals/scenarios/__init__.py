@@ -11,8 +11,14 @@ from .global_skill_eval import GlobalSkillEvalScenario
 from .meta_gobii import MetaGobiiSystemSkillScenario
 from .behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
+    CharterAddsDurablePreferencePreservingExistingScenario,
+    CharterAddsInferredPreferencePreservingExistingScenario,
+    CharterExpandsSparseCharterWithDetailScenario,
+    CharterIgnoresOneOffPreferenceScenario,
+    CharterNarrowsScopePreservingUnrelatedGuidanceScenario,
     PlanningFirstTurnAsksBoundedQuestionsScenario,
     PlanningClearTaskEndsPlanningFirstScenario,
     PlanningExecuteRequestStaysInPlanningScenario,

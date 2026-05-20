@@ -1631,7 +1631,13 @@ def _render_prompt_context_once(
                 "Do not update __agent_config.charter directly while planning mode is active. "
                 "Finish planning with end_planning(full_plan=...), which replaces your runtime charter."
                 if planning_mode_active
-                else "UPDATE THIS CHARTER NOW if it's vague, incomplete, or doesn't match what the user just asked for. Your charter is your persistent memory—make it specific and actionable. Don't wait for permission; evolve it immediately when you learn something new."
+                else (
+                    "Your charter is durable standing memory. Update it only when the user changes your ongoing "
+                    "role, scope, responsibilities, stable preferences, or operating boundaries. Stable preferences "
+                    "may be explicit or reasonably inferred from repeated feedback or clear user patterns. Preserve existing "
+                    "charter content that still applies; merge or append new durable guidance instead of replacing "
+                    "the whole charter. Do not update it for one-off task details, completed work, or weak preference guesses."
+                )
             ),
             weight=2,
             non_shrinkable=True
@@ -3854,17 +3860,23 @@ def _get_system_instruction(
                 "```\n\n"
             )
 
-    charter_and_schedule_intro = (
-        "Your charter is your memory of purpose. If it's missing, vague, or needs updating based on user input, update __agent_config.charter via sqlite_batch right away—ideally alongside your greeting. "
-        "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
-        "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
-        "Default to the user's local timezone or the current conversation context when timezone is omitted; ask only if the timing would otherwise be materially wrong. "
-        if not planning_mode_active
-        else "Your runtime charter is your memory of purpose. While Planning Mode is active, do not update __agent_config.charter directly as a substitute for planning. "
-        "Do not update schedule or __agent_config.schedule while Planning Mode is active. "
-        "Keep the current schedule unchanged until planning is completed or skipped. "
-        "Only ask about timing or timezone if it changes the scope of the work itself. "
-    )
+    if not planning_mode_active:
+        charter_and_schedule_intro = (
+            "Your charter is durable standing memory for your role, responsibilities, scope, stable preferences, "
+            "communication guidance, and operating boundaries. If it is missing, vague, or needs updating based on "
+            "explicit durable user guidance or a reasonably inferred stable preference, update __agent_config.charter via sqlite_batch while preserving existing "
+            "relevant charter text and merging the new guidance. "
+            "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
+            "Randomize timing slightly to avoid clustering, though some tasks need precise timing—confirm with the user. "
+            "Default to the user's local timezone or the current conversation context when timezone is omitted; ask only if the timing would otherwise be materially wrong. "
+        )
+    else:
+        charter_and_schedule_intro = (
+            "Your runtime charter is durable standing memory. While Planning Mode is active, do not update __agent_config.charter directly as a substitute for planning. "
+            "Do not update schedule or __agent_config.schedule while Planning Mode is active. "
+            "Keep the current schedule unchanged until planning is completed or skipped. "
+            "Only ask about timing or timezone if it changes the scope of the work itself. "
+        )
     schedule_updates_guidance = (
         ""
         if planning_mode_active
@@ -3896,15 +3908,24 @@ def _get_system_instruction(
         "\n\n"
         "## Your Charter: When & How to Update\n\n"
 
-        "Your **charter** is your persistent memory of purpose—it defines *who you are* and *what you do*. "
-        "It survives across sessions, so future-you will rely on it. Treat it like your job description.\n\n"
+        "Your **charter** is your durable standing memory: who you are for this user, what recurring job you own, "
+        "the scope of that job, stable user preferences, communication guidance, and operating boundaries. "
+        "It survives across sessions, so future-you will rely on it. Treat it like a cumulative job description "
+        "and standing-instructions document, not a scratchpad for every task.\n\n"
 
         "### Update your charter when:\n"
         "- **New job/task**: User gives you a new responsibility → capture it\n"
         "- **Changed scope**: User expands, narrows, or pivots your focus → reflect the change\n"
-        "- **Clarifications**: User specifies preferences, constraints, or priorities → incorporate them\n"
-        "- **Learnings**: You discover important context that affects how you work → note it\n"
+        "- **Durable user guidance**: User explicitly gives stable preferences, constraints, priorities, communication guidance, or operating boundaries → incorporate them\n"
+        "- **Stable inferred preferences**: Repeated feedback or clear user patterns reveal an ongoing preference → incorporate it without removing existing guidance\n"
+        "- **Learnings about ongoing work**: You discover important context that changes the recurring job → note it\n"
         "- **Vague charter**: Your current charter is empty, generic, or doesn't match what user wants → fix it\n\n"
+
+        "### How to update your charter:\n"
+        "- Preserve existing charter content that still applies. Do not drop standing guidance just because the newest request is narrow.\n"
+        "- Merge or append small durable changes. Rewrite the whole charter only when the user clearly replaces the job, says to forget prior guidance, or the existing charter is unusable.\n"
+        "- Do not update the charter for one-off style requests, transient facts, completed work, or weak/speculative guesses about user preferences.\n"
+        "- Do not remove or weaken existing charter guidance based on an inferred preference unless the user clearly supersedes it.\n\n"
 
         "### Charter examples:\n\n"
 
@@ -3924,12 +3945,26 @@ def _get_system_instruction(
         "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Monitor competitor enterprise pricing only. Ignore consumer plans. Track daily.' WHERE id=1;\")\n"
         "```\n\n"
 
-        "**User adds a preference:**\n"
+        "**User adds a durable preference:**\n"
         "```\n"
         "User: 'Send me updates via Slack, not email'\n"
-        "Before: 'Scout AI startups weekly.'\n"
-        "After:  'Scout AI startups weekly. User prefers Slack for updates.'\n"
-        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout AI startups weekly. User prefers Slack for updates.' WHERE id=1;\")\n"
+        "Before: 'Scout AI startups weekly. Use concise bullets.'\n"
+        "After:  'Scout AI startups weekly. Use concise bullets. Prefer Slack for routine updates.'\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Scout AI startups weekly. Use concise bullets. Prefer Slack for routine updates.' WHERE id=1;\")\n"
+        "```\n\n"
+
+        "**User gives a one-off preference:**\n"
+        "```\n"
+        "User: 'For this answer only, use bullet points.'\n"
+        "→ Do not update __agent_config. Respect the preference in this response only.\n"
+        "```\n\n"
+
+        "**User reveals a stable preference through feedback:**\n"
+        "```\n"
+        "User: 'This is the third time I'm asking: lead with a short TL;DR before the details.'\n"
+        "Before: 'Prepare weekly portfolio risk updates. Track earnings dates.'\n"
+        "After:  'Prepare weekly portfolio risk updates. Track earnings dates. Lead updates with a short TL;DR before details.'\n"
+        "→ sqlite_batch(sql=\"UPDATE __agent_config SET charter='Prepare weekly portfolio risk updates. Track earnings dates. Lead updates with a short TL;DR before details.' WHERE id=1;\")\n"
         "```\n\n"
 
         "**User gives entirely new instructions:**\n"
@@ -4095,7 +4130,8 @@ def _get_system_instruction(
         "The __agent_config table is for durable operating instructions. Updating it is not part of normal task execution.\n"
         "Never update charter or schedule just because you completed a one-off task, learned a transient fact, inferred a preference, or want to describe what you just did. "
         "A finished answer, briefing, chart, or lookup is not a charter change. For scheduled runs, keep the existing schedule unless the user explicitly asked to change cadence. "
-        "Only mutate __agent_config when a configure-authorized user clearly changes ongoing behavior, monitoring scope, alerting rules, durable preferences, or recurrence. "
+        "Only mutate __agent_config when a configure-authorized user clearly changes ongoing behavior, monitoring scope, alerting rules, durable preferences, stable inferred preferences, or recurrence. "
+        "When updating charter, preserve existing still-relevant instructions and merge the new durable guidance instead of overwriting the whole charter. "
         "When the user asks to set up a future recurring digest, report, monitor, or alert, update charter/schedule once and stop; do not run the first job unless asked. "
         "If that future job will email or text someone and the user says not to send now, do not request contact permission during setup; include the recipient and permission requirement in the charter and handle permission when an actual send is due. "
         "Do not mutate __agent_config for a one-off conversational preference such as 'stand by', 'I'll reach out later', or 'don't follow up unless I ask'; just respect it in the current conversation and stop. "
@@ -4131,9 +4167,9 @@ def _get_system_instruction(
         "Text output is for RESULTS, not narration. Tools execute silently—no commentary.\n\n"
         "Work iteratively, in small chunks. Use your SQLite database when persistence helps.\n\n"
 
-        "Your charter is a living document. When the user gives feedback, corrections, or new context that changes your ongoing job, update it. "
-        "Do not mutate charter or schedule for ordinary one-off lookups, completed scheduled runs, or preference guesses. "
-        "A great charter captures durable preferences and operating boundaries, not every transient task result. "
+        "Your charter is a living document. Treat it as durable standing memory: when the user gives explicit long-term feedback, corrections, or new context that changes your ongoing job or stable preferences, or when a stable preference is reasonably inferred from repeated feedback, merge it into the charter without dropping still-relevant guidance. "
+        "Do not mutate charter or schedule for ordinary one-off lookups, completed scheduled runs, or weak preference guesses. "
+        "A great charter captures the current job, durable preferences, and operating boundaries, not every transient task result. "
         "As conditions change, adjust your schedule only when the user requested recurring behavior or the existing recurring job truly needs a cadence change. "
         "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 

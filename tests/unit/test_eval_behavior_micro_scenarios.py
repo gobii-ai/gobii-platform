@@ -16,6 +16,12 @@ from api.evals.scenarios.bitcoin_price_multiturn import is_supported_bitcoin_pri
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     BehaviorMicroScenario,
+    CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
+    CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+    CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
+    CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
     CommonUseCaseEvalDefinition,
     CommonUseCaseToolChoiceScenario,
     COMMON_USE_CASE_EVAL_CASES,
@@ -46,6 +52,7 @@ from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingl
 from api.evals.scenarios.weather_lookup import _is_free_weather_request
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
+    sqlite_batch_mutates_agent_config_field,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
 )
@@ -71,17 +78,26 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_all_behavior_micro_scenarios_are_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        for slug in BEHAVIOR_MICRO_SCENARIO_SLUGS:
+        for slug in BEHAVIOR_MICRO_SCENARIO_SLUGS + CHARTER_MEMORY_MICRO_SCENARIO_SLUGS:
             self.assertIn(slug, registered)
 
     def test_behavior_micro_suites_include_expected_scenarios(self):
         agent_behavior_suite = SuiteRegistry.get("agent_behavior_micro")
+        charter_memory_suite = SuiteRegistry.get("charter_memory_micro")
         planning_suite = SuiteRegistry.get("planning_micro")
         tool_choice_suite = SuiteRegistry.get("tool_choice_micro")
 
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
+        self.assertEqual(charter_memory_suite.scenario_slugs, CHARTER_MEMORY_MICRO_SCENARIO_SLUGS)
         self.assertEqual(planning_suite.scenario_slugs, PLANNING_MICRO_SCENARIO_SLUGS)
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
+        self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(BEHAVIOR_MICRO_SCENARIO_SLUGS))
+        self.assertFalse(set(CHARTER_MEMORY_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
+        self.assertIn(CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE, charter_memory_suite.scenario_slugs)
+        self.assertIn(CHARTER_IGNORES_ONE_OFF_PREFERENCE, charter_memory_suite.scenario_slugs)
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
@@ -929,6 +945,34 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_can_wait_for_expected_charter_mutation_execution(self):
+        policy = {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_when_all_seen": [
+                {
+                    "tool_name": "sqlite_batch",
+                    "agent_config_field": "charter",
+                    "after_execution": True,
+                }
+            ],
+        }
+        params = {"sql": "UPDATE __agent_config SET charter = 'Monitor competitors' WHERE id = 1"}
+        call = self._add_tool_call("sqlite_batch", params, status="pending")
+
+        self.assertTrue(sqlite_batch_mutates_agent_config_field(call, "charter"))
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("sqlite_batch", params, status="complete")
+
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
 
     def test_eval_stop_policy_can_stop_on_sqlite_config_mutation(self):
         self._add_tool_call(
