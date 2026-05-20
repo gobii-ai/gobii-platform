@@ -21,6 +21,7 @@ from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.views import redirect_to_login
 from django.utils.http import url_has_allowed_host_and_scheme
+from django.utils.text import Truncator
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
@@ -1648,6 +1649,14 @@ def _canonical_public_template_redirect(template):
     return redirect(public_template_detail_path(template), permanent=True)
 
 
+def _public_site_absolute_url(path_or_url: str) -> str:
+    value = str(path_or_url or "").strip()
+    if value.startswith(("http://", "https://")):
+        return value
+    path = value if value.startswith("/") else f"/{value}"
+    return f"{settings.PUBLIC_SITE_URL.rstrip('/')}{path}"
+
+
 class PublicTemplateLegacyDetailRedirectView(View):
     def get(self, request, *args, **kwargs):
         template = _get_active_public_template_by_legacy_path(
@@ -1675,15 +1684,88 @@ class PublicTemplateDetailView(TemplateView):
         context = super().get_context_data(**kwargs)
         detail_path = public_template_detail_path(self.template)
         category_path = public_template_category_path(self.template)
+        detail_url = _public_site_absolute_url(detail_path)
+        category_url = _public_site_absolute_url(category_path)
+        library_url = _public_site_absolute_url(reverse("pages:library"))
+        home_url = _public_site_absolute_url(reverse("pages:home"))
+        social_image_path = (
+            self.template.hero_image_path.strip()
+            if self.template.hero_image_path
+            else "images/gobii_fish_social_1280x640.png"
+        )
+        social_image_url = _public_site_absolute_url(static(social_image_path))
+        seo_description = Truncator(
+            (self.template.description or self.template.tagline or "").strip()
+        ).chars(160)
+        category_label = public_template_category_label(self.template)
         social_title = f"{self.template.display_name} AI Agent Template"
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "SoftwareApplication",
+            "name": self.template.display_name,
+            "description": seo_description,
+            "applicationCategory": "BusinessApplication",
+            "applicationSubCategory": category_label,
+            "operatingSystem": "Web",
+            "url": detail_url,
+            "image": social_image_url,
+            "creator": {
+                "@type": "Person",
+                "name": self.template.public_profile.handle,
+            },
+            "isPartOf": {
+                "@type": "CollectionPage",
+                "name": "Gobii Library",
+                "url": library_url,
+            },
+        }
+        if self.template.created_at:
+            structured_data["datePublished"] = self.template.created_at.isoformat()
+        if self.template.updated_at:
+            structured_data["dateModified"] = self.template.updated_at.isoformat()
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Library",
+                    "item": library_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": category_label,
+                    "item": category_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 4,
+                    "name": self.template.display_name,
+                    "item": detail_url,
+                },
+            ],
+        }
+
         context["template"] = self.template
         context["public_profile_handle"] = self.template.public_profile.handle
-        context["template_category_label"] = public_template_category_label(self.template)
-        context["template_category_url"] = self.request.build_absolute_uri(category_path)
+        context["template_category_label"] = category_label
+        context["template_category_url"] = category_url
         context["template_hire_url"] = public_template_hire_path(self.template)
         context["template_social_title"] = social_title
         context["template_seo_title"] = f"{social_title} | Gobii"
-        context["template_url"] = self.request.build_absolute_uri(detail_path)
+        context["template_seo_description"] = seo_description
+        context["template_social_image_url"] = social_image_url
+        context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
+        context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
+        context["template_url"] = detail_url
         context["canonical_url"] = context["template_url"]
         context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
         context["base_schedule"] = self.template.base_schedule

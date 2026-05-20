@@ -1,5 +1,7 @@
+import json
 from urllib.parse import parse_qs, urlparse
 
+from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
@@ -141,6 +143,97 @@ class PublicTemplateViewsTests(TestCase):
         self.assertContains(response, '<script type="application/ld+json">')
         self.assertContains(response, '"@type": "SoftwareApplication"')
         self.assertContains(response, 'aria-label="Breadcrumb"')
+
+    @override_settings(
+        PUBLIC_SITE_URL="https://www.gobii.ai",
+        GOBII_RELEASE_ENV="prod",
+        GOBII_PROPRIETARY_MODE=True,
+    )
+    @tag("batch_public_templates")
+    def test_public_template_detail_includes_stable_search_metadata(self):
+        user = get_user_model().objects.create_user(username="seo-owner", email="seo-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="seo-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-seo",
+            public_profile=profile,
+            slug="market-radar",
+            display_name="Market Radar",
+            tagline="Track market movement",
+            description="Tracks public market signals and sends a weekly summary.",
+            charter="Track public market signals.",
+            base_schedule="@weekly",
+            recommended_contact_channel="email",
+            category="Research",
+        )
+
+        response = self.client.get(public_template_detail_path(template), HTTP_HOST="preview.local")
+
+        detail_url = f"https://www.gobii.ai{public_template_detail_path(template)}"
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(soup.find("link", rel="canonical")["href"], detail_url)
+        self.assertEqual(soup.find("meta", property="og:url")["content"], detail_url)
+        self.assertEqual(soup.find("meta", property="og:image")["content"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
+        self.assertEqual(soup.find("meta", attrs={"name": "twitter:card"})["content"], "summary_large_image")
+        self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
+
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["url"], detail_url)
+        self.assertEqual(application_schema["image"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
+        self.assertEqual(application_schema["applicationCategory"], "BusinessApplication")
+        self.assertEqual(application_schema["applicationSubCategory"], "Research")
+        self.assertEqual(application_schema["operatingSystem"], "Web")
+
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(breadcrumb_schema["itemListElement"][-1]["item"], detail_url)
+
+    @override_settings(PUBLIC_SITE_URL="https://www.gobii.ai")
+    @tag("batch_public_templates")
+    def test_public_template_detail_escapes_json_ld_script_closing_sequence(self):
+        display_name = 'Bad </script><script>alert("x")</script>'
+        description = "Description </script><img src=x onerror=alert(1)>"
+        user = get_user_model().objects.create_user(username="unsafe-owner", email="unsafe-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="unsafe-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-unsafe",
+            public_profile=profile,
+            slug="unsafe-template",
+            display_name=display_name,
+            tagline="Unsafe tagline",
+            description=description,
+            charter="Do useful work.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Operations",
+        )
+
+        response = self.client.get(public_template_detail_path(template))
+
+        content = response.content.decode()
+        self.assertIn("\\u003C/script\\u003E\\u003Cscript\\u003Ealert", content)
+        self.assertNotIn('</script><script>alert("x")</script>', content)
+
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = [
+            json.loads(script.string)
+            for script in soup.find_all("script", {"type": "application/ld+json"})
+        ]
+        application_schema = next(
+            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        )
+        self.assertEqual(application_schema["name"], display_name)
+        self.assertEqual(application_schema["description"], description)
+        breadcrumb_schema = next(
+            item for item in structured_data if item.get("@type") == "BreadcrumbList"
+        )
+        self.assertEqual(breadcrumb_schema["itemListElement"][-1]["name"], display_name)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     @tag("batch_public_templates")
