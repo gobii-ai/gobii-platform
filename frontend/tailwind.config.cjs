@@ -1,0 +1,37 @@
+module.exports = {
+  content: [
+    '../templates/**/*.html',
+    '../pages/**/*.py',
+    '../pages/templates/**/*.html',
+    '../proprietary/templates/**/*.html',
+    '../console/**/*.py',
+    '../console/templates/**/*.html',
+    '../frontend/src/**/*.{js,jsx,ts,tsx}',
+    '../static/js/**/*.js',
+  ],
+  safelist: [
+    'bg-black/5',
+    'bg-white/20',
+    'border-black/10',
+    'border-white/40',
+    'hover:text-slate-900',
+    'hover:text-white',
+    'text-emerald-600',
+    'text-slate-500',
+    'text-slate-700',
+    'text-slate-800',
+    'text-slate-900',
+    'text-white',
+    'text-white/70',
+    'text-white/80',
+  ],
+  theme: {
+    extend: {},
+  },
+  plugins: [
+    require('@tailwindcss/typography'),
+    require('@tailwindcss/forms'),
+    require('@tailwindcss/aspect-ratio'),
+    require('@tailwindcss/container-queries'),
+  ],
+}

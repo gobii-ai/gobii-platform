@@ -17,7 +17,6 @@
     <link rel="icon" type="image/png" sizes="16x16" href="{% static 'images/favicon-16x16.png' %}" />
     <link rel="apple-touch-icon" sizes="180x180" href="{% static 'images/apple-touch-icon.png' %}" />
   {% endif %}
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
   <link rel="preconnect" href="https://cdnjs.cloudflare.com">
   {% if settings.GOBII_PROPRIETARY_MODE %}
   <link rel="preconnect" href="https://js.stripe.com">
@@ -25,7 +24,7 @@
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <link rel="preconnect" href="https://www.googletagmanager.com">
   {% endif %}
-  <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
   {% if settings.GOBII_PROPRIETARY_MODE %}
   <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
   {% endif %}

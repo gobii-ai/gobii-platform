@@ -51,15 +51,20 @@
   <meta name="theme-color" content="#0ea5e9">
 
   <!-- Connection hints for common third-party script origins -->
-  <link rel="preconnect" href="https://cdn.tailwindcss.com">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
-  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="preconnect" href="https://static.gobii.ai">
   {% if settings.GOBII_PROPRIETARY_MODE %}
   <link rel="preconnect" href="https://js.stripe.com">
   {% endif %}
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <link rel="preconnect" href="https://www.googletagmanager.com">
   {% endif %}
+
+  <!-- Critical CSS: discover render-blocking styles before analytics scripts. -->
+  <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
+  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
+  <link rel="stylesheet" href="{% static 'css/globals.css' %}">
+  {% block early_head_styles %}{% endblock %}
 
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
   {% if settings.GOBII_PROPRIETARY_MODE %}
@@ -349,16 +354,6 @@
   <!-- End Meta Pixel Code -->
 
   {% endif %}
-
-  <!-- Tailwind Play CDN -->
-  <script src="https://cdn.tailwindcss.com?plugins=typography,forms,aspect-ratio,container-queries"></script>
-  
-  <!-- Custom Fonts -->
-  <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
-
-  <!-- Global CSS styles -->
-  <link rel="stylesheet" href="{% static 'css/globals.css' %}">
-  
   <!-- Preload logo to prevent flicker -->
   {% if fish_collateral_enabled %}
     <link rel="preload" as="image" href="{% static 'images/gobii_fish_with_text_purple_nav.png' %}" />

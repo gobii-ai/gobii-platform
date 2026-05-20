@@ -73,10 +73,21 @@ RUN --mount=type=cache,target=/root/.npm \
     if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm ci --prefix frontend; fi
 
 COPY frontend ./frontend
+COPY templates ./templates
+COPY pages ./pages
+COPY proprietary/templates ./proprietary/templates
+COPY console ./console
+COPY static/js ./static/js
 RUN --mount=type=cache,target=/root/.npm \
     if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm run build --prefix frontend; fi
 
 COPY . .
+
+# COPY . . refreshes the source tree after the cached frontend build layer.
+# Regenerate the compiled Tailwind asset so the final static source reflects
+# the exact templates and Python-rendered class strings in this image.
+RUN --mount=type=cache,target=/root/.npm \
+    if [ "$SKIP_FRONTEND_BUILD" != "true" ]; then npm run build:tailwind --prefix frontend; fi
 
 # When frontend build is skipped, download the manifest from CDN so Django
 # can resolve entry points to hashed filenames in CDN mode.
