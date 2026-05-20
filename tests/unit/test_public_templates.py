@@ -343,10 +343,42 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'id="gobii-frontend-root"')
         self.assertContains(response, 'data-app="library"')
+        self.assertContains(response, 'data-props-json-id="library-initial-payload"')
+        self.assertContains(response, 'id="library-initial-payload"')
         self.assertContains(response, '<meta name="description"')
         self.assertContains(response, '<meta property="og:url"')
         self.assertContains(response, '<script type="application/ld+json">')
         self.assertContains(response, '"@type": "CollectionPage"')
+        self.assertNotContains(response, "Loading shared agents")
+
+    @tag("batch_public_templates")
+    def test_library_page_renders_initial_public_templates_for_crawlers(self):
+        user = get_user_model().objects.create_user(username="library-ssr-owner", email="library-ssr-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library-ssr-owner")
+        template = PersistentAgentTemplate.objects.create(
+            code="lib-ssr-ops",
+            public_profile=profile,
+            slug="ops-automator",
+            display_name="SSR Ops Automator",
+            tagline="Automate operations checks",
+            description="Tracks recurring operations work.",
+            charter="Automate operations checks.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.get(reverse("pages:library"))
+        self.assertEqual(response.status_code, 200)
+        detail_url = reverse(
+            "pages:public_template_detail",
+            kwargs={"handle": profile.handle, "template_slug": template.slug},
+        )
+        self.assertContains(response, "SSR Ops Automator")
+        self.assertContains(response, "Automate operations checks")
+        self.assertContains(response, f'href="{detail_url}"')
+        self.assertContains(response, "Operations")
+        self.assertContains(response, '"@type": "ItemList"')
+        self.assertContains(response, '"agents":')
 
     @tag("batch_public_templates")
     def test_libary_path_redirects_to_library(self):
