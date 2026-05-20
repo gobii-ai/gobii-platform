@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import patch
 
 
@@ -172,7 +172,7 @@ def _text_size(value: str) -> int:
 
 class FixedDateTime(datetime):
     @classmethod
-    def now(cls, tz: Optional[timezone] = None) -> datetime:
+    def now(cls, tz: timezone | None = None) -> datetime:
         if tz is None:
             return FIXED_PROMPT_NOW.replace(tzinfo=None)
         return FIXED_PROMPT_NOW.astimezone(tz)
@@ -462,7 +462,7 @@ def check_prompt_sizes(budget: dict[str, Any]) -> dict[str, dict[str, int]]:
     return measurements
 
 
-def _resolve_baseline_sha(value: Optional[str]) -> str:
+def _resolve_baseline_sha(value: str | None) -> str:
     if value:
         return value
     return _run_git(["rev-parse", "HEAD"]).strip()
@@ -471,8 +471,8 @@ def _resolve_baseline_sha(value: Optional[str]) -> str:
 def _print_success(
     *,
     budget: dict[str, Any],
-    loc: Optional[SourceLocMeasurement],
-    prompt_sizes: Optional[dict[str, dict[str, int]]],
+    loc: SourceLocMeasurement | None,
+    prompt_sizes: dict[str, dict[str, int]] | None,
 ) -> None:
     print(f"Baseline SHA: {budget['baseline_sha']}")
     if loc is not None:
