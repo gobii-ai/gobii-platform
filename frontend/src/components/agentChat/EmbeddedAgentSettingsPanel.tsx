@@ -15,6 +15,7 @@ type EmbeddedAgentSettingsPanelProps = {
   onOpenSecrets?: () => void
   onOpenEmailSettings?: () => void
   onOpenFiles?: () => void
+  onOpenContactRequests?: () => void
   onReassigned?: (payload: {
     context?: { type: string; id: string; name?: string | null }
     redirect?: string | null
@@ -81,6 +82,7 @@ export function EmbeddedAgentSettingsPanel({
   onOpenSecrets,
   onOpenEmailSettings,
   onOpenFiles,
+  onOpenContactRequests,
 }: EmbeddedAgentSettingsPanelProps) {
   const queryClient = useQueryClient()
   const { data, isLoading, error, refetch } = useAgentSettings(agentId, { enabled: Boolean(agentId) })
@@ -146,6 +148,7 @@ export function EmbeddedAgentSettingsPanel({
         onOpenSecrets={onOpenSecrets}
         onOpenEmailSettings={onOpenEmailSettings}
         onOpenFiles={onOpenFiles}
+        onOpenContactRequests={onOpenContactRequests}
       />
     </EmbeddedAgentShellPanel>
   )

@@ -80,6 +80,21 @@ function isCurrentAgentSettingsHref(href: string, agentId: string): boolean {
   }
 }
 
+function isCurrentAgentContactRequestsHref(href: string, agentId: string): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+  try {
+    const url = new URL(href, window.location.origin)
+    const pathname = normalizeAgentSettingsPathname(url.pathname)
+    return pathname === `/app/agents/${agentId}/contact-requests`
+      || pathname === `/console/agents/${agentId}/contact-requests`
+      || pathname === `/console/agents/${agentId}/chat/contact-requests`
+  } catch {
+    return false
+  }
+}
+
 function timelineEventKey(event: SimplifiedTimelineItem): string {
   if (event.kind === 'collapsed-group') {
     return `collapsed:${event.cursor}`
@@ -258,8 +273,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
       allowInbound: boolean
       allowOutbound: boolean
       canConfigure: boolean
+      smsContactPermissionAttested?: boolean
     }>
   ) => Promise<void>
+  onViewAllContactRequests?: () => void
 }
 
 type PlanPanelMode = 'docked' | 'hidden'
@@ -421,6 +438,7 @@ export function AgentChatLayout({
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
   onResolveContactRequests,
+  onViewAllContactRequests,
 }: AgentChatLayoutProps) {
   const timelineRenderEvents = displayEvents ?? (events as SimplifiedTimelineItem[])
 
@@ -888,7 +906,14 @@ export function AgentChatLayout({
   const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
 
   const handleMessageLinkClick = useCallback((href: string) => {
-    if (!agentId || !isCurrentAgentSettingsHref(href, agentId)) {
+    if (!agentId) {
+      return false
+    }
+    if (onViewAllContactRequests && isCurrentAgentContactRequestsHref(href, agentId)) {
+      onViewAllContactRequests()
+      return true
+    }
+    if (!isCurrentAgentSettingsHref(href, agentId)) {
       return false
     }
     if (previewActionsDisabled && onBlockedSettingsClick) {
@@ -905,6 +930,7 @@ export function AgentChatLayout({
     canOpenQuickSettings,
     handleSettingsOpen,
     onBlockedSettingsClick,
+    onViewAllContactRequests,
     previewActionsDisabled,
   ])
 
@@ -1471,6 +1497,7 @@ export function AgentChatLayout({
                         agentAvatarUrl={agentAvatarUrl}
                         agentColorHex={agentColorHex}
                         isStreaming={isStreaming}
+                        onLinkClick={handleMessageLinkClick}
                       />
                     ) : null}
                   </div>
@@ -1580,6 +1607,7 @@ export function AgentChatLayout({
               onFulfillRequestedSecrets={onFulfillRequestedSecrets}
               onRemoveRequestedSecrets={onRemoveRequestedSecrets}
               onResolveContactRequests={onResolveContactRequests}
+              onViewAllContactRequests={onViewAllContactRequests}
               onFocus={onComposerFocus}
               agentFirstName={agentFirstName}
               isProcessing={showProcessingIndicator}

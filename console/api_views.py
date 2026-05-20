@@ -187,6 +187,7 @@ from console.agent_chat.pending_actions import (
     expire_pending_action_requests,
     get_legacy_pending_human_input_requests,
     list_pending_action_requests,
+    serialize_contact_request,
 )
 from console.agent_chat.timeline import (
     DEFAULT_PAGE_SIZE,
@@ -4158,6 +4159,34 @@ class AgentRequestedSecretsRemoveAPIView(ApiLoginRequiredMixin, View):
                 "message": f"Removed {removed_count} requested secret(s).",
                 "removed_count": removed_count,
                 **_pending_action_payload(agent, request.user),
+            }
+        )
+
+
+class AgentContactRequestListAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        expire_pending_action_requests(agent)
+        pending_requests = list(
+            CommsAllowlistRequest.objects.filter(
+                agent=agent,
+                status=CommsAllowlistRequest.RequestStatus.PENDING,
+            ).order_by("-requested_at")
+        )
+        return JsonResponse(
+            {
+                "requests": [serialize_contact_request(request_obj) for request_obj in pending_requests],
+                "count": len(pending_requests),
+                "resolveApiUrl": reverse(
+                    "console_agent_contact_requests_resolve",
+                    kwargs={"agent_id": agent.id},
+                ),
             }
         )
 
