@@ -20,6 +20,7 @@ from pages.public_template_urls import (
 )
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
+LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY = "pages:library:category_slug_map:v1"
 LIBRARY_CACHE_TTL_SECONDS = 120
 LIBRARY_DEFAULT_PAGE_SIZE = 24
 LIBRARY_MAX_PAGE_SIZE = 100
@@ -93,21 +94,38 @@ def _get_top_categories() -> list[dict[str, Any]]:
     return top_categories
 
 
-def _resolve_category_from_slug(category_slug: str | None) -> str:
-    normalized_slug = str(category_slug or "").strip().lower()
-    if not normalized_slug:
-        return ""
-
+def _build_category_slug_map() -> dict[str, str]:
     category_rows = (
         _library_queryset()
         .annotate(normalized_category=_normalized_category_expression())
         .values_list("normalized_category", flat=True)
         .distinct()
     )
+    category_slug_map = {}
     for category in category_rows:
         label = _normalize_category(category)
-        if public_template_category_slug_from_label(label) == normalized_slug:
-            return label
+        category_slug_map[public_template_category_slug_from_label(label)] = label
+    return category_slug_map
+
+
+def _get_category_slug_map() -> dict[str, str]:
+    cached = cache.get(LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY)
+    if isinstance(cached, dict) and all(isinstance(key, str) and isinstance(value, str) for key, value in cached.items()):
+        return cached
+
+    category_slug_map = _build_category_slug_map()
+    cache.set(LIBRARY_CATEGORY_SLUG_MAP_CACHE_KEY, category_slug_map, timeout=LIBRARY_CACHE_TTL_SECONDS)
+    return category_slug_map
+
+
+def _resolve_category_from_slug(category_slug: str | None) -> str:
+    normalized_slug = str(category_slug or "").strip().lower()
+    if not normalized_slug:
+        return ""
+
+    label = _get_category_slug_map().get(normalized_slug)
+    if label:
+        return label
 
     raise Http404("This library category is not available.")
 
