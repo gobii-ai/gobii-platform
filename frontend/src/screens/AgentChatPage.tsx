@@ -2058,16 +2058,11 @@ export function AgentChatPage({
   // (send message, click jump button, composer focus, initial scroll).
   const jumpToBottom = useCallback(() => {
     const container = document.getElementById('timeline-shell')
-    const sentinel = document.getElementById('timeline-bottom-sentinel')
     if (!container) return
     lastProgrammaticScrollAtRef.current = Date.now()
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
-    if (sentinel) {
-      sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
-    } else {
-      container.scrollTop = container.scrollHeight + 10000
-    }
+    container.scrollTop = container.scrollHeight + 10000
     requestAnimationFrame(() => { container.style.overflowY = '' })
     isNearBottomRef.current = true
     setIsNearBottom(true)
