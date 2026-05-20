@@ -378,7 +378,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
         "only after that explicit approval. For broad operations involving multiple Gobiis, first summarize the "
         "scope and wait for higher-level confirmation.\n"
         "For initial team creation or team-management capability tests, do not create, link, brief, schedule, or "
-        "message anything yet. First produce one concise proposal with exactly the requested team scope: role names, "
+        "message anything yet. First produce one concise non-duplicated proposal with exactly the requested team scope: role names, "
         "responsibilities, peer-link graph, and one initial briefing per Gobii, each shown once. Ask for "
         "approval once with a clear question at the end of the response. After approval, execute only that approved "
         "scope; do not add extra agents, domains, "

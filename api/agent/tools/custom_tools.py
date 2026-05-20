@@ -538,24 +538,27 @@ _ACTIONABLE_RESULT_TERMS = (
     "next_cursor",
 )
 
-_ACTIONABLE_RESULT_REQUIRED_TRIGGERS = (
+_ACTIONABLE_RESULT_REQUIRED_LITERAL_TRIGGERS = (
     "ctx.call_tool",
     "ctx.sqlite",
     "sqlite3",
     ".execute(",
     ".executemany(",
-    "insert",
-    "update",
-    "delete",
-    "upsert",
-    "append",
-    "sync",
     "batch_size",
     "batch_id",
     "remaining",
     "cursor",
     "side_effect",
     "output_table",
+)
+
+_ACTIONABLE_RESULT_REQUIRED_WORD_TRIGGERS = (
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "append",
+    "sync",
 )
 
 _BATCH_RESULT_REQUIRED_TRIGGERS = (
@@ -594,7 +597,12 @@ def _source_identifiers(tree: ast.Module) -> set[str]:
 
 def _needs_actionable_result_signal(source_text: str) -> bool:
     source_lower = source_text.lower()
-    return any(term in source_lower for term in _ACTIONABLE_RESULT_REQUIRED_TRIGGERS)
+    return any(
+        term in source_lower for term in _ACTIONABLE_RESULT_REQUIRED_LITERAL_TRIGGERS
+    ) or any(
+        re.search(rf"\b{re.escape(term)}\b", source_lower)
+        for term in _ACTIONABLE_RESULT_REQUIRED_WORD_TRIGGERS
+    )
 
 
 def _has_actionable_result_signal(tree: ast.Module) -> bool:

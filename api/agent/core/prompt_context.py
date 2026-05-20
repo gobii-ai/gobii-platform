@@ -3827,6 +3827,9 @@ def _get_system_instruction(
         "value to send-tool attachments and never say a file is attached when attachments are empty. Use create_csv for "
         "tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must "
         "return exactly one row and one column.\n\n"
+        "# Attachment pre-flight: RIGHT: send_email(..., attachments=[result.attach]). "
+        "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count and "
+        "__messages.rejected_attachments_json before claiming or resending files.\n\n"
         f"{image_generation_skill}"
 
         "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
