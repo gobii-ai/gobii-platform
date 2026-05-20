@@ -35,6 +35,7 @@ from api.evals.scenarios.behavior_micro import (
     UPDATE_PLAN_POLICY_EXPECT,
     UPDATE_PLAN_POLICY_OPTIONAL,
     all_requests_have_options,
+    get_agent_config_mutation_calls_for_run,
     get_forbidden_calls_before_end_planning,
     get_common_use_case_tool_calls_for_run,
     get_first_common_use_case_tool_call,
@@ -1058,6 +1059,21 @@ class BehaviorMicroHelperTests(TestCase):
         calls = get_planning_mutation_calls_before_end_planning(self.run.id)
 
         self.assertEqual(calls, [mutation, plan_mutation])
+
+    def test_agent_config_mutation_detection_tracks_direct_and_sqlite_tools(self):
+        self._add_tool_call("sqlite_batch", {"sql": "SELECT * FROM __agent_config"})
+        sqlite_mutation = self._add_tool_call(
+            "sqlite_batch",
+            {"sql": "UPDATE __agent_config SET charter='Monitor competitors'"},
+        )
+        charter_mutation = self._add_tool_call("update_charter", {"charter": "Monitor competitors"})
+        schedule_mutation = self._add_tool_call("update_schedule", {"schedule": "0 9 * * *"})
+        self._add_tool_call("update_plan", {"plan": [{"step": "x", "status": "todo"}]})
+        self._add_tool_call("http_request")
+
+        calls = get_agent_config_mutation_calls_for_run(self.run.id)
+
+        self.assertEqual(calls, [sqlite_mutation, charter_mutation, schedule_mutation])
 
     def test_pending_human_input_requests_are_scoped_to_eval_run(self):
         expected = self._add_human_input_request(self.run, "Current run question?")
