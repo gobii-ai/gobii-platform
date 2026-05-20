@@ -1,0 +1,117 @@
+{
+  "baseline_sha": "fb5583d40d41c21d70585c151f94e70050bb64e0",
+  "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
+  "prompt_size": {
+    "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
+    "limits": {
+      "normal_explicit_send": {
+        "fitted_tokens": 5067,
+        "system_bytes": 38633,
+        "tools_bytes": 32593,
+        "total_bytes": 94548,
+        "user_bytes": 23322
+      },
+      "planning_first_run": {
+        "fitted_tokens": 4976,
+        "system_bytes": 46475,
+        "tools_bytes": 15018,
+        "total_bytes": 84563,
+        "user_bytes": 23070
+      },
+      "web_chat_implied_send": {
+        "fitted_tokens": 5070,
+        "system_bytes": 38883,
+        "tools_bytes": 34109,
+        "total_bytes": 96317,
+        "user_bytes": 23325
+      }
+    },
+    "scenarios": {
+      "normal_explicit_send": "No active web session; communication requires explicit send tools.",
+      "planning_first_run": "Planning mode on the first run with a verified preferred contact.",
+      "web_chat_implied_send": "Active web-chat session; text replies can use implied send."
+    },
+    "unit": "utf8_bytes"
+  },
+  "source_loc": {
+    "description": "Nonblank lines in tracked application/test/frontend source files.",
+    "exclude_filenames": [
+      "package-lock.json",
+      "uv.lock"
+    ],
+    "exclude_parts": [
+      "/__pycache__/",
+      "/build/",
+      "/cache/",
+      "/dist/",
+      "/migrations/",
+      "/node_modules/"
+    ],
+    "exclude_prefixes": [
+      ".factory/",
+      ".github/",
+      ".local/",
+      "api/migrations/",
+      "console/migrations/",
+      "docs/",
+      "frontend/node_modules/",
+      "gobii_platform.egg-info/",
+      "mediafiles/",
+      "misc/",
+      "pages/migrations/",
+      "scripts/",
+      "static/frontend/",
+      "vendor/"
+    ],
+    "file_count": 1360,
+    "include_files": [
+      "manage.py",
+      "pyproject.toml",
+      "sandbox_server/pyproject.toml"
+    ],
+    "include_roots": [
+      "agents/",
+      "api/",
+      "assets/",
+      "billing/",
+      "config/",
+      "console/",
+      "constants/",
+      "docker/",
+      "frontend/src/",
+      "marketing_events/",
+      "middleware/",
+      "pages/",
+      "proprietary/",
+      "sandbox_server/server/",
+      "sandbox_server/tests/",
+      "setup/",
+      "static/css/",
+      "static/js/",
+      "tasks/",
+      "templates/",
+      "templatetags/",
+      "tests/",
+      "util/"
+    ],
+    "include_suffixes": [
+      ".bash",
+      ".css",
+      ".html",
+      ".js",
+      ".jsx",
+      ".py",
+      ".pyi",
+      ".scss",
+      ".sh",
+      ".sql",
+      ".toml",
+      ".ts",
+      ".tsx",
+      ".yaml",
+      ".yml",
+      ".zsh"
+    ],
+    "limit": 405737
+  }
+}
