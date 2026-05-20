@@ -175,6 +175,19 @@ class CustomToolResultContractEvalTests(TestCase):
         self.assertNotIn("spreadsheet_id, run_date", prompt)
         self.assertNotIn("do_not_repeat_manually=true", prompt)
 
+    def test_batching_stop_policy_waits_for_bounded_invocation(self):
+        case = _case("sheets_backlog_sync")
+        policy = CustomToolResultContractScenario._eval_stop_policy(
+            case,
+            CustomToolResultContractScenario._custom_tool_name(case),
+        )
+
+        self.assertNotIn("stop_on_tool_names_after_execution", policy)
+        self.assertEqual(
+            policy["stop_when_all_seen"][0]["required_params_any"],
+            list(("batch_size", "batch_limit", "limit", "max_items", "max_rows", "row_limit")),
+        )
+
     def test_local_create_tool_check_requires_good_params_and_result_fields(self):
         case = _case("sheets_final_sync")
         ok, reason = CustomToolResultContractScenario._local_create_tool_check(
@@ -291,6 +304,21 @@ if __name__ == "__main__":
 
         self.assertFalse(ok)
         self.assertIn("helpful result signal", reason)
+
+    def test_local_create_tool_check_accepts_structured_manual_replay_prevention(self):
+        case = _case("sheets_backlog_sync")
+        source = _source_code(extra_fields='"do_not_repeat_manually": True,').replace(
+            "Use read-only verification; do not replay append/add/update calls.",
+            "Verify completed rows.",
+        )
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_sheets_backlog_sync",
+        )
+
+        self.assertTrue(ok, reason)
 
     def test_local_create_tool_check_accepts_ready_outputs_without_next_action_field(self):
         case = _case("scrape_url_normalization")

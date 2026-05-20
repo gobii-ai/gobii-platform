@@ -123,6 +123,15 @@ def _params_match(actual_params: dict[str, Any], expected_params: dict[str, Any]
     return all(actual_params.get(key) == value for key, value in expected_params.items())
 
 
+def _has_required_param_any(actual_params: dict[str, Any], required_param_names: Any) -> bool:
+    if not isinstance(required_param_names, (list, tuple, set)):
+        return True
+    names = [name for name in required_param_names if isinstance(name, str) and name]
+    if not names:
+        return True
+    return any(name in actual_params for name in names)
+
+
 def _is_relevant_call(tool_call, policy: dict[str, Any]) -> bool:
     ignored_tool_names = set(policy.get("ignored_tool_names") or ())
     if tool_call.tool_name in ignored_tool_names:
@@ -151,7 +160,10 @@ def _expected_condition_matches_call(
 
     if tool_call.tool_name not in candidate_tool_names:
         return False
-    if expected_params and not _params_match(tool_call.tool_params or {}, expected_params):
+    actual_params = tool_call.tool_params or {}
+    if expected_params and not _params_match(actual_params, expected_params):
+        return False
+    if not _has_required_param_any(actual_params, condition.get("required_params_any")):
         return False
     if condition.get("after_execution") and not _tool_call_has_succeeded(tool_call):
         return False

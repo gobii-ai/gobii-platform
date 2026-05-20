@@ -855,6 +855,28 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
+    def test_eval_stop_policy_can_wait_for_required_param_any(self):
+        self._add_tool_call("custom_sync", {"mode": "status"}, status="complete")
+        policy = {
+            "stop_when_all_seen": [
+                {
+                    "tool_name": "custom_sync",
+                    "after_execution": True,
+                    "required_params_any": ["batch_size", "limit"],
+                }
+            ]
+        }
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+
+        self._add_tool_call("custom_sync", {"mode": "sync", "batch_size": 10}, status="complete")
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
     def test_eval_stop_policy_can_wait_for_tool_execution(self):
         self._add_tool_call("custom_sync", status="pending")
 

@@ -298,6 +298,141 @@ def _extract_human_input_question(message_text: str) -> str:
     return _truncate_text_bytes(fallback, 500).strip()
 
 
+def _latest_inbound_message_text(agent: PersistentAgent) -> str:
+    message = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .values_list("body", flat=True)
+        .first()
+    )
+    return str(message or "")
+
+
+def _user_asked_for_setup_question(text: str) -> bool:
+    lower = " ".join((text or "").lower().split())
+    if not lower:
+        return False
+    return (
+        lower.startswith(("ask ", "ask me ", "ask which ", "ask what "))
+        or "before setting up" in lower
+        or "before starting" in lower
+        or "before you start" in lower
+        or "ask me which" in lower
+        or "ask which" in lower
+    )
+
+
+def _looks_like_defaultable_recurring_setup_request(text: str) -> bool:
+    lower = " ".join((text or "").lower().split())
+    if not lower or _user_asked_for_setup_question(lower):
+        return False
+
+    has_setup_action = any(
+        term in lower
+        for term in (
+            "set ",
+            "set up",
+            "schedule",
+            "monitor",
+            "track",
+            "check",
+            "alert",
+            "digest",
+            "report",
+        )
+    )
+    has_recurring_signal = any(
+        term in lower
+        for term in (
+            "schedule",
+            "daily",
+            "hourly",
+            "weekly",
+            "weekday",
+            "weekdays",
+            "every ",
+            "recurring",
+            "regular",
+            "monitor",
+            "digest",
+            "alert",
+        )
+    )
+    has_config_target = any(
+        term in lower
+        for term in (
+            "schedule",
+            "monitor",
+            "digest",
+            "alert",
+            "report",
+            "check",
+            "track",
+        )
+    )
+    return has_setup_action and has_recurring_signal and has_config_target
+
+
+def _looks_like_defaultable_setup_question(text: str) -> bool:
+    lower = " ".join((text or "").lower().split())
+    if not lower:
+        return False
+    return any(
+        term in lower
+        for term in (
+            "which competitors",
+            "what competitors",
+            "which products",
+            "what products",
+            "which vendors",
+            "what vendors",
+            "what types of updates",
+            "how often should",
+            "what cadence",
+            "specific data sources",
+            "which data sources",
+            "where should i send",
+            "where should this",
+            "need a few details",
+            "need details",
+            "to make it work",
+            "to make the digest useful",
+            "before i configure",
+            "before setting",
+        )
+    )
+
+
+def _should_reject_defaultable_setup_question(agent: PersistentAgent, question_text: str) -> bool:
+    latest_user_text = _latest_inbound_message_text(agent)
+    return _looks_like_defaultable_recurring_setup_request(
+        latest_user_text
+    ) and _looks_like_defaultable_setup_question(question_text)
+
+
+def _record_defaultable_setup_question_correction(
+    agent: PersistentAgent,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Tool policy: this is a reversible recurring setup request with enough information to proceed. "
+            "Do not ask a scope or preference survey; choose reasonable defaults, update __agent_config "
+            "charter/schedule with sqlite_batch, and stop unless a real blocker remains."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+    logger.info(
+        "Agent %s: rejected defaultable setup question and requested sqlite_batch configuration.",
+        agent.id,
+    )
+
+
 def _truncate_text_bytes(text: str, max_bytes: int) -> str:
     if not text:
         return ""
@@ -1800,6 +1935,107 @@ def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[
     return normalized_params
 
 
+def _http_request_dedupe_signature(tool_params: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(tool_params, dict) or not isinstance(tool_params.get("url"), str):
+        return None
+
+    normalized = {
+        key: value
+        for key, value in tool_params.items()
+        if key != "will_continue_work" and value is not None
+    }
+    normalized["url"] = _strip_linkified_url_artifact(str(normalized["url"]))
+    normalized["method"] = str(normalized.get("method") or "GET").upper()
+    try:
+        return json.dumps(normalized, sort_keys=True, separators=(",", ":"), default=str)
+    except (TypeError, ValueError):
+        return None
+
+
+def _tool_call_result_text_is_success(result_text: str) -> bool:
+    if not result_text:
+        return False
+    try:
+        parsed = json.loads(result_text)
+    except json.JSONDecodeError:
+        return True
+    if not _tool_result_is_success(parsed):
+        return False
+    if isinstance(parsed, dict):
+        status_code = parsed.get("status_code")
+        if isinstance(status_code, int) and status_code >= 400:
+            return False
+    return True
+
+
+def _current_task_boundary(agent: PersistentAgent) -> Optional[Any]:
+    latest_inbound = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp", "-seq")
+        .values_list("timestamp", flat=True)
+        .first()
+    )
+    latest_cron = (
+        PersistentAgentStep.objects.filter(agent=agent, cron_trigger__isnull=False)
+        .order_by("-created_at")
+        .values_list("created_at", flat=True)
+        .first()
+    )
+    candidates = [candidate for candidate in (latest_inbound, latest_cron) if candidate is not None]
+    return max(candidates) if candidates else None
+
+
+def _find_successful_duplicate_http_request(
+    agent: PersistentAgent,
+    tool_params: Dict[str, Any],
+    *,
+    eval_run_id: Optional[str],
+) -> Optional[PersistentAgentToolCall]:
+    signature = _http_request_dedupe_signature(tool_params)
+    if signature is None:
+        return None
+
+    queryset = PersistentAgentToolCall.objects.filter(
+        step__agent=agent,
+        tool_name="http_request",
+    ).exclude(status="pending")
+    if eval_run_id:
+        queryset = queryset.filter(step__eval_run_id=eval_run_id)
+    boundary = _current_task_boundary(agent)
+    if boundary is not None:
+        queryset = queryset.filter(step__created_at__gte=boundary)
+    elif not eval_run_id:
+        return None
+
+    for prior_call in queryset.order_by("-step__created_at")[:12]:
+        prior_params = _normalize_tool_params("http_request", prior_call.tool_params or {})
+        if (
+            _http_request_dedupe_signature(prior_params) == signature
+            and _tool_call_result_text_is_success(prior_call.result)
+        ):
+            return prior_call
+    return None
+
+
+def _record_duplicate_http_request_skip(
+    agent: PersistentAgent,
+    prior_call: PersistentAgentToolCall,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped duplicate http_request: this exact request already succeeded in this task. "
+            f"Use the prior tool result from step {prior_call.step_id}; do not fetch it again unless params change."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
 def _execute_tool_call_runtime(
     agent: PersistentAgent,
     *,
@@ -1980,6 +2216,7 @@ def _prepare_tool_batch(
     *,
     tool_calls: list[Any],
     budget_ctx: Optional[BudgetContext],
+    eval_run_id: Optional[str],
     heartbeat: Any,
     lock_extender: Any,
     credit_snapshot: Any,
@@ -2166,6 +2403,28 @@ def _prepare_tool_batch(
                         agent.id,
                     )
 
+            if tool_name == "send_chat_message":
+                message_body = str(tool_params.get("body") or "")
+                if _should_reject_defaultable_setup_question(agent, message_body):
+                    _record_defaultable_setup_question_correction(
+                        agent,
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    followup_required = True
+                    break
+
+            if tool_name == "request_human_input":
+                question_text = str(tool_params.get("question") or "")
+                if _should_reject_defaultable_setup_question(agent, question_text):
+                    _record_defaultable_setup_question_correction(
+                        agent,
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    followup_required = True
+                    break
+
             if tool_name == "update_plan":
                 skipped_plan_result = build_redundant_research_plan_skip_result(agent, tool_params)
                 if skipped_plan_result is not None:
@@ -2185,30 +2444,6 @@ def _prepare_tool_batch(
                     else:
                         followup_required = True
                     continue
-
-            parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
-
-            if not _enforce_tool_rate_limit(
-                agent,
-                tool_name,
-                span=tool_span,
-                attach_completion=attach_completion,
-                attach_prompt_archive=attach_prompt_archive,
-            ):
-                followup_required = True
-                continue
-
-            credit_info = _ensure_credit_for_tool(
-                agent,
-                tool_name,
-                span=tool_span,
-                credit_snapshot=credit_snapshot,
-            )
-            if not credit_info:
-                abort_after_execution = True
-                break
-            credits_consumed = credit_info.get("cost")
-            consumed_credit = credit_info.get("credit")
 
             call_id = getattr(call, "id", None)
             if not call_id and isinstance(call, dict):
@@ -2266,6 +2501,51 @@ def _prepare_tool_batch(
             if tool_name == "sqlite_batch":
                 exec_params = dict(exec_params)
                 exec_params["_has_user_facing_message"] = has_user_facing_message
+
+            if tool_name == "http_request":
+                duplicate_call = _find_successful_duplicate_http_request(
+                    agent,
+                    tool_params,
+                    eval_run_id=eval_run_id,
+                )
+                if duplicate_call is not None:
+                    _record_duplicate_http_request_skip(
+                        agent,
+                        duplicate_call,
+                        attach_completion=attach_completion,
+                        attach_prompt_archive=attach_prompt_archive,
+                    )
+                    logger.info(
+                        "Agent %s: skipped duplicate http_request; prior_step_id=%s",
+                        agent.id,
+                        duplicate_call.step_id,
+                    )
+                    followup_required = True
+                    continue
+
+            parallel_ineligible_reason = get_parallel_safe_tool_rejection_reason(tool_name, tool_params)
+
+            if not _enforce_tool_rate_limit(
+                agent,
+                tool_name,
+                span=tool_span,
+                attach_completion=attach_completion,
+                attach_prompt_archive=attach_prompt_archive,
+            ):
+                followup_required = True
+                continue
+
+            credit_info = _ensure_credit_for_tool(
+                agent,
+                tool_name,
+                span=tool_span,
+                credit_snapshot=credit_snapshot,
+            )
+            if not credit_info:
+                abort_after_execution = True
+                break
+            credits_consumed = credit_info.get("cost")
+            consumed_credit = credit_info.get("credit")
 
             close_old_connections()
             pending_step = _create_pending_tool_call_step(
@@ -5743,6 +6023,7 @@ def _run_agent_loop(
                     agent,
                     tool_calls=list(tool_calls or []),
                     budget_ctx=budget_ctx,
+                    eval_run_id=eval_run_id,
                     heartbeat=heartbeat,
                     lock_extender=lock_extender,
                     credit_snapshot=credit_snapshot,

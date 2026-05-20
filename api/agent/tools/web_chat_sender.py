@@ -45,6 +45,7 @@ _INTERNAL_PROGRESS_RE = re.compile(
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
     r"real data is coming back|got what i need|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|verify|analy[sz]e|compile|process|inspect|do (?:proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?))|let me send it over|let me end planning|"
+    r"got (?:the )?(?:result|results|data|source material).{0,180}\blet me (?:report|send|share|set up|configure)|"
     r"i now have (?:detailed )?data|source pages|mark the research steps|deliver the synthesized|"
     r"good (?:initial )?data gathered|let me (?:now )?scrape|let me do (?:a couple|some) more|"
     r"strengthen the competitive analysis|then synthesize|synthesize the full memo|"

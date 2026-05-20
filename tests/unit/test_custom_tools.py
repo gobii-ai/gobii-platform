@@ -183,20 +183,25 @@ class CustomToolsTests(TestCase):
             "target resource ids/names",
             "source filters or date ranges",
             "pass concrete values on the first invocation",
+            "do not stop after seed/setup/preview",
             "dedupe/format tools expose input_table, output_table, and run_date",
             "URL/list validators expose input_table/output_table or urls plus minimum/limit params",
+            "do not accept/reject based on `url[match.end():]` remainders",
             "before any `db.execute(...).fetchall()`/SELECT",
             "setting it after fetching does not convert existing tuple rows",
             "not `row.get(...)`",
+            "datetime.now(timezone.utc)",
+            "not `datetime.timezone`",
             "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
+            "source-code next_action text exactly",
             "what changed or which outputs are ready",
             "remaining work/cursor",
             "verification guidance",
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use list",
-            "read-only verification",
+            "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
 
@@ -206,21 +211,26 @@ class CustomToolsTests(TestCase):
             "db.row_factory = sqlite3.Row",
             "setting it after fetching does not convert existing tuple rows",
             "not `row.get(...)`",
+            "datetime.now(timezone.utc)",
+            "not `datetime.timezone`",
             "after the block exits the DB is closed",
             "target resource ids/names",
             "source filters/date ranges",
             "Never invoke custom_* with empty params",
+            "do not stop after seed/setup/preview",
             "dedupe/format jobs expose input_table, output_table, and run_date",
-            "URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params",
+            "URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params as required inputs",
+            "do not accept/reject based on `url[match.end():]` remainders",
             "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
+            "source-code next_action text exactly",
             "what changed or which outputs are ready",
             "remaining work/cursor",
             "verification guidance",
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use list",
-            "read-only tools",
+            "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, prompt_summary)
 
@@ -516,6 +526,278 @@ class CustomToolsTests(TestCase):
         node = AgentFsNode.objects.get(path="/tools/greeter.py")
         with node.content.open("rb") as handle:
             self.assertIn(b"def run", handle.read())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_likely_undefined_f_string_name(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Runlog Sync",
+                "description": "Summarize synced rows.",
+                "source_path": "/tools/runlog_sync.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    total_runlog_rows = 3\n"
+                    "    return {'summary': f'Synced {total_runlog_row} run_log rows'}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("undefined f-string name", result["message"])
+        self.assertIn("total_runlog_row", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_runlog_sync").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_defined_f_string_names(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Runlog Summary",
+                "description": "Summarize synced rows.",
+                "source_path": "/tools/runlog_summary.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    total_runlog_rows = 3\n"
+                    "    return {\n"
+                    "        'summary': f'Synced {total_runlog_rows} run_log rows',\n"
+                    "        'next_action': 'Verify read-only.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_runlog_summary").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_datetime_timezone_after_datetime_class_import(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Datetime Sync",
+                "description": "Use a UTC timestamp.",
+                "source_path": "/tools/datetime_sync.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    now = datetime.now(datetime.timezone.utc).isoformat()\n"
+                    "    return {'status': 'ok', 'timestamp': now}\n",
+                    imports="from datetime import datetime, timedelta",
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("invalid datetime reference", result["message"])
+        self.assertIn("datetime.timezone", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_datetime_sync").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_timezone_import_with_datetime_class_import(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Datetime Valid",
+                "description": "Use a UTC timestamp.",
+                "source_path": "/tools/datetime_valid.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    now = datetime.now(timezone.utc).isoformat()\n"
+                    "    return {'status': 'ok', 'timestamp': now}\n",
+                    imports="from datetime import datetime, timezone",
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_datetime_valid").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_greedy_url_regex_suffix_check(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Post URL Classifier",
+                "description": "Classify direct post URLs.",
+                "source_path": "/tools/post_url_classifier.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    import re\n"
+                    "    pattern = re.compile(r'^https?://example\\.com/posts/[a-zA-Z0-9_-]+')\n"
+                    "    url = 'https://example.com/posts/product-launch-activity-1234'\n"
+                    "    match = pattern.match(url)\n"
+                    "    suffix = url[match.end():] if match else ''\n"
+                    "    return {'status': 'ok', 'next_action': suffix}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("regex path-segment match", result["message"])
+        self.assertIn("url[match.end():]", result["message"])
+        self.assertFalse(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_post_url_classifier").exists()
+        )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_url_validator_without_required_runtime_inputs(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "URL Classifier",
+                "description": "Classify and validate candidate URLs.",
+                "source_path": "/tools/url_classifier.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    urls = params.get('urls') or ['https://example.com/posts/sample']\n"
+                    "    accepted = [url for url in urls if '/posts/' in url]\n"
+                    "    rejected = [url for url in urls if url not in accepted]\n"
+                    "    return {\n"
+                    "        'status': 'ok',\n"
+                    "        'summary': f'{len(accepted)} accepted, {len(rejected)} rejected',\n"
+                    "        'direct_post_urls': accepted,\n"
+                    "        'rejected_urls': rejected,\n"
+                    "        'next_action': 'Use direct_post_urls only.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "urls": {"type": "array", "items": {"type": "string"}},
+                        "min_posts": {"type": "integer"},
+                    },
+                },
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("require explicit runtime inputs", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_url_classifier").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_url_validator_with_required_runtime_inputs(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "URL Classifier Valid",
+                "description": "Classify and validate candidate URLs.",
+                "source_path": "/tools/url_classifier_valid.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    urls = params['input_data']\n"
+                    "    limit = params['limit']\n"
+                    "    accepted = [url for url in urls if '/posts/' in url]\n"
+                    "    accepted = accepted[:limit]\n"
+                    "    rejected = [url for url in urls if url not in accepted]\n"
+                    "    return {\n"
+                    "        'status': 'ok',\n"
+                    "        'summary': f'{len(accepted)} accepted, {len(rejected)} rejected',\n"
+                    "        'direct_post_urls': accepted,\n"
+                    "        'rejected_urls': rejected,\n"
+                    "        'next_action': 'Use direct_post_urls only.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {
+                    "type": "object",
+                    "properties": {
+                        "input_data": {"type": "array", "items": {"type": "string"}},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["input_data", "limit"],
+                },
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_url_classifier_valid").exists()
+        )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_batch_tool_without_actionable_result_signal(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Batch Sync",
+                "description": "Sync a bounded batch.",
+                "source_path": "/tools/batch_sync.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    batch_size = params.get('batch_size')\n"
+                    "    return {'status': 'ok', 'summary': 'Wrote rows.', 'batch_size': batch_size}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {"batch_size": {"type": "integer"}}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("actionable result guidance", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_batch_sync").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_batch_tool_without_remaining_work_signal(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Batch No Cursor",
+                "description": "Sync a bounded batch.",
+                "source_path": "/tools/batch_no_cursor.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    batch_size = params.get('batch_size')\n"
+                    "    return {\n"
+                    "        'status': 'ok',\n"
+                    "        'summary': 'Wrote rows.',\n"
+                    "        'batch_size': batch_size,\n"
+                    "        'next_action': 'Verify read-only.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {"batch_size": {"type": "integer"}}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("remaining-work or cursor", result["message"])
+        self.assertFalse(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_batch_no_cursor").exists()
+        )
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_allows_batch_tool_with_actionable_result_signal(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Batch Sync Valid",
+                "description": "Sync a bounded batch.",
+                "source_path": "/tools/batch_sync_valid.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    batch_size = params.get('batch_size')\n"
+                    "    return {\n"
+                    "        'status': 'ok',\n"
+                    "        'summary': 'Wrote rows.',\n"
+                    "        'batch_size': batch_size,\n"
+                    "        'remaining_work': 0,\n"
+                    "        'next_action': 'Verify read-only; continue only if remaining_work is nonzero.',\n"
+                    "    }\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {"batch_size": {"type": "integer"}}},
+                "enable": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(
+            PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_batch_sync_valid").exists()
+        )
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.tool_manager.enable_tools")
@@ -1282,7 +1564,11 @@ class CustomToolsTests(TestCase):
             "    with ctx.sqlite() as conn:\n"
             "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
             "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
-            "    return {'stored': params['value']}\n"
+            "    return {\n"
+            "        'stored': params['value'],\n"
+            "        'do_not_repeat_manually': True,\n"
+            "        'next_action': 'Do not repeat manually; verify read-only.',\n"
+            "    }\n"
             ,
             imports="import sqlite3",
         )
@@ -1310,7 +1596,14 @@ class CustomToolsTests(TestCase):
             result = execute_custom_tool(self.agent, tool, {"value": "hello"})
 
             self.assertEqual(result["status"], "ok")
-            self.assertEqual(result["result"], {"stored": "hello"})
+            self.assertEqual(
+                result["result"],
+                {
+                    "stored": "hello",
+                    "do_not_repeat_manually": True,
+                    "next_action": "Do not repeat manually; verify read-only.",
+                },
+            )
 
             batch_result = execute_sqlite_batch(
                 self.agent,
@@ -1348,7 +1641,11 @@ class CustomToolsTests(TestCase):
             "    with ctx.sqlite() as conn:\n"
             "        conn.execute('CREATE TABLE IF NOT EXISTS custom_tool_rows (value TEXT NOT NULL)')\n"
             "        conn.execute('INSERT INTO custom_tool_rows(value) VALUES (?)', (params['value'],))\n"
-            "    return {'stored': params['value']}\n",
+            "    return {\n"
+            "        'stored': params['value'],\n"
+            "        'do_not_repeat_manually': True,\n"
+            "        'next_action': 'Do not repeat manually; verify read-only.',\n"
+            "    }\n",
             imports="import sqlite3",
         )
         write_result = write_bytes_to_dir(
@@ -1385,7 +1682,14 @@ class CustomToolsTests(TestCase):
             )
 
             self.assertEqual(result["status"], "ok")
-            self.assertEqual(result["result"], {"stored": value})
+            self.assertEqual(
+                result["result"],
+                {
+                    "stored": value,
+                    "do_not_repeat_manually": True,
+                    "next_action": "Do not repeat manually; verify read-only.",
+                },
+            )
 
             batch_result = execute_sqlite_batch(
                 self.agent,

@@ -1,5 +1,6 @@
 import ast
 import base64
+import builtins
 import contextlib
 import json
 import logging
@@ -430,6 +431,336 @@ def _sync_workspace_source(agent: PersistentAgent, source_path: str) -> Optional
     return None
 
 
+_PYTHON_BUILTIN_NAMES = frozenset(dir(builtins))
+
+
+def _target_bound_names(target: ast.AST) -> set[str]:
+    return {node.id for node in ast.walk(target) if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store)}
+
+
+def _import_bound_name(alias: ast.alias) -> str:
+    return alias.asname or alias.name.split(".", 1)[0]
+
+
+def _module_bound_names(tree: ast.Module) -> set[str]:
+    names = {"__name__"}
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names.update(_import_bound_name(alias) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(_import_bound_name(alias) for alias in node.names if alias.name != "*")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                names.update(_target_bound_names(target))
+        elif isinstance(node, ast.AnnAssign):
+            names.update(_target_bound_names(node.target))
+        elif isinstance(node, ast.AugAssign):
+            names.update(_target_bound_names(node.target))
+    return names
+
+
+def _function_bound_names(node: ast.FunctionDef | ast.AsyncFunctionDef, module_names: set[str]) -> set[str]:
+    names = set(module_names)
+    args = node.args
+    for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+        names.add(arg.arg)
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+            names.add(child.id)
+        elif isinstance(child, ast.Import):
+            names.update(_import_bound_name(alias) for alias in child.names)
+        elif isinstance(child, ast.ImportFrom):
+            names.update(_import_bound_name(alias) for alias in child.names if alias.name != "*")
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(child.name)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            names.add(child.name)
+    return names
+
+
+def _simple_fstring_name(value: ast.AST) -> Optional[str]:
+    if isinstance(value, ast.Name):
+        return value.id
+    return None
+
+
+def _find_likely_undefined_fstring_names(tree: ast.Module) -> list[str]:
+    module_names = _module_bound_names(tree)
+    missing: set[str] = set()
+
+    def check_joined_strings(scope: ast.AST, bound_names: set[str]) -> None:
+        allowed_names = bound_names | _PYTHON_BUILTIN_NAMES
+
+        class FStringScopeVisitor(ast.NodeVisitor):
+            def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+                if node is scope:
+                    self.generic_visit(node)
+
+            def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+                if node is scope:
+                    self.generic_visit(node)
+
+            def visit_ClassDef(self, node: ast.ClassDef) -> None:
+                return
+
+            def visit_FormattedValue(self, node: ast.FormattedValue) -> None:
+                name = _simple_fstring_name(node.value)
+                if name and name not in allowed_names:
+                    missing.add(name)
+                self.generic_visit(node)
+
+        FStringScopeVisitor().visit(scope)
+
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            check_joined_strings(node, _function_bound_names(node, module_names))
+
+    return sorted(missing)
+
+
+_ACTIONABLE_RESULT_TERMS = (
+    "next_action",
+    "next action",
+    "follow_up",
+    "follow-up",
+    "verify",
+    "verification",
+    "read-only",
+    "instructions",
+    "remaining_work",
+    "next_cursor",
+)
+
+_ACTIONABLE_RESULT_REQUIRED_TRIGGERS = (
+    "ctx.call_tool",
+    "ctx.sqlite",
+    "sqlite3",
+    ".execute(",
+    ".executemany(",
+    "insert",
+    "update",
+    "delete",
+    "upsert",
+    "append",
+    "sync",
+    "batch_size",
+    "batch_id",
+    "remaining",
+    "cursor",
+    "side_effect",
+    "output_table",
+)
+
+_BATCH_RESULT_REQUIRED_TRIGGERS = (
+    "batch_size",
+    "batch_limit",
+    "limit",
+    "max_items",
+    "max_rows",
+)
+
+_BATCH_PROGRESS_TERMS = (
+    "remaining_work",
+    "remaining",
+    "next_cursor",
+    "cursor",
+)
+
+
+def _source_string_literals(tree: ast.Module) -> set[str]:
+    return {
+        node.value.lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+
+
+def _source_identifiers(tree: ast.Module) -> set[str]:
+    identifiers: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            identifiers.add(node.id.lower())
+        elif isinstance(node, ast.arg):
+            identifiers.add(node.arg.lower())
+    return identifiers
+
+
+def _needs_actionable_result_signal(source_text: str) -> bool:
+    source_lower = source_text.lower()
+    return any(term in source_lower for term in _ACTIONABLE_RESULT_REQUIRED_TRIGGERS)
+
+
+def _has_actionable_result_signal(tree: ast.Module) -> bool:
+    literals = _source_string_literals(tree)
+    return any(term in literal for literal in literals for term in _ACTIONABLE_RESULT_TERMS)
+
+
+def _needs_batch_progress_signal(source_text: str) -> bool:
+    source_lower = source_text.lower()
+    specific_batch_triggers = tuple(
+        term for term in _BATCH_RESULT_REQUIRED_TRIGGERS if term != "limit"
+    )
+    if any(term in source_lower for term in specific_batch_triggers):
+        return True
+    return "limit" in source_lower and any(
+        term in source_lower
+        for term in (
+            "batch",
+            "backfill",
+            "cursor",
+            "fanout",
+            "fan-out",
+            "pagination",
+            "page_token",
+            "offset",
+            "remaining",
+            "sync",
+        )
+    )
+
+
+def _has_batch_progress_signal(tree: ast.Module) -> bool:
+    terms = _source_string_literals(tree) | _source_identifiers(tree)
+    return any(progress_term in term for term in terms for progress_term in _BATCH_PROGRESS_TERMS)
+
+
+def _invalid_datetime_timezone_refs(tree: ast.Module) -> list[str]:
+    datetime_class_names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.ImportFrom) or node.module != "datetime":
+            continue
+        for alias in node.names:
+            if alias.name == "datetime":
+                datetime_class_names.add(alias.asname or alias.name)
+
+    invalid_refs: set[str] = set()
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr in {"timezone", "UTC"}
+            and isinstance(node.value, ast.Name)
+            and node.value.id in datetime_class_names
+        ):
+            invalid_refs.add(f"{node.value.id}.{node.attr}")
+    return sorted(invalid_refs)
+
+
+def _has_match_end_url_slice(tree: ast.Module) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Subscript):
+            continue
+        target = node.value
+        if not isinstance(target, ast.Name) or "url" not in target.id.lower():
+            continue
+        slice_node = node.slice
+        if not isinstance(slice_node, ast.Slice):
+            continue
+        start = slice_node.lower
+        if (
+            isinstance(start, ast.Call)
+            and isinstance(start.func, ast.Attribute)
+            and start.func.attr == "end"
+        ):
+            return True
+    return False
+
+
+def _has_url_regex_remainder_antipattern(tree: ast.Module) -> bool:
+    string_literals = _source_string_literals(tree)
+    has_url_segment_pattern = any(
+        ("://" in literal or "http" in literal)
+        and "/" in literal
+        and any(
+            marker in literal.replace(" ", "")
+            for marker in (
+                "[^/]+",
+                "[a-za-z0-9_-]+",
+                "[a-za-z0-9-_]+",
+                "[\\w-]+",
+                "[\\w_-]+",
+                "\\w+",
+            )
+        )
+        for literal in string_literals
+    )
+    if not has_url_segment_pattern:
+        return False
+
+    return _has_match_end_url_slice(tree)
+
+
+def _validate_schema_runtime_params_for_source(
+    source_text: str,
+    description: str,
+    parameters_schema: Dict[str, Any],
+) -> Optional[str]:
+    properties = parameters_schema.get("properties")
+    if not isinstance(properties, dict) or not properties:
+        return None
+
+    combined_text = "\n".join(
+        (
+            source_text.lower(),
+            description.lower(),
+            json.dumps(parameters_schema, sort_keys=True).lower(),
+        )
+    )
+    is_url_or_list_validator = "url" in combined_text and any(
+        term in combined_text
+        for term in (
+            "validator",
+            "validate",
+            "classifier",
+            "classify",
+            "accepted",
+            "rejected",
+            "direct_post_urls",
+            "scrape_ready_urls",
+        )
+    )
+    if not is_url_or_list_validator:
+        return None
+
+    input_like_names = {
+        "urls",
+        "url",
+        "input_urls",
+        "input_data",
+        "candidate_urls",
+        "candidate_url",
+        "input_table",
+        "source_table",
+        "output_table",
+        "dest_table",
+        "min_posts",
+        "minimum_posts",
+        "minimum_count",
+        "limit",
+        "batch_size",
+    }
+    property_names = set(properties)
+    if not property_names & input_like_names:
+        return None
+
+    required = parameters_schema.get("required")
+    required_names = {name for name in required if isinstance(name, str)} if isinstance(required, list) else set()
+    if required_names & input_like_names:
+        return None
+
+    return (
+        "URL/list validator custom tools must require explicit runtime inputs instead of relying on built-in samples "
+        "or hidden defaults. Mark urls/input_table/output_table/minimum/limit params as required as appropriate, then "
+        "invoke the tool with concrete values."
+    )
+
+
 def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     source_bytes = source_text.encode("utf-8")
     if len(source_bytes) > MAX_CUSTOM_TOOL_SOURCE_BYTES:
@@ -482,6 +813,34 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
             break
     if not has_main_guard:
         return "Custom tool source must end with `if __name__ == '__main__': main(run)`."
+    missing_fstring_names = _find_likely_undefined_fstring_names(tree)
+    if missing_fstring_names:
+        names = ", ".join(missing_fstring_names)
+        return f"Custom tool source may reference undefined f-string name(s): {names}. Fix the source before registering."
+    invalid_datetime_refs = _invalid_datetime_timezone_refs(tree)
+    if invalid_datetime_refs:
+        refs = ", ".join(invalid_datetime_refs)
+        return (
+            f"Custom tool source uses invalid datetime reference(s): {refs}. "
+            "After `from datetime import datetime`, import `timezone` separately and use `datetime.now(timezone.utc)`, "
+            "or use `import datetime` with `datetime.datetime.now(datetime.timezone.utc)`."
+        )
+    if _has_url_regex_remainder_antipattern(tree):
+        return (
+            "Custom tool source appears to validate URLs with a regex path-segment match and then inspect "
+            "`url[match.end():]`. The regex can consume the slug before the remainder check and reject valid URLs. "
+            "Parse URLs with urllib.parse, use fullmatch/anchors, or capture and validate the path segment instead."
+        )
+    if _needs_actionable_result_signal(source_text) and not _has_actionable_result_signal(tree):
+        return (
+            "Custom tool source writes, syncs, batches, or calls tools but lacks actionable result guidance. "
+            "Return next_action, verification, remaining_work, or next_cursor so the agent knows whether to verify or continue."
+        )
+    if _needs_batch_progress_signal(source_text) and not _has_batch_progress_signal(tree):
+        return (
+            "Custom tool source accepts batch/limit params but lacks remaining-work or cursor reporting. "
+            "Return remaining_work or next_cursor so the agent can resume bounded work."
+        )
     return None
 
 
@@ -621,6 +980,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "That DB may look sandbox-local during execution, but it is still the same durable agent SQLite DB that sqlite_batch reads. "
                 "SQLite row counts live on the cursor returned by `db.execute(...)` (or use `SELECT changes()`); `sqlite3.Connection` has no `rowcount` attribute. "
                 "If you want `dict(row)` from SQLite query results, set `db.row_factory = sqlite3.Row` before any `db.execute(...).fetchall()`/SELECT; setting it after fetching does not convert existing tuple rows. `sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Otherwise build dicts from `cursor.description` and tuple rows. "
+                "For UTC timestamps after `from datetime import datetime`, also import `timezone` and use `datetime.now(timezone.utc)`, not `datetime.timezone`. "
                 "Do not ATTACH sandbox file paths in sqlite_batch. "
                 "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
                 "For external API/MCP fan-out, Google Sheets syncs, or other slow network batches, design the tool to be chunkable by default: "
@@ -631,13 +991,15 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Never use an empty parameters_schema for data transforms, syncs, validators, or dedupe jobs; expose the tables, filters, limits, destinations, URLs, or modes you can vary, then pass values when invoking the tool. "
                 "For dedupe/format tools expose input_table, output_table, and run_date or equivalents; for URL/list validators expose input_table/output_table or urls plus minimum/limit params. "
                 "Even for representative/sample runs, put sample inputs/defaults in runtime params and pass concrete values on the first invocation; do not invoke custom_* with empty params just because the code has defaults. "
-                "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for URL/list validators, accept the candidate list and destination/default options as params. "
+                "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for URL/list validators, accept the candidate list and destination/default options as required params. "
+                "For URL/list validators, parse URL paths, fullmatch/anchor regexes, or capture exact path segments; do not accept/reject based on `url[match.end():]` remainders. "
                 "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
+                "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "
                 "When a custom tool performs side effects such as appending Google Sheets rows, updating external systems, sending messages, or syncing data, "
                 "its return value must make the side effects unambiguous. Every success or error return dict should include `next_action`, including validation-only/filtering tools. Keep results concise: status, summary, what changed or which outputs are ready, counts, side_effects_completed or target resource ids/names, source filters or date ranges, skipped/duplicate counts when relevant, remaining work/cursor when resumable, and verification guidance are usually enough. "
                 "Name ready outputs for the next tool or step, for example `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or `records_to_sync`; avoid only generic names like `kept` when the downstream agent needs a specific accepted list. "
                 "For validator/classifier tools, return the accepted ready-to-use list, rejected inputs with reasons, the rule used, and whether more inputs are needed. "
-                "If the tool already wrote or synced records, return do_not_repeat_manually=true and make clear that follow-up should be read-only verification, not another append/add/update call. "
+                "If the tool already wrote or synced records, return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
                 "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
                 "If a needed env var secret is missing, request it with `secure_credentials_request` using `secret_type='env_var'` "
                 "rather than a domain-scoped credential. "
@@ -773,6 +1135,9 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         validation_error = _validate_source_code(source_code, source_path)
         if validation_error:
             return {"status": "error", "message": validation_error}
+        validation_error = _validate_schema_runtime_params_for_source(source_code, description, parameters_schema)
+        if validation_error:
+            return {"status": "error", "message": validation_error}
         write_result = write_bytes_to_dir(
             agent=agent,
             content_bytes=source_code.encode("utf-8"),
@@ -792,6 +1157,9 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
             return {"status": "error", "message": source_error}
         assert source_text is not None
         validation_error = _validate_source_code(source_text, source_path)
+        if validation_error:
+            return {"status": "error", "message": validation_error}
+        validation_error = _validate_schema_runtime_params_for_source(source_text, description, parameters_schema)
         if validation_error:
             return {"status": "error", "message": validation_error}
 
@@ -1011,12 +1379,14 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, or destinations. "
         "Never invoke custom_* with empty params just because the code has defaults; pass concrete sample/default values on the first run. "
         "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for dedupe/format jobs expose input_table, output_table, and run_date or equivalents. "
-        "For URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params, then pass concrete values when invoking. "
+        "For URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params as required inputs, then pass concrete values when invoking. "
+        "Parse URL paths, fullmatch/anchor regexes, or capture exact path segments; do not accept/reject based on `url[match.end():]` remainders. "
         "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
+        "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "
         "Return values must be helpful to the downstream agent, especially after writes or syncs. Every success or error return dict should include `next_action`, including validation-only/filtering tools. Keep them concise: status, summary, what changed or which outputs are ready, counts, side_effects_completed or target resource ids/names, source filters/date ranges, skipped/duplicate counts, remaining work/cursor when resumable, and verification guidance are usually enough. "
         "Name ready outputs for the next tool or step, such as `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or `records_to_sync`; do not rely only on generic names like `kept` when a downstream tool needs the accepted list. "
         "For validator/classifier tools, return the accepted ready-to-use list, rejected inputs with reasons, the rule used, and whether more inputs are needed. "
-        "For completed writes, include do_not_repeat_manually=true and make clear that the agent should verify with read-only tools instead of manually replaying the same append/add/update calls. "
+        "For completed writes, include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
         "\nSOURCE: Scripts are run via `uv run` — any pip package is available. "
         "Add PEP 723 metadata at the top for third-party deps: "
         "# /// script\\n# dependencies = [\"requests[socks]\"]\\n# ///\\n"
@@ -1059,6 +1429,7 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "For normal DB work, use `with ctx.sqlite() as db:`; it auto-commits on success, rolls back on error, and closes the connection for you. "
         "For SQLite row counts, use the cursor returned by `db.execute(...)` or `SELECT changes()`; `sqlite3.Connection` does not have `rowcount`. "
         "For SQLite result rows, set `db.row_factory = sqlite3.Row` before any `db.execute(...).fetchall()`/SELECT if you plan to call `dict(row)`; setting it after fetching does not convert existing tuple rows. `sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Otherwise build dicts from cursor.description. "
+        "For UTC timestamps after `from datetime import datetime`, import `timezone` too and use `datetime.now(timezone.utc)`, not `datetime.timezone`. "
         "Your custom tool shares the agent's embedded SQLite DB — INSERT/UPDATE/SELECT directly. "
         "Fetch/normalize/store/query work is an especially strong trigger for this SQLite-backed custom-tool pattern, without waiting for the user to request it explicitly. "
         "Treat ctx.sqlite_db_path as an internal/advanced escape hatch; most tools should not need it. "
