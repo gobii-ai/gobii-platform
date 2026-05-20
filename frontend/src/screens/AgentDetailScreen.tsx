@@ -143,6 +143,7 @@ export type AgentSettingsWorkspaceProps = {
   onOpenSecrets?: () => void
   onOpenEmailSettings?: () => void
   onOpenFiles?: () => void
+  onOpenContactRequests?: () => void
   onReassigned?: (payload: {
     context?: { type: string; id: string; name?: string | null }
     redirect?: string | null
@@ -422,6 +423,7 @@ export function AgentSettingsWorkspace({
   onOpenSecrets,
   onOpenEmailSettings,
   onOpenFiles,
+  onOpenContactRequests,
   onReassigned,
 }: AgentSettingsWorkspaceProps) {
   const isEmbedded = variant === 'embedded'
@@ -2261,6 +2263,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               onAddContact={openAddContactModal}
               onRemoveRows={confirmAllowlistRemoval}
               contactRequestsUrl={initialData.urls.contactRequests}
+              onOpenContactRequests={onOpenContactRequests}
             />
           )}
 
@@ -2604,10 +2607,11 @@ type AllowlistManagerProps = {
   onAddContact: () => void
   onRemoveRows: (rows: AllowlistTableRow[]) => void
   contactRequestsUrl: string
+  onOpenContactRequests?: () => void
   embedded?: boolean
 }
 
-function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, embedded = false }: AllowlistManagerProps) {
+function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContact, onRemoveRows, contactRequestsUrl, onOpenContactRequests, embedded = false }: AllowlistManagerProps) {
   const contactCapReached = typeof state.maxContacts === 'number' && state.maxContacts > 0 && projectedSlotsUsed >= state.maxContacts
   const embeddedInfoBannerClassName = 'flex items-start gap-2 rounded-lg border border-amber-300/20 bg-amber-950/30 px-4 py-3'
   const embeddedInfoCardClassName = 'rounded-xl border border-slate-200/20 bg-slate-950/35 px-4 py-4'
@@ -2644,9 +2648,19 @@ function AllowlistManager({ state, rows, projectedSlotsUsed, saving, onAddContac
                 {state.pendingContactRequests} Contact Request{state.pendingContactRequests === 1 ? '' : 's'} Pending
               </span>
             </div>
-            <a href={contactRequestsUrl} className="text-sm font-medium text-amber-700 hover:text-amber-900 underline">
-              Review
-            </a>
+            {embedded && onOpenContactRequests ? (
+              <button
+                type="button"
+                onClick={onOpenContactRequests}
+                className="text-sm font-medium text-amber-100 underline transition-colors hover:text-white"
+              >
+                Review
+              </button>
+            ) : (
+              <a href={contactRequestsUrl} className="text-sm font-medium text-amber-700 hover:text-amber-900 underline">
+                Review
+              </a>
+            )}
           </div>
         </div>
       )}

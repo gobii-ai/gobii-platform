@@ -32,6 +32,7 @@ from console.api_views import (
     AgentHumanInputRequestDismissAPIView,
     AgentHumanInputRequestResponseAPIView,
     AgentPlanningSkipAPIView,
+    AgentContactRequestListAPIView,
     AgentContactRequestResolveAPIView,
     AgentChatRosterAPIView,
     AgentQuickCreateAPIView,
@@ -392,6 +393,7 @@ urlpatterns = [
     path("console/agents/<uuid:pk>/chat/secrets/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell_secrets"),
     path("console/agents/<uuid:pk>/chat/email/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell_email"),
     path("console/agents/<uuid:pk>/chat/files/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell_files"),
+    path("console/agents/<uuid:pk>/chat/contact-requests/", PersistentAgentChatShellView.as_view(), name="agent_chat_shell_contact_requests"),
     path("console/agents/<uuid:pk>/avatar/thumb/", AgentAvatarThumbnailProxyView.as_view(), name="agent_avatar_thumbnail"),
     path("console/agents/<uuid:pk>/avatar/", AgentAvatarProxyView.as_view(), name="agent_avatar"),
     path("public/agents/<uuid:pk>/avatar/thumb/", PublicAgentAvatarThumbnailView.as_view(), name="agent_avatar_public_thumbnail"),
@@ -431,6 +433,11 @@ urlpatterns = [
         "console/api/agents/<uuid:agent_id>/requested-secrets/remove/",
         AgentRequestedSecretsRemoveAPIView.as_view(),
         name="console_agent_requested_secrets_remove_api",
+    ),
+    path(
+        "console/api/agents/<uuid:agent_id>/contact-requests/",
+        AgentContactRequestListAPIView.as_view(),
+        name="console_agent_contact_requests_api",
     ),
     path(
         "console/api/agents/<uuid:agent_id>/contact-requests/resolve/",

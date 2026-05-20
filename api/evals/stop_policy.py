@@ -153,6 +153,10 @@ def _expected_condition_matches_call(
         return False
     if expected_params and not _params_match(tool_call.tool_params or {}, expected_params):
         return False
+    if condition.get("after_execution") and not _tool_call_has_succeeded(tool_call):
+        return False
+    if condition.get("after_finish") and not _tool_call_has_finished(tool_call):
+        return False
 
     config_field = condition.get("agent_config_field")
     if config_field and tool_call.tool_name == "sqlite_batch":

@@ -4,6 +4,7 @@ from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios import * # noqa
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
 )
@@ -32,6 +33,11 @@ register_builtin_suites(
             slug="agent_behavior_micro",
             description="Small deterministic planning and tool-choice behavior checks.",
             scenario_slugs=BEHAVIOR_MICRO_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug="charter_memory_micro",
+            description="Small deterministic charter memory behavior checks.",
+            scenario_slugs=CHARTER_MEMORY_MICRO_SCENARIO_SLUGS,
         ),
         EvalSuite(
             slug="planning_micro",

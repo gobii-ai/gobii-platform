@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -12,6 +13,7 @@ type StreamingReplyCardProps = {
   agentAvatarUrl?: string | null
   agentColorHex?: string | null
   isStreaming: boolean
+  onLinkClick?: (href: string) => boolean | void
 }
 
 /**
@@ -63,7 +65,23 @@ function useThrottledMarkdown(content: string, isStreaming: boolean) {
   return { committedMarkdown, tailText }
 }
 
-export function StreamingReplyCard({ content, agentFirstName, agentAvatarUrl, agentColorHex, isStreaming }: StreamingReplyCardProps) {
+function shouldInterceptLinkClick(event: ReactMouseEvent<HTMLElement>): boolean {
+  return event.button === 0
+    && !event.defaultPrevented
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.shiftKey
+}
+
+export function StreamingReplyCard({
+  content,
+  agentFirstName,
+  agentAvatarUrl,
+  agentColorHex,
+  isStreaming,
+  onLinkClick,
+}: StreamingReplyCardProps) {
   // Typewriter for non-streaming reveal of completed messages.
   const { displayedContent, isWaiting } = useTypewriter(content, isStreaming, {
     charsPerFrame: 3,
@@ -102,6 +120,31 @@ export function StreamingReplyCard({ content, agentFirstName, agentAvatarUrl, ag
     return sanitizeHtml(isStreaming ? content : normalizedContent)
   }, [isStreaming, content, normalizedContent, shouldRenderHtml])
 
+  const handleContentClick = useCallback((event: ReactMouseEvent<HTMLElement>) => {
+    if (!onLinkClick || !shouldInterceptLinkClick(event)) {
+      return
+    }
+
+    const target = event.target
+    if (!(target instanceof Element)) {
+      return
+    }
+
+    const anchor = target.closest('a[href]')
+    if (!(anchor instanceof HTMLAnchorElement)) {
+      return
+    }
+
+    const href = anchor.getAttribute('href')
+    if (!href) {
+      return
+    }
+
+    if (onLinkClick(href)) {
+      event.preventDefault()
+    }
+  }, [onLinkClick])
+
   if (!hasContent) {
     return null
   }
@@ -124,7 +167,7 @@ export function StreamingReplyCard({ content, agentFirstName, agentAvatarUrl, ag
           />
           {agentFirstName || 'Agent'}
         </div>
-        <div className="chat-content prose prose-sm max-w-none leading-relaxed text-slate-800">
+        <div className="chat-content prose prose-sm max-w-none leading-relaxed text-slate-800" onClick={handleContentClick}>
           {htmlContent ? (
             <div dangerouslySetInnerHTML={{ __html: htmlContent }} />
           ) : (

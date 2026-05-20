@@ -44,6 +44,7 @@ import {
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
 import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
@@ -670,6 +671,10 @@ function sameConsoleContext(left: ConsoleContext | null | undefined, right: Cons
   return left.type === right.type && left.id === right.id
 }
 
+function consoleContextKey(context: ConsoleContext): string {
+  return `${context.type}:${context.id}`
+}
+
 type ConnectionIndicator = {
   status: ConnectionStatusTone
   label: string
@@ -1004,15 +1009,31 @@ export function AgentChatPage({
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const locallySelectedAgentIdsRef = useRef<Set<string>>(new Set())
+  const [manuallySelectedContextKey, setManuallySelectedContextKey] = useState<string | null>(null)
+  const resetManualContextForExternalAgent = useCallback((nextAgentId: string | null) => {
+    if (
+      !nextAgentId
+      || nextAgentId === activeAgentIdRef.current
+      || locallySelectedAgentIdsRef.current.has(nextAgentId)
+    ) {
+      return
+    }
+    setManuallySelectedContextKey(null)
+  }, [])
   const selectedFromCurrentRoster = Boolean(activeAgentId && locallySelectedAgentIdsRef.current.has(activeAgentId))
-  const contextLookupAgentId = isNewAgent || isSelectionView
-    ? undefined
-    : selectedFromCurrentRoster
-      ? undefined
-      : routeAgentId ?? activeAgentId ?? undefined
+  const shouldResolveContextForRouteAgent = (
+    !isNewAgent
+    && !isSelectionView
+    && !manuallySelectedContextKey
+    && !selectedFromCurrentRoster
+  )
+  const contextLookupAgentId = shouldResolveContextForRouteAgent
+    ? routeAgentId ?? activeAgentId ?? undefined
+    : undefined
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
+      setManuallySelectedContextKey(consoleContextKey(context))
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
       if (onContextSwitch) {
         onContextSwitch(context)
@@ -1060,9 +1081,10 @@ export function AgentChatPage({
   const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
+    resetManualContextForExternalAgent(agentId ?? null)
     setShellPathname(typeof window === 'undefined' ? '' : window.location.pathname)
     setActiveAgentId(agentId ?? null)
-  }, [agentId])
+  }, [agentId, resetManualContextForExternalAgent])
 
   useEffect(() => {
     activeAgentIdRef.current = activeAgentId
@@ -1106,6 +1128,7 @@ export function AgentChatPage({
       setShellPathname(nextPathname)
       const nextAgentId = extractAgentChatShellAgentId(nextPathname)
       if (nextAgentId !== activeAgentIdRef.current) {
+        resetManualContextForExternalAgent(nextAgentId)
         setSwitchingAgentId(null)
         setActiveAgentId(nextAgentId)
       }
@@ -1113,7 +1136,7 @@ export function AgentChatPage({
 
     window.addEventListener('popstate', handleShellLocationChange)
     return () => window.removeEventListener('popstate', handleShellLocationChange)
-  }, [])
+  }, [resetManualContextForExternalAgent])
 
   // Set up queryClient bridge for the Zustand store
   useEffect(() => { setTimelineQueryClient(queryClient) }, [queryClient])
@@ -3143,6 +3166,10 @@ export function AgentChatPage({
     navigateToShellSubview('files')
   }, [navigateToShellSubview])
 
+  const handleOpenEmbeddedContactRequests = useCallback(() => {
+    navigateToShellSubview('contact-requests')
+  }, [navigateToShellSubview])
+
   const handleCloseEmbeddedSettings = useCallback(() => {
     if (!activeAgentIdRef.current) {
       return
@@ -4204,6 +4231,8 @@ export function AgentChatPage({
       make_global: makeGlobal,
     })
     replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+    void queryClient.invalidateQueries({ queryKey: ['agent-settings', activeAgentId], exact: true })
+    void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
   }, [activeAgentId, queryClient])
 
   const handleRemoveRequestedSecrets = useCallback(async (secretIds: string[]) => {
@@ -4325,6 +4354,8 @@ export function AgentChatPage({
         return 'Email Settings'
       case 'files':
         return 'Agent Files'
+      case 'contact-requests':
+        return 'Contact Requests'
       case 'settings':
       default:
         return 'Agent Settings'
@@ -4340,6 +4371,7 @@ export function AgentChatPage({
         onOpenSecrets={handleOpenEmbeddedSecrets}
         onOpenEmailSettings={handleOpenEmbeddedEmailSettings}
         onOpenFiles={handleOpenEmbeddedFiles}
+        onOpenContactRequests={handleOpenEmbeddedContactRequests}
       />
     ) : shellSubview === 'secrets' ? (
       <EmbeddedAgentSecretsPanel
@@ -4351,6 +4383,13 @@ export function AgentChatPage({
       <EmbeddedAgentEmailSettingsPanel
         agentId={activeAgentId}
         onBack={handleCloseEmbeddedSettings}
+      />
+    ) : shellSubview === 'contact-requests' ? (
+      <EmbeddedAgentContactRequestsPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        onBack={handleCloseEmbeddedSettings}
+        onResolveContactRequests={handleResolveContactRequests}
       />
     ) : (
       <EmbeddedAgentFilesPanel
@@ -4608,6 +4647,7 @@ export function AgentChatPage({
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
         onResolveContactRequests={handleResolveContactRequests}
+        onViewAllContactRequests={handleOpenEmbeddedContactRequests}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         autoScrollPinned={autoScrollPinned}

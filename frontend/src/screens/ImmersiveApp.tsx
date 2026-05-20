@@ -245,6 +245,19 @@ function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentS
   return query ? `${basePath}?${query}` : basePath
 }
 
+function buildAgentSelectionPath(currentSearch = ''): string {
+  const currentParams = new URLSearchParams(currentSearch)
+  const nextParams = new URLSearchParams()
+  for (const key of AGENT_SHELL_PRESERVED_QUERY_KEYS) {
+    const value = currentParams.get(key)
+    if (value !== null) {
+      nextParams.set(key, value)
+    }
+  }
+  const query = nextParams.toString()
+  return query ? `/app/agents?${query}` : '/app/agents'
+}
+
 function parseBooleanFlag(value: string | null): boolean {
   if (!value) {
     return false
@@ -618,8 +631,8 @@ export function ImmersiveApp({
 
   const handleContextSwitch = useCallback((_context: ConsoleContext) => {
     setSelectionRefreshKey((current) => current + 1)
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, activeAgentShellPage, location.search))
+    if (route.kind === 'agent-chat') {
+      navigateTo(buildAgentSelectionPath(location.search))
       return
     }
     if (route.kind === 'billing') {
@@ -643,7 +656,7 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/agents')
-  }, [activeAgentShellPage, location.search, route])
+  }, [location.search, route])
 
   const handleSelectionPageChange = useCallback((page: SelectionShellPage) => {
     if (route.kind === 'agent-chat' && route.agentId) {

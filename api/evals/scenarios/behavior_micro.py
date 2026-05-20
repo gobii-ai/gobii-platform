@@ -40,6 +40,11 @@ PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_fir
 PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_planning"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
+CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
+CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
+CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
+CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE = "charter_narrows_scope_preserving_unrelated_guidance"
+CHARTER_IGNORES_ONE_OFF_PREFERENCE = "charter_ignores_one_off_preference"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -306,6 +311,14 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
 ]
 
+CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
+    CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING,
+    CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL,
+    CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE,
+    CHARTER_IGNORES_ONE_OFF_PREFERENCE,
+]
+
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
     TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST,
     TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV,
@@ -314,7 +327,10 @@ TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
     *COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
 ]
 
-BEHAVIOR_MICRO_SCENARIO_SLUGS = PLANNING_MICRO_SCENARIO_SLUGS + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
+BEHAVIOR_MICRO_SCENARIO_SLUGS = (
+    PLANNING_MICRO_SCENARIO_SLUGS
+    + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
+)
 
 SUBSTANTIVE_WORK_TOOL_NAMES = {
     "create_file",
@@ -334,9 +350,12 @@ SUBSTANTIVE_WORK_TOOL_NAMES = {
     "spawn_web_task",
 }
 
-PLANNING_MUTATION_TOOL_NAMES = {
+AGENT_CONFIG_MUTATION_TOOL_NAMES = {
     "update_schedule",
     "update_charter",
+}
+
+PLANNING_MUTATION_TOOL_NAMES = AGENT_CONFIG_MUTATION_TOOL_NAMES | {
     "update_plan",
 }
 
@@ -449,6 +468,21 @@ def get_planning_mutation_calls_before_end_planning(run_id, *, after=None):
         if call.tool_name in PLANNING_MUTATION_TOOL_NAMES or sqlite_batch_mutates_planning_state(call):
             calls.append(call)
     return calls
+
+
+def tool_call_mutates_agent_config(tool_call):
+    return (
+        tool_call.tool_name in AGENT_CONFIG_MUTATION_TOOL_NAMES
+        or sqlite_batch_mutates_planning_state(tool_call)
+    )
+
+
+def get_agent_config_mutation_calls_for_run(run_id, *, after=None):
+    return [
+        call
+        for call in get_tool_calls_for_run(run_id, after=after)
+        if tool_call_mutates_agent_config(call)
+    ]
 
 
 def get_pending_human_input_requests(agent_id, run_id, *, after=None):
@@ -1024,6 +1058,273 @@ class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
                     f"pending_requests={pending_requests}, raw_reply_message={request_obj.raw_reply_message_id}."
                 ),
             )
+
+
+class CharterMemoryScenario(BehaviorMicroScenario):
+    category = "memory"
+    tags = ("agent_behavior", "micro", "charter", "memory")
+    existing_charter = ""
+    prompt = ""
+    verification_task_name = ""
+    success_summary = ""
+    failure_summary = ""
+    expect_charter_mutation = True
+
+    def _eval_stop_policy(self):
+        if self.expect_charter_mutation:
+            return {
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "charter",
+                        "after_execution": True,
+                    }
+                ],
+            }
+        return {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_on_sqlite_agent_config_mutation": True,
+            "stop_on_tool_names": sorted(AGENT_CONFIG_MUTATION_TOOL_NAMES),
+        }
+
+    def _seed_charter_agent(self, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        PersistentAgent.objects.filter(id=agent_id).update(charter=self.existing_charter)
+        self._seed_prior_processing_run(agent_id)
+        self._enable_builtin_tools(agent_id, ["sqlite_batch"])
+
+    def _inject_charter_prompt(self, run_id, agent_id):
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                self.prompt,
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy=self._eval_stop_policy(),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+        return inbound
+
+    def _charter_mutation_calls(self, run_id, inbound):
+        return [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["sqlite_batch"])
+            if sqlite_batch_mutates_agent_config_field(call, "charter")
+        ]
+
+    def _mutation_calls_for_verification(self, run_id, inbound):
+        if self.expect_charter_mutation:
+            return self._charter_mutation_calls(run_id, inbound)
+        return get_agent_config_mutation_calls_for_run(run_id, after=inbound.timestamp)
+
+    def _charter_check(self, agent, mutation_calls):
+        raise NotImplementedError
+
+    def run(self, run_id, agent_id):
+        self._seed_charter_agent(agent_id)
+        inbound = self._inject_charter_prompt(run_id, agent_id)
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name=self.verification_task_name,
+        )
+        mutation_calls = self._mutation_calls_for_verification(run_id, inbound)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        passed, failure_detail = self._charter_check(agent, mutation_calls)
+        if passed:
+            artifacts = {"step": mutation_calls[0].step} if mutation_calls else {}
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=self.verification_task_name,
+                observed_summary=self.success_summary,
+                artifacts=artifacts,
+            )
+            return
+
+        observed_summary = self.failure_summary
+        if failure_detail:
+            observed_summary = f"{observed_summary}; {failure_detail}"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=self.verification_task_name,
+            observed_summary=observed_summary,
+            artifacts={"step": mutation_calls[0].step} if mutation_calls else {},
+        )
+
+
+@register_scenario
+class CharterAddsDurablePreferencePreservingExistingScenario(CharterMemoryScenario):
+    slug = CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING
+    description = "Durable user preferences should be merged into the charter without dropping existing guidance."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_charter_update_preserved_existing", assertion_type="manual"),
+    ]
+    existing_charter = "Monitor AI funding news weekly. Prefer concise section titles in reports."
+    prompt = (
+        "Going forward, always answer status updates in concise bullets. "
+        "Keep my existing standing guidance too."
+    )
+    verification_task_name = "verify_charter_update_preserved_existing"
+    success_summary = "Agent merged the durable bullet preference into charter while preserving existing guidance."
+    failure_summary = "Expected a charter update preserving existing job/guidance and adding bullets"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        preserved_job = "ai funding" in charter
+        preserved_existing_guidance = "concise section title" in charter
+        added_preference = "bullet" in charter
+        passed = bool(
+            mutation_calls and preserved_job and preserved_existing_guidance and added_preference
+        )
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterAddsInferredPreferencePreservingExistingScenario(CharterMemoryScenario):
+    slug = CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING
+    description = "Stable inferred user preferences should be merged into the charter without dropping existing guidance."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_inferred_preference_preserved_existing", assertion_type="manual"),
+    ]
+    existing_charter = "Prepare weekly portfolio risk updates. Track earnings dates and major macro events."
+    prompt = (
+        "This is the third time I'm asking: lead with a short TL;DR before the details. "
+        "That format works better for me."
+    )
+    verification_task_name = "verify_inferred_preference_preserved_existing"
+    success_summary = "Agent captured the inferred TL;DR preference while preserving existing portfolio guidance."
+    failure_summary = "Expected a charter update preserving portfolio guidance and adding inferred TL;DR preference"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        preserved_job = "portfolio risk" in charter
+        preserved_existing_guidance = "earnings" in charter and "macro" in charter
+        summary_terms = ("tl;dr", "tldr", "summary", "takeaway")
+        lead_terms = ("lead", "begin", "start", "first", "before")
+        added_inferred_preference = (
+            any(term in charter for term in summary_terms)
+            and any(term in charter for term in lead_terms)
+        )
+        passed = bool(
+            mutation_calls
+            and preserved_job
+            and preserved_existing_guidance
+            and added_inferred_preference
+        )
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterExpandsSparseCharterWithDetailScenario(CharterMemoryScenario):
+    slug = CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL
+    description = "Durable detail should make a sparse charter more specific while preserving the core job."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_charter_expanded_with_detail", assertion_type="manual"),
+    ]
+    existing_charter = "Monitor vendor risks."
+    prompt = (
+        "Going forward, make the vendor risk monitor specific: track security incidents, "
+        "pricing changes, SLA outages, and contract renewal dates. Include source links in each update."
+    )
+    verification_task_name = "verify_charter_expanded_with_detail"
+    success_summary = "Agent expanded a sparse charter into specific durable monitoring guidance."
+    failure_summary = (
+        "Expected a longer charter preserving vendor risk and adding security/pricing/SLA/renewal/source details"
+    )
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        required_terms = ("vendor risk", "security", "pricing", "sla", "renewal")
+        includes_sources = "source" in charter or "link" in charter
+        expanded = len(agent.charter or "") > len(self.existing_charter) + 50
+        passed = bool(
+            mutation_calls
+            and expanded
+            and includes_sources
+            and all(term in charter for term in required_terms)
+        )
+        return (
+            passed,
+            (
+                f"mutation_count={len(mutation_calls)}, expanded={expanded}, "
+                f"includes_sources={includes_sources}, charter={agent.charter!r}."
+            ),
+        )
+
+
+@register_scenario
+class CharterNarrowsScopePreservingUnrelatedGuidanceScenario(CharterMemoryScenario):
+    slug = CHARTER_NARROWS_SCOPE_PRESERVING_UNRELATED_GUIDANCE
+    description = "Scope changes should replace only the relevant charter clause while preserving unrelated guidance."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_scope_replaced_and_guidance_preserved", assertion_type="manual"),
+    ]
+    existing_charter = (
+        "Monitor competitor pricing for enterprise and consumer plans. "
+        "Use concise bullets. Send routine updates in Slack."
+    )
+    prompt = (
+        "Actually narrow the pricing monitor to enterprise plans only. "
+        "Keep my standing format and delivery preferences."
+    )
+    verification_task_name = "verify_scope_replaced_and_guidance_preserved"
+    success_summary = "Agent narrowed the pricing scope while preserving format and delivery guidance."
+    failure_summary = "Expected enterprise-only scope, no consumer scope, and preserved concise bullets/Slack guidance"
+
+    def _charter_check(self, agent, mutation_calls):
+        charter = (agent.charter or "").lower()
+        excludes_consumer = (
+            "consumer" not in charter
+            or "ignore consumer" in charter
+            or "exclude consumer" in charter
+            or "not consumer" in charter
+            or "no consumer" in charter
+            or "do not track consumer" in charter
+        )
+        narrowed_scope = "enterprise" in charter and excludes_consumer
+        preserved_format = "concise" in charter and "bullet" in charter
+        preserved_delivery = "slack" in charter
+        passed = bool(mutation_calls and narrowed_scope and preserved_format and preserved_delivery)
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
+
+
+@register_scenario
+class CharterIgnoresOneOffPreferenceScenario(CharterMemoryScenario):
+    slug = CHARTER_IGNORES_ONE_OFF_PREFERENCE
+    description = "One-off response preferences should not mutate the charter."
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_no_charter_mutation", assertion_type="manual"),
+    ]
+    existing_charter = "Monitor AI funding news weekly. Prefer concise section titles in reports."
+    prompt = "For this answer only, use bullet points: list two reasons backups matter."
+    verification_task_name = "verify_no_charter_mutation"
+    success_summary = "Agent left charter unchanged for a one-off style request."
+    failure_summary = "Expected no config mutation for one-off preference"
+    expect_charter_mutation = False
+
+    def _charter_check(self, agent, mutation_calls):
+        passed = not mutation_calls and agent.charter == self.existing_charter
+        return passed, f"mutation_count={len(mutation_calls)}, charter={agent.charter!r}."
 
 
 @register_scenario

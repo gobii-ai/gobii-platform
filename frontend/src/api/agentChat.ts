@@ -583,6 +583,12 @@ export type ContactRequestResolvePayload = {
   }>
 }
 
+export type ContactRequestsListResult = {
+  requests: PendingContactRequest[]
+  count: number
+  resolveApiUrl?: string | null
+}
+
 export type SpawnRequestDecisionPayload = {
   decision: 'approve' | 'decline'
 }
@@ -632,6 +638,23 @@ export function resolveContactRequests(
   payload: ContactRequestResolvePayload,
 ): Promise<PendingActionMutationResult> {
   return postPendingActionMutation(`/console/api/agents/${agentId}/contact-requests/resolve/`, payload)
+}
+
+export async function fetchContactRequests(agentId: string): Promise<ContactRequestsListResult> {
+  const response = await jsonFetch<{
+    requests?: unknown[]
+    count?: unknown
+    resolveApiUrl?: unknown
+    resolve_api_url?: unknown
+  }>(`/console/api/agents/${agentId}/contact-requests/`)
+  const requests = Array.isArray(response.requests)
+    ? response.requests.map(normalizePendingContactRequest).filter((value): value is PendingContactRequest => Boolean(value))
+    : []
+  return {
+    requests,
+    count: asPositiveInteger(response.count) ?? requests.length,
+    resolveApiUrl: asNonEmptyString(response.resolveApiUrl) ?? asNonEmptyString(response.resolve_api_url),
+  }
 }
 
 export function resolveSpawnRequest(

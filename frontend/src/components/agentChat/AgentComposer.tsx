@@ -298,8 +298,10 @@ type AgentComposerProps = {
       allowInbound: boolean
       allowOutbound: boolean
       canConfigure: boolean
+      smsContactPermissionAttested?: boolean
     }>
   ) => Promise<void>
+  onViewAllContactRequests?: () => void
   disabled?: boolean
   disabledReason?: string | null
   autoFocus?: boolean
@@ -356,6 +358,7 @@ export const AgentComposer = memo(function AgentComposer({
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
   onResolveContactRequests,
+  onViewAllContactRequests,
   disabled = false,
   disabledReason = null,
   autoFocus = false,
@@ -1652,6 +1655,7 @@ export const AgentComposer = memo(function AgentComposer({
                       onFulfillRequestedSecrets={onFulfillRequestedSecrets}
                       onRemoveRequestedSecrets={onRemoveRequestedSecrets}
                       onResolveContactRequests={onResolveContactRequests}
+                      onViewAllContactRequests={onViewAllContactRequests}
                     />
                   </div>
                 ) : (

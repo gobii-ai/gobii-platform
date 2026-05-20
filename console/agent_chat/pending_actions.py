@@ -73,6 +73,10 @@ def _serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
     }
 
 
+def serialize_contact_request(request_obj: CommsAllowlistRequest) -> dict:
+    return _serialize_contact_request(request_obj)
+
+
 def _serialize_spawn_request(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> dict:
     return {
         "id": f"spawn_request:{spawn_request.id}",
