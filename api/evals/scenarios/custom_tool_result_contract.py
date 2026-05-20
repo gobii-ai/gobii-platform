@@ -626,7 +626,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 "read-only",
                 "instructions",
                 "scrape_ready",
-                "ready",
                 "valid_post_urls",
                 "direct_post_urls",
                 "remaining_work",
@@ -653,8 +652,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 "do not manually",
                 "not another append",
                 "not replay",
-                "verify",
-                "verification",
             )
             if not any(term in source_text for term in replay_prevention_terms):
                 return False, (
