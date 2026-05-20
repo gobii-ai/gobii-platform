@@ -403,7 +403,10 @@ class TemplateCloneService:
 
         candidate = base
         suffix = 1
-        while PersistentAgentTemplate.objects.filter(public_profile=profile, slug=candidate).exists():
+        while PersistentAgentTemplate.objects.filter(
+            public_profile__isnull=False,
+            slug=candidate,
+        ).exists():
             suffix += 1
             suffix_text = f"-{suffix}"
             max_base_len = 80 - len(suffix_text)

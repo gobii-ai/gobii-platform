@@ -3,20 +3,38 @@ from urllib.parse import parse_qs, urlparse
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from unittest.mock import patch
 from waffle.testutils import override_flag
 
 from agents.services import PretrainedWorkerTemplateService
-from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PublicProfile
+from api.models import (
+    PersistentAgentTemplate,
+    PersistentAgentTemplateLike,
+    PersistentAgentTemplateUrlAlias,
+    PublicProfile,
+)
 from api.public_profiles import validate_public_handle
+from api.services.template_clone import TemplateCloneService
 from pages.library_views import LIBRARY_CACHE_KEY
+from pages.public_template_urls import public_template_detail_path, public_template_hire_path
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
+
+
+def legacy_public_template_detail_path(template):
+    return reverse(
+        "pages:public_template_legacy_detail",
+        kwargs={
+            "handle": template.public_profile.handle,
+            "template_slug": template.slug,
+        },
+    )
 
 
 class PublicProfileHandleTests(TestCase):
@@ -32,6 +50,66 @@ class PublicProfileHandleTests(TestCase):
             validate_public_handle("system")
         with self.assertRaises(ValidationError):
             validate_public_handle("gobii")
+        with self.assertRaises(ValidationError):
+            validate_public_handle("library")
+
+
+class PublicTemplateSlugTests(TestCase):
+    @tag("batch_public_templates")
+    def test_public_template_slug_is_globally_unique(self):
+        user_a = get_user_model().objects.create_user(username="slug-owner-a", email="slug-owner-a@example.com", password="pw")
+        user_b = get_user_model().objects.create_user(username="slug-owner-b", email="slug-owner-b@example.com", password="pw")
+        profile_a = PublicProfile.objects.create(user=user_a, handle="slug-owner-a")
+        profile_b = PublicProfile.objects.create(user=user_b, handle="slug-owner-b")
+
+        PersistentAgentTemplate.objects.create(
+            code="global-slug-a",
+            public_profile=profile_a,
+            slug="global-slug",
+            display_name="Global Slug A",
+            tagline="First public slug",
+            description="First public slug.",
+            charter="First public slug.",
+            category="Operations",
+            is_active=True,
+        )
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                PersistentAgentTemplate.objects.create(
+                    code="global-slug-b",
+                    public_profile=profile_b,
+                    slug="global-slug",
+                    display_name="Global Slug B",
+                    tagline="Second public slug",
+                    description="Second public slug.",
+                    charter="Second public slug.",
+                    category="Operations",
+                    is_active=True,
+                )
+
+    @tag("batch_public_templates")
+    def test_template_clone_slug_generation_uses_global_public_slugs(self):
+        user_a = get_user_model().objects.create_user(username="clone-slug-a", email="clone-slug-a@example.com", password="pw")
+        user_b = get_user_model().objects.create_user(username="clone-slug-b", email="clone-slug-b@example.com", password="pw")
+        profile_a = PublicProfile.objects.create(user=user_a, handle="clone-slug-a")
+        profile_b = PublicProfile.objects.create(user=user_b, handle="clone-slug-b")
+
+        PersistentAgentTemplate.objects.create(
+            code="clone-slug-existing",
+            public_profile=profile_a,
+            slug="ops-brief",
+            display_name="Ops Brief",
+            tagline="Existing public slug",
+            description="Existing public slug.",
+            charter="Existing public slug.",
+            category="Operations",
+            is_active=True,
+        )
+
+        slug = TemplateCloneService._generate_template_slug(profile_b, "Ops Brief")
+
+        self.assertEqual(slug, "ops-brief-2")
 
 
 class PublicTemplateViewsTests(TestCase):
@@ -52,16 +130,17 @@ class PublicTemplateViewsTests(TestCase):
             category="Operations",
         )
 
-        response = self.client.get(
-            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
-        )
+        response = self.client.get(public_template_detail_path(template))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, template.display_name)
         self.assertContains(response, f'href="{reverse("pages:library")}"')
+        self.assertContains(response, public_template_hire_path(template))
+        self.assertContains(response, f"{template.display_name} AI Agent Template | Gobii")
         self.assertContains(response, '<meta name="description"')
         self.assertContains(response, '<meta property="og:url"')
         self.assertContains(response, '<script type="application/ld+json">')
         self.assertContains(response, '"@type": "SoftwareApplication"')
+        self.assertContains(response, 'aria-label="Breadcrumb"')
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     @tag("batch_public_templates")
@@ -81,9 +160,7 @@ class PublicTemplateViewsTests(TestCase):
             category="Operations",
         )
 
-        response = self.client.get(
-            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
-        )
+        response = self.client.get(public_template_detail_path(template))
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'name="trial_onboarding" value="1"')
@@ -110,9 +187,7 @@ class PublicTemplateViewsTests(TestCase):
             category="Operations",
         )
 
-        response = self.client.get(
-            reverse("pages:public_template_detail", kwargs={"handle": profile.handle, "template_slug": template.slug})
-        )
+        response = self.client.get(public_template_detail_path(template))
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, 'name="trial_onboarding" value="1"')
@@ -120,6 +195,77 @@ class PublicTemplateViewsTests(TestCase):
             response,
             f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
         )
+
+    @tag("batch_public_templates")
+    def test_legacy_public_template_detail_redirects_permanently_to_canonical_library_url(self):
+        user = get_user_model().objects.create_user(username="owner-legacy", email="owner-legacy@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="quiet-harbor")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-legacy",
+            public_profile=profile,
+            slug="b2b-sales-lead-generator",
+            display_name="B2B Sales Lead Generator",
+            tagline="Find B2B leads",
+            description="Finds B2B sales leads.",
+            charter="Find B2B sales leads.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+
+        response = self.client.get(legacy_public_template_detail_path(template))
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, "/library/sales/b2b-sales-lead-generator/")
+
+    @tag("batch_public_templates")
+    def test_legacy_public_template_alias_redirects_after_slug_collision_rename(self):
+        user = get_user_model().objects.create_user(username="owner-alias", email="owner-alias@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="lucid-voyage")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-alias",
+            public_profile=profile,
+            slug="renewable-energy-market-analyst-2",
+            display_name="Renewable Energy Market Analyst",
+            tagline="Track renewable energy markets",
+            description="Tracks renewable energy markets.",
+            charter="Track renewable energy markets.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Research",
+        )
+        PersistentAgentTemplateUrlAlias.objects.create(
+            template=template,
+            public_profile=profile,
+            slug="renewable-energy-market-analyst",
+        )
+
+        response = self.client.get("/lucid-voyage/renewable-energy-market-analyst/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, public_template_detail_path(template))
+
+    @tag("batch_public_templates")
+    def test_public_template_detail_recovers_from_stale_category_slug(self):
+        user = get_user_model().objects.create_user(username="owner-recovery", email="owner-recovery@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="steady-signal")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-recovery",
+            public_profile=profile,
+            slug="market-research-agent",
+            display_name="Market Research Agent",
+            tagline="Research markets",
+            description="Researches markets.",
+            charter="Research markets.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Research",
+        )
+
+        response = self.client.get("/library/old-category/market-research-agent/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, public_template_detail_path(template))
 
     @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
@@ -140,7 +286,7 @@ class PublicTemplateViewsTests(TestCase):
 
         self.client.force_login(user)
         response = self.client.post(
-            reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+            public_template_hire_path(template),
             data={"source_page": "public_template_detail"},
         )
         self.assertEqual(response.status_code, 302)
@@ -170,7 +316,7 @@ class PublicTemplateViewsTests(TestCase):
         )
 
         response = self.client.post(
-            reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+            public_template_hire_path(template),
             data={"source_page": "public_template_detail", "flow": "pro"},
         )
 
@@ -201,7 +347,7 @@ class PublicTemplateViewsTests(TestCase):
         )
 
         response = self.client.post(
-            reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+            public_template_hire_path(template),
             data={
                 "source_page": "public_template_detail",
                 "trial_onboarding": "1",
@@ -240,7 +386,7 @@ class PublicTemplateViewsTests(TestCase):
 
         with override_flag("cta_signup_first", active=True):
             response = self.client.post(
-                reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+                public_template_hire_path(template),
                 data={
                     "source_page": "public_template_detail",
                     "trial_onboarding": "1",
@@ -287,7 +433,7 @@ class PublicTemplateViewsTests(TestCase):
 
         with override_flag("cta_signup_modal", active=True):
             response = self.client.post(
-                reverse("pages:public_template_hire", kwargs={"handle": profile.handle, "template_slug": template.slug}),
+                public_template_hire_path(template),
                 data={
                     "source_page": "public_template_detail",
                     "trial_onboarding": "1",
@@ -369,16 +515,90 @@ class LibraryViewsTests(TestCase):
 
         response = self.client.get(reverse("pages:library"))
         self.assertEqual(response.status_code, 200)
-        detail_url = reverse(
-            "pages:public_template_detail",
-            kwargs={"handle": profile.handle, "template_slug": template.slug},
-        )
+        detail_url = public_template_detail_path(template)
         self.assertContains(response, "SSR Ops Automator")
         self.assertContains(response, "Automate operations checks")
         self.assertContains(response, f'href="{detail_url}"')
         self.assertContains(response, "Operations")
         self.assertContains(response, '"@type": "ItemList"')
         self.assertContains(response, '"agents":')
+
+    @tag("batch_public_templates")
+    def test_library_category_page_renders_filtered_initial_payload(self):
+        user = get_user_model().objects.create_user(username="library-category-owner", email="library-category-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library-category-owner")
+        sales_template = PersistentAgentTemplate.objects.create(
+            code="lib-category-sales",
+            public_profile=profile,
+            slug="sales-agent",
+            display_name="Sales Agent",
+            tagline="Sales work",
+            description="Handles sales work.",
+            charter="Handle sales work.",
+            category="Sales",
+            is_active=True,
+        )
+        PersistentAgentTemplate.objects.create(
+            code="lib-category-research",
+            public_profile=profile,
+            slug="research-agent",
+            display_name="Research Agent",
+            tagline="Research work",
+            description="Handles research work.",
+            charter="Handle research work.",
+            category="Research",
+            is_active=True,
+        )
+
+        response = self.client.get(reverse("pages:library_category", kwargs={"category_slug": "sales"}))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Sales AI Agent Templates | Gobii")
+        self.assertContains(response, 'data-library-initial-category="Sales"')
+        self.assertContains(response, sales_template.display_name)
+        self.assertNotContains(response, "Research Agent")
+
+    @tag("batch_public_templates")
+    def test_library_category_route_preserves_legacy_library_handle_urls(self):
+        user = get_user_model().objects.create_user(username="legacy-library-owner", email="legacy-library-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library")
+        template = PersistentAgentTemplate.objects.create(
+            code="legacy-library-template",
+            public_profile=profile,
+            slug="ops-agent",
+            display_name="Ops Agent",
+            tagline="Ops work",
+            description="Handles ops work.",
+            charter="Handle ops work.",
+            category="Operations",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/ops-agent/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, public_template_detail_path(template))
+
+    @tag("batch_public_templates")
+    def test_library_category_route_prefers_legacy_library_template_when_slug_collides_with_category(self):
+        user = get_user_model().objects.create_user(username="legacy-library-sales-owner", email="legacy-library-sales-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library")
+        template = PersistentAgentTemplate.objects.create(
+            code="legacy-library-sales-template",
+            public_profile=profile,
+            slug="sales",
+            display_name="Sales Agent",
+            tagline="Sales work",
+            description="Handles sales work.",
+            charter="Handle sales work.",
+            category="Sales",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/sales/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, public_template_detail_path(template))
 
     @tag("batch_public_templates")
     def test_libary_path_redirects_to_library(self):
@@ -406,8 +626,9 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         content = response.content.decode()
         self.assertIn("http://example.com/library/", content)
+        self.assertIn("http://example.com/library/operations/", content)
         self.assertIn(
-            f"http://example.com/{profile.handle}/{template.slug}/",
+            f"http://example.com{public_template_detail_path(template)}",
             content,
         )
 
@@ -489,8 +710,9 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(first_agent["publicProfileHandle"], "library-owner")
         self.assertEqual(
             first_agent["templateUrl"],
-            reverse("pages:public_template_detail", kwargs={"handle": "library-owner", "template_slug": "ops-automator"}),
+            public_template_detail_path(operations_agent),
         )
+        self.assertEqual(first_agent["categorySlug"], "operations")
         self.assertEqual(first_agent["likeCount"], 0)
         self.assertFalse(first_agent["isLiked"])
 
