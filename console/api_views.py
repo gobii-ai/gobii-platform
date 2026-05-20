@@ -63,6 +63,7 @@ from api.agent.files.attachment_helpers import load_signed_filespace_download_pa
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
+from pages.public_template_urls import public_template_detail_path
 from api.models import (
     BrowserLLMPolicy,
     BrowserUseAgent,
@@ -3647,7 +3648,7 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
         if not template.slug or not result.public_profile.handle:
             return JsonResponse({"error": "Template URL could not be generated."}, status=500)
 
-        template_url = request.build_absolute_uri(f"/{result.public_profile.handle}/{template.slug}/")
+        template_url = request.build_absolute_uri(public_template_detail_path(template))
         if result.created:
             transaction.on_commit(
                 lambda: emit_configured_custom_capi_event(

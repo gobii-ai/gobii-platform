@@ -6,6 +6,7 @@ export type LibraryAgent = {
   tagline: string
   description: string
   category: string
+  categorySlug: string
   publicProfileHandle: string
   templateSlug: string
   templateUrl: string

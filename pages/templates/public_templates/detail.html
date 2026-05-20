@@ -1,15 +1,15 @@
 {% extends "base.html" %}
-{% block title %}{{ template.display_name }} – Public Template{% endblock %}
+{% block title %}{{ template_seo_title }}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="{{ template.display_name }} – Public Template">
+  <meta property="og:title" content="{{ template_social_title }}">
   <meta property="og:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
   <meta property="og:url" content="{{ template_url }}">
   <meta property="og:site_name" content="Gobii">
   <meta name="twitter:card" content="summary">
-  <meta name="twitter:title" content="{{ template.display_name }} – Public Template">
+  <meta name="twitter:title" content="{{ template_social_title }}">
   <meta name="twitter:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
   <script type="application/ld+json">
     {
@@ -17,7 +17,7 @@
       "@type": "SoftwareApplication",
       "name": "{{ template.display_name|escapejs }}",
       "description": "{{ template.description|default:template.tagline|truncatechars:160|escapejs }}",
-      "applicationCategory": "{{ template.category|default:'BusinessApplication'|escapejs }}",
+      "applicationCategory": "{{ template_category_label|default:'BusinessApplication'|escapejs }}",
       "creator": {
         "@type": "Person",
         "name": "{{ public_profile_handle|escapejs }}"
@@ -50,6 +50,12 @@
         {
           "@type": "ListItem",
           "position": 3,
+          "name": "{{ template_category_label|escapejs }}",
+          "item": "{{ template_category_url|escapejs }}"
+        },
+        {
+          "@type": "ListItem",
+          "position": 4,
           "name": "{{ template.display_name|escapejs }}",
           "item": "{{ template_url|escapejs }}"
         }
@@ -60,9 +66,23 @@
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-amber-50/50 via-white via-60% to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-16">
-    <a href="{% url 'pages:library' %}" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
-      &larr; Back to templates
-    </a>
+    <nav aria-label="Breadcrumb" class="text-sm font-medium">
+      <ol class="flex flex-wrap items-center gap-2 text-slate-600">
+        <li>
+          <a href="{% url 'pages:home' %}" class="text-indigo-600 hover:text-indigo-500 transition">Home</a>
+        </li>
+        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li>
+          <a href="{% url 'pages:library' %}" class="text-indigo-600 hover:text-indigo-500 transition">Library</a>
+        </li>
+        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li>
+          <a href="{{ template_category_url }}" class="text-indigo-600 hover:text-indigo-500 transition">{{ template_category_label }}</a>
+        </li>
+        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li aria-current="page" class="text-slate-800">{{ template.display_name }}</li>
+      </ol>
+    </nav>
 
     <div class="mt-6 relative overflow-hidden rounded-3xl border border-indigo-100 bg-white/85 shadow-xl">
       <div class="absolute -top-24 -right-24 h-56 w-56 rounded-full bg-indigo-200/40 blur-3xl" aria-hidden="true"></div>
@@ -70,11 +90,9 @@
 
       <div class="relative px-10 py-12">
         <div class="flex flex-wrap items-center gap-3 text-xs font-semibold uppercase tracking-wide">
-          <span class="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">Public Template</span>
+          <span class="rounded-full bg-indigo-100 px-3 py-1 text-indigo-700">AI Agent Template</span>
           <span class="rounded-full bg-amber-100 px-3 py-1 text-amber-700">@{{ public_profile_handle }}</span>
-          {% if template.category %}
-          <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700">{{ template.category }}</span>
-          {% endif %}
+          <span class="rounded-full bg-sky-100 px-3 py-1 text-sky-700">{{ template_category_label }}</span>
         </div>
 
         <h1 class="mt-6 text-4xl sm:text-5xl font-semibold text-slate-900">{{ template.display_name }}</h1>
@@ -94,7 +112,7 @@
           {% endif %}
         </div>
 
-        <form method="post" action="{% url 'pages:public_template_hire' public_profile_handle template.slug %}" class="mt-8">
+        <form method="post" action="{{ template_hire_url }}" class="mt-8">
           {% csrf_token %}
           <input type="hidden" name="source_page" value="public_template_detail" />
           {% if settings.GOBII_PROPRIETARY_MODE %}

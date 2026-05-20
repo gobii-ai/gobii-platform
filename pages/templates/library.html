@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% load vite_tags %}
 
-{% block title %}AI Agent Templates & Workers | Gobii{% endblock %}
+{% block title %}{{ library_page_title|default:"AI Agent Templates & Workers | Gobii" }}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="Explore Gobii’s library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own.">
+  <meta name="description" content="{{ library_page_description|default:"Explore Gobii’s library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own." }}">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="AI Agent Templates & Workers | Gobii">
-  <meta property="og:description" content="Explore Gobii’s library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own.">
+  <meta property="og:title" content="{{ library_page_title|default:"AI Agent Templates & Workers | Gobii" }}">
+  <meta property="og:description" content="{{ library_page_description|default:"Explore Gobii’s library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own." }}">
   <meta property="og:url" content="{{ canonical_url }}">
   <meta property="og:site_name" content="Gobii">
   <meta name="twitter:card" content="summary">
@@ -89,8 +89,9 @@
       data-library-list-url="{% url 'pages:library_agents_api' %}"
       data-library-like-url="{% url 'pages:library_agent_like_api' %}"
       data-library-can-like="{{ user.is_authenticated|yesno:'true,false' }}"
+      data-library-initial-category="{{ library_initial_category|default:'' }}"
     >
-      {% include "library/_fallback.html" with payload=library_initial_payload %}
+      {% include "library/_fallback.html" with payload=library_initial_payload selected_category=library_initial_category %}
     </div>
   </section>
 </div>

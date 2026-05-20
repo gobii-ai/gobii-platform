@@ -6356,10 +6356,48 @@ class PersistentAgentTemplate(models.Model):
                 condition=Q(public_profile__isnull=False),
                 name="unique_public_profile_template_slug",
             ),
+            UniqueConstraint(
+                fields=["slug"],
+                condition=Q(public_profile__isnull=False) & ~Q(slug=""),
+                name="unique_public_template_slug",
+            ),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return f"PretrainedWorkerTemplate<{self.display_name}>"
+
+
+class PersistentAgentTemplateUrlAlias(models.Model):
+    """Legacy handle-scoped URL slug for a public template."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    template = models.ForeignKey(
+        PersistentAgentTemplate,
+        on_delete=models.CASCADE,
+        related_name="url_aliases",
+    )
+    public_profile = models.ForeignKey(
+        PublicProfile,
+        on_delete=models.CASCADE,
+        related_name="template_url_aliases",
+    )
+    slug = models.SlugField(
+        max_length=80,
+        help_text="Legacy public-facing slug that should redirect to the template's canonical URL.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["public_profile", "slug"]
+        constraints = [
+            UniqueConstraint(
+                fields=["public_profile", "slug"],
+                name="unique_public_template_url_alias",
+            ),
+        ]
+
+    def __str__(self) -> str:  # pragma: no cover - simple repr
+        return f"PersistentAgentTemplateUrlAlias<{self.public_profile.handle}/{self.slug}>"
 
 
 class PersistentAgentTemplateLike(models.Model):
