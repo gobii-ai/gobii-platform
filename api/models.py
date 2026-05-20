@@ -6356,6 +6356,11 @@ class PersistentAgentTemplate(models.Model):
                 condition=Q(public_profile__isnull=False),
                 name="unique_public_profile_template_slug",
             ),
+            UniqueConstraint(
+                fields=["slug"],
+                condition=Q(public_profile__isnull=False) & ~Q(slug=""),
+                name="unique_public_template_slug",
+            ),
         ]
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
