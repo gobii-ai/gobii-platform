@@ -1453,14 +1453,12 @@ class PretrainedWorkerDetailView(TemplateView):
 
         structured_data = {
             "@context": "https://schema.org",
-            "@type": "SoftwareApplication",
-            "name": self.employee.display_name,
+            "@type": "WebPage",
+            "name": social_title,
             "description": seo_description,
-            "applicationCategory": self.employee.category or "BusinessApplication",
-            "operatingSystem": "Web",
             "url": detail_url,
             "image": default_social_image_url,
-            "creator": {
+            "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
             },
@@ -1468,6 +1466,19 @@ class PretrainedWorkerDetailView(TemplateView):
                 "@type": "WebSite",
                 "name": "Gobii",
                 "url": home_url,
+            },
+            "mainEntity": {
+                "@type": "Service",
+                "name": self.employee.display_name,
+                "description": seo_description,
+                "url": detail_url,
+                "image": default_social_image_url,
+                "serviceType": "AI agent template",
+                "category": self.employee.category or "General",
+                "provider": {
+                    "@type": "Organization",
+                    "name": "Gobii",
+                },
             },
         }
         breadcrumb_data = {

@@ -1497,12 +1497,16 @@ class PretrainedWorkerDirectoryTests(TestCase):
             json.loads(script.string)
             for script in soup.find_all("script", {"type": "application/ld+json"})
         ]
-        application_schema = next(
-            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
         )
-        self.assertEqual(application_schema["name"], template.display_name)
-        self.assertEqual(application_schema["url"], detail_url)
-        self.assertEqual(application_schema["creator"]["name"], "Gobii")
+        self.assertEqual(webpage_schema["name"], f"{template.display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["url"], detail_url)
+        self.assertEqual(webpage_schema["publisher"]["name"], "Gobii")
+        self.assertEqual(webpage_schema["mainEntity"]["@type"], "Service")
+        self.assertEqual(webpage_schema["mainEntity"]["name"], template.display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["url"], detail_url)
+        self.assertEqual(webpage_schema["mainEntity"]["provider"]["name"], "Gobii")
 
         breadcrumb_schema = next(
             item for item in structured_data if item.get("@type") == "BreadcrumbList"
@@ -1545,11 +1549,13 @@ class PretrainedWorkerDirectoryTests(TestCase):
             json.loads(script.string)
             for script in soup.find_all("script", {"type": "application/ld+json"})
         ]
-        application_schema = next(
-            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
         )
-        self.assertEqual(application_schema["name"], display_name)
-        self.assertEqual(application_schema["description"], description)
+        self.assertEqual(webpage_schema["name"], f"{display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["description"], description)
+        self.assertEqual(webpage_schema["mainEntity"]["name"], display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["description"], description)
         breadcrumb_schema = next(
             item for item in structured_data if item.get("@type") == "BreadcrumbList"
         )
