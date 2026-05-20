@@ -2,66 +2,19 @@
 {% block title %}{{ template_seo_title }}{% endblock %}
 {% block head_extras %}
   {{ block.super }}
-  <meta name="description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
+  <meta name="description" content="{{ template_seo_description }}">
   <meta property="og:type" content="website">
   <meta property="og:title" content="{{ template_social_title }}">
-  <meta property="og:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
-  <meta property="og:url" content="{{ template_url }}">
+  <meta property="og:description" content="{{ template_seo_description }}">
+  <meta property="og:url" content="{{ template_canonical_url }}">
   <meta property="og:site_name" content="Gobii">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="{{ template_social_image_url }}">
+  <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="{{ template_social_title }}">
-  <meta name="twitter:description" content="{{ template.description|default:template.tagline|truncatechars:160 }}">
-  <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "{{ template.display_name|escapejs }}",
-      "description": "{{ template.description|default:template.tagline|truncatechars:160|escapejs }}",
-      "applicationCategory": "{{ template_category_label|default:'BusinessApplication'|escapejs }}",
-      "creator": {
-        "@type": "Person",
-        "name": "{{ public_profile_handle|escapejs }}"
-      },
-      "url": "{{ template_url|escapejs }}",
-      "isPartOf": {
-        "@type": "CollectionPage",
-        "name": "Gobii Library",
-        "url": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
-      }
-    }
-  </script>
-  <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "BreadcrumbList",
-      "itemListElement": [
-        {
-          "@type": "ListItem",
-          "position": 1,
-          "name": "Home",
-          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:home' %}"
-        },
-        {
-          "@type": "ListItem",
-          "position": 2,
-          "name": "Library",
-          "item": "{{ request.scheme }}://{{ request.get_host }}{% url 'pages:library' %}"
-        },
-        {
-          "@type": "ListItem",
-          "position": 3,
-          "name": "{{ template_category_label|escapejs }}",
-          "item": "{{ template_category_url|escapejs }}"
-        },
-        {
-          "@type": "ListItem",
-          "position": 4,
-          "name": "{{ template.display_name|escapejs }}",
-          "item": "{{ template_url|escapejs }}"
-        }
-      ]
-    }
-  </script>
+  <meta name="twitter:description" content="{{ template_seo_description }}">
+  <meta name="twitter:image" content="{{ template_social_image_url }}">
+  <script type="application/ld+json">{{ template_structured_data_json }}</script>
+  <script type="application/ld+json">{{ template_breadcrumb_json }}</script>
 {% endblock %}
 {% block content %}
 <div class="min-h-screen bg-gradient-to-b from-amber-50/50 via-white via-60% to-white">
