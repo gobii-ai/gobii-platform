@@ -253,13 +253,10 @@ class LibraryView(TemplateView):
         self.selected_category = ""
         category_slug = kwargs.get("category_slug")
         if category_slug:
-            try:
-                self.selected_category = _resolve_category_from_slug(category_slug)
-            except Http404:
-                legacy_template = _get_legacy_library_handle_template(category_slug)
-                if legacy_template:
-                    return redirect(public_template_detail_path(legacy_template), permanent=True)
-                raise
+            legacy_template = _get_legacy_library_handle_template(category_slug)
+            if legacy_template:
+                return redirect(public_template_detail_path(legacy_template), permanent=True)
+            self.selected_category = _resolve_category_from_slug(category_slug)
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):

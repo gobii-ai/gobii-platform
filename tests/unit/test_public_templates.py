@@ -580,6 +580,27 @@ class LibraryViewsTests(TestCase):
         self.assertEqual(response.url, public_template_detail_path(template))
 
     @tag("batch_public_templates")
+    def test_library_category_route_prefers_legacy_library_template_when_slug_collides_with_category(self):
+        user = get_user_model().objects.create_user(username="legacy-library-sales-owner", email="legacy-library-sales-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="library")
+        template = PersistentAgentTemplate.objects.create(
+            code="legacy-library-sales-template",
+            public_profile=profile,
+            slug="sales",
+            display_name="Sales Agent",
+            tagline="Sales work",
+            description="Handles sales work.",
+            charter="Handle sales work.",
+            category="Sales",
+            is_active=True,
+        )
+
+        response = self.client.get("/library/sales/")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, public_template_detail_path(template))
+
+    @tag("batch_public_templates")
     def test_libary_path_redirects_to_library(self):
         response = self.client.get("/libary/")
         self.assertEqual(response.status_code, 301)
