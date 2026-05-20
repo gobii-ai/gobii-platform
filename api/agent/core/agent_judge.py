@@ -770,6 +770,12 @@ def _build_trajectory_packet(
             "If the agent is blocked or missing a user decision, it should reframe the blocker and ask a clearer question rather than repeating itself.",
             "If the user repeats the same command and the agent repeats the same blocker for three turns, reframe the ask prominently with one clear next question.",
             "If task complexity exceeds the current intelligence tier, suggest an intelligence upgrade instead of silently struggling.",
+            (
+                "Do not suggest an intelligence upgrade when the evidence is burn-rate throttling or burn-rate "
+                "tier step-down. Higher intelligence tiers apply a task-credit multiplier, and burn-rate controls "
+                "scale with that multiplier, so intelligence level usually does not resolve burn rate. Recommend "
+                "lower-burn strategies such as batching, fewer tool calls, cached results, pausing, or narrower scope."
+            ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],
         "capability_manifest": _capability_manifest(tools, prompt_limits),
