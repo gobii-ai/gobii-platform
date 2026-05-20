@@ -53,7 +53,6 @@ def run(params, ctx):
         "remaining_work": {{"count": 0, "next_cursor": None}},
         "next_action": "Use read-only verification; do not replay append/add/update calls.",
         "warnings": [],
-        "do_not_repeat_manually": True,
         "batch_size": batch_size,
         {extra_fields}
     }}
@@ -290,6 +289,68 @@ if __name__ == "__main__":
 
         self.assertFalse(ok)
         self.assertIn("helpful result signal", reason)
+
+    def test_local_create_tool_check_accepts_ready_outputs_without_next_action_field(self):
+        case = _case("scrape_url_normalization")
+        source = """
+from _gobii_ctx import main
+
+def run(params, ctx):
+    accepted = ["https://stripe.com"]
+    rejected = [{"input": "not a domain", "reason": "not a valid domain"}]
+    return {
+        "status": "ok",
+        "summary": "1 accepted, 1 rejected.",
+        "accepted_count": len(accepted),
+        "rejected_count": len(rejected),
+        "source": {"input": params.get("input_table"), "output": params.get("output_table")},
+        "scrape_ready_urls": accepted,
+        "rejected_urls": rejected,
+    }
+
+if __name__ == "__main__":
+    main(run)
+"""
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_scrape_url_normalization",
+        )
+
+        self.assertTrue(ok, reason)
+
+    def test_local_create_tool_check_accepts_accepted_url_outputs_without_next_action_field(self):
+        case = _case("linkedin_post_urls")
+        source = """
+from _gobii_ctx import main
+
+def run(params, ctx):
+    urls = params.get("urls", [])
+    valid_post_urls = [url for url in urls if "/posts/" in url]
+    rejected_urls = [url for url in urls if url not in valid_post_urls]
+    return {
+        "status": "ok",
+        "summary": f"{len(valid_post_urls)} valid posts, {len(rejected_urls)} rejected.",
+        "total": len(urls),
+        "accepted_count": len(valid_post_urls),
+        "rejected_count": len(rejected_urls),
+        "source": {"input": "urls param"},
+        "valid_post_urls": valid_post_urls,
+        "rejected_urls": rejected_urls,
+    }
+
+if __name__ == "__main__":
+    main(run)
+"""
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_linkedin_post_urls",
+        )
+
+        self.assertTrue(ok, reason)
 
     def test_batching_cases_require_batch_handling_in_create_and_invoke(self):
         for case_slug in ("sheets_backlog_sync", "chunked_mcp_fanout"):

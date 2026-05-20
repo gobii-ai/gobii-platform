@@ -177,24 +177,26 @@ class CustomToolsTests(TestCase):
             "Exact final line: `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "mime_type='text/x-python'",
-            "side_effects_completed",
             "db.row_factory = sqlite3.Row",
-            "target resource ids/names",
-            "source filters or date ranges",
-            "per-destination",
-            "do_not_repeat_manually=true",
+            "what changed or which outputs are ready",
+            "remaining work/cursor",
+            "verification guidance",
+            "direct_post_urls",
+            "scrape_ready_urls",
+            "accepted ready-to-use list",
             "read-only verification",
         ):
             self.assertIn(text, create_tool_description)
 
         for text in (
-            "side_effects_completed",
             "exact final line `if __name__ == '__main__': main(run)`",
             "db.row_factory = sqlite3.Row",
-            "target resource ids/names",
-            "source filters/date ranges",
-            "per-destination rows/items written",
-            "do_not_repeat_manually=true",
+            "what changed or which outputs are ready",
+            "remaining work/cursor",
+            "verification guidance",
+            "direct_post_urls",
+            "scrape_ready_urls",
+            "accepted ready-to-use list",
             "read-only tools",
         ):
             self.assertIn(text, prompt_summary)
