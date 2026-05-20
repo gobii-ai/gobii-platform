@@ -33,10 +33,50 @@ jobs:
         run: |
           python3 scripts/check_test_tags.py
 
+  complexity-guardrails:
+    name: Complexity Guardrails
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      UV_PYTHON_DOWNLOADS: "never"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check source LoC budget
+        run: |
+          python3 scripts/check_complexity_budgets.py --loc-only
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv (with cache)
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          ignore-nothing-to-cache: true
+
+      - name: Sync deps (locked)
+        if: ${{ hashFiles('uv.lock') != '' }}
+        run: |
+          uv sync --frozen --all-extras --dev
+
+      - name: Sync deps
+        if: ${{ hashFiles('uv.lock') == '' }}
+        run: |
+          uv sync --all-extras --dev
+
+      - name: Check prompt-size budgets
+        run: |
+          uv run python scripts/check_complexity_budgets.py --prompt-only
+
   frontend-tests:
     name: Frontend Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [tag-guard, complexity-guardrails]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -60,6 +100,7 @@ jobs:
     name: Sandbox Server Tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    needs: [tag-guard, complexity-guardrails]
     env:
       TEST_OUTPUT_DIR: test-results
     steps:
@@ -106,6 +147,7 @@ jobs:
     name: tests (${{ matrix.batch }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: [tag-guard, complexity-guardrails]
     strategy:
       fail-fast: false
       max-parallel: 10
@@ -256,7 +298,7 @@ jobs:
     name: Publish Static Assets
     runs-on: ubuntu-latest
     # Test jobs report independently; staging deploy only needs deploy inputs.
-    needs: [tag-guard]
+    needs: [tag-guard, complexity-guardrails]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -335,7 +377,7 @@ jobs:
     name: Dispatch Preview Deployment
     runs-on: ubuntu-latest
     # Failed tests should not prevent preview environments from updating.
-    needs: [tag-guard]
+    needs: [tag-guard, complexity-guardrails]
     if: >
       github.event_name == 'pull_request' &&
       github.event.pull_request.head.repo.full_name == github.repository
@@ -372,7 +414,7 @@ jobs:
     name: Dispatch Staging Deployment
     runs-on: ubuntu-latest
     # Failed tests should not prevent staging from deploying a published asset set.
-    needs: [tag-guard, publish-static-assets]
+    needs: [tag-guard, complexity-guardrails, publish-static-assets]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - name: Generate GitHub App token
