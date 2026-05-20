@@ -168,11 +168,11 @@
   width: 100%;
   padding: 0.625rem 1.25rem;
   overflow: hidden;
-  background: rgba(221, 214, 254, 0.42);
-  backdrop-filter: blur(12px) saturate(150%);
-  -webkit-backdrop-filter: blur(12px) saturate(150%);
-  border-bottom: 1px solid rgba(139, 92, 246, 0.15);
-  box-shadow: 0 1px 4px rgba(30, 17, 69, 0.06);
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72) 0%, rgba(170, 116, 206, 0.28) 100%);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid rgba(170, 116, 206, 0.22);
+  box-shadow: 0 1px 4px rgba(64, 27, 104, 0.05);
   pointer-events: auto;
 }
 
@@ -2295,17 +2295,43 @@
    ========================================================================== */
 
 .composer-working-panel {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 0;
-  background: rgba(255, 255, 255, 0.65);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-radius: 1rem 1rem 0 0;
+  isolation: isolate;
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(26px) saturate(150%);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  border-radius: 1.25rem 1.25rem 0 0;
   border: none;
-  box-shadow: 0 -4px 20px -8px rgba(99, 102, 241, 0.08);
+  box-shadow: 0 -4px 20px -12px rgba(170, 116, 206, 0.18);
   overflow: hidden;
   transition: max-height 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.composer-working-panel::before {
+  content: '';
+  position: absolute;
+  inset: -18%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 78% 120% at 93% 42%, rgba(170, 116, 206, 0.55) 0%, rgba(170, 116, 206, 0.28) 48%, transparent 78%),
+    radial-gradient(ellipse 70% 92% at 8% 5%, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.58) 38%, transparent 68%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98) 0%, rgba(170, 116, 206, 0.14) 50%, rgba(170, 116, 206, 0.34) 100%);
+  filter: blur(30px);
+  transform: translate3d(0, 0, 0);
+}
+
+.composer-working-panel::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.72) 0%, rgba(255, 255, 255, 0.28) 46%, rgba(255, 255, 255, 0.12) 100%);
 }
 
 .composer-working-panel[data-expanded="false"] .composer-working-content {
@@ -2341,16 +2367,19 @@
 
 /* Header row - clickable to toggle expand/collapse */
 .composer-working-header-row {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 0.625rem;
   padding: 0.375rem 1.25rem;
   cursor: pointer;
+  background: rgba(255, 255, 255, 0.24);
   transition: background-color 0.15s ease;
 }
 
 .composer-working-header-row:hover {
-  background: rgba(99, 102, 241, 0.04);
+  background: rgba(255, 255, 255, 0.34);
 }
 
 /* Legacy - keep for any remaining uses */
@@ -2561,6 +2590,7 @@
   flex-direction: column;
   gap: 0;
   position: relative;
+  z-index: 1;
   height: 7.5rem;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2607,7 +2637,7 @@
 }
 
 .composer-working-insight[data-loading="true"] {
-  background: linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%);
+  background: transparent;
 }
 
 .composer-working-insight-skeleton {
@@ -2624,7 +2654,7 @@
 .composer-working-insight-skeleton span {
   display: block;
   border-radius: 9999px;
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.12), rgba(14, 165, 233, 0.22), rgba(99, 102, 241, 0.12));
+  background: linear-gradient(90deg, rgba(170, 116, 206, 0.1), rgba(170, 116, 206, 0.24), rgba(255, 255, 255, 0.34));
   background-size: 180% 100%;
   animation: composerInsightSkeleton 1.2s ease-in-out infinite;
 }
@@ -2704,23 +2734,23 @@
 
 /* Apply gradients to wrapper based on card type */
 .composer-working-insight:has(.insight-card-v2--time-saved) {
-  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%);
+  background: transparent;
 }
 
 .composer-working-insight:has(.insight-card-v2--burn-rate) {
-  background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%);
+  background: transparent;
 }
 
 .composer-working-insight:has(.insight-card-v2--burn-rate-warning) {
-  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%);
+  background: transparent;
 }
 
 .composer-working-insight:has(.insight-card-v2--burn-rate-critical) {
-  background: linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%);
+  background: transparent;
 }
 
 .composer-working-insight:has(.insight-card-v2--agent-setup) {
-  background: linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%);
+  background: transparent;
 }
 
 /* Colored pill tabs for composer insights - in header row */
@@ -2738,6 +2768,10 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
   padding: 2px;
+  border-radius: 9999px;
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .composer-insight-tabs-scroll::-webkit-scrollbar {
@@ -2754,14 +2788,14 @@
   width: 3.75rem;
   height: 22px;
   border-radius: 11px;
-  background: linear-gradient(90deg, rgba(14, 165, 233, 0.16), rgba(99, 102, 241, 0.24), rgba(14, 165, 233, 0.16));
+  background: linear-gradient(90deg, rgba(170, 116, 206, 0.14), rgba(170, 116, 206, 0.26), rgba(255, 255, 255, 0.34));
   background-size: 180% 100%;
   animation: composerInsightSkeleton 1.2s ease-in-out infinite;
 }
 
 .composer-insight-tab-placeholder--active {
   width: 4.5rem;
-  background: linear-gradient(90deg, rgba(14, 165, 233, 0.24), rgba(99, 102, 241, 0.34), rgba(14, 165, 233, 0.24));
+  background: linear-gradient(90deg, rgba(170, 116, 206, 0.22), rgba(170, 116, 206, 0.36), rgba(255, 255, 255, 0.38));
   background-size: 180% 100%;
 }
 
@@ -2774,19 +2808,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 0.25rem;
   height: 22px;
   border: none;
   border-radius: 11px;
-  background: color-mix(in srgb, var(--tab-color, #6b7280) 15%, transparent);
+  background: rgba(255, 255, 255, 0.54);
   cursor: pointer;
   padding: 0 10px;
   overflow: hidden;
   flex-shrink: 0;
-  transition: background 150ms ease;
+  transition: background 150ms ease, color 150ms ease;
 }
 
 .composer-insight-tab:hover {
-  background: color-mix(in srgb, var(--tab-color, #6b7280) 25%, transparent);
+  background: rgba(255, 255, 255, 0.74);
 }
 
 .composer-insight-tab[data-active="true"] {
@@ -2805,14 +2840,24 @@
   position: relative;
   z-index: 1;
   font-size: 0.625rem;
-  font-weight: 500;
+  font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--tab-color, #6b7280);
+  color: #7c4ca0;
   line-height: 1;
   transition: color 150ms ease;
 }
 
-.composer-insight-tab[data-active="true"] .composer-insight-tab-label {
+.composer-insight-tab-icon {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  color: #7c4ca0;
+  transition: color 150ms ease;
+}
+
+.composer-insight-tab[data-active="true"] .composer-insight-tab-label,
+.composer-insight-tab[data-active="true"] .composer-insight-tab-icon {
   color: white;
   font-weight: 600;
 }

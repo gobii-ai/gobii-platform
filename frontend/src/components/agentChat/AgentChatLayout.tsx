@@ -208,6 +208,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onJumpToLatest?: () => void
   onClose?: () => void
   onShare?: () => void
+  onPublicShare?: () => void
   onBlockedSettingsClick?: (location: 'banner_desktop' | 'banner_mobile') => void
   onBlockedCollaborate?: (location: 'banner_desktop' | 'banner_mobile' | 'insight_card') => void
   onSendMessage?: (
@@ -391,6 +392,7 @@ export function AgentChatLayout({
   onJumpToLatest,
   onClose,
   onShare,
+  onPublicShare,
   onBlockedSettingsClick,
   onBlockedCollaborate,
   onSendMessage,
@@ -1331,6 +1333,9 @@ export function AgentChatLayout({
           shareDisabled={previewActionsDisabled}
           shareDisabledReason={previewActionsDisabledReason}
           onBlockedShareClick={onBlockedCollaborate}
+          onPublicShare={onPublicShare}
+          publicShareDisabled={previewActionsDisabled}
+          publicShareDisabledReason={previewActionsDisabledReason}
           signupPreviewState={signupPreviewState}
           sidebarMode={sidebarMode}
         >
@@ -1623,10 +1628,8 @@ export function AgentChatLayout({
               onInsightIndexChange={onInsightIndexChange}
               onPauseChange={onPauseChange}
               isInsightsPaused={isInsightsPaused}
-              onCollaborate={onShare}
-              collaborateDisabled={previewActionsDisabled}
-              collaborateDisabledReason={previewActionsDisabledReason}
-              onBlockedCollaborate={onBlockedCollaborate}
+              onOpenUsage={onOpenUsage}
+              usageUrl={sidebarUsageUrl}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}
               intelligenceTier={currentLlmTier}

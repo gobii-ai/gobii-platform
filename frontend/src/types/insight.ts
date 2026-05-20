@@ -27,11 +27,21 @@ export type BurnRateMetadata = {
   agentName: string
   agentCreditsPerHour: number
   allAgentsCreditsPerDay: number
-  dailyLimit: number
-  percentUsed: number
+  dailyLimit: number | null
+  percentUsed: number | null
+  todayUsage?: UsageGaugeMetadata
+  monthUsage?: UsageGaugeMetadata
+  usageUrl?: string
 }
 
-export type AgentSetupPanel = 'always_on' | 'sms' | 'org_transfer' | 'upsell_pro' | 'upsell_scale' | 'template'
+export type UsageGaugeMetadata = {
+  used: number
+  limit: number | null
+  percentUsed: number | null
+  unlimited: boolean
+}
+
+export type AgentSetupPanel = 'always_on' | 'sms' | 'upsell_pro' | 'upsell_scale'
 
 export type AgentSetupPhone = {
   number: string
@@ -69,7 +79,6 @@ export type AgentSetupMetadata = {
   }
   organization: {
     currentOrg?: { id: string; name: string } | null
-    options: { id: string; name: string }[]
   }
   upsell?: {
     items: AgentSetupUpsellItem[]
@@ -80,15 +89,6 @@ export type AgentSetupMetadata = {
     scaleUrl?: string
   }
   utmQuerystring?: string
-  publicProfile?: {
-    handle?: string | null
-    suggestedHandle?: string | null
-  }
-  template?: {
-    slug?: string | null
-    displayName?: string | null
-    url?: string | null
-  }
 }
 
 export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata | AgentSetupMetadata

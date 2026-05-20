@@ -1,18 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
-import { ArrowRight, Brain, Building2, Check, CheckCircle2, Copy, Download, Globe, Loader2, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, UserPlus, Zap } from 'lucide-react'
+import { ArrowRight, Brain, Check, CheckCircle2, Copy, Download, Mail, MessageSquare, Phone, Rocket, Sparkles, TrendingDown, Zap } from 'lucide-react'
 
 import type { AgentSetupMetadata, AgentSetupPanel, AgentSetupPhone, InsightEvent } from '../../../types/insight'
 import {
   addUserPhone,
   deleteUserPhone,
   enableAgentSms,
-  reassignAgentOrg,
   resendUserPhone,
   resendEmailVerification,
   verifyUserPhone,
 } from '../../../api/agentSetup'
-import { cloneAgentTemplate } from '../../../api/agentTemplates'
 import { HttpError } from '../../../api/http'
 import { track, AnalyticsEvent } from '../../../util/analytics'
 import { getReturnToPath } from '../../../util/returnTo'
@@ -69,10 +67,6 @@ declare global {
 
 type AgentSetupInsightProps = {
   insight: InsightEvent
-  onCollaborate?: () => void
-  collaborateDisabled?: boolean
-  collaborateDisabledReason?: string | null
-  onBlockedCollaborate?: (location: 'insight_card') => void
 }
 
 function describeError(error: unknown): string {
@@ -136,10 +130,6 @@ function formatPhoneE164(raw: string, region: string): string {
 
 export function AgentSetupInsight({
   insight,
-  onCollaborate,
-  collaborateDisabled = false,
-  collaborateDisabledReason = null,
-  onBlockedCollaborate,
 }: AgentSetupInsightProps) {
   const metadata = insight.metadata as AgentSetupMetadata
   const panel = (metadata.panel ?? 'always_on') as AgentSetupPanel
@@ -157,58 +147,11 @@ export function AgentSetupInsight({
   const [emailResendState, setEmailResendState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle')
   const [emailResendError, setEmailResendError] = useState<string | null>(null)
 
-  const [templateUrl, setTemplateUrl] = useState(metadata.template?.url ?? null)
-  const [templateHandle, setTemplateHandle] = useState(
-    metadata.publicProfile?.handle ?? metadata.publicProfile?.suggestedHandle ?? ''
-  )
-  const [templateHandleDirty, setTemplateHandleDirty] = useState(false)
-  const [templatePanelOpen, setTemplatePanelOpen] = useState(false)
-  const [templateBusy, setTemplateBusy] = useState(false)
-  const [templateError, setTemplateError] = useState<string | null>(null)
-  const [templateCopied, setTemplateCopied] = useState(false)
-
-  const [orgCurrent, setOrgCurrent] = useState(metadata.organization.currentOrg ?? null)
-  const [selectedOrgId, setSelectedOrgId] = useState<string | null>(metadata.organization.currentOrg?.id ?? null)
-  const [orgError, setOrgError] = useState<string | null>(null)
-  const [orgBusy, setOrgBusy] = useState(false)
-  const handleCollaborateClick = useCallback(() => {
-    if (collaborateDisabled && onBlockedCollaborate) {
-      onBlockedCollaborate('insight_card')
-      return
-    }
-    onCollaborate?.()
-  }, [collaborateDisabled, onBlockedCollaborate, onCollaborate])
-
   useEffect(() => {
     setPhone(metadata.sms.userPhone ?? null)
     setSmsEnabled(metadata.sms.enabled)
     setAgentNumber(metadata.sms.agentNumber ?? null)
   }, [metadata.sms.userPhone, metadata.sms.enabled, metadata.sms.agentNumber])
-
-  useEffect(() => {
-    setOrgCurrent(metadata.organization.currentOrg ?? null)
-    setSelectedOrgId(metadata.organization.currentOrg?.id ?? null)
-  }, [metadata.organization.currentOrg])
-
-  useEffect(() => {
-    setTemplateUrl(metadata.template?.url ?? null)
-  }, [metadata.template?.url])
-
-  useEffect(() => {
-    const existingHandle = metadata.publicProfile?.handle ?? ''
-    if (existingHandle) {
-      setTemplateHandle(existingHandle)
-      setTemplateHandleDirty(false)
-      return
-    }
-    if (templateHandleDirty) {
-      return
-    }
-    const suggested = metadata.publicProfile?.suggestedHandle ?? ''
-    if (suggested) {
-      setTemplateHandle(suggested)
-    }
-  }, [metadata.publicProfile?.handle, metadata.publicProfile?.suggestedHandle, templateHandleDirty])
 
   useEffect(() => {
     setCooldown(phone?.cooldownRemaining ?? 0)
@@ -230,9 +173,6 @@ export function AgentSetupInsight({
   const agentEmail = metadata.agentEmail ?? null
   const phoneVerified = Boolean(phone?.isVerified)
   const smsBusy = smsAction !== null
-
-  const orgCurrentId = orgCurrent?.id ?? null
-  const orgHasChange = selectedOrgId !== orgCurrentId
 
   const upsellItems = metadata.upsell?.items ?? []
   const upsellPlan = panel === 'upsell_pro' ? 'pro' : panel === 'upsell_scale' ? 'scale' : null
@@ -260,14 +200,14 @@ export function AgentSetupInsight({
     }
 
     const pageParams = new URLSearchParams(window.location.search)
-    const orgId = pageParams.get('org_id') || orgCurrent?.id
+    const orgId = pageParams.get('org_id') || metadata.organization.currentOrg?.id
     if (orgId && !params.has('org_id')) {
       params.set('org_id', orgId)
     }
 
     url.search = params.toString()
     return url.toString()
-  }, [metadata.utmQuerystring, orgCurrent?.id])
+  }, [metadata.organization.currentOrg?.id, metadata.utmQuerystring])
 
   const checkoutUrls = useMemo(() => {
     return {
@@ -300,76 +240,6 @@ export function AgentSetupInsight({
       phone: agentNumber,
     })
   }, [agentDisplayName, agentEmail, agentNumber])
-
-  const handleTemplateCopy = useCallback(async (value: string) => {
-    if (!value) return
-
-    let success = false
-
-    // Try modern Clipboard API first (requires HTTPS)
-    if (navigator.clipboard?.writeText) {
-      try {
-        await navigator.clipboard.writeText(value)
-        success = true
-      } catch {
-        // Fall through to legacy method
-      }
-    }
-
-    // Fallback for HTTP or older browsers
-    if (!success) {
-      try {
-        const textarea = document.createElement('textarea')
-        textarea.value = value
-        textarea.style.position = 'fixed'
-        textarea.style.left = '-9999px'
-        textarea.style.top = '-9999px'
-        document.body.appendChild(textarea)
-        textarea.focus()
-        textarea.select()
-        success = document.execCommand('copy')
-        document.body.removeChild(textarea)
-      } catch {
-        // Copy failed
-      }
-    }
-
-    if (success) {
-      setTemplateCopied(true)
-      window.setTimeout(() => setTemplateCopied(false), 1800)
-    }
-  }, [])
-
-  const handleCreateTemplate = useCallback(async () => {
-    const hasProfile = Boolean(metadata.publicProfile?.handle)
-    if (!hasProfile && !templatePanelOpen) {
-      setTemplatePanelOpen(true)
-      setTemplateError(null)
-      return
-    }
-    if (!hasProfile && !templateHandle.trim()) {
-      setTemplateError('Choose a public handle to continue.')
-      return
-    }
-    // Note: Charter requirement validation should be handled by the backend API.
-    // The backend should return an appropriate error if the agent has no charter set.
-    setTemplateBusy(true)
-    setTemplateError(null)
-    try {
-      const response = await cloneAgentTemplate(
-        metadata.agentId,
-        hasProfile ? null : templateHandle.trim()
-      )
-      setTemplateUrl(response.templateUrl)
-      setTemplateHandle(response.publicProfileHandle)
-      setTemplateHandleDirty(false)
-      setTemplatePanelOpen(false)
-    } catch (error) {
-      setTemplateError(describeError(error))
-    } finally {
-      setTemplateBusy(false)
-    }
-  }, [metadata.agentId, metadata.publicProfile?.handle, templatePanelOpen, templateHandle])
 
   const handleAddPhone = useCallback(async () => {
     const trimmed = phoneInput.trim()
@@ -466,26 +336,6 @@ export function AgentSetupInsight({
       setSmsAction(null)
     }
   }, [metadata.agentId])
-
-  const handleOrgMove = useCallback(async () => {
-    setOrgError(null)
-    setOrgBusy(true)
-    try {
-      const response = await reassignAgentOrg(metadata.agentId, selectedOrgId)
-      const nextOrg = response.organization ?? null
-      setOrgCurrent(nextOrg)
-      setSelectedOrgId(nextOrg?.id ?? null)
-      track(AnalyticsEvent.AGENT_SETUP_ORG_MOVED, {
-        agentId: metadata.agentId,
-        toOrgId: nextOrg?.id ?? 'personal',
-        toOrgName: nextOrg?.name ?? 'Personal workspace',
-      })
-    } catch (error) {
-      setOrgError(describeError(error))
-    } finally {
-      setOrgBusy(false)
-    }
-  }, [metadata.agentId, selectedOrgId])
 
   const renderAlwaysOn = () => {
     const hasContact = agentEmail || agentNumber
@@ -711,201 +561,6 @@ export function AgentSetupInsight({
     )
   }
 
-  const renderOrgTransfer = () => {
-    const statusText = orgError || `Currently owned by ${orgCurrent?.name || 'your personal workspace'}`
-
-    return (
-      <motion.div
-        className="org-hero"
-        variants={containerVariants}
-        initial="hidden"
-        animate="visible"
-      >
-        {/* Left visual */}
-        <motion.div className="org-hero__visual" variants={visualVariants}>
-          <div className="org-hero__ring org-hero__ring--outer" />
-          <div className="org-hero__ring org-hero__ring--inner" />
-          <div className="org-hero__icon">
-            <Building2 size={24} strokeWidth={2} />
-          </div>
-        </motion.div>
-
-        {/* Center content */}
-        <motion.div className="org-hero__content" variants={itemVariants}>
-          <h3 className="org-hero__title">Organization</h3>
-          <p className={`org-hero__body${orgError ? ' org-hero__body--error' : ''}`}>{statusText}</p>
-        </motion.div>
-
-        {/* Right controls */}
-        <motion.div className="org-hero__controls" variants={badgeVariants}>
-          <select
-            className="org-hero__select"
-            value={selectedOrgId ?? 'personal'}
-            onChange={(event) => {
-              const value = event.target.value
-              setSelectedOrgId(value === 'personal' ? null : value)
-            }}
-          >
-            <option value="personal">Personal workspace</option>
-            {metadata.organization.options.map((org) => (
-              <option key={org.id} value={org.id}>
-                {org.name}
-              </option>
-            ))}
-          </select>
-          <button
-            type="button"
-            className="org-hero__button"
-            onClick={handleOrgMove}
-            disabled={!orgHasChange || orgBusy}
-          >
-            {orgBusy ? 'Moving...' : 'Move'}
-          </button>
-        </motion.div>
-      </motion.div>
-    )
-  }
-
-  const renderTemplate = () => {
-    const hasProfile = Boolean(metadata.publicProfile?.handle)
-    const hasTemplate = Boolean(templateUrl)
-    const showHandleForm = !hasProfile && templatePanelOpen
-    const shortDisplayUrl = templateUrl?.replace(/^https?:\/\//, '') ?? ''
-
-    // Handle form state - full width
-    if (showHandleForm) {
-      return (
-        <motion.div
-          className="collab-row"
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-        >
-          <motion.div className="collab-row__icon collab-row__icon--purple" variants={visualVariants}>
-            <Globe size={18} strokeWidth={2} />
-          </motion.div>
-          <motion.div className="collab-row__main" variants={itemVariants}>
-            <span className="collab-row__title">Create public link</span>
-            <div className="collab-row__form">
-              <div className="collab-row__input-wrap">
-                <span className="collab-row__input-prefix">gobii.ai/</span>
-                <input
-                  className="collab-row__input"
-                  type="text"
-                  value={templateHandle}
-                  onChange={(e) => {
-                    setTemplateHandle(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))
-                    setTemplateHandleDirty(true)
-                  }}
-                  placeholder="your-handle"
-                  autoFocus
-                />
-              </div>
-              {templateError && <span className="collab-row__error">{templateError}</span>}
-            </div>
-          </motion.div>
-          <motion.div className="collab-row__actions" variants={badgeVariants}>
-            <button
-              type="button"
-              className="collab-row__btn collab-row__btn--primary"
-              onClick={handleCreateTemplate}
-              disabled={templateBusy || !templateHandle.trim()}
-            >
-              {templateBusy ? <Loader2 size={14} className="collab-row__spinner" /> : null}
-              <span>Publish</span>
-            </button>
-            <button
-              type="button"
-              className="collab-row__btn collab-row__btn--ghost"
-              onClick={() => setTemplatePanelOpen(false)}
-            >
-              Cancel
-            </button>
-          </motion.div>
-        </motion.div>
-      )
-    }
-
-    return (
-      <div className="collab-grid">
-        {/* Share panel */}
-        <motion.div
-          className="collab-row"
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-        >
-          <motion.div className={`collab-row__icon ${hasTemplate ? 'collab-row__icon--green' : 'collab-row__icon--purple'}`} variants={visualVariants}>
-            {hasTemplate ? <CheckCircle2 size={18} strokeWidth={2} /> : <Globe size={18} strokeWidth={2} />}
-          </motion.div>
-          <motion.div className="collab-row__main" variants={itemVariants}>
-            <span className="collab-row__title">{hasTemplate ? 'Public link active' : 'Share publicly'}</span>
-            {hasTemplate ? (
-              <a href={templateUrl ?? '#'} className="collab-row__link" target="_blank" rel="noreferrer">
-                {shortDisplayUrl}
-              </a>
-            ) : (
-              <span className="collab-row__desc">Anyone with the link can copy this agent</span>
-            )}
-          </motion.div>
-          <motion.div className="collab-row__actions" variants={badgeVariants}>
-            {hasTemplate ? (
-              <button
-                type="button"
-                className={`collab-row__btn ${templateCopied ? 'collab-row__btn--success' : 'collab-row__btn--secondary'}`}
-                onClick={() => handleTemplateCopy(templateUrl ?? '')}
-              >
-                {templateCopied ? <Check size={14} /> : <Copy size={14} />}
-                <span>{templateCopied ? 'Copied!' : 'Copy link'}</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                className="collab-row__btn collab-row__btn--primary"
-                onClick={handleCreateTemplate}
-                disabled={templateBusy}
-              >
-                {templateBusy ? <Loader2 size={14} className="collab-row__spinner" /> : <Globe size={14} />}
-                <span>Create shareable template</span>
-              </button>
-            )}
-          </motion.div>
-        </motion.div>
-
-        {/* Collaborate panel */}
-        {onCollaborate ? (
-          <motion.div
-            className="collab-row"
-            variants={containerVariants}
-            initial="hidden"
-            animate="visible"
-          >
-            <motion.div className="collab-row__icon collab-row__icon--green" variants={visualVariants}>
-              <UserPlus size={18} strokeWidth={2} />
-            </motion.div>
-            <motion.div className="collab-row__main" variants={itemVariants}>
-              <span className="collab-row__title">Collaborate</span>
-              <span className="collab-row__desc">Invite teammates to work on this agent</span>
-            </motion.div>
-            <motion.div className="collab-row__actions" variants={badgeVariants}>
-              <button
-                type="button"
-                className="collab-row__btn collab-row__btn--green"
-                onClick={handleCollaborateClick}
-                disabled={collaborateDisabled && !onBlockedCollaborate}
-                aria-disabled={collaborateDisabled ? 'true' : undefined}
-                title={collaborateDisabledReason || 'Invite collaborators to this agent'}
-              >
-                <UserPlus size={14} />
-                <span>Add people</span>
-              </button>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </div>
-    )
-  }
-
   const renderUpsell = () => {
     if (!upsellItem) {
       return null
@@ -1003,10 +658,6 @@ export function AgentSetupInsight({
     )
   }
 
-  if (panel === 'org_transfer' && metadata.organization.options.length === 0) {
-    return null
-  }
-
   if ((panel === 'upsell_pro' || panel === 'upsell_scale') && !upsellItem) {
     return null
   }
@@ -1020,9 +671,7 @@ export function AgentSetupInsight({
       transition={{ duration: 0.35 }}
     >
       {panel === 'always_on' && renderAlwaysOn()}
-      {panel === 'template' && renderTemplate()}
       {panel === 'sms' && renderSms()}
-      {panel === 'org_transfer' && renderOrgTransfer()}
       {(panel === 'upsell_pro' || panel === 'upsell_scale') && renderUpsell()}
     </motion.div>
   )

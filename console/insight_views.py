@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Count, Sum
+from django.db.models import Count, DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -23,14 +23,10 @@ from django.urls import reverse
 from api.models import (
     BrowserUseAgentTask,
     CommsChannel,
-    OrganizationMembership,
     PersistentAgent,
-    PersistentAgentTemplate,
     PersistentAgentStep,
-    PublicProfile,
 )
 from api.agent.core.prompt_context import get_agent_daily_credit_state
-from api.public_profiles import generate_handle_suggestion
 from billing.services import BillingService
 from console.agent_chat.access import resolve_agent_for_request
 from console.context_helpers import build_console_context
@@ -39,10 +35,11 @@ from config import settings
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
 from djstripe.models import Price
+from tasks.services import TaskCreditService
+from util.constants.task_constants import TASKS_UNLIMITED
 from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from api.services.email_verification import has_verified_email
-from pages.public_template_urls import public_template_detail_path
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +55,20 @@ DECIMAL_ZERO = Decimal("0")
 CURRENCY_SYMBOLS = {
     "usd": "$",
 }
+
+
+def _decimal_to_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _usage_percent(used: Decimal, limit: Decimal | None, *, unlimited: bool) -> float | None:
+    if unlimited:
+        return None
+    if limit is None or limit <= DECIMAL_ZERO:
+        return 0.0
+    return round(min(float((used / limit) * Decimal("100")), 100.0), 1)
 
 
 @dataclass
@@ -144,23 +155,6 @@ def _build_agent_setup_metadata(
     agent_sms = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
     agent_email = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
 
-    org_memberships = OrganizationMembership.objects.filter(
-        user=request.user,
-        status=OrganizationMembership.OrgStatus.ACTIVE,
-        role__in=[
-            OrganizationMembership.OrgRole.OWNER,
-            OrganizationMembership.OrgRole.ADMIN,
-            OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-        ],
-    ).select_related("org").order_by("org__name")
-    org_options = [
-        {
-            "id": str(membership.org.id),
-            "name": membership.org.name,
-        }
-        for membership in org_memberships
-    ]
-
     current_org = None
     if agent.organization_id:
         current_org = {
@@ -223,18 +217,6 @@ def _build_agent_setup_metadata(
 
     utm_querystring = request.session.get("utm_querystring") or ""
 
-    public_profile = PublicProfile.objects.filter(user=request.user).first()
-    suggested_handle = None if public_profile else generate_handle_suggestion()
-    template = None
-    template_url = None
-    if public_profile:
-        template = PersistentAgentTemplate.objects.filter(
-            public_profile=public_profile,
-            source_agent=agent,
-        ).first()
-        if template and template.slug:
-            template_url = request.build_absolute_uri(public_template_detail_path(template))
-
     return {
         "agentId": str(agent.id),
         "alwaysOn": {
@@ -252,7 +234,6 @@ def _build_agent_setup_metadata(
         },
         "organization": {
             "currentOrg": current_org,
-            "options": org_options,
         },
         "upsell": {
             "items": upsell_items,
@@ -260,15 +241,6 @@ def _build_agent_setup_metadata(
         } if upsell_items else None,
         "checkout": checkout,
         "utmQuerystring": utm_querystring,
-        "publicProfile": {
-            "handle": public_profile.handle if public_profile else None,
-            "suggestedHandle": suggested_handle,
-        },
-        "template": {
-            "slug": template.slug if template else None,
-            "displayName": template.display_name if template else None,
-            "url": template_url,
-        },
     }
 
 
@@ -294,14 +266,6 @@ def _get_agent_setup_insights(
             "dismissible": False,
         })
 
-    if agent.organization_id is None:
-        add_panel(
-            "template",
-            97,
-            "Public profile",
-            "Create a public template anyone can spawn in one click.",
-        )
-
     add_panel(
         "always_on",
         100,
@@ -314,15 +278,6 @@ def _get_agent_setup_insights(
         "SMS chat",
         "Chat with your agent over SMS.",
     )
-
-    org_options = metadata.get("organization", {}).get("options") or []
-    if org_options:
-        add_panel(
-            "org_transfer",
-            92,
-            "Organization ownership",
-            "Move this agent into a workspace you manage.",
-        )
 
     upsell = metadata.get("upsell") or {}
     upsell_items = upsell.get("items") or []
@@ -457,8 +412,34 @@ def _get_time_saved_insight(ctx: InsightContext) -> Optional[dict]:
     }
 
 
+def _get_month_usage_payload(ctx: InsightContext) -> dict:
+    owner = ctx.organization or ctx.user
+    current_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
+
+    if ctx.organization is None:
+        total = Decimal(TaskCreditService.get_tasks_entitled_for_owner(owner))
+        used = TaskCreditService.get_owner_task_credits_used(owner, task_credits=current_credits)
+    else:
+        credits_zero = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
+        credit_agg = current_credits.aggregate(
+            total=Coalesce(Sum("credits"), credits_zero),
+            used=Coalesce(Sum("credits_used"), credits_zero),
+        )
+        total = Decimal(credit_agg.get("total") or DECIMAL_ZERO)
+        used = Decimal(credit_agg.get("used") or DECIMAL_ZERO)
+
+    unlimited = total == Decimal(TASKS_UNLIMITED)
+
+    return {
+        "used": _decimal_to_float(used) or 0.0,
+        "limit": None if unlimited else _decimal_to_float(total),
+        "percentUsed": _usage_percent(used, total, unlimited=unlimited),
+        "unlimited": unlimited,
+    }
+
+
 def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
-    """Generate burn rate insight for current agent."""
+    """Generate usage insight for current agent."""
     try:
         daily_state = get_agent_daily_credit_state(ctx.agent)
     except Exception as e:
@@ -484,45 +465,31 @@ def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
     hard_limit = daily_state.get("hard_limit")
     soft_target = daily_state.get("soft_target")
 
-    # Calculate daily limit and percent used
+    daily_unlimited = hard_limit is None and soft_target is None
     daily_limit = hard_limit or soft_target
-    if daily_limit is None or daily_limit <= 0:
-        daily_limit = Decimal("100")  # Default fallback
-
-    percent_used = min(100, float(used_today / daily_limit * 100)) if daily_limit > 0 else 0
-
-    # Get all agents' usage for today
-    today = timezone.localdate()
-    today_start = timezone.make_aware(datetime.combine(today, time.min))
-    today_end = timezone.make_aware(datetime.combine(today, time.max))
-
-    all_agents_filters = {
-        "created_at__gte": today_start,
-        "created_at__lte": today_end,
+    today_usage = {
+        "used": _decimal_to_float(used_today) or 0.0,
+        "limit": None if daily_unlimited else _decimal_to_float(daily_limit),
+        "percentUsed": _usage_percent(used_today, daily_limit, unlimited=daily_unlimited),
+        "unlimited": daily_unlimited,
     }
-    if ctx.organization:
-        all_agents_filters["agent__organization"] = ctx.organization
-    else:
-        all_agents_filters["agent__user"] = ctx.user
-        all_agents_filters["agent__organization__isnull"] = True
-
-    all_agents_stats = PersistentAgentStep.objects.filter(**all_agents_filters).aggregate(
-        total=Coalesce(Sum("credits_cost"), DECIMAL_ZERO),
-    )
-    all_agents_credits = float(all_agents_stats.get("total", DECIMAL_ZERO) or DECIMAL_ZERO)
+    month_usage = _get_month_usage_payload(ctx)
 
     return {
         "insightId": f"burn_rate_{uuid.uuid4().hex[:8]}",
         "insightType": "burn_rate",
         "priority": 5,
         "title": "Credit usage",
-        "body": f"{ctx.agent.name} is using {float(burn_rate or 0):.1f} credits/hour",
+        "body": "Track today's agent usage and this month's account usage.",
         "metadata": {
             "agentName": ctx.agent.name,
             "agentCreditsPerHour": round(float(burn_rate or 0), 2),
-            "allAgentsCreditsPerDay": round(all_agents_credits, 2),
-            "dailyLimit": float(daily_limit),
-            "percentUsed": round(percent_used, 1),
+            "allAgentsCreditsPerDay": round(month_usage["used"], 2),
+            "dailyLimit": today_usage["limit"],
+            "percentUsed": today_usage["percentUsed"],
+            "todayUsage": today_usage,
+            "monthUsage": month_usage,
+            "usageUrl": reverse("usage"),
         },
         "dismissible": True,
     }
@@ -562,10 +529,6 @@ def generate_insights_for_agent(
     insights: list[dict] = []
     if _should_include_agent_setup_insights(user, agent):
         insights.extend(_get_agent_setup_insights(request, agent, organization))
-
-    time_saved = _get_time_saved_insight(ctx)
-    if time_saved:
-        insights.append(time_saved)
 
     burn_rate = _get_burn_rate_insight(ctx)
     if burn_rate:
