@@ -103,9 +103,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 100)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 100)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 100)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 108)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 108)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 108)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -210,6 +210,20 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertFalse(by_slug["common_use_case_091_schedule_daily_digest"].plan_expected)
         self.assertIn("ET schedule", by_slug["common_use_case_093_schedule_weekly_report"].prompt)
+        self.assertIn("revenue operations candidates", by_slug["common_use_case_101_linkedin_revenue_ops_candidates"].prompt)
+        self.assertIn("HR leaders", by_slug["common_use_case_102_linkedin_hr_leaders"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_103_apollo_logistics_leads"].eval_synthetic_tools,
+            ("apollo_io-search-contacts",),
+        )
+        self.assertIn("VC funding", by_slug["common_use_case_104_recent_vc_funding_research"].prompt)
+        self.assertIn("market timestamp", by_slug["common_use_case_105_current_finance_snapshot"].prompt)
+        self.assertIn("review evidence", by_slug["common_use_case_106_maps_dental_lead_screen"].prompt)
+        self.assertIn("do not run it now", by_slug["common_use_case_107_schedule_vc_digest"].prompt)
+        self.assertEqual(
+            by_slug["common_use_case_108_sheets_read_before_upsert"].expected_tools,
+            ("google_sheets-find-row", "google_sheets-upsert-row"),
+        )
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
             {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
@@ -232,9 +246,14 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"google_sheets-get-values-in-range": ("google_sheets-read-rows",)},
         )
         self.assertEqual(
+            by_slug["common_use_case_057_sheets_read_rows"].accepted_tool_alternatives,
+            {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
+        )
+        self.assertEqual(
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
+        self.assertIn("company Vanta", by_slug["common_use_case_060_sheets_append_rows"].prompt)
         sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success(
             "google_sheets-get-spreadsheet-by-id"
         )
@@ -468,9 +487,12 @@ class BehaviorMicroHelperTests(TestCase):
 
     def test_brightdata_eval_synthetic_descriptions_prefer_structured_data_over_browser(self):
         search_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["description"]
+        maps_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_google_maps_reviews"]["description"]
         reddit_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_reddit_posts"]["description"]
 
         self.assertIn("ordinary research", search_description)
+        self.assertIn("representative market", maps_description)
+        self.assertIn("instead of asking which city", maps_description)
         self.assertIn("Reddit mentions", reddit_description)
         self.assertIn("browser automation", reddit_description)
 
@@ -829,6 +851,28 @@ class BehaviorMicroHelperTests(TestCase):
             str(self.run.id),
             {"stop_when_all_seen": [{"tool_name": "http_request", "params": {"url": "https://example.test"}}]},
         )
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
+
+    def test_eval_stop_policy_can_wait_for_required_param_any(self):
+        self._add_tool_call("custom_sync", {"mode": "status"}, status="complete")
+        policy = {
+            "stop_when_all_seen": [
+                {
+                    "tool_name": "custom_sync",
+                    "after_execution": True,
+                    "required_params_any": ["batch_size", "limit"],
+                }
+            ]
+        }
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+
+        self._add_tool_call("custom_sync", {"mode": "sync", "batch_size": 10}, status="complete")
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
 
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)

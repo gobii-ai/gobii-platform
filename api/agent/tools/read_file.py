@@ -202,6 +202,7 @@ def get_read_file_tool() -> Dict[str, Any]:
             "name": "read_file",
             "description": (
                 "Read a file from the agent filesystem and return content as markdown or raw text. "
+                "Do not use this for http:// or https:// URLs; use http_request, scraping, or spawn_web_task for URLs. "
                 "Defaults to raw_text for plain text files and markdown for PDFs, images, scanned documents, and office files "
                 "(markdown mode handles OCR and richer extraction). "
                 "Not for SQLite snapshots; use sqlite_batch on __tool_results, __messages, or __files instead. "

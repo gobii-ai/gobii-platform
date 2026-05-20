@@ -767,9 +767,13 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     "For a multi-Gobii team, include meta_gobii_link_agents. For any request to brief, hand off, "
                     "follow up, send updates, coordinate with an owner/team, or explain initial work, include "
                     "meta_gobii_send_agent_message as the explicit briefing/handoff step. "
+                    "Briefing an audience is not a second Gobii; a request for one Gobii to do work and brief or "
+                    "send updates remains one planned agent unless the user asks for a team or multiple Gobiis. "
                     "If the user asks to restructure, reorganize, rewire, relink, add links, or fix a Gobii graph, "
                     "include meta_gobii_list_agent_links and meta_gobii_link_agents; include unlink only when "
                     "stale or weak links may need removal. "
+                    "Do not include meta_gobii_update_agent for graph restructure, link, unlink, or archive work "
+                    "unless the user asks to change name, charter, schedule, resources, availability, policy, or tier. "
                     "Whenever meta_gobii_create_agent will create a Gobii that is expected to do work, include "
                     "meta_gobii_send_agent_message to deliver the initial role/project briefing after approval; "
                     "the exception is an explicit request to use only the separate human Create/Decline request flow. "
@@ -1176,8 +1180,13 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         if not role_names and (case.min_planned_agents or case.max_planned_agents):
             role_names = _simulated_role_names(case)
 
+        required_terms = [term for term in case.required_role_terms if term]
+        scope_note = f" Focus on: {', '.join(required_terms)}." if required_terms else ""
         roles = [
-            {"name": role_name, "responsibility": f"Own the {role_name.lower()} scope requested by the user."}
+            {
+                "name": role_name,
+                "responsibility": f"Own the {role_name.lower()} scope requested by the user.{scope_note}",
+            }
             for role_name in role_names
         ]
         ordered_tools = {str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])}
@@ -1190,14 +1199,20 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         initial_briefings = []
         if "meta_gobii_send_agent_message" in ordered_tools:
             initial_briefings = [
-                f"{role_name}: execute the requested {role_name.lower()} workstream and coordinate with linked Gobiis."
+                f"{role_name}: execute the requested {role_name.lower()} workstream.{scope_note} Coordinate with linked Gobiis."
                 for role_name in role_names
             ]
 
         if plan_args.get("needs_human_confirmation"):
-            response_text = "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
+            response_text = (
+                "Please approve this Meta Gobii plan before I create, link, message, or modify any Gobiis."
+                f"{scope_note}"
+            )
         else:
-            response_text = "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
+            response_text = (
+                "I will carry out the approved Meta Gobii scope without adding extra roles or schedules."
+                f"{scope_note}"
+            )
 
         return {
             "response_text": response_text,

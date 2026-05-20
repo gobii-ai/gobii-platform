@@ -350,7 +350,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("<agent_skills>", content)
         self.assertIn("System Skill: Runtime Planning", content)
-        self.assertIn("Use `update_plan` to track steps", content)
+        self.assertIn("Use `update_plan` to track substantial multi-step work", content)
 
     def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
@@ -1383,11 +1383,11 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         content = system_message["content"]
         self.assertIn(
-            "If send_chat_message is unavailable, retry with send_email/send_sms",
+            "and send_email/send_sms/send_agent_message for other channels",
             content,
         )
         self.assertIn(
-            "most recently active non-web channel from unified history/recent contacts",
+            "If send_chat_message is unavailable, use the most recently active non-web channel from unified history/recent contacts",
             content,
         )
 

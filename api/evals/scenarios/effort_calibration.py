@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Iterable
 
 from django.db.models import Sum
@@ -9,12 +10,15 @@ from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
 from api.evals.stop_policy import (
+    split_sql_statements,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_mutation,
     sqlite_batch_is_only_planning_state_read,
     sqlite_batch_mutates_planning_state,
+    sqlite_batch_sql,
 )
 from api.models import (
+    EvalRun,
     EvalRunTask,
     PersistentAgent,
     PersistentAgentCompletion,
@@ -33,6 +37,9 @@ EFFORT_SCHEDULED_BRIEFING_FINISHES = "effort_scheduled_briefing_finishes"
 EFFORT_DEFAULTABLE_RESEARCH_NO_QUESTION_BATTERY = "effort_defaultable_research_no_question_battery"
 EFFORT_PARTIAL_BRIEFING_REPORTS_WITHOUT_SURVEY = "effort_partial_briefing_reports_without_survey"
 EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT = "effort_chart_requested_single_artifact"
+EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT = "effort_simple_current_yc_batch_report"
+EFFORT_SIMPLE_CURRENT_COMPANY_REPORT = "effort_simple_current_company_report"
+EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE = "effort_explicit_deep_research_remains_capable"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_TRIVIAL_ANSWER_STOPS,
@@ -41,6 +48,9 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_DEFAULTABLE_RESEARCH_NO_QUESTION_BATTERY,
     EFFORT_PARTIAL_BRIEFING_REPORTS_WITHOUT_SURVEY,
     EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT,
+    EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
+    EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
+    EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
 ]
 
 MESSAGE_TOOL_NAMES = {
@@ -75,6 +85,130 @@ EFFORT_OVERWORK_TOOL_NAMES = {
     "spawn_agent",
     "update_plan",
 }
+WEB_QUERY_PARAM_NAMES = ("query", "keyword", "prompt")
+_WORD_RE = re.compile(r"[a-z0-9]+")
+_SQL_TOOL_RESULT_TEXT_RE = re.compile(
+    r"\bfrom\s+__tool_results\b[^;]*\bresult_text\b|\bresult_text\b[^;]*\bfrom\s+__tool_results\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_SQL_RESULT_ID_RE = re.compile(r"\bresult_id\s*=\s*['\"]([^'\"]+)['\"]", re.IGNORECASE)
+_HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*:?\s*$|<h[1-4]\b")
+_LIST_OR_TABLE_RE = re.compile(
+    r"(?im)^\s*(?:[-*]|\d+[.)])\s+\S|^\s*\*\*\d+[.)]\s+\S|^\s*\|.+\|\s*$|<\s*(?:ul|ol|li|table)\b"
+)
+_MARKDOWN_URL_LINK_RE = re.compile(
+    r"\[[^\]]*(?:https?://|www\.|[a-z0-9.-]+\.[a-z]{2,}/)[^\]]*\]\(https?://[^)]+\)",
+    re.IGNORECASE,
+)
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _normalize_similarity_text(value: str) -> str:
+    return " ".join(_WORD_RE.findall((value or "").casefold()))
+
+
+def _token_set(value: str) -> set[str]:
+    return set(_normalize_similarity_text(value).split())
+
+
+def _near_duplicate_text(first: str, second: str) -> bool:
+    first_normalized = _normalize_similarity_text(first)
+    second_normalized = _normalize_similarity_text(second)
+    if not first_normalized or not second_normalized:
+        return False
+    if first_normalized == second_normalized:
+        return True
+
+    first_tokens = _token_set(first_normalized)
+    second_tokens = _token_set(second_normalized)
+    if len(first_tokens) < 4 or len(second_tokens) < 4:
+        return False
+
+    overlap = len(first_tokens & second_tokens)
+    union = len(first_tokens | second_tokens)
+    containment = overlap / min(len(first_tokens), len(second_tokens))
+    jaccard = overlap / union if union else 0
+    return containment >= 0.9 or jaccard >= 0.82
+
+
+def _find_near_duplicate_texts(values: Iterable[str]) -> list[tuple[str, str]]:
+    seen: list[str] = []
+    duplicates = []
+    for value in values:
+        text = str(value or "").strip()
+        if not text:
+            continue
+        for prior in seen:
+            if _near_duplicate_text(prior, text):
+                duplicates.append((prior, text))
+                break
+        seen.append(text)
+    return duplicates
+
+
+def _web_query_value(params: dict) -> str | None:
+    for param_name in WEB_QUERY_PARAM_NAMES:
+        value = params.get(param_name)
+        if value:
+            return str(value)
+    return None
+
+
+def _sqlite_result_text_reads(sql: str) -> list[str]:
+    reads = []
+    for statement in split_sql_statements(sql):
+        if not _SQL_TOOL_RESULT_TEXT_RE.search(statement):
+            continue
+        result_ids = _SQL_RESULT_ID_RE.findall(statement)
+        if result_ids:
+            reads.extend(result_ids)
+        else:
+            reads.append("__tool_results.result_text")
+    return reads
+
+
+def _hierarchical_report_shape(
+    body: str,
+    *,
+    source_urls: Iterable[str],
+    min_source_count: int,
+    min_chars: int,
+    max_chars: int,
+    required_any_groups: Iterable[Iterable[str]] = (),
+) -> tuple[bool, str]:
+    text = body or ""
+    linked_sources = [url for url in source_urls if url in text]
+    missing_groups = []
+    text_folded = text.casefold()
+    for group in required_any_groups:
+        options = [option for option in group if option]
+        if options and not any(option.casefold() in text_folded for option in options):
+            missing_groups.append(options)
+
+    heading_count = len(_HEADING_RE.findall(text))
+    has_heading = heading_count > 0
+    has_list_or_table = bool(_LIST_OR_TABLE_RE.search(text))
+    has_structured_detail = has_list_or_table or heading_count >= 2
+    has_sections = text.count("\n\n") >= 2 or heading_count >= 2
+    failures = []
+    if len(text) < min_chars:
+        failures.append(f"too short ({len(text)} chars < {min_chars})")
+    if len(text) > max_chars:
+        failures.append(f"too long ({len(text)} chars > {max_chars})")
+    if len(linked_sources) < min_source_count:
+        failures.append(f"too few source links ({len(linked_sources)} < {min_source_count})")
+    if missing_groups:
+        failures.append(f"missing required concept group(s): {missing_groups}")
+    if not has_heading:
+        failures.append("missing visible heading")
+    if not has_structured_detail:
+        failures.append("missing bullets, numbered list, table, or multiple visible sections")
+    if not has_sections:
+        failures.append("missing section breaks")
+
+    if failures:
+        return False, "; ".join(failures)
+    return True, f"Structured report with {len(text)} chars and {len(linked_sources)} source link(s)."
 
 
 def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | None = None):
@@ -125,7 +259,9 @@ def _human_input_requests_for_run(run_id: str, *, after=None):
 
 
 def _question_count(text: str) -> int:
-    return (text or "").count("?")
+    without_urls = _MARKDOWN_URL_LINK_RE.sub("", text or "")
+    without_urls = _URL_RE.sub("", without_urls)
+    return without_urls.count("?")
 
 
 def _orchestrator_completion_count(run_id: str) -> int:
@@ -186,6 +322,46 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                 tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
                 tool_name=tool_name,
             )
+
+    def _is_simulated(self, run_id: str) -> bool:
+        run = EvalRun.objects.select_related("suite_run").get(id=run_id)
+        suite_run = run.suite_run
+        return bool(suite_run and (suite_run.launch_config or {}).get("mode") == "simulated")
+
+    def _record_simulated_tool_call(
+        self,
+        run_id: str,
+        agent_id: str,
+        *,
+        tool_name: str,
+        tool_params: dict,
+        result: dict | None = None,
+    ) -> None:
+        step = PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            eval_run_id=run_id,
+            description=f"Simulated eval tool call: {tool_name}",
+        )
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name=tool_name,
+            tool_params=tool_params,
+            result=json.dumps(result or {"status": "ok"}),
+        )
+
+    def _send_simulated_web_report(self, agent_id: str, body: str) -> None:
+        from api.agent.tools.web_chat_sender import execute_send_chat_message
+
+        agent = PersistentAgent.objects.get(id=agent_id)
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": body,
+                "will_continue_work": False,
+            },
+        )
+        if result.get("status") != "ok":
+            raise RuntimeError(f"Simulated web report failed: {result.get('message')}")
 
     def _record_single_concise_reply(
         self,
@@ -383,6 +559,217 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                 f"Used {count} orchestrator completions; expected at most {max_completions}. "
                 f"Tokens: {token_summary}."
             ),
+        )
+        return False
+
+    def _record_plan_update_budget(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+        max_updates: int,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        plan_calls = _tool_calls_for_run(run_id, after=after, tool_names={"update_plan"})
+        if len(plan_calls) <= max_updates:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=f"Used {len(plan_calls)} plan update(s), within budget {max_updates}.",
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=f"Expected at most {max_updates} plan update(s); saw {len(plan_calls)}.",
+            artifacts={"step": plan_calls[0].step},
+        )
+        return False
+
+    def _record_no_repetitive_web_queries(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        query_values = []
+        for call in _tool_calls_for_run(run_id, after=after):
+            if call.tool_name == "search_tools":
+                continue
+            params = call.tool_params or {}
+            value = _web_query_value(params)
+            if value:
+                query_values.append(value)
+
+        duplicates = _find_near_duplicate_texts(query_values)
+        if not duplicates:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=(
+                    "No identical or near-identical web query loop across "
+                    f"{len(query_values)} query value(s)."
+                ),
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=f"Near-duplicate web queries detected: {duplicates[:2]}.",
+        )
+        return False
+
+    def _record_no_sqlite_result_text_reread_loop(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+        max_result_text_reads: int = 0,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        reads = []
+        first_bad_call = None
+        for call in _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"}):
+            call_reads = _sqlite_result_text_reads(sqlite_batch_sql(call))
+            if call_reads and first_bad_call is None:
+                first_bad_call = call
+            reads.extend(call_reads)
+
+        duplicate_reads = [first for first, _second in _find_near_duplicate_texts(reads)]
+        if len(reads) <= max_result_text_reads and not duplicate_reads:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=(
+                    f"Observed {len(reads)} __tool_results.result_text read(s), "
+                    f"within budget {max_result_text_reads}, with no reread loop."
+                ),
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=(
+                f"Expected at most {max_result_text_reads} result_text read(s) and no duplicate reads; "
+                f"saw reads={reads[:8]}."
+            ),
+            artifacts={"step": first_bad_call.step} if first_bad_call else {},
+        )
+        return False
+
+    def _record_hierarchical_report(
+        self,
+        run_id: str,
+        *,
+        agent_id: str,
+        after,
+        task_name: str,
+        source_urls: Iterable[str],
+        min_source_count: int,
+        min_chars: int,
+        max_chars: int,
+        required_any_groups: Iterable[Iterable[str]] = (),
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        outbound = _outbound_messages_after(agent_id, after)
+        if len(outbound) != 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name=task_name,
+                observed_summary=f"Expected exactly one final outbound report; found {len(outbound)}.",
+                artifacts={"message": outbound[0]} if outbound else {},
+            )
+            return False
+
+        body = outbound[0].body or ""
+        ok, summary = _hierarchical_report_shape(
+            body,
+            source_urls=source_urls,
+            min_source_count=min_source_count,
+            min_chars=min_chars,
+            max_chars=max_chars,
+            required_any_groups=required_any_groups,
+        )
+        if ok:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=summary,
+                artifacts={"message": outbound[0]},
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=summary,
+            artifacts={"message": outbound[0]},
+        )
+        return False
+
+    def _record_research_tool_budget(
+        self,
+        run_id: str,
+        *,
+        after,
+        task_name: str,
+        allowed_tool_names: Iterable[str],
+        min_relevant_calls: int,
+        max_relevant_calls: int,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        relevant = _relevant_tool_calls_for_run(
+            run_id,
+            after=after,
+            ignored_tool_names=MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES,
+        )
+        allowed = set(allowed_tool_names)
+        unexpected = [call.tool_name for call in relevant if call.tool_name not in allowed]
+        if min_relevant_calls <= len(relevant) <= max_relevant_calls and not unexpected:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=f"Relevant tool calls were {[call.tool_name for call in relevant]}.",
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=(
+                f"Expected {min_relevant_calls}-{max_relevant_calls} relevant calls from {sorted(allowed)}; "
+                f"saw {[call.tool_name for call in relevant]}, unexpected={unexpected}."
+            ),
+            artifacts={"step": relevant[0].step} if relevant else {},
         )
         return False
 
@@ -1179,3 +1566,939 @@ class EffortChartRequestedSingleArtifactScenario(EffortCalibrationScenario):
             after=inbound.timestamp,
             task_name="verify_no_config_churn",
         )
+
+
+@register_scenario
+class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
+    slug = EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT
+    supports_simulation = True
+    description = (
+        "Production-seeded latest-YC-batch report should stay in bounded current-research mode: "
+        "a few good sources, one structured report, no progress-only message, charts, or retrieval loops."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_bounded_research_budget", assertion_type="manual"),
+        ScenarioTask(name="verify_single_hierarchical_report", assertion_type="manual"),
+        ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
+        ScenarioTask(name="verify_no_artifacts_or_plan", assertion_type="manual"),
+        ScenarioTask(name="verify_no_query_or_sqlite_loops", assertion_type="manual"),
+        ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        self._enable_eval_synthetic_tools(
+            agent_id,
+            ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"],
+        )
+        self._enable_builtin_tools(agent_id, ["create_chart", "create_csv", "create_file", "create_pdf"])
+        source_urls = (
+            "https://www.ycombinator.com/companies?batch=Winter%202026",
+            "https://www.ycombinator.com/blog/yc-winter-2026-demo-day",
+            "https://techcrunch.example.test/yc-w26-demo-day-highlights",
+            "https://research.example.test/yc-w26-batch-analysis",
+        )
+        mock_config = {
+            "mcp_brightdata_search_engine": {
+                "status": "ok",
+                "results": [
+                    {
+                        "title": "Y Combinator Winter 2026 companies",
+                        "url": source_urls[0],
+                        "snippet": "YC's latest completed batch is Winter 2026 (W26), with roughly 198 companies.",
+                    },
+                    {
+                        "title": "YC Winter 2026 Demo Day",
+                        "url": source_urls[1],
+                        "snippet": "Demo Day took place in late March 2026 and highlighted AI, B2B, devtools, healthcare, and fintech startups.",
+                    },
+                    {
+                        "title": "Highlights from YC W26 Demo Day",
+                        "url": source_urls[2],
+                        "snippet": "Selected standouts included infrastructure, robotics, health AI, and new financial workflow products.",
+                    },
+                    {
+                        "title": "YC W26 batch analysis",
+                        "url": source_urls[3],
+                        "snippet": "The batch skewed toward B2B and applied AI, with smaller clusters in healthcare, fintech, and climate.",
+                    },
+                ],
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "rules": [
+                    {
+                        "url_contains": "companies?batch=Winter%202026",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[0],
+                            "markdown": (
+                                "# YC Winter 2026 Companies\n\n"
+                                "The latest completed YC batch is Winter 2026 (W26). The directory lists about "
+                                "198 companies. Common tags include B2B, AI, developer tools, healthcare, fintech, "
+                                "robotics, and climate. Example companies include Byteport, Graze Robotics, "
+                                "Helix Health AI, LedgerFlow, and Orbital Grid."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "yc-winter-2026-demo-day",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[1],
+                            "markdown": (
+                                "# YC Winter 2026 Demo Day\n\n"
+                                "Demo Day ran in late March 2026. YC described the batch as heavily weighted toward "
+                                "applied AI and B2B software, with infrastructure and vertical workflow companies "
+                                "showing up across sectors."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "yc-w26-demo-day-highlights",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[2],
+                            "markdown": (
+                                "# YC W26 highlights\n\n"
+                                "Investors highlighted startups building logistics automation, satellite power, "
+                                "clinical documentation, developer infrastructure, and finance operations. The most "
+                                "common pattern was AI embedded into narrow operational workflows."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "yc-w26-batch-analysis",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[3],
+                            "markdown": (
+                                "# YC W26 batch analysis\n\n"
+                                "B2B and AI were the dominant themes. Healthcare, fintech, and climate were present "
+                                "but smaller. The batch continued YC's shift toward technical founders and concrete "
+                                "workflow automation."
+                            ),
+                        },
+                    },
+                ],
+                "default": {
+                    "status": "ok",
+                    "url": "https://research.example.test/yc-w26-source",
+                    "markdown": "YC W26 source note: latest batch, AI/B2B heavy, with healthcare, fintech, climate, and robotics examples.",
+                },
+            },
+            "search_tools": {
+                "status": "ok",
+                "tools": [
+                    {
+                        "name": "mcp_brightdata_search_engine",
+                        "description": "Search deterministic eval web results.",
+                    },
+                    {
+                        "name": "mcp_brightdata_scrape_as_markdown",
+                        "description": "Scrape deterministic eval web pages.",
+                    },
+                ],
+            },
+            "create_chart": {"status": "error", "message": "Charts are not requested for this simple report."},
+            "create_csv": {"status": "error", "message": "Files are not requested for this simple report."},
+            "create_file": {"status": "error", "message": "Files are not requested for this simple report."},
+            "create_pdf": {"status": "error", "message": "Files are not requested for this simple report."},
+        }
+        prompt = (
+            "Tell me about the latest YC batch of companies. Give me a concise but substantive structured "
+            "report with key themes, representative examples, and sources. Treat this as bounded current-info "
+            "research, not exhaustive research; use at most one search query and answer from the first reliable "
+            "source set."
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        if self._is_simulated(run_id):
+            inbound = self.inject_message(
+                agent_id,
+                prompt,
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_search_engine",
+                tool_params={"query": "latest YC batch companies W26", "will_continue_work": True},
+                result=mock_config["mcp_brightdata_search_engine"],
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                tool_params={"url": source_urls[0]},
+                result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][0]["result"],
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                tool_params={"url": source_urls[1]},
+                result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][1]["result"],
+            )
+            self._send_simulated_web_report(
+                agent_id,
+                (
+                    "## YC Winter 2026 Batch\n\n"
+                    "**Bottom line:** YC's latest completed batch is Winter 2026 (W26), with about 198 "
+                    "companies. The batch reads as an applied-AI and B2B software cohort rather than a broad "
+                    "consumer wave.\n\n"
+                    "### Key Takeaways\n\n"
+                    "- **Themes:** B2B, AI, developer tools, healthcare, fintech, robotics, and climate were "
+                    "the main clusters.\n"
+                    "- **What changed:** More companies are packaging AI into specific operating workflows, "
+                    "such as logistics, clinical documentation, finance ops, and infrastructure.\n"
+                    "- **How to read it:** The interesting signal is less \"AI everywhere\" and more vertical "
+                    "workflow automation with concrete buyers.\n\n"
+                    "| Area | What stood out |\n"
+                    "| --- | --- |\n"
+                    "| Batch | Winter 2026 / W26, roughly 198 companies |\n"
+                    "| Center of gravity | B2B software and applied AI |\n"
+                    "| Examples | Byteport, Graze Robotics, Helix Health AI, LedgerFlow, Orbital Grid |\n\n"
+                    "### Sources\n\n"
+                    f"- {source_urls[0]}\n"
+                    f"- {source_urls[1]}\n"
+                    f"- {source_urls[2]}"
+                ),
+            )
+        else:
+            with self.wait_for_agent_idle(agent_id, timeout=180):
+                inbound = self.inject_message(
+                    agent_id,
+                    prompt,
+                    trigger_processing=True,
+                    eval_run_id=run_id,
+                    mock_config=mock_config,
+                    eval_stop_policy={
+                        "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES),
+                        "stop_on_sqlite_agent_config_mutation": True,
+                        "stop_on_human_input_request": True,
+                        "stop_on_unexpected_relevant_tool": True,
+                        "allowed_tool_names": [
+                            "search_tools",
+                            "mcp_brightdata_search_engine",
+                            "mcp_brightdata_scrape_as_markdown",
+                        ],
+                        "max_relevant_tool_calls": 6,
+                        "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    },
+                )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_research_tool_budget(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_bounded_research_budget",
+            allowed_tool_names={
+                "search_tools",
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+            },
+            min_relevant_calls=1,
+            max_relevant_calls=5,
+        )
+        self._record_hierarchical_report(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_single_hierarchical_report",
+            source_urls=source_urls,
+            min_source_count=2,
+            min_chars=700,
+            max_chars=3200,
+            required_any_groups=(("Winter 2026", "W26"), ("YC", "Y Combinator")),
+        )
+        self._record_no_question_battery(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_question_or_progress_message",
+            max_message_questions=0,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_artifacts_or_plan",
+            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES,
+        )
+        no_query_loop = self._record_no_repetitive_web_queries(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_query_or_sqlite_loops",
+        )
+        if no_query_loop:
+            self._record_no_sqlite_result_text_reread_loop(
+                run_id,
+                after=inbound.timestamp,
+                task_name="verify_no_query_or_sqlite_loops",
+                max_result_text_reads=0,
+            )
+        self._record_no_agent_config_mutation(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_config_churn",
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
+class EffortSimpleCurrentCompanyReportScenario(EffortCalibrationScenario):
+    slug = EFFORT_SIMPLE_CURRENT_COMPANY_REPORT
+    supports_simulation = True
+    description = (
+        "A generic current company/news report should use bounded source collection and stop, "
+        "preventing the YC failure fix from overfitting to one wording."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_bounded_research_budget", assertion_type="manual"),
+        ScenarioTask(name="verify_single_hierarchical_report", assertion_type="manual"),
+        ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
+        ScenarioTask(name="verify_no_artifacts_or_plan", assertion_type="manual"),
+        ScenarioTask(name="verify_no_query_or_sqlite_loops", assertion_type="manual"),
+        ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        self._enable_eval_synthetic_tools(
+            agent_id,
+            ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"],
+        )
+        self._enable_builtin_tools(agent_id, ["create_chart", "create_csv", "create_file", "create_pdf"])
+        source_urls = (
+            "https://northstar.example.test/blog/atlas-launch",
+            "https://news.example.test/northstar-series-b",
+            "https://customers.example.test/northstar-warehouse-rollout",
+        )
+        mock_config = {
+            "mcp_brightdata_search_engine": {
+                "status": "ok",
+                "results": [
+                    {
+                        "title": "Northstar Robotics launches Atlas routing system",
+                        "url": source_urls[0],
+                        "snippet": "Northstar Robotics announced Atlas, a warehouse robot-routing system for mixed fleets.",
+                    },
+                    {
+                        "title": "Northstar Robotics raises Series B",
+                        "url": source_urls[1],
+                        "snippet": "The company raised a 42 million dollar Series B to expand deployments in food and pharma logistics.",
+                    },
+                    {
+                        "title": "Northstar warehouse rollout customer note",
+                        "url": source_urls[2],
+                        "snippet": "A regional distributor reported 18 percent faster pick-pack cycles after a Northstar pilot.",
+                    },
+                ],
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "rules": [
+                    {
+                        "url_contains": "atlas-launch",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[0],
+                            "markdown": (
+                                "# Northstar Robotics launches Atlas\n\n"
+                                "Northstar Robotics launched Atlas, software that coordinates warehouse robots from "
+                                "multiple vendors. The launch focuses on reducing congestion and improving fulfillment "
+                                "throughput without replacing existing fleets."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "northstar-series-b",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[1],
+                            "markdown": (
+                                "# Northstar Robotics raises Series B\n\n"
+                                "Northstar Robotics raised $42M in Series B funding. The company said proceeds will "
+                                "support deployments with food, pharma, and third-party logistics operators."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "warehouse-rollout",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[2],
+                            "markdown": (
+                                "# Customer rollout note\n\n"
+                                "A regional distributor reported an 18 percent improvement in pick-pack cycles and "
+                                "fewer aisle conflicts after a six-week Atlas pilot."
+                            ),
+                        },
+                    },
+                ],
+                "default": {
+                    "status": "ok",
+                    "url": "https://northstar.example.test/source",
+                    "markdown": "Northstar Robotics current note: Atlas launch, Series B, and early customer rollout data.",
+                },
+            },
+            "search_tools": {
+                "status": "ok",
+                "tools": [
+                    {
+                        "name": "mcp_brightdata_search_engine",
+                        "description": "Search deterministic eval web results.",
+                    },
+                    {
+                        "name": "mcp_brightdata_scrape_as_markdown",
+                        "description": "Scrape deterministic eval web pages.",
+                    },
+                ],
+            },
+            "create_chart": {"status": "error", "message": "Charts are not requested for this simple report."},
+            "create_csv": {"status": "error", "message": "Files are not requested for this simple report."},
+            "create_file": {"status": "error", "message": "Files are not requested for this simple report."},
+            "create_pdf": {"status": "error", "message": "Files are not requested for this simple report."},
+        }
+        prompt = (
+            "Tell me what is new with Northstar Robotics right now. "
+            "Give me a concise company/news report with sources."
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        if self._is_simulated(run_id):
+            inbound = self.inject_message(
+                agent_id,
+                prompt,
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_search_engine",
+                tool_params={"query": "Northstar Robotics latest company news", "will_continue_work": True},
+                result=mock_config["mcp_brightdata_search_engine"],
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                tool_params={"url": source_urls[0]},
+                result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][0]["result"],
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_scrape_as_markdown",
+                tool_params={"url": source_urls[1]},
+                result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][1]["result"],
+            )
+            self._send_simulated_web_report(
+                agent_id,
+                (
+                    "## Northstar Robotics Update\n\n"
+                    "**Bottom line:** Northstar Robotics has three current signals worth noting: the Atlas "
+                    "mixed-fleet routing launch, a $42M Series B, and early customer evidence from a warehouse "
+                    "pilot.\n\n"
+                    "### What Changed\n\n"
+                    "- **Product:** Atlas coordinates warehouse robots from multiple vendors, which makes it a "
+                    "brownfield software layer rather than a full hardware replacement.\n"
+                    "- **Funding:** The Series B gives Northstar more room to expand in food, pharma, and 3PL "
+                    "warehouse deployments.\n"
+                    "- **Customer proof:** A distributor reported an 18 percent pick-pack cycle improvement in a "
+                    "six-week pilot.\n\n"
+                    "| Signal | Why it matters |\n"
+                    "| --- | --- |\n"
+                    "| Atlas launch | Clearer product wedge around interoperability |\n"
+                    "| Series B | More deployment capacity and enterprise credibility |\n"
+                    "| Pilot result | Early ROI story for operations buyers |\n\n"
+                    "### Sources\n\n"
+                    f"- {source_urls[0]}\n"
+                    f"- {source_urls[1]}\n"
+                    f"- {source_urls[2]}"
+                ),
+            )
+        else:
+            with self.wait_for_agent_idle(agent_id, timeout=180):
+                inbound = self.inject_message(
+                    agent_id,
+                    prompt,
+                    trigger_processing=True,
+                    eval_run_id=run_id,
+                    mock_config=mock_config,
+                    eval_stop_policy={
+                        "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES),
+                        "stop_on_sqlite_agent_config_mutation": True,
+                        "stop_on_human_input_request": True,
+                        "stop_on_unexpected_relevant_tool": True,
+                        "allowed_tool_names": [
+                            "search_tools",
+                            "mcp_brightdata_search_engine",
+                            "mcp_brightdata_scrape_as_markdown",
+                        ],
+                        "max_relevant_tool_calls": 6,
+                        "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    },
+                )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_research_tool_budget(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_bounded_research_budget",
+            allowed_tool_names={
+                "search_tools",
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+            },
+            min_relevant_calls=1,
+            max_relevant_calls=5,
+        )
+        self._record_hierarchical_report(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_single_hierarchical_report",
+            source_urls=source_urls,
+            min_source_count=2,
+            min_chars=650,
+            max_chars=3000,
+            required_any_groups=(("Northstar Robotics", "Northstar"),),
+        )
+        self._record_no_question_battery(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_question_or_progress_message",
+            max_message_questions=0,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_artifacts_or_plan",
+            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES,
+        )
+        no_query_loop = self._record_no_repetitive_web_queries(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_query_or_sqlite_loops",
+        )
+        if no_query_loop:
+            self._record_no_sqlite_result_text_reread_loop(
+                run_id,
+                after=inbound.timestamp,
+                task_name="verify_no_query_or_sqlite_loops",
+                max_result_text_reads=0,
+            )
+        self._record_no_agent_config_mutation(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_config_churn",
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
+class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario):
+    slug = EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE
+    supports_simulation = True
+    description = (
+        "An explicitly deep/exhaustive current-research ask may use a larger source budget and produce "
+        "a richer memo, proving bounded mode does not flatten true deep work."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_deep_research_budget", assertion_type="manual"),
+        ScenarioTask(name="verify_rich_hierarchical_memo", assertion_type="manual"),
+        ScenarioTask(name="verify_plan_budget", assertion_type="manual"),
+        ScenarioTask(name="verify_no_unrequested_artifacts_or_input", assertion_type="manual"),
+        ScenarioTask(name="verify_no_query_or_sqlite_loops", assertion_type="manual"),
+        ScenarioTask(name="verify_no_config_churn", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(agent_id)
+        self._enable_eval_synthetic_tools(
+            agent_id,
+            ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"],
+        )
+        self._enable_builtin_tools(agent_id, ["create_chart", "create_csv", "create_file", "create_pdf"])
+        source_urls = (
+            "https://northstar.example.test/blog/atlas-launch",
+            "https://news.example.test/northstar-series-b",
+            "https://market.example.test/warehouse-automation-2026",
+            "https://competitors.example.test/orion-fulfillment-ai",
+            "https://competitors.example.test/vector-pick-systems",
+            "https://competitors.example.test/ranger-autonomous-lifts",
+            "https://competitors.example.test/legacy-wms-robotics",
+            "https://customers.example.test/northstar-warehouse-rollout",
+        )
+        mock_config = {
+            "mcp_brightdata_search_engine": {
+                "status": "ok",
+                "results": [
+                    {
+                        "title": "Northstar Robotics launches Atlas",
+                        "url": source_urls[0],
+                        "snippet": "Atlas coordinates mixed warehouse robot fleets and targets congestion reduction.",
+                    },
+                    {
+                        "title": "Northstar Robotics raises Series B",
+                        "url": source_urls[1],
+                        "snippet": "Northstar raised $42M to expand food, pharma, and 3PL deployments.",
+                    },
+                    {
+                        "title": "Warehouse automation market 2026",
+                        "url": source_urls[2],
+                        "snippet": "The market is consolidating around orchestration software, fleet interoperability, and labor productivity.",
+                    },
+                    {
+                        "title": "Orion Fulfillment AI product update",
+                        "url": source_urls[3],
+                        "snippet": "Orion focuses on warehouse slotting and demand forecasting rather than robot fleet control.",
+                    },
+                    {
+                        "title": "Vector Pick Systems customer expansion",
+                        "url": source_urls[4],
+                        "snippet": "Vector sells modular pick stations and works best in greenfield warehouse deployments.",
+                    },
+                    {
+                        "title": "Ranger Autonomous Lifts fleet update",
+                        "url": source_urls[5],
+                        "snippet": "Ranger focuses on autonomous forklifts and pallet movement for high-throughput warehouses.",
+                    },
+                    {
+                        "title": "Legacy WMS vendors add robotics modules",
+                        "url": source_urls[6],
+                        "snippet": "Warehouse management incumbents are adding robot orchestration modules to defend installed accounts.",
+                    },
+                    {
+                        "title": "Northstar customer rollout note",
+                        "url": source_urls[7],
+                        "snippet": "A customer reported 18 percent faster pick-pack cycles after a six-week Atlas pilot.",
+                    },
+                ],
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "rules": [
+                    {
+                        "url_contains": "atlas-launch",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[0],
+                            "markdown": (
+                                "# Northstar Atlas launch\n\n"
+                                "Atlas coordinates robots across vendors, reducing aisle congestion and improving "
+                                "warehouse throughput. Northstar positions the product as a software layer for "
+                                "brownfield automation programs."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "northstar-series-b",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[1],
+                            "markdown": (
+                                "# Northstar Series B\n\n"
+                                "Northstar raised $42M to expand deployments in food, pharma, and third-party logistics. "
+                                "The round emphasized interoperability and fast ROI for existing warehouse footprints."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "warehouse-automation-2026",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[2],
+                            "markdown": (
+                                "# Warehouse automation market 2026\n\n"
+                                "Buyers are prioritizing labor productivity, fleet interoperability, and software that "
+                                "layers over existing hardware. Integration risk and change management remain major "
+                                "sales blockers."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "orion-fulfillment-ai",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[3],
+                            "markdown": (
+                                "# Orion Fulfillment AI\n\n"
+                                "Orion optimizes slotting, demand forecasts, and labor plans. It competes for operations "
+                                "budget but does not directly control heterogeneous robot fleets."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "vector-pick-systems",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[4],
+                            "markdown": (
+                                "# Vector Pick Systems\n\n"
+                                "Vector sells modular pick stations and robotics bundles. It is strong in greenfield "
+                                "deployments but less flexible for brownfield mixed-fleet warehouses."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "ranger-autonomous-lifts",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[5],
+                            "markdown": (
+                                "# Ranger Autonomous Lifts\n\n"
+                                "Ranger builds autonomous forklifts and pallet movement systems for high-throughput "
+                                "warehouses. It competes more directly on heavy material movement than on mixed-fleet "
+                                "software orchestration."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "legacy-wms-robotics",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[6],
+                            "markdown": (
+                                "# Legacy WMS vendors add robotics modules\n\n"
+                                "Warehouse management incumbents are adding robotics modules to protect installed "
+                                "accounts. Their advantage is procurement access; their risk is slower robotics-native "
+                                "workflow depth."
+                            ),
+                        },
+                    },
+                    {
+                        "url_contains": "warehouse-rollout",
+                        "result": {
+                            "status": "ok",
+                            "url": source_urls[7],
+                            "markdown": (
+                                "# Northstar rollout\n\n"
+                                "A regional distributor reported an 18 percent improvement in pick-pack cycles after "
+                                "a six-week Atlas pilot, with fewer aisle conflicts and less supervisor intervention."
+                            ),
+                        },
+                    },
+                ],
+                "default": {
+                    "status": "ok",
+                    "url": "https://market.example.test/source",
+                    "markdown": "Deep research source note for warehouse automation, competitors, and Northstar Robotics.",
+                },
+            },
+            "search_tools": {
+                "status": "ok",
+                "tools": [
+                    {
+                        "name": "mcp_brightdata_search_engine",
+                        "description": "Search deterministic eval web results.",
+                    },
+                    {
+                        "name": "mcp_brightdata_scrape_as_markdown",
+                        "description": "Scrape deterministic eval web pages.",
+                    },
+                ],
+            },
+            "create_chart": {"status": "error", "message": "The prompt requested no chart artifacts."},
+            "create_csv": {"status": "error", "message": "The prompt requested no file artifacts."},
+            "create_file": {"status": "error", "message": "The prompt requested no file artifacts."},
+            "create_pdf": {"status": "error", "message": "The prompt requested no file artifacts."},
+        }
+        prompt = (
+            "Do deep, exhaustive current research on Northstar Robotics in warehouse automation. "
+            "Build a source-backed investment-style memo comparing Northstar with at least four competitors, "
+            "cite at least four sources, include a compact table, and go deeper than a quick summary. "
+            "Use a finite source plan: one broad discovery search first, then scrape the strongest source pages; "
+            "add another search only if the first result set misses the requested company, competitor, or market "
+            "angles. Keep the memo dense and under 4,800 characters. Do not create files or charts."
+        )
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        if self._is_simulated(run_id):
+            inbound = self.inject_message(
+                agent_id,
+                prompt,
+                trigger_processing=False,
+                eval_run_id=run_id,
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="update_plan",
+                tool_params={
+                    "plan": [
+                        {"step": "Collect current source set", "status": "done"},
+                        {"step": "Compare market position", "status": "doing"},
+                        {"step": "Write memo", "status": "todo"},
+                    ],
+                    "will_continue_work": True,
+                },
+            )
+            self._record_simulated_tool_call(
+                run_id,
+                agent_id,
+                tool_name="mcp_brightdata_search_engine",
+                tool_params={
+                    "query": "Northstar Robotics warehouse automation competitors 2026",
+                    "will_continue_work": True,
+                },
+                result=mock_config["mcp_brightdata_search_engine"],
+            )
+            for index in range(5):
+                self._record_simulated_tool_call(
+                    run_id,
+                    agent_id,
+                    tool_name="mcp_brightdata_scrape_as_markdown",
+                    tool_params={"url": source_urls[index]},
+                    result=mock_config["mcp_brightdata_scrape_as_markdown"]["rules"][index]["result"],
+                )
+            self._send_simulated_web_report(
+                agent_id,
+                (
+                    "## Northstar Robotics Investment Memo\n\n"
+                    "**Thesis:** Northstar is positioned as a brownfield warehouse orchestration layer. That is "
+                    "more attractive than a pure hardware wedge because buyers can improve existing fleets without "
+                    "a full facility redesign.\n\n"
+                    "### Key Takeaways\n\n"
+                    "- Northstar's Atlas launch targets mixed-fleet control, reducing aisle congestion and "
+                    "supervisor intervention.\n"
+                    "- The $42M Series B gives the company enough capital to push deployments in food, pharma, "
+                    "and 3PL accounts where downtime is expensive.\n"
+                    "- The market is moving toward interoperability and labor productivity rather than isolated "
+                    "robot purchases.\n"
+                    "- Orion, Vector, and other competitors overlap on operations budget, but their wedges are "
+                    "slotting software or greenfield hardware bundles rather than heterogeneous fleet control.\n\n"
+                    "### Competitive Table\n\n"
+                    "| Company | Wedge | Strength | Risk |\n"
+                    "| --- | --- | --- | --- |\n"
+                    "| Northstar Robotics | Mixed-fleet robot routing | Brownfield ROI and interoperability | Needs proof across more sites |\n"
+                    "| Orion Fulfillment AI | Slotting and demand forecasting | Software-only deployment | Less direct control of robot movement |\n"
+                    "| Vector Pick Systems | Modular pick stations | Strong greenfield bundle | Harder sell into existing fleets |\n"
+                    "| Legacy WMS vendors | Existing warehouse footprint | Installed base | Slower robotics-native workflow depth |\n\n"
+                    "### Evidence\n\n"
+                    "Atlas is framed as a software layer for existing fleets, which supports a lower-friction "
+                    "deployment motion. The funding source suggests expansion into regulated and high-throughput "
+                    "verticals, while market analysis points to interoperability as a buyer priority. The customer "
+                    "rollout signal gives Northstar an early ROI story, but the main diligence question is whether "
+                    "that result repeats across larger and messier warehouse networks.\n\n"
+                    "### Sources\n\n"
+                    f"- {source_urls[0]}\n"
+                    f"- {source_urls[1]}\n"
+                    f"- {source_urls[2]}\n"
+                    f"- {source_urls[3]}\n"
+                    f"- {source_urls[4]}"
+                ),
+            )
+        else:
+            with self.wait_for_agent_idle(agent_id, timeout=240):
+                inbound = self.inject_message(
+                    agent_id,
+                    prompt,
+                    trigger_processing=True,
+                    eval_run_id=run_id,
+                    mock_config=mock_config,
+                    eval_stop_policy={
+                        "stop_on_tool_names": list(
+                            (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                            | ARTIFACT_TOOL_NAMES
+                        ),
+                        "stop_on_sqlite_agent_config_mutation": True,
+                        "stop_on_human_input_request": True,
+                        "stop_on_unexpected_relevant_tool": True,
+                        "allowed_tool_names": [
+                            "search_tools",
+                            "mcp_brightdata_search_engine",
+                            "mcp_brightdata_scrape_as_markdown",
+                            "sqlite_batch",
+                            "update_plan",
+                        ],
+                        "max_relevant_tool_calls": 14,
+                        "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                    },
+                )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_research_tool_budget(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_deep_research_budget",
+            allowed_tool_names={
+                "search_tools",
+                "mcp_brightdata_search_engine",
+                "mcp_brightdata_scrape_as_markdown",
+                "sqlite_batch",
+                "update_plan",
+            },
+            min_relevant_calls=4,
+            max_relevant_calls=14,
+        )
+        self._record_hierarchical_report(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_rich_hierarchical_memo",
+            source_urls=source_urls,
+            min_source_count=4,
+            min_chars=1700,
+            max_chars=5200,
+            required_any_groups=(("Northstar Robotics", "Northstar"), ("|", "<table")),
+        )
+        self._record_plan_update_budget(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_plan_budget",
+            max_updates=1,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_unrequested_artifacts_or_input",
+            forbidden_tool_names=ARTIFACT_TOOL_NAMES
+            | {"request_human_input", "secure_credentials_request", "spawn_agent"},
+        )
+        no_query_loop = self._record_no_repetitive_web_queries(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_query_or_sqlite_loops",
+        )
+        if no_query_loop:
+            self._record_no_sqlite_result_text_reread_loop(
+                run_id,
+                after=inbound.timestamp,
+                task_name="verify_no_query_or_sqlite_loops",
+                max_result_text_reads=1,
+            )
+        self._record_no_agent_config_mutation(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_config_churn",
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=8)

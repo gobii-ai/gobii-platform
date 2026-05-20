@@ -7,8 +7,10 @@ from django.test import SimpleTestCase, TestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core.event_processing import _get_completed_process_run_count
+from api.agent.core.event_processing import _looks_like_blocking_human_input_request
 from api.agent.core.prompt_context import build_prompt_context_preview
 from api.agent.core.tool_results import _wrap_as_sqlite_result
+from api.agent.system_skills.defaults import RUNTIME_PLANNING_SYSTEM_SKILL
 from api.agent.tools.create_chart import get_create_chart_tool
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.agent.tools.plan import get_update_plan_tool
@@ -17,7 +19,15 @@ from api.agent.tools.request_human_input import execute_request_human_input, get
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.evals.scenarios.effort_calibration import (
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
+    EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
+    EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
+    EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
     EffortTrivialAnswerStopsScenario,
+    _find_near_duplicate_texts,
+    _hierarchical_report_shape,
+    _question_count,
+    _sqlite_result_text_reads,
+    _web_query_value,
 )
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
@@ -40,6 +50,107 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(suite.scenario_slugs, EFFORT_CALIBRATION_SCENARIO_SLUGS)
+        self.assertIn(EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT, suite.scenario_slugs)
+        self.assertIn(EFFORT_SIMPLE_CURRENT_COMPANY_REPORT, suite.scenario_slugs)
+        self.assertIn(EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE, suite.scenario_slugs)
+
+    def test_near_duplicate_query_detector_flags_repetitive_searches(self):
+        duplicates = _find_near_duplicate_texts(
+            [
+                "latest YC Winter 2026 batch companies sector breakdown",
+                "YC W26 Moon hotels cattle drones startups",
+                "latest yc winter 2026 batch companies sector breakdown statistics",
+            ]
+        )
+
+        self.assertEqual(
+            duplicates,
+            [
+                (
+                    "latest YC Winter 2026 batch companies sector breakdown",
+                    "latest yc winter 2026 batch companies sector breakdown statistics",
+                )
+            ],
+        )
+
+    def test_web_query_value_collapses_aliases_per_tool_call(self):
+        self.assertEqual(
+            _web_query_value(
+                {
+                    "query": "latest Y Combinator batch companies 2025 2026",
+                    "keyword": "latest Y Combinator batch 2025 2026 companies",
+                    "prompt": "Tell me about the latest Y Combinator batch of companies",
+                }
+            ),
+            "latest Y Combinator batch companies 2025 2026",
+        )
+
+    def test_eval_synthetic_search_tool_matches_production_query_shape(self):
+        parameters = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["parameters"]
+
+        self.assertEqual(set(parameters["properties"]), {"query"})
+        self.assertEqual(parameters["required"], ["query"])
+        self.assertFalse(parameters["additionalProperties"])
+
+    def test_sqlite_result_text_read_detector_finds_retrieval_loops(self):
+        reads = _sqlite_result_text_reads(
+            "SELECT result_text FROM __tool_results WHERE result_id='abc123'; "
+            "SELECT grep_context_all(result_text, 'AI', 500, 3) FROM __tool_results WHERE result_id='def456';"
+        )
+
+        self.assertEqual(reads, ["abc123", "def456"])
+
+    def test_hierarchical_report_shape_requires_sources_and_structure(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "## Northstar Robotics\n\n"
+                "- Atlas launched for mixed-fleet warehouse routing.\n"
+                "- Series B funding supports deployments.\n\n"
+                "| Area | Takeaway |\n"
+                "| --- | --- |\n"
+                "| Product | Atlas reduces aisle congestion. |\n\n"
+                "Sources: https://northstar.example.test/blog/atlas-launch and "
+                "https://news.example.test/northstar-series-b"
+            ),
+            source_urls=[
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ],
+            min_source_count=2,
+            min_chars=150,
+            max_chars=1000,
+            required_any_groups=(("Northstar Robotics",),),
+        )
+
+        self.assertTrue(ok, summary)
+
+    def test_question_count_ignores_source_url_query_strings(self):
+        self.assertEqual(
+            _question_count("Sources: https://www.ycombinator.com/companies?batch=Winter%202026"),
+            0,
+        )
+        self.assertEqual(
+            _question_count(
+                "Source: [ycombinator.com/companies?batch=Winter%202026]"
+                "(https://www.ycombinator.com/companies?batch=Winter%202026)"
+            ),
+            0,
+        )
+
+    def test_blocking_question_detector_ignores_report_table_questions(self):
+        self.assertFalse(
+            _looks_like_blocking_human_input_request(
+                (
+                    "## Investment Memo\n\n"
+                    "| Criterion | Northstar | Competitor |\n"
+                    "| --- | --- | --- |\n"
+                    "| Vendor agnostic? | Yes | No |\n\n"
+                    "### Sources\n\n"
+                    "- https://northstar.example.test/blog/atlas-launch\n"
+                )
+                * 4
+            )
+        )
 
     def test_chart_tool_description_requires_request_or_material_need(self):
         description = get_create_chart_tool()["function"]["description"]
@@ -54,6 +165,16 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("Do not use for quick lookups", description)
         self.assertIn("one-shot chart requests", description)
 
+    def test_runtime_planning_skill_excludes_bounded_current_research(self):
+        instructions = RUNTIME_PLANNING_SYSTEM_SKILL.prompt_instructions
+
+        self.assertIn("Do not create, update, or finish a plan", instructions)
+        self.assertIn("simple latest/current company, news, funding, product, status, or batch reports", instructions)
+        self.assertIn("send the final answer directly", instructions)
+        self.assertIn("use at most one initial plan update", instructions)
+        self.assertIn("do not call `update_plan` again", instructions)
+        self.assertIn("send the final answer with will_continue_work=false", instructions)
+
     def test_contact_permission_description_defers_setup_only_future_sends(self):
         description = get_request_contact_permission_tool()["function"]["description"]
 
@@ -66,6 +187,8 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("category example choices", description)
         self.assertIn("which vendor/company", description)
         self.assertIn("choose and disclose afterward", description)
+        self.assertIn("explicitly asks you to ask for targets/scope before setup", description)
+        self.assertIn("missing targets/scope block a recurring monitor", description)
 
     def test_linkedin_jobs_synthetic_tool_accepts_category_queries(self):
         description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_linkedin_job_listings"][
@@ -260,6 +383,61 @@ class EffortCalibrationHarnessTests(TestCase):
         self.assertTrue(result["skipped"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
 
+    def test_send_chat_skips_deep_research_progress_before_final(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="deep_progress_chat_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Deep Progress Chat Browser")
+        agent = PersistentAgent.objects.create(
+            name="Deep Progress Chat Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": (
+                    "I now have detailed data from all 8 source pages. "
+                    "Let me mark the research steps done and deliver the synthesized memo."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
+    def test_send_chat_skips_extra_deep_research_progress_before_final(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="extra_deep_progress_chat_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Extra Deep Progress Chat Browser")
+        agent = PersistentAgent.objects.create(
+            name="Extra Deep Progress Chat Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": (
+                    "Good data gathered on Northstar and four competitors plus market context. "
+                    "Let me do a couple more targeted searches to strengthen the competitive analysis, "
+                    "then synthesize the full memo."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
     def test_send_chat_strips_trailing_optional_followup_from_final_answer(self):
         User = get_user_model()
         user = User.objects.create_user(username="optional_followup_final_user")
@@ -352,7 +530,18 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("After simple facts, prices, statuses, exact lookups", system_prompt)
         self.assertIn("a fintech company", system_prompt)
         self.assertIn("Do not turn these into company-choice surveys", system_prompt)
+        self.assertIn("call the structured local-reviews/maps tool directly", system_prompt)
+        self.assertIn("pollution/air-quality monitors", system_prompt)
+        self.assertIn("at least six-hour checks", system_prompt)
         self.assertIn("Do not use sqlite_batch to reread __tool_results", system_prompt)
+        self.assertIn("compact Sources section", system_prompt)
+        self.assertIn("cite at least two distinct source URLs", system_prompt)
+        self.assertIn("Use at most one web search query", system_prompt)
+        self.assertIn("Do not run alternate query variants", system_prompt)
+        self.assertIn("usually 4-8 strong sources", system_prompt)
+        self.assertIn("Start with one broad discovery search", system_prompt)
+        self.assertIn("instead of running separate search queries for every company or competitor", system_prompt)
+        self.assertIn("under about 5,000 characters", system_prompt)
         self.assertNotIn("Before ANY tool calls", system_prompt)
         self.assertNotIn("Greeting comes first, always", system_prompt)
         self.assertNotIn("Schedule: When in doubt, set one", system_prompt)

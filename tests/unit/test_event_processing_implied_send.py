@@ -11,6 +11,7 @@ from django.utils import timezone
 from api.agent.core import event_processing as ep
 from api.agent.core.internal_reasoning import INTERNAL_REASONING_PREFIX
 from api.agent.core.prompt_context import _get_implied_send_context
+from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.models import (
     BrowserUseAgent,
     CommsChannel,
@@ -19,6 +20,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentKanbanCard,
     PersistentAgentMessage,
+    PersistentAgentCronTrigger,
     PersistentAgentWebSession,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -127,6 +129,119 @@ class ImpliedSendTests(TestCase):
 
         self.assertEqual(params["url"], "https://releases.example.test/latest.json")
 
+    def test_prepare_tool_batch_skips_duplicate_successful_http_request(self):
+        trigger_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cron trigger: 0 9 * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="prior fetch")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={
+                "method": "GET",
+                "url": "https://api.example.test/daily.json",
+                "will_continue_work": True,
+            },
+            result=json.dumps({"status": "ok", "status_code": 200, "content": "{}"}),
+            status="complete",
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_duplicate",
+                        "function": {
+                            "name": "http_request",
+                            "arguments": json.dumps(
+                                {
+                                    "method": "GET",
+                                    "url": "https://api.example.test/daily.json",
+                                    "will_continue_work": False,
+                                }
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="http_request").count(), 1)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped duplicate http_request",
+            ).exists()
+        )
+
+    def test_prepare_tool_batch_keeps_http_request_when_prior_result_failed(self):
+        trigger_step = PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description="Cron trigger: 0 9 * * *",
+        )
+        PersistentAgentCronTrigger.objects.create(step=trigger_step, cron_expression="0 9 * * *")
+        prior_step = PersistentAgentStep.objects.create(agent=self.agent, description="prior failed fetch")
+        PersistentAgentToolCall.objects.create(
+            step=prior_step,
+            tool_name="http_request",
+            tool_params={"method": "GET", "url": "https://api.example.test/daily.json"},
+            result=json.dumps({"status": "error", "message": "temporary failure"}),
+            status="error",
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_retry",
+                        "function": {
+                            "name": "http_request",
+                            "arguments": json.dumps(
+                                {"method": "GET", "url": "https://api.example.test/daily.json"}
+                            ),
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
+
     def test_skipped_progress_chat_keeps_batch_followup_required(self):
         skipped_chat = ep._ToolExecutionOutcome(
             prepared=ep._PreparedToolExecution(
@@ -187,6 +302,168 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(finalized.followup_required)
         self.assertFalse(finalized.message_delivery_ok)
         self.assertIs(finalized.last_explicit_continue, False)
+
+    def test_send_chat_skips_got_result_progress_before_actual_report(self):
+        start_web_session(self.agent, self.user)
+
+        result = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Got the result! The browser task found the Washington DC pollution data. "
+                    "Let me report it and set up the regular monitoring."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result.get("status"), "ok")
+        self.assertTrue(result.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+    def test_defaultable_schedule_setup_question_gets_runtime_correction(self):
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body="Set a daily 9am ET schedule for a competitor pricing digest.",
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "Got it. I just need a few details to make the digest useful. "
+                                    "Let me ask before I configure anything."
+                                ),
+                                "will_continue_work": True,
+                            }
+                        ),
+                    },
+                },
+                {
+                    "id": "call_question",
+                    "function": {
+                        "name": "request_human_input",
+                        "arguments": json.dumps(
+                            {
+                                "question": "Which competitors/products should I track, and where should I send it?",
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="reversible recurring setup request",
+            ).exists()
+        )
+
+    def test_defaultable_charter_detail_question_gets_runtime_correction(self):
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body=(
+                "Going forward, make the vendor risk monitor specific: track security incidents, "
+                "pricing changes, SLA outages, and contract renewal dates. Include source links in each update."
+            ),
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_question",
+                    "function": {
+                        "name": "request_human_input",
+                        "arguments": json.dumps(
+                            {
+                                "question": (
+                                    "Which vendors should I track, and how often should I check for updates?"
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                }
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="reversible recurring setup request",
+            ).exists()
+        )
+
+    def test_user_requested_monitoring_scope_question_is_allowed(self):
+        self.assertFalse(
+            ep._looks_like_defaultable_recurring_setup_request(
+                "Ask which competitors and update types matter before setting up monitoring."
+            )
+        )
 
     def test_delivered_progress_chat_marks_pending_reply(self):
         progress_chat = ep._ToolExecutionOutcome(

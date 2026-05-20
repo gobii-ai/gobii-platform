@@ -49,6 +49,7 @@ class ReadFileToolTests(TestCase):
         self.assertEqual(properties["response_format"]["enum"], ["markdown", "raw_text"])
         self.assertIn("defaults to", properties["response_format"]["description"].lower())
         self.assertIn("pdf", tool["function"]["description"].lower())
+        self.assertIn("do not use this for http:// or https:// urls", tool["function"]["description"].lower())
 
     def test_markitdown_prompt_requests_description_and_verbatim_text(self):
         self.assertIn("return exactly two labeled sections", MARKITDOWN_OCR_PROMPT.lower())

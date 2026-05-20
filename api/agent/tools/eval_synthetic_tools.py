@@ -65,6 +65,15 @@ _GENERIC_WEB_DATA_SCHEMA = {
     "additionalProperties": True,
 }
 
+_WEB_SEARCH_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {"type": "string"},
+    },
+    "required": ["query"],
+    "additionalProperties": False,
+}
+
 _LINKEDIN_PEOPLE_SEARCH_SCHEMA = {
     "type": "object",
     "properties": {
@@ -131,7 +140,7 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
     },
     "mcp_brightdata_search_engine": {
         "description": "Search web snippets; prefer this over browser automation for ordinary research.",
-        "parameters": _GENERIC_WEB_DATA_SCHEMA,
+        "parameters": _WEB_SEARCH_SCHEMA,
     },
     "mcp_brightdata_scrape_as_markdown": {
         "description": "Scrape a known web page and return its content as markdown; use when the user says to scrape a docs/help/pricing/blog/changelog page.",
@@ -170,7 +179,11 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_google_maps_reviews": {
-        "description": "Fetch structured Google Maps review data.",
+        "description": (
+            "Fetch structured Google Maps review data by business, category, or local-market query. "
+            "For local lead screens, use this directly; if the user omits a city, choose a representative market "
+            "or broad category query instead of asking which city."
+        ),
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_yahoo_finance_business": {

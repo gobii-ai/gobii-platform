@@ -137,8 +137,8 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
         ),
         user_task="Extract direct LinkedIn post URLs from search results and reject profile or activity feed URLs.",
         custom_tool_job=(
-            "Classify candidate LinkedIn URLs, keep only direct post URLs for the structured posts tool, and explain "
-            "what was rejected."
+            "Classify candidate LinkedIn URLs, keep only direct `/posts/...` URLs for the structured posts tool, "
+            "reject feed/update activity, profile, company, job, and pulse URLs, and explain what was rejected."
         ),
         required_result_traits=(
             "reports accepted direct post URLs",
@@ -243,11 +243,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 self._agent_prompt(case),
                 trigger_processing=True,
                 eval_run_id=run_id,
-                eval_stop_policy={
-                    "stop_on_tool_names_after_execution": [custom_tool_name],
-                    "max_relevant_tool_calls": 16,
-                    "ignored_tool_names": ["update_plan", "end_planning"],
-                },
+                eval_stop_policy=self._eval_stop_policy(case, custom_tool_name),
             )
         self.record_task_result(
             run_id,
@@ -433,6 +429,24 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             return f"custom_{case.slug}"
         return normalized[1]
 
+    @staticmethod
+    def _eval_stop_policy(case: CustomToolResultContractCase, custom_tool_name: str) -> dict[str, Any]:
+        policy: dict[str, Any] = {
+            "max_relevant_tool_calls": 16,
+            "ignored_tool_names": ["update_plan", "end_planning"],
+        }
+        if case.requires_batching:
+            policy["stop_when_all_seen"] = [
+                {
+                    "tool_name": custom_tool_name,
+                    "after_execution": True,
+                    "required_params_any": list(PARAM_NAME_ALIASES["batch_size"]),
+                }
+            ]
+        else:
+            policy["stop_on_tool_names_after_execution"] = [custom_tool_name]
+        return policy
+
     @classmethod
     def _agent_prompt(cls, case: CustomToolResultContractCase) -> str:
         custom_tool_name = cls._custom_tool_name(case)
@@ -443,8 +457,10 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             f"User task: {case.user_task}\n\n"
             f"Custom tool job: {case.custom_tool_job}\n\n"
             "Eval safety constraints: use representative sample data instead of live external data, and do not "
-            "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. Simulate "
-            "any external side effects that would normally happen."
+            "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. "
+            "Make the tool reusable with runtime parameters for source inputs/tables, destination outputs/tables, "
+            "dates/status/minimums/batch limits when relevant; when you run it, pass concrete representative values. "
+            "Simulate any external side effects that would normally happen."
         )
 
     @staticmethod
@@ -645,6 +661,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
 
         if case.requires_manual_replay_prevention:
             replay_prevention_terms = (
+                "do_not_repeat_manually",
                 "read-only",
                 "read only",
                 "do not repeat",

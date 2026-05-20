@@ -25,11 +25,22 @@ PLAN_STATUSES = {
     PersistentAgentKanbanCard.Status.DONE,
 }
 _WHITESPACE_RE = re.compile(r"\s+")
+_RESEARCH_PLAN_TERMS = (
+    "competitor",
+    "current",
+    "investment",
+    "memo",
+    "research",
+    "report",
+    "source",
+    "synthesize",
+)
 MESSAGE_DELIVERABLE_GUIDANCE = (
     "Use messages only for substantial final deliverables in existing multi-step work, not for every quick answer, "
     "lookup, briefing, or one-shot chart. Message deliverables must come from send_email, send_sms, or send_chat_message. "
-    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now, "
-    "send it first with will_continue_work=true, then call update_plan after the send tool returns. "
+    "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now and a completion "
+    "plan update is still needed, send it first with will_continue_work=true, then call update_plan after the send tool returns. "
+    "For explicit deep or exhaustive research with no file deliverables, send the final answer with will_continue_work=false. "
     "Do not include peer messages from send_agent_message."
 )
 
@@ -75,14 +86,17 @@ def get_update_plan_tool() -> dict[str, Any]:
             "description": (
                 "Updates the task plan.\n"
                 "Use only for real multi-step work where a persistent user-visible plan is useful. Do not use for "
-                "quick lookups, simple research answers, scheduled briefings, or one-shot chart requests.\n"
+                "quick lookups, simple research answers, simple latest/current company/news/batch reports, "
+                "scheduled briefings, or one-shot chart requests.\n"
+                "For deep work, use at most one initial plan update; do not call this again just to mark research done, "
+                "narrate progress, or prepare the final response.\n"
                 "Provide a list of plan items, each with a step and status.\n"
                 "At most one step can be doing at a time.\n"
                 "Every call replaces the full current active plan, including the deliverable references. "
                 "Keep plans short: usually 3-6 active steps. "
                 "When starting a new task, new iteration, or new scheduled run, omit stale prior-task or prior-run steps. "
                 "For recurring or hourly work, do not create one step per day, hour, or recurrence slot; "
-                "instead, represent the current run with compact reusable phases."
+                "represent the current run with compact reusable phases."
             ),
             "parameters": {
                 "type": "object",
@@ -107,10 +121,9 @@ def get_update_plan_tool() -> dict[str, Any]:
                     "files": {
                         "type": "array",
                         "description": (
-                            "Optional final file deliverables created during the work. Use this for user-visible artifacts "
-                            "such as reports, CSV exports, PDFs, charts, or generated documents that should remain attached "
-                            "to the completed plan. Include the complete current file deliverable list on every update; omit "
-                            "scratch files, temporary downloads, and intermediate analysis files."
+                            "Optional final file deliverables created during the work: user-visible reports, CSV exports, "
+                            "PDFs, charts, or generated documents. Include the complete current file list on every update; "
+                            "omit scratch files, temporary downloads, and intermediate analysis files."
                         ),
                         "items": {
                             "type": "object",
@@ -131,10 +144,8 @@ def get_update_plan_tool() -> dict[str, Any]:
                     "messages": {
                         "type": "array",
                         "description": (
-                            "Optional final message deliverables associated with the work. Use this after sending a final "
-                            "report, answer, or important user-facing summary so the completed plan links to that delivered "
-                            f"message. {MESSAGE_DELIVERABLE_GUIDANCE} Include the complete current message deliverable list "
-                            "on every update; do not add routine progress updates, greetings, or internal/status messages."
+                            "Optional final message deliverables already sent to the user and returned by the send tool. "
+                            f"{MESSAGE_DELIVERABLE_GUIDANCE} Include the complete current message deliverable list on every update."
                         ),
                         "items": {
                             "type": "object",
@@ -341,6 +352,60 @@ def execute_update_plan(agent, params: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> dict[str, Any] | None:
+    raw_plan = params.get("plan")
+    if not isinstance(raw_plan, list) or not raw_plan:
+        return None
+    if params.get("files") or params.get("messages"):
+        return None
+
+    existing_cards = list(PersistentAgentKanbanCard.objects.filter(assigned_agent=agent))
+    if not existing_cards:
+        return None
+
+    incoming_steps: list[str] = []
+    for item in raw_plan:
+        if not isinstance(item, dict):
+            return None
+        step = str(item.get("step") or "").strip()
+        status = str(item.get("status") or "").strip().lower()
+        if not step or status not in PLAN_STATUSES:
+            return None
+        incoming_steps.append(step)
+
+    if len(incoming_steps) != len(existing_cards):
+        return None
+
+    plan_text = " ".join(incoming_steps).casefold()
+    existing_plan_text = " ".join(card.title for card in existing_cards).casefold()
+    matched_terms = sum(1 for term in _RESEARCH_PLAN_TERMS if term in plan_text)
+    existing_matched_terms = sum(1 for term in _RESEARCH_PLAN_TERMS if term in existing_plan_text)
+    if matched_terms < 2 or existing_matched_terms < 2:
+        return None
+
+    will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
+    if will_continue_work is False or _has_outbound_since_latest_inbound(agent):
+        return {
+            "status": "ok",
+            "message": (
+                "Skipped redundant research plan completion update. The final answer was already delivered or "
+                "the task requested stopping."
+            ),
+            "skipped": True,
+            "auto_sleep_ok": True,
+        }
+
+    return {
+        "status": "ok",
+        "message": (
+            "Skipped redundant research plan status update. Continue with the remaining research, then send the "
+            "final answer directly."
+        ),
+        "skipped": True,
+        "auto_sleep_ok": False,
+    }
+
+
 def build_plan_snapshot(agent) -> PlanSnapshot:
     cards = list(
         PersistentAgentKanbanCard.objects.filter(assigned_agent=agent).order_by("-priority", "created_at")
@@ -423,6 +488,22 @@ def _validate_update_plan_params(agent, params: dict[str, Any]) -> dict[str, Any
     file_items = _validate_file_deliverables(params.get("files"), errors)
     message_items = _validate_message_deliverables(agent, params.get("messages"), errors)
     return {"errors": errors, "plan": plan_items, "files": file_items, "messages": message_items}
+
+
+def _has_outbound_since_latest_inbound(agent) -> bool:
+    latest_inbound_at = (
+        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
+        .order_by("-timestamp")
+        .values_list("timestamp", flat=True)
+        .first()
+    )
+    if latest_inbound_at is None:
+        return False
+    return PersistentAgentMessage.objects.filter(
+        owner_agent=agent,
+        is_outbound=True,
+        timestamp__gt=latest_inbound_at,
+    ).exists()
 
 
 def _format_plan_validation_message(errors: list[str]) -> str:

@@ -149,6 +149,7 @@ class AgentCapabilitiesPromptTests(TestCase):
             "If you still need to mark the plan done after the report is already sent, call update_plan with will_continue_work=false",
             contents,
         )
+        self.assertIn("Plain text is invisible and update_plan is not delivery", contents)
         self.assertIn("no extra turn, no announcement or confirmation message", contents)
         self.assertNotIn(
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
@@ -164,6 +165,9 @@ class AgentCapabilitiesPromptTests(TestCase):
         contents = "\n".join(message["content"] for message in context)
 
         self.assertIn("Your response text is a user message", contents)
+        self.assertIn("monitoring targets/scope before setup", contents)
+        self.assertIn("never search for it or refetch the same successful URL", contents)
+        self.assertIn("update your ongoing charter/schedule", contents)
         self.assertIn("While working, respond with tool calls and no text", contents)
         self.assertIn("never status narration", contents)
 
@@ -209,14 +213,27 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("even if the user did not explicitly ask for a custom tool or mention SQLite", summary)
         self.assertIn("source_path='/tools/name.py'", summary)
         self.assertIn("source_code", summary)
+        self.assertIn("Do not pass only source_path unless you already wrote that file", summary)
         self.assertIn("exact final line `if __name__ == '__main__': main(run)`", summary)
+        self.assertIn("do not invoke custom_* with empty params", summary)
+        self.assertIn("dedupe/format jobs expose input_table, output_table, and run_date", summary)
+        self.assertIn("do not stop after seed/setup/preview", summary)
+        self.assertIn("side_effects_completed", summary)
+        self.assertIn("do_not_repeat_manually=true", summary)
+        self.assertIn("source-code next_action text exactly", summary)
+        self.assertIn("after the block exits the DB is closed", summary)
         self.assertIn("what changed or which outputs are ready", summary)
         self.assertIn("verification guidance", summary)
-        self.assertIn("verify read-only instead of replaying completed writes", summary)
+        self.assertIn("Do not repeat manually; verify read-only", summary)
         self.assertIn("direct_post_urls", summary)
         self.assertIn("scrape_ready_urls", summary)
         self.assertIn("accepted ready-to-use values", summary)
         self.assertIn("db.row_factory = sqlite3.Row", summary)
+        self.assertIn("before any `db.execute(...).fetchall()`/SELECT", summary)
+        self.assertIn("setting it after fetching does not convert existing tuple rows", summary)
+        self.assertIn("not `row.get(...)`", summary)
+        self.assertIn("datetime.now(timezone.utc)", summary)
+        self.assertIn("not `datetime.timezone`", summary)
 
     @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
     def test_sandbox_summary_distinguishes_tool_paths_from_shell_paths(self, _mock_sandbox):
