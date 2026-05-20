@@ -6,7 +6,6 @@ who are not yet in their allowlist. The agent owner must approve
 these requests before the agent can send messages.
 """
 import logging
-from django.contrib.sites.models import Site
 from django.utils import timezone
 from datetime import timedelta
 
@@ -237,8 +236,12 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
             agent.id,
             str(agent.organization_id) if agent.organization_id else None,
         )
-    except Site.DoesNotExist:
-        logger.warning("No current Site configured; returning relative contact requests URL for agent %s", agent.id)
+    except Exception:
+        logger.warning(
+            "Failed to generate contact requests URL for agent %s; returning relative fallback",
+            agent.id,
+            exc_info=True,
+        )
         approval_url = build_immersive_contact_requests_path(agent.id)
     
     # Build response message
