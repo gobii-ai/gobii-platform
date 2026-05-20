@@ -1684,8 +1684,10 @@ class PublicTemplateDetailView(TemplateView):
         context = super().get_context_data(**kwargs)
         detail_path = public_template_detail_path(self.template)
         category_path = public_template_category_path(self.template)
-        detail_url = _public_site_absolute_url(detail_path)
-        category_url = _public_site_absolute_url(category_path)
+        detail_url = self.request.build_absolute_uri(detail_path)
+        category_url = self.request.build_absolute_uri(category_path)
+        canonical_detail_url = _public_site_absolute_url(detail_path)
+        canonical_category_url = _public_site_absolute_url(category_path)
         library_url = _public_site_absolute_url(reverse("pages:library"))
         home_url = _public_site_absolute_url(reverse("pages:home"))
         social_image_path = (
@@ -1707,7 +1709,7 @@ class PublicTemplateDetailView(TemplateView):
             "applicationCategory": "BusinessApplication",
             "applicationSubCategory": category_label,
             "operatingSystem": "Web",
-            "url": detail_url,
+            "url": canonical_detail_url,
             "image": social_image_url,
             "creator": {
                 "@type": "Person",
@@ -1743,13 +1745,13 @@ class PublicTemplateDetailView(TemplateView):
                     "@type": "ListItem",
                     "position": 3,
                     "name": category_label,
-                    "item": category_url,
+                    "item": canonical_category_url,
                 },
                 {
                     "@type": "ListItem",
                     "position": 4,
                     "name": self.template.display_name,
-                    "item": detail_url,
+                    "item": canonical_detail_url,
                 },
             ],
         }
@@ -1766,7 +1768,8 @@ class PublicTemplateDetailView(TemplateView):
         context["template_structured_data_json"] = html_safe_json_dumps(structured_data)
         context["template_breadcrumb_json"] = html_safe_json_dumps(breadcrumb_data)
         context["template_url"] = detail_url
-        context["canonical_url"] = context["template_url"]
+        context["template_canonical_url"] = canonical_detail_url
+        context["canonical_url"] = canonical_detail_url
         context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
         context["base_schedule"] = self.template.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.template.base_schedule)

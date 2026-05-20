@@ -175,6 +175,8 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(soup.find("meta", property="og:image")["content"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:card"})["content"], "summary_large_image")
         self.assertEqual(soup.find("meta", attrs={"name": "twitter:image"})["content"], "https://www.gobii.ai/static/images/gobii_fish_social_1280x640.png")
+        self.assertEqual(soup.find("a", string="Research")["href"], "http://preview.local/library/research/")
+        self.assertIn("http://preview.local/library/research/market-radar/", soup.get_text(" ", strip=True))
 
         structured_data = [
             json.loads(script.string)
