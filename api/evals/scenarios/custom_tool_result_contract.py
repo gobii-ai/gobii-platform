@@ -23,15 +23,13 @@ class CustomToolResultContractCase:
     required_fields: tuple[str, ...] = field(
         default=(
             "status",
-            "side_effects_completed",
             "summary",
             "side_effects",
             "source",
             "verification",
-            "next_action",
         )
     )
-    do_not_repeat_manually: bool = False
+    requires_manual_replay_prevention: bool = False
     requires_batching: bool = False
 
     @property
@@ -59,10 +57,10 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports per-worksheet rows appended",
             "reports source table filters or run_date used",
             "tells the agent not to manually append the same records again",
-            "recommends read-only verification as the next action",
+            "makes read-only verification/follow-up clear",
         ),
         required_param_names=("run_date",),
-        do_not_repeat_manually=True,
+        requires_manual_replay_prevention=True,
     ),
     CustomToolResultContractCase(
         slug="sheets_backlog_sync",
@@ -85,7 +83,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "explains whether another write invocation is needed",
         ),
         required_param_names=("batch_size", "status_filter"),
-        do_not_repeat_manually=True,
+        requires_manual_replay_prevention=True,
         requires_batching=True,
     ),
     CustomToolResultContractCase(
@@ -106,7 +104,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports destination table and rows written",
             "includes representative rejection reasons",
             "makes clear that no external write happened yet",
-            "states the next tool or verification step",
+            "states the verification or follow-up step",
         ),
         required_param_names=("input_table", "output_table", "run_date"),
     ),
@@ -126,7 +124,7 @@ CUSTOM_TOOL_RESULT_CONTRACT_CASES = (
             "reports rejected inputs with reasons",
             "states no scrape was performed if it only validated",
             "reports destination table or file",
-            "states the next action should use only accepted URLs",
+            "makes clear only accepted scrape-ready URLs should be used downstream",
         ),
         required_param_names=("input_table", "output_table", "default_scheme"),
     ),
@@ -618,7 +616,22 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 "worksheet",
                 "url",
             ),
-            "next_action": ("next_action", "next action", "verify", "verification", "read-only"),
+            "actionable_guidance": (
+                "next_action",
+                "next action",
+                "follow_up",
+                "follow-up",
+                "verify",
+                "verification",
+                "read-only",
+                "instructions",
+                "scrape_ready",
+                "ready",
+                "valid_post_urls",
+                "direct_post_urls",
+                "remaining_work",
+                "next_cursor",
+            ),
         }
         missing_categories = [
             category
@@ -631,8 +644,22 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 f"{missing_categories}."
             )
 
-        if case.do_not_repeat_manually and "do_not_repeat_manually" not in source_text:
-            return False, "completed side-effect tool source must include do_not_repeat_manually."
+        if case.requires_manual_replay_prevention:
+            replay_prevention_terms = (
+                "read-only",
+                "read only",
+                "do not repeat",
+                "do not replay",
+                "do not manually",
+                "not another append",
+                "not replay",
+                "verify",
+                "verification",
+            )
+            if not any(term in source_text for term in replay_prevention_terms):
+                return False, (
+                    "completed side-effect tool source must make manual replay prevention clear."
+                )
 
         if case.requires_batching:
             if "batch_size" not in source_text and "limit" not in source_text:
@@ -709,7 +736,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                     "custom_tool_job": case.custom_tool_job,
                     "helpful_param_concepts": list(case.required_param_names),
                     "requires_batching": case.requires_batching,
-                    "must_prevent_manual_replay": case.do_not_repeat_manually,
+                    "must_prevent_manual_replay": case.requires_manual_replay_prevention,
                     "required_result_traits": list(case.required_result_traits),
                 },
                 "create_custom_tool": {
@@ -730,8 +757,8 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                     "The agent must use create_custom_tool and invoke the resulting custom_* tool.",
                     "The parameters schema and invocation must expose useful runtime params rather than hardcoding ids, dates, filters, destinations, or batch settings. Equivalent parameter names are acceptable when they cover the same concept.",
                     "Batching-required cases must include bounded batch params and resumable remaining-work state.",
-                    "The custom tool source/result must return helpful fields such as side effects, counts, source scope, verification, remaining work, and next action.",
-                    "Completed writes must include manual replay prevention. Read-only validators do not need a manual-replay flag if they clearly say no external write occurred.",
+                    "The custom tool source/result must return helpful fields such as side effects, counts, source scope, verification/follow-up guidance, resumable remaining work, or ready-to-use accepted outputs.",
+                    "Completed writes must include manual replay prevention. Read-only validators do not need replay-prevention guidance if they clearly say no external write occurred.",
                 ],
             },
             indent=2,
