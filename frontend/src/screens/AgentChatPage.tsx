@@ -670,6 +670,10 @@ function sameConsoleContext(left: ConsoleContext | null | undefined, right: Cons
   return left.type === right.type && left.id === right.id
 }
 
+function consoleContextKey(context: ConsoleContext): string {
+  return `${context.type}:${context.id}`
+}
+
 type ConnectionIndicator = {
   status: ConnectionStatusTone
   label: string
@@ -1004,15 +1008,31 @@ export function AgentChatPage({
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
   const locallySelectedAgentIdsRef = useRef<Set<string>>(new Set())
+  const [manuallySelectedContextKey, setManuallySelectedContextKey] = useState<string | null>(null)
+  const resetManualContextForExternalAgent = useCallback((nextAgentId: string | null) => {
+    if (
+      !nextAgentId
+      || nextAgentId === activeAgentIdRef.current
+      || locallySelectedAgentIdsRef.current.has(nextAgentId)
+    ) {
+      return
+    }
+    setManuallySelectedContextKey(null)
+  }, [])
   const selectedFromCurrentRoster = Boolean(activeAgentId && locallySelectedAgentIdsRef.current.has(activeAgentId))
-  const contextLookupAgentId = isNewAgent || isSelectionView
-    ? undefined
-    : selectedFromCurrentRoster
-      ? undefined
-      : routeAgentId ?? activeAgentId ?? undefined
+  const shouldResolveContextForRouteAgent = (
+    !isNewAgent
+    && !isSelectionView
+    && !manuallySelectedContextKey
+    && !selectedFromCurrentRoster
+  )
+  const contextLookupAgentId = shouldResolveContextForRouteAgent
+    ? routeAgentId ?? activeAgentId ?? undefined
+    : undefined
 
   const handleContextSwitched = useCallback(
     (context: ConsoleContext) => {
+      setManuallySelectedContextKey(consoleContextKey(context))
       void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
       if (onContextSwitch) {
         onContextSwitch(context)
@@ -1060,9 +1080,10 @@ export function AgentChatPage({
   const liveAgentId = !agentContextReady ? null : activeAgentId
 
   useEffect(() => {
+    resetManualContextForExternalAgent(agentId ?? null)
     setShellPathname(typeof window === 'undefined' ? '' : window.location.pathname)
     setActiveAgentId(agentId ?? null)
-  }, [agentId])
+  }, [agentId, resetManualContextForExternalAgent])
 
   useEffect(() => {
     activeAgentIdRef.current = activeAgentId
@@ -1106,6 +1127,7 @@ export function AgentChatPage({
       setShellPathname(nextPathname)
       const nextAgentId = extractAgentChatShellAgentId(nextPathname)
       if (nextAgentId !== activeAgentIdRef.current) {
+        resetManualContextForExternalAgent(nextAgentId)
         setSwitchingAgentId(null)
         setActiveAgentId(nextAgentId)
       }
@@ -1113,7 +1135,7 @@ export function AgentChatPage({
 
     window.addEventListener('popstate', handleShellLocationChange)
     return () => window.removeEventListener('popstate', handleShellLocationChange)
-  }, [])
+  }, [resetManualContextForExternalAgent])
 
   // Set up queryClient bridge for the Zustand store
   useEffect(() => { setTimelineQueryClient(queryClient) }, [queryClient])

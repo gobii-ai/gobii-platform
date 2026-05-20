@@ -103,9 +103,12 @@ export function useConsoleContextSwitcher({
         return
       }
       const previousContext = data.context
+      const previousResolvedForAgentId = resolvedForAgentId
+      requestIdRef.current += 1
       setIsSwitching(true)
       setError(null)
       setData({ ...data, context })
+      setResolvedForAgentId(undefined)
       storeConsoleContext(context)
       try {
         const updated = await switchConsoleContext(context, { persistSession })
@@ -113,7 +116,7 @@ export function useConsoleContextSwitcher({
           return
         }
         setData((prev) => (prev ? { ...prev, context: updated } : prev))
-        setResolvedForAgentId(forAgentId)
+        setResolvedForAgentId(undefined)
         storeConsoleContext(updated)
         onSwitched?.(updated)
       } catch (err) {
@@ -122,6 +125,7 @@ export function useConsoleContextSwitcher({
         }
         console.error('Failed to switch context:', err)
         setData((prev) => (prev ? { ...prev, context: previousContext } : prev))
+        setResolvedForAgentId(previousResolvedForAgentId)
         storeConsoleContext(previousContext)
         setError('Unable to switch context.')
       } finally {
@@ -130,7 +134,7 @@ export function useConsoleContextSwitcher({
         }
       }
     },
-    [data, forAgentId, isSwitching, onSwitched, persistSession],
+    [data, isSwitching, onSwitched, persistSession, resolvedForAgentId],
   )
 
   return {
