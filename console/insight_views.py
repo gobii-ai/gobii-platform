@@ -274,7 +274,7 @@ def _get_agent_setup_insights(
     )
     add_panel(
         "sms",
-        95,
+        1,
         "SMS chat",
         "Chat with your agent over SMS.",
     )
@@ -478,7 +478,7 @@ def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
     return {
         "insightId": f"burn_rate_{uuid.uuid4().hex[:8]}",
         "insightType": "burn_rate",
-        "priority": 5,
+        "priority": 98,
         "title": "Credit usage",
         "body": "Track today's agent usage and this month's account usage.",
         "metadata": {

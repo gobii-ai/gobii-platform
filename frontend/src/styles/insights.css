@@ -241,21 +241,29 @@
 }
 
 .usage-insight-card {
-  gap: 1rem;
-  padding: 0.75rem 1rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 0.75rem;
+  min-height: 0;
+  padding: 0.5rem 1rem;
 }
 
 .usage-insight-card__gauges {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
-  flex: 1;
-  min-width: 0;
+  display: contents;
 }
 
 .usage-gauge-card,
 .usage-details-card {
+  align-self: stretch;
+  justify-self: stretch;
+  width: 100%;
   min-width: 0;
+  min-height: 0;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
   border: 1px solid rgba(170, 116, 206, 0.18);
   background: rgba(255, 255, 255, 0.64);
   backdrop-filter: blur(14px);
@@ -267,7 +275,8 @@
   display: flex;
   align-items: center;
   gap: 0.65rem;
-  padding: 0.55rem 0.7rem;
+  justify-content: flex-start;
+  padding: 0.45rem 0.65rem;
 }
 
 .usage-gauge-card__chart {
@@ -275,6 +284,30 @@
   width: 84px;
   height: 84px;
   flex: 0 0 84px;
+}
+
+.usage-gauge-card__chart .insight-gauge {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.usage-gauge-card--unlimited {
+  gap: 0.85rem;
+}
+
+.usage-gauge-card__unlimited-stat {
+  display: flex;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(170, 116, 206, 0.2);
+  border-radius: 9999px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82) 0%, rgba(170, 116, 206, 0.16) 100%);
+  box-shadow: inset 0 0 0 8px rgba(170, 116, 206, 0.08);
 }
 
 .usage-gauge-card__value {
@@ -330,13 +363,26 @@
   text-overflow: ellipsis;
 }
 
+.usage-gauge-card__status {
+  grid-column: 1 / -1;
+  width: fit-content;
+  margin-top: 0.1rem;
+  border-radius: 9999px;
+  background: rgba(170, 116, 206, 0.12);
+  padding: 0.18rem 0.5rem;
+  color: #6f4690;
+  font-size: 0.62rem;
+  font-weight: 800;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
 .usage-details-card {
   display: flex;
-  flex: 0 0 12rem;
   flex-direction: column;
   justify-content: center;
   gap: 0.2rem;
-  padding: 0.7rem 0.85rem;
+  padding: 0.55rem 0.75rem;
   color: inherit;
   text-align: left;
   text-decoration: none;
@@ -2877,6 +2923,69 @@
    Responsive adjustments
    ========================================================================== */
 
+@media (max-width: 820px) {
+  .usage-insight-card {
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+  }
+
+  .usage-gauge-card {
+    flex-direction: column;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.35rem;
+  }
+
+  .usage-gauge-card__chart,
+  .usage-gauge-card__unlimited-stat {
+    width: 76px;
+    height: 76px;
+    flex-basis: 76px;
+  }
+
+  .usage-gauge-card__copy {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    width: 100%;
+  }
+
+  .usage-gauge-card__title {
+    font-size: 0.68rem;
+  }
+
+  .usage-gauge-card__value {
+    font-size: 1.15rem;
+  }
+
+  .usage-gauge-card__unit {
+    font-size: 0.56rem;
+  }
+
+  .usage-gauge-card__label,
+  .usage-gauge-card__status {
+    display: none;
+  }
+
+  .usage-details-card {
+    align-items: center;
+    justify-content: center;
+    gap: 0.25rem;
+    padding: 0.5rem;
+    text-align: center;
+  }
+
+  .usage-details-card__body {
+    display: none;
+  }
+
+  .usage-details-card__action {
+    margin-top: 0;
+    font-size: 0.68rem;
+  }
+}
+
 @media (max-width: 640px) {
   .insight-card-v2 {
     gap: 1rem;
@@ -2884,27 +2993,36 @@
   }
 
   .usage-insight-card {
-    padding: 0.55rem 0.65rem;
-  }
-
-  .usage-insight-card__gauges {
-    gap: 0.5rem;
+    padding: 0.5rem 0.55rem;
   }
 
   .usage-gauge-card {
-    gap: 0.45rem;
-    padding: 0.45rem 0.5rem;
+    padding: 0.4rem 0.35rem;
   }
 
   .usage-gauge-card__chart {
-    width: 72px;
-    height: 72px;
-    flex-basis: 72px;
+    width: 70px;
+    height: 70px;
+    flex-basis: 70px;
+  }
+
+  .usage-gauge-card__unlimited-stat {
+    width: 70px;
+    height: 70px;
+    flex-basis: 70px;
+    box-shadow: inset 0 0 0 6px rgba(170, 116, 206, 0.08);
+  }
+
+  .usage-gauge-card__value {
+    font-size: 1.05rem;
+  }
+
+  .usage-gauge-card__unit {
+    font-size: 0.54rem;
   }
 
   .usage-details-card {
-    flex-basis: 9.5rem;
-    padding: 0.55rem 0.65rem;
+    padding: 0.45rem 0.35rem;
   }
 
   .insight-metric-cards {

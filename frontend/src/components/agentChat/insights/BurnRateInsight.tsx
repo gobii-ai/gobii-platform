@@ -47,34 +47,55 @@ function UsageGauge({
   usage: UsageGaugeMetadata
   icon: 'today' | 'month'
 }) {
-  const displayValue = usage.unlimited ? usage.used : clampPercent(usage.percentUsed)
-  const maxValue = usage.unlimited ? Math.max(10, Math.ceil(usage.used)) : 100
-  const centerValue = usage.unlimited ? formatCredits(usage.used) : Math.round(displayValue).toString()
-  const centerUnit = usage.unlimited ? 'credits' : '%'
+  const displayValue = clampPercent(usage.percentUsed)
+  const centerValue = Math.round(displayValue).toString()
   const label = usage.unlimited
-    ? 'Unlimited'
+    ? `${formatCredits(usage.used)} credits used`
     : `${formatCredits(usage.used)} / ${formatCredits(usage.limit ?? 0)} credits`
+  const iconNode = icon === 'today'
+    ? <Gauge size={13} strokeWidth={2.2} />
+    : <CalendarDays size={13} strokeWidth={2.2} />
+
+  if (usage.unlimited) {
+    return (
+      <div className="usage-gauge-card usage-gauge-card--unlimited">
+        <div className="usage-gauge-card__unlimited-stat">
+          <span className="usage-gauge-card__value">{formatCredits(usage.used)}</span>
+          <span className="usage-gauge-card__unit">credits</span>
+        </div>
+        <div className="usage-gauge-card__copy">
+          <span className="usage-gauge-card__icon" aria-hidden="true">
+            {iconNode}
+          </span>
+          <span className="usage-gauge-card__title">{title}</span>
+          <span className="usage-gauge-card__label">{label}</span>
+          <span className="usage-gauge-card__status">Unlimited</span>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="usage-gauge-card">
       <div className="usage-gauge-card__chart">
         <InsightGauge
           value={displayValue}
-          max={maxValue}
+          max={100}
           size={84}
           gradientColors={['#AA74CE', '#7C4CA0']}
-          thickness={10}
+          thickness={8}
+          radius="94%"
           showGlow={false}
           trackColor="rgba(170, 116, 206, 0.14)"
         />
         <div className="insight-gauge-center">
           <span className="usage-gauge-card__value">{centerValue}</span>
-          <span className="usage-gauge-card__unit">{centerUnit}</span>
+          <span className="usage-gauge-card__unit">%</span>
         </div>
       </div>
       <div className="usage-gauge-card__copy">
         <span className="usage-gauge-card__icon" aria-hidden="true">
-          {icon === 'today' ? <Gauge size={13} strokeWidth={2.2} /> : <CalendarDays size={13} strokeWidth={2.2} />}
+          {iconNode}
         </span>
         <span className="usage-gauge-card__title">{title}</span>
         <span className="usage-gauge-card__label">{label}</span>
@@ -99,6 +120,13 @@ export function BurnRateInsight({
       <ArrowRight size={13} strokeWidth={2.4} />
     </span>
   )
+  const detailsContent = (
+    <>
+      <span className="usage-details-card__title">Usage</span>
+      <span className="usage-details-card__body">Open detailed usage and quota trends.</span>
+      {detailAction}
+    </>
+  )
 
   return (
     <motion.div
@@ -120,15 +148,11 @@ export function BurnRateInsight({
 
       {onOpenUsage ? (
         <button type="button" className="usage-details-card" onClick={onOpenUsage}>
-          <span className="usage-details-card__title">Usage</span>
-          <span className="usage-details-card__body">Open detailed usage and quota trends.</span>
-          {detailAction}
+          {detailsContent}
         </button>
       ) : (
         <a className="usage-details-card" href={detailsUrl}>
-          <span className="usage-details-card__title">Usage</span>
-          <span className="usage-details-card__body">Open detailed usage and quota trends.</span>
-          {detailAction}
+          {detailsContent}
         </a>
       )}
 
