@@ -129,6 +129,13 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
             _question_count("Sources: https://www.ycombinator.com/companies?batch=Winter%202026"),
             0,
         )
+        self.assertEqual(
+            _question_count(
+                "Source: [ycombinator.com/companies?batch=Winter%202026]"
+                "(https://www.ycombinator.com/companies?batch=Winter%202026)"
+            ),
+            0,
+        )
 
     def test_blocking_question_detector_ignores_report_table_questions(self):
         self.assertFalse(
@@ -529,7 +536,11 @@ class FirstRunPromptCalibrationTests(TestCase):
         self.assertIn("Do not use sqlite_batch to reread __tool_results", system_prompt)
         self.assertIn("compact Sources section", system_prompt)
         self.assertIn("cite at least two distinct source URLs", system_prompt)
+        self.assertIn("Use at most one web search query", system_prompt)
+        self.assertIn("Do not run alternate query variants", system_prompt)
         self.assertIn("usually 4-8 strong sources", system_prompt)
+        self.assertIn("Start with one broad discovery search", system_prompt)
+        self.assertIn("instead of running separate search queries for every company or competitor", system_prompt)
         self.assertIn("under about 5,000 characters", system_prompt)
         self.assertNotIn("Before ANY tool calls", system_prompt)
         self.assertNotIn("Greeting comes first, always", system_prompt)

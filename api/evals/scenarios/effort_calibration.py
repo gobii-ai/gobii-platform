@@ -96,6 +96,10 @@ _HEADING_RE = re.compile(r"(?im)^\s{0,3}#{1,4}\s+\S|^\s*\*\*[^*\n]{3,80}\*\*:?\s
 _LIST_OR_TABLE_RE = re.compile(
     r"(?im)^\s*(?:[-*]|\d+[.)])\s+\S|^\s*\*\*\d+[.)]\s+\S|^\s*\|.+\|\s*$|<\s*(?:ul|ol|li|table)\b"
 )
+_MARKDOWN_URL_LINK_RE = re.compile(
+    r"\[[^\]]*(?:https?://|www\.|[a-z0-9.-]+\.[a-z]{2,}/)[^\]]*\]\(https?://[^)]+\)",
+    re.IGNORECASE,
+)
 _URL_RE = re.compile(r"https?://\S+")
 
 
@@ -255,7 +259,8 @@ def _human_input_requests_for_run(run_id: str, *, after=None):
 
 
 def _question_count(text: str) -> int:
-    without_urls = _URL_RE.sub("", text or "")
+    without_urls = _MARKDOWN_URL_LINK_RE.sub("", text or "")
+    without_urls = _URL_RE.sub("", without_urls)
     return without_urls.count("?")
 
 
@@ -1703,7 +1708,9 @@ class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
         }
         prompt = (
             "Tell me about the latest YC batch of companies. Give me a concise but substantive structured "
-            "report with key themes, representative examples, and sources."
+            "report with key themes, representative examples, and sources. Treat this as bounded current-info "
+            "research, not exhaustive research; use at most one search query and answer from the first reliable "
+            "source set."
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
@@ -2322,7 +2329,9 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             "Do deep, exhaustive current research on Northstar Robotics in warehouse automation. "
             "Build a source-backed investment-style memo comparing Northstar with at least four competitors, "
             "cite at least four sources, include a compact table, and go deeper than a quick summary. "
-            "Keep the memo dense and under 4,800 characters. Do not create files or charts."
+            "Use a finite source plan: one broad discovery search first, then scrape the strongest source pages; "
+            "add another search only if the first result set misses the requested company, competitor, or market "
+            "angles. Keep the memo dense and under 4,800 characters. Do not create files or charts."
         )
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
