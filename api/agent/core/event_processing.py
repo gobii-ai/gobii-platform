@@ -1713,6 +1713,14 @@ def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -
         if not all(str(part).lower() in url for part in expected_parts):
             return False
 
+    param_contains = rule.get("param_contains")
+    if param_contains:
+        for key, expected_parts in param_contains.items():
+            value = str(exec_params.get(key) or "").lower()
+            parts = [expected_parts] if isinstance(expected_parts, str) else list(expected_parts)
+            if not all(str(part).lower() in value for part in parts):
+                return False
+
     param_equals = rule.get("param_equals")
     if param_equals:
         for key, expected in param_equals.items():

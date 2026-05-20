@@ -4,6 +4,7 @@ import { PendingActionSectionCard } from './PendingActionSectionCard'
 export type PendingContactDraft = {
   allowInbound: boolean
   allowOutbound: boolean
+  smsContactPermissionAttested: boolean
 }
 
 type PendingContactRequestsPanelProps = {
@@ -34,7 +35,12 @@ export function PendingContactRequestsPanel({
   const draft = contactDrafts[activeRequest.id] ?? {
     allowInbound: activeRequest.allowInbound,
     allowOutbound: activeRequest.allowOutbound,
+    smsContactPermissionAttested: Boolean(activeRequest.smsContactPermissionAttested),
   }
+  const smsApprovalBlocked = (
+    activeRequest.channel === 'sms'
+    && !draft.smsContactPermissionAttested
+  )
 
   return (
     <PendingActionSectionCard toneClass="border-amber-200 bg-amber-50/65">
@@ -45,6 +51,15 @@ export function PendingContactRequestsPanel({
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Reason</p>
                 <p className="mt-1 whitespace-pre-line text-sm text-slate-700">{activeRequest.reason}</p>
+              </div>
+            ) : null}
+            {activeRequest.channel === 'sms' && activeRequest.smsContactPurpose ? (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">SMS purpose</p>
+                <p className="mt-1 text-sm text-slate-700">{activeRequest.smsContactPurpose.replace(/_/g, ' ')}</p>
+                {activeRequest.smsContactPurposeDetails ? (
+                  <p className="mt-1 whitespace-pre-line text-sm text-slate-600">{activeRequest.smsContactPurposeDetails}</p>
+                ) : null}
               </div>
             ) : null}
             <div className="grid gap-2 md:grid-cols-2">
@@ -69,6 +84,18 @@ export function PendingContactRequestsPanel({
                 <span>Outbound</span>
               </label>
             </div>
+            {activeRequest.channel === 'sms' ? (
+              <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={draft.smsContactPermissionAttested}
+                  onChange={(event) => onContactDraftChange(activeRequest.id, { ...draft, smsContactPermissionAttested: event.currentTarget.checked })}
+                  disabled={disabled || busy}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-amber-600 focus:ring-amber-500"
+                />
+                <span>I confirm I have permission to contact this number by SMS.</span>
+              </label>
+            ) : null}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
@@ -82,7 +109,7 @@ export function PendingContactRequestsPanel({
           </button>
           <button
             type="button"
-            disabled={disabled || busy}
+            disabled={disabled || busy || smsApprovalBlocked}
             className="inline-flex w-full items-center justify-center rounded-xl bg-amber-600 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:cursor-not-allowed disabled:opacity-60"
             onClick={() => void onSubmit('approve', activeRequest.id)}
           >

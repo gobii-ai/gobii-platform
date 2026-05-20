@@ -1976,6 +1976,33 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("current reasoning one", content)
         self.assertIn("current reasoning two", content)
 
+    def test_prompt_context_labels_reasoning_only_steps_as_no_action(self):
+        self._configure_unified_history_limits(
+            tool_limit=5,
+            unified_limit=10,
+            hysteresis=2,
+            reasoning_limit=3,
+        )
+
+        PersistentAgentStep.objects.create(
+            agent=self.agent,
+            description=build_internal_reasoning_description(
+                "I should send the answer now.",
+                reasoning_only=True,
+            ),
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ):
+            context, _, _ = build_prompt_context(self.agent)
+
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(user_message)
+        content = user_message["content"]
+        self.assertIn("reasoning-only, no user-visible action or tool call", content)
+        self.assertIn("I should send the answer now.", content)
+
     def test_prompt_context_overfetches_past_filtered_reasoning_steps(self):
         """Filtered older reasoning should not crowd out older visible steps."""
         self._configure_unified_history_limits(

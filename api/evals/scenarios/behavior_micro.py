@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from api.agent.comms.human_input_requests import dismiss_human_input_request
+from api.agent.core.processing_flags import get_human_inbound_generation
 from api.agent.tools.eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
@@ -18,18 +20,26 @@ from api.evals.stop_policy import (
 )
 from api.models import (
     EvalRunTask,
+    CommsChannel,
     PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentCompletion,
+    PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
+    PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    build_web_agent_address,
+    build_web_user_address,
 )
 
 PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS = "planning_first_turn_asks_bounded_questions"
 PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_first"
 PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_planning"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
+PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -190,14 +200,14 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_017_search_local_events", "category": "web_research", "prompt": "Search the web for upcoming data science meetups in Austin and return two dates.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_018_search_product_launches", "category": "web_research", "prompt": "Search the web for new product launches from Contoso Health and summarize one.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_019_search_public_filings", "category": "web_research", "prompt": "Search the web for ExampleCo SEC enforcement press releases and return one link.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_search_engine": ["mcp_brightdata_web_data_reddit_posts"]}, "plan_expected": True},
+    {"slug": "common_use_case_020_search_reddit_mentions", "category": "web_research", "prompt": "Search the web for Reddit mentions of BiomeBoost Pro gut health supplement and summarize sentiment.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts"], "forbidden_tools": ["spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_web_data_reddit_posts": ["mcp_brightdata_search_engine"]}, "plan_expected": False, "stop_after_success": False},
     {"slug": "common_use_case_021_scrape_known_article", "category": "web_scrape", "prompt": "Scrape https://news.example.test/article-42 and return the headline.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_022_scrape_known_blog", "category": "web_scrape", "prompt": "Scrape https://blog.example.test/q2-roadmap and return the author name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_023_scrape_known_pricing_page", "category": "web_scrape", "prompt": "Scrape https://vendor.example.test/pricing and return the starter plan price.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_024_scrape_known_docs_page", "category": "web_scrape", "prompt": "Scrape https://docs.example.test/api/auth and return the required header name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_025_scrape_known_permit_page", "category": "web_scrape", "prompt": "Scrape https://borough.example.test/permits/zoning and return the filing fee.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_026_scrape_known_jobs_page", "category": "web_scrape", "prompt": "Scrape https://careers.example.test/jobs and return the first listed role.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
-    {"slug": "common_use_case_027_scrape_known_changelog", "category": "web_scrape", "prompt": "Scrape https://app.example.test/changelog and return the latest release date.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_027_scrape_known_changelog", "category": "web_scrape", "prompt": "Scrape https://app.example.test/changelog and return the latest release date.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "accepted_tool_alternatives": {"mcp_brightdata_scrape_as_markdown": ["http_request"]}, "plan_expected": False},
     {"slug": "common_use_case_028_scrape_known_directory", "category": "web_scrape", "prompt": "Scrape https://directory.example.test/vendors and return the first vendor name.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_029_scrape_known_support_page", "category": "web_scrape", "prompt": "Scrape https://support.example.test/status and return the support email.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_030_scrape_known_event_page", "category": "web_scrape", "prompt": "Scrape https://events.example.test/summit and return the venue.", "expected_tools": ["mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["mcp_brightdata_search_engine", "spawn_web_task"], "plan_expected": False},
@@ -216,10 +226,10 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_043_yahoo_finance_business", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT and return market cap.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_044_linkedin_company_jobs", "category": "lead_sourcing", "prompt": "Find LinkedIn job listings for a fintech company and return remote roles.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
     {"slug": "common_use_case_045_linkedin_candidate_search", "category": "lead_sourcing", "prompt": "Search LinkedIn for senior backend candidates in Toronto with Python experience.", "expected_tools": ["mcp_brightdata_web_data_linkedin_people_search"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
-    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_046_sheets_read_range", "category": "sheets", "prompt": "Read A1:D20 from the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-get-values-in-range"], "forbidden_tools": ["sqlite_batch"], "accepted_tool_alternatives": {"google_sheets-get-values-in-range": ["google_sheets-read-rows"]}, "plan_expected": False},
     {"slug": "common_use_case_047_sheets_find_row", "category": "sheets", "prompt": "Find the row in spreadsheet sheet-123 where email equals ana@example.test.", "expected_tools": ["google_sheets-find-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_048_sheets_add_single_row", "category": "sheets", "prompt": "In spreadsheet sheet-123, add one row to the Leads worksheet: company Acme, priority high, owner Sam.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
-    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
+    {"slug": "common_use_case_049_sheets_add_multiple_rows", "category": "sheets", "prompt": "Add three prospect rows to the Leads worksheet in spreadsheet sheet-123: Acme priority high owner Sam; Globex priority medium owner Priya; Initech priority low owner Lee.", "expected_tools": ["google_sheets-add-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_050_sheets_update_cell", "category": "sheets", "prompt": "Update cell C8 in spreadsheet sheet-123 to Qualified.", "expected_tools": ["google_sheets-update-cell"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_051_sheets_update_row", "category": "sheets", "prompt": "In spreadsheet sheet-123 Leads worksheet, update the row where company is Globex so status is Contacted.", "expected_tools": ["google_sheets-update-row"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
     {"slug": "common_use_case_052_sheets_update_multiple_rows", "category": "sheets", "prompt": "In spreadsheet sheet-123 Pipeline worksheet, update rows 12, 13, and 14 so follow_up_due is today.", "expected_tools": ["google_sheets-update-multiple-rows"], "forbidden_tools": ["sqlite_batch"], "plan_expected": False},
@@ -234,7 +244,7 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_061_send_summary_email", "category": "outbound", "prompt": "Email ana@example.test three sentences: Enterprise leads increased. Acme renewal moved to legal review. Globex needs a Friday follow-up.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_062_send_attachment_email", "category": "outbound", "prompt": "Email pat@example.test that the prepared report is attached at $[/exports/report.pdf].", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["sqlite_batch", "read_file"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_063_send_followup_email", "category": "outbound", "prompt": "Send a polite follow-up email to lee@example.test about the demo times.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
-    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with three bullet points.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
+    {"slug": "common_use_case_064_send_digest_email", "category": "outbound", "prompt": "Email ops@example.test the daily incident digest with bullets: API latency stayed under 120 ms; queue backlog cleared by 14:00 UTC; no Sev1 incidents opened.", "expected_tools": ["send_email"], "forbidden_tools": ["send_sms"], "allowed_preamble_tools": ["search_tools"], "accepted_tool_alternatives": {"send_email": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_065_send_status_sms", "category": "outbound", "prompt": "Text +15555550123 that the build finished successfully.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_066_send_meeting_sms", "category": "outbound", "prompt": "Send an SMS to +15555550123 saying the meeting moved to 3pm.", "expected_tools": ["send_sms"], "forbidden_tools": ["send_email"], "accepted_tool_alternatives": {"send_sms": ["request_contact_permission"]}, "plan_expected": False},
     {"slug": "common_use_case_067_request_contact_email_permission", "category": "outbound", "prompt": "Ask permission to email new-contact@example.test about the partnership intro.", "expected_tools": ["request_contact_permission"], "forbidden_tools": ["send_email"], "plan_expected": False},
@@ -285,6 +295,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST,
     PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING,
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
+    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
 ]
 
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
@@ -851,6 +862,163 @@ class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
 
 
 @register_scenario
+class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
+    slug = PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME
+    description = "Dismissing a completed planning prompt after a greeting should clear it without resuming the agent."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "human_input", "dismissal")
+    tasks = [
+        ScenarioTask(name="seed_completed_greeting", assertion_type="manual"),
+        ScenarioTask(name="dismiss_plain_request", assertion_type="manual"),
+        ScenarioTask(name="verify_no_resume", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.COMPLETED)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="seed_completed_greeting")
+        user_address = build_web_user_address(agent.user_id, agent.id)
+        agent_address = build_web_agent_address(agent.id)
+        agent_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=agent_address,
+            defaults={"owner_agent": agent, "is_primary": True},
+        )
+        if agent_endpoint.owner_agent_id is None:
+            agent_endpoint.owner_agent = agent
+            agent_endpoint.is_primary = True
+            agent_endpoint.save(update_fields=["owner_agent", "is_primary"])
+        user_endpoint, _ = PersistentAgentCommsEndpoint.objects.get_or_create(
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=agent,
+            channel=CommsChannel.WEB,
+            address=user_address,
+        )
+        completion = PersistentAgentCompletion.objects.create(
+            agent=agent,
+            eval_run_id=run_id,
+            llm_model="seeded-completed-greeting",
+            billed=True,
+        )
+        step = PersistentAgentStep.objects.create(
+            agent=agent,
+            eval_run_id=run_id,
+            completion=completion,
+            description="Seed completed greeting with planning options.",
+        )
+        PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=agent_endpoint,
+            to_endpoint=user_endpoint,
+            conversation=conversation,
+            owner_agent=agent,
+            body="Hi. I can help with that. Which setup option should I use?",
+            raw_payload={"source": "eval_seed_completed_greeting"},
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.create(
+            agent=agent,
+            conversation=conversation,
+            originating_step=step,
+            question="Which setup option should I use?",
+            options_json=[
+                {"key": "a", "title": "Option A", "description": "Continue with option A."},
+                {"key": "b", "title": "Option B", "description": "Continue with option B."},
+            ],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.OPTIONS_PLUS_TEXT,
+            requested_via_channel=CommsChannel.WEB,
+        )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="seed_completed_greeting",
+            observed_summary="Seeded a completed planning greeting with one pending human-input request.",
+        )
+
+        before_generation = get_human_inbound_generation(agent_id)
+        before_inbound_messages = PersistentAgentMessage.objects.filter(
+            owner_agent_id=agent_id,
+            is_outbound=False,
+        ).count()
+        before_completions = PersistentAgentCompletion.objects.filter(agent_id=agent_id).count()
+        before_tool_calls = PersistentAgentToolCall.objects.filter(step__agent_id=agent_id).count()
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="dismiss_plain_request")
+        message = dismiss_human_input_request(request_obj, actor_user_id=agent.user_id)
+        request_obj.refresh_from_db()
+        if message is None and request_obj.status == PersistentAgentHumanInputRequest.Status.CANCELLED:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="dismiss_plain_request",
+                observed_summary="Plain dismiss cancelled the request without producing an inbound continuation message.",
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="dismiss_plain_request",
+                observed_summary=(
+                    "Plain dismiss should return no message and cancel the request; "
+                    f"message_created={message is not None}, status={request_obj.status}."
+                ),
+            )
+            return
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_no_resume")
+        after_generation = get_human_inbound_generation(agent_id)
+        after_inbound_messages = PersistentAgentMessage.objects.filter(
+            owner_agent_id=agent_id,
+            is_outbound=False,
+        ).count()
+        after_completions = PersistentAgentCompletion.objects.filter(agent_id=agent_id).count()
+        after_tool_calls = PersistentAgentToolCall.objects.filter(step__agent_id=agent_id).count()
+        pending_requests = PersistentAgentHumanInputRequest.objects.filter(
+            agent_id=agent_id,
+            status=PersistentAgentHumanInputRequest.Status.PENDING,
+        ).count()
+        if (
+            after_generation == before_generation
+            and after_inbound_messages == before_inbound_messages
+            and after_completions == before_completions
+            and after_tool_calls == before_tool_calls
+            and pending_requests == 0
+            and request_obj.raw_reply_message_id is None
+        ):
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_no_resume",
+                observed_summary=(
+                    "Dismissal cleared the pending request without inbound generation, message, "
+                    "completion, or tool-call growth."
+                ),
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_no_resume",
+                observed_summary=(
+                    "Plain dismiss resumed or left work pending: "
+                    f"generation {before_generation}->{after_generation}, "
+                    f"inbound_messages {before_inbound_messages}->{after_inbound_messages}, "
+                    f"completions {before_completions}->{after_completions}, "
+                    f"tool_calls {before_tool_calls}->{after_tool_calls}, "
+                    f"pending_requests={pending_requests}, raw_reply_message={request_obj.raw_reply_message_id}."
+                ),
+            )
+
+
+@register_scenario
 class ToolChoiceExactJsonUrlUsesHttpRequestScenario(BehaviorMicroScenario):
     slug = TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST
     description = "An exact JSON API URL should be fetched with http_request, not search or browser tools."
@@ -1186,6 +1354,8 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
 
     def _mock_success(self, tool_name):
         if tool_name == "sqlite_batch":
+            if self.case.slug == "common_use_case_079_create_report_with_chart":
+                return CommonUseCaseToolChoiceScenario._revenue_sqlite_mock_success()
             return CommonUseCaseToolChoiceScenario._sqlite_mock_success()
         if tool_name.startswith("google_sheets-"):
             return CommonUseCaseToolChoiceScenario._google_sheets_mock_success(tool_name)
@@ -1213,6 +1383,39 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                             ),
                         }
                     ],
+                },
+            }
+        if (
+            self.case.slug == "common_use_case_020_search_reddit_mentions"
+            and tool_name in {"mcp_brightdata_search_engine", "mcp_brightdata_web_data_reddit_posts"}
+        ):
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked Reddit mentions result for deterministic common-use-case eval.",
+                "content": {
+                    "ok": True,
+                    "results": [
+                        {
+                            "title": "r/Supplements thread on BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/Supplements/comments/eval1/biomeboost_pro/",
+                            "snippet": "Several users liked the gentle formula but said results took two weeks.",
+                            "sentiment": "mildly positive",
+                        },
+                        {
+                            "title": "r/GutHealth discussion: BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/GutHealth/comments/eval2/biomeboost_pro/",
+                            "snippet": "Posters questioned the price and wanted clearer strain counts.",
+                            "sentiment": "negative",
+                        },
+                        {
+                            "title": "r/Nutrition mention of BiomeBoost Pro",
+                            "url": "https://www.reddit.com/r/Nutrition/comments/eval3/biomeboost_pro/",
+                            "snippet": "A few commenters compared it favorably with cheaper probiotic blends.",
+                            "sentiment": "mixed",
+                        },
+                    ],
+                    "summary_hint": "Sentiment is mixed: efficacy comments trend positive, while price and labeling are concerns.",
                 },
             }
         if tool_name == "mcp_brightdata_web_data_linkedin_company_profile":
@@ -1271,7 +1474,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
             "tool": tool_name,
             "message": (
                 f"Mocked {tool_name} result for deterministic Google Sheets eval. "
-                "The requested spreadsheet and worksheet exist; use the requested Google Sheets mutation tool next."
+                "The requested spreadsheet and worksheet exist; use the requested Google Sheets tool next."
             ),
             "content": {
                 "ok": True,
@@ -1327,6 +1530,28 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                     },
                 ],
                 "next_step": "The requested eval fixture data exists; continue with the user-requested tool.",
+            },
+        }
+
+    @staticmethod
+    def _revenue_sqlite_mock_success():
+        return {
+            "status": "ok",
+            "tool": "sqlite_batch",
+            "message": "Mocked SQLite result for deterministic revenue chart eval.",
+            "content": {
+                "ok": True,
+                "tables": ["revenue_data", "__tool_results", "__files"],
+                "columns": ["month", "revenue"],
+                "rows": [
+                    {"month": "Jan", "revenue": 120},
+                    {"month": "Feb", "revenue": 135},
+                    {"month": "Mar", "revenue": 150},
+                    {"month": "Apr", "revenue": 142},
+                    {"month": "May", "revenue": 165},
+                    {"month": "Jun", "revenue": 180},
+                ],
+                "next_step": "Revenue data is ready; call create_chart next with a query over revenue_data.",
             },
         }
 

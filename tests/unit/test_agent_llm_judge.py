@@ -342,6 +342,12 @@ class AgentJudgeTests(TestCase):
         self.assertIsNotNone(trigger)
         trajectory = trigger.trajectory
         self.assertIn("current_context", trajectory)
+        self.assertTrue(
+            any(
+                "Custom tools can call other tools internally" in note
+                for note in trajectory["packet_notes"]
+            )
+        )
         self.assertEqual(
             trajectory["current_context"]["skills"]["saved_skills"][0]["name"],
             "Daily report",

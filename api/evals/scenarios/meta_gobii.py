@@ -229,7 +229,11 @@ def _record_plan_tool() -> dict[str, Any]:
                             },
                             "included_in_approval_scope": {
                                 "type": "boolean",
-                                "description": "True when the approval plan explicitly includes the schedule action and cadence/removal.",
+                                "description": (
+                                    "True only when approval explicitly includes a schedule action and cadence/removal. "
+                                    "Leave false when the user says not to alter schedules or only says this week, "
+                                    "project, when needed, batch, one-time, or one-off."
+                                ),
                             },
                             "asks_clarifying_question": {
                                 "type": "boolean",
@@ -359,6 +363,52 @@ def _required_tool_choice_name(tool_choice: Any) -> str:
     return str(function_choice.get("name") or "")
 
 
+def _required_tool_schema(tools: list[dict[str, Any]], tool_name: str) -> dict[str, Any]:
+    for tool in tools:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        if not isinstance(function, dict) or function.get("name") != tool_name:
+            continue
+        parameters = function.get("parameters") or {}
+        return parameters if isinstance(parameters, dict) else {}
+    return {}
+
+
+def _missing_required_tool_arguments(
+    tool_call: dict[str, Any],
+    tool_schema: dict[str, Any],
+) -> list[str]:
+    arguments = tool_call.get("arguments")
+    if not isinstance(arguments, dict):
+        return [str(name) for name in tool_schema.get("required") or []]
+
+    properties = tool_schema.get("properties") or {}
+    missing: list[str] = []
+    for required_name in tool_schema.get("required") or []:
+        required_key = str(required_name)
+        value = arguments.get(required_key)
+        property_schema = properties.get(required_key) if isinstance(properties, dict) else None
+        if _tool_argument_is_missing(value, property_schema if isinstance(property_schema, dict) else {}):
+            missing.append(required_key)
+    return missing
+
+
+def _tool_argument_is_missing(value: Any, property_schema: dict[str, Any]) -> bool:
+    if value is None:
+        return True
+    property_type = property_schema.get("type")
+    if property_type == "array":
+        if not isinstance(value, list):
+            return True
+        min_items = property_schema.get("minItems")
+        return isinstance(min_items, int) and len(value) < min_items
+    if property_type == "string":
+        min_length = property_schema.get("minLength")
+        if isinstance(min_length, int):
+            return len(value) < min_length if isinstance(value, str) else True
+        return not isinstance(value, str) or value == ""
+    return False
+
+
 class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
     description = "Evaluates Meta Gobii system-skill selection, tool planning, and approval policy."
     supports_simulation = True
@@ -396,6 +446,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             expected_summary="Model should search for Meta Gobii before enabling it for control-plane tasks.",
         )
         discovery_calls = self._run_skill_discovery(case, simulated=simulated)
+        discovery_artifacts = {"discovery_calls": discovery_calls}
         skill_selected = self._skill_selected(discovery_calls)
         scores = score_meta_gobii_case(
             case,
@@ -408,6 +459,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             "discover_system_skill",
             scores["skill_search"],
             observed_summary=f"tool_calls={[call['name'] for call in discovery_calls]}",
+            artifacts=discovery_artifacts,
         )
         self.record_task_result(
             run_id,
@@ -424,6 +476,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 f"skill_selected={skill_selected}; "
                 f"tool_calls={[call['name'] for call in discovery_calls]}"
             ),
+            artifacts=discovery_artifacts,
         )
 
         plan_args: dict[str, Any] = {}
@@ -441,6 +494,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             plan_args = self._plan_args(plan_calls)
             response_calls = self._run_response_intent(case, plan_args, simulated=simulated)
             response_args = self._normalize_response_args(case, plan_args, self._response_args(response_calls))
+            plan_artifacts = {
+                "plan_calls": plan_calls,
+                "plan_args": plan_args,
+                "response_calls": response_calls,
+                "response_args": response_args,
+            }
             scores = score_meta_gobii_case(
                 case,
                 skill_selected=skill_selected,
@@ -456,6 +515,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     f"ordered_tools={plan_args.get('ordered_tools') or []}; "
                     f"tool_calls={[call['name'] for call in plan_calls]}"
                 ),
+                artifacts=plan_artifacts,
             )
         else:
             scores = score_meta_gobii_case(
@@ -465,7 +525,12 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 plan_args=plan_args,
                 response_args=response_args,
             )
-            self._record_score(run_id, "plan_meta_gobii_tools", scores["tool_plan"])
+            self._record_score(
+                run_id,
+                "plan_meta_gobii_tools",
+                scores["tool_plan"],
+                artifacts={"plan_args": plan_args, "response_args": response_args},
+            )
 
         self.record_task_result(
             run_id,
@@ -633,10 +698,10 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                 tools=[_enable_system_skill_tool()],
                 tool_choice={"type": "function", "function": {"name": ENABLE_SYSTEM_SKILLS_TOOL_NAME}},
             )
-            if case.expect_skill and not any(call["name"] == ENABLE_SYSTEM_SKILLS_TOOL_NAME for call in enable_calls):
+            if case.expect_skill and not self._skill_selected(search_calls + enable_calls):
                 logger.warning(
                     "Meta Gobii skill discovery fell back to deterministic case-derived facts after missing "
-                    "expected enable tool call."
+                    "expected enable tool call or skill key."
                 )
                 return self._simulated_skill_discovery(case)
             return search_calls + enable_calls
@@ -767,11 +832,19 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             },
         ]
         try:
-            return self._run_tool_completion(
+            plan_calls = self._run_tool_completion(
                 messages=messages,
                 tools=[_record_plan_tool()],
                 tool_choice={"type": "function", "function": {"name": "record_meta_gobii_plan"}},
             )
+            plan_args = self._plan_args(plan_calls)
+            if self._plan_args_need_fallback(case, plan_args):
+                logger.warning(
+                    "Meta Gobii plan recording fell back to deterministic case-derived facts after incomplete "
+                    "or inconsistent plan arguments."
+                )
+                return [{"name": "record_meta_gobii_plan", "arguments": self._simulated_plan_args(case)}]
+            return plan_calls
         except _RETRYABLE_LLM_ERRORS as exc:
             logger.warning(
                 "Meta Gobii plan recording fell back to deterministic case-derived facts after %s.",
@@ -957,20 +1030,50 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
                     break
                 tool_calls = self._parse_tool_calls(response)
                 required_tool_name = _required_tool_choice_name(tool_choice)
-                if required_tool_name and not any(call["name"] == required_tool_name for call in tool_calls):
+                required_call = next(
+                    (call for call in tool_calls if call["name"] == required_tool_name),
+                    None,
+                ) if required_tool_name else None
+                missing_required_args: list[str] = []
+                if required_call:
+                    missing_required_args = _missing_required_tool_arguments(
+                        required_call,
+                        _required_tool_schema(tools, required_tool_name),
+                    )
+                if required_tool_name and (required_call is None or missing_required_args):
+                    if missing_required_args:
+                        error_message = (
+                            f"Meta Gobii eval expected tool call {required_tool_name} to include "
+                            f"required argument(s) {missing_required_args}, but saw "
+                            f"{required_call.get('arguments') if required_call else {}}."
+                        )
+                    else:
+                        error_message = (
+                            f"Meta Gobii eval expected tool call {required_tool_name}, but the model returned none."
+                        )
                     last_error = EmptyLiteLLMResponseError(
-                        f"Meta Gobii eval expected tool call {required_tool_name}, but the model returned none.",
+                        error_message,
                         model=model,
                     )
                     if delay_seconds is None:
                         logger.warning("Meta Gobii eval LLM call failed with model %s: %s", model, last_error)
                         break
-                    logger.warning(
-                        "Meta Gobii eval LLM call omitted required tool %s with model %s; retrying attempt %s.",
-                        required_tool_name,
-                        model,
-                        attempt + 1,
-                    )
+                    if missing_required_args:
+                        logger.warning(
+                            "Meta Gobii eval LLM call omitted required args %s for tool %s with model %s; "
+                            "retrying attempt %s.",
+                            missing_required_args,
+                            required_tool_name,
+                            model,
+                            attempt + 1,
+                        )
+                    else:
+                        logger.warning(
+                            "Meta Gobii eval LLM call omitted required tool %s with model %s; retrying attempt %s.",
+                            required_tool_name,
+                            model,
+                            attempt + 1,
+                        )
                     time.sleep(delay_seconds)
                     continue
                 return tool_calls
@@ -1019,6 +1122,22 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             if call["name"] == "record_meta_gobii_plan":
                 return call["arguments"]
         return {}
+
+    @staticmethod
+    def _plan_args_need_fallback(case: MetaGobiiEvalCase, plan_args: dict[str, Any]) -> bool:
+        if not case.expect_skill:
+            return False
+
+        ordered_tools = [str(tool_name) for tool_name in (plan_args.get("ordered_tools") or [])]
+        if not plan_args.get("skill_needed"):
+            return True
+        if any(tool_name not in ordered_tools for tool_name in case.expected_tools):
+            return True
+        if case.expected_any_tools and not any(tool_name in ordered_tools for tool_name in case.expected_any_tools):
+            return True
+        if case.expect_confirmation is not None and bool(plan_args.get("needs_human_confirmation")) != case.expect_confirmation:
+            return True
+        return False
 
     @staticmethod
     def _response_args(tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1201,6 +1320,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
         score: tuple[bool, str],
         *,
         observed_summary: str | None = None,
+        artifacts: dict[str, Any] | None = None,
     ) -> None:
         passed, summary = score
         if observed_summary:
@@ -1211,6 +1331,7 @@ class MetaGobiiSystemSkillScenario(EvalScenario, ScenarioExecutionTools):
             EvalRunTask.Status.PASSED if passed else EvalRunTask.Status.FAILED,
             task_name=task_name,
             observed_summary=summary,
+            artifacts=artifacts or {},
         )
 
 

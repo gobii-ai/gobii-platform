@@ -3,10 +3,25 @@ export type AllowlistInput = {
   channel: string
   allowInbound: boolean
   allowOutbound: boolean
+  smsContactPurpose?: string | null
+  smsContactPurposeDetails?: string | null
+  smsContactPermissionAttested?: boolean | null
+  smsContactPermissionAttestedAt?: string | null
 }
 
 export type PendingAllowlistAction =
-  | { type: 'create'; tempId: string; channel: string; address: string; allowInbound: boolean; allowOutbound: boolean }
+  | {
+      type: 'create'
+      tempId: string
+      channel: string
+      address: string
+      allowInbound: boolean
+      allowOutbound: boolean
+      smsContactPurpose?: string | null
+      smsContactPurposeDetails?: string | null
+      smsContactPermissionAttested?: boolean | null
+      smsContactPermissionAttestedAt?: string | null
+    }
   | { type: 'remove'; id: string }
   | { type: 'cancel_invite'; id: string }
 
@@ -17,6 +32,10 @@ export type AllowlistTableRow = {
   address: string
   allowInbound: boolean
   allowOutbound: boolean
+  smsContactPurpose?: string | null
+  smsContactPurposeDetails?: string | null
+  smsContactPermissionAttested?: boolean | null
+  smsContactPermissionAttestedAt?: string | null
   pendingType?: PendingAllowlistAction['type']
   temp?: boolean
 }

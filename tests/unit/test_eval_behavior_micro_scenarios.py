@@ -23,6 +23,7 @@ from api.evals.scenarios.behavior_micro import (
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
     PLANNING_MICRO_SCENARIO_SLUGS,
+    PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     UPDATE_PLAN_POLICIES,
     UPDATE_PLAN_POLICY_EXPECT,
@@ -137,8 +138,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         by_slug = {case.slug: case for case in COMMON_USE_CASE_EVAL_CASES}
         self.assertFalse(by_slug["common_use_case_001_fetch_inventory_json"].plan_expected)
         self.assertFalse(by_slug["common_use_case_061_send_summary_email"].plan_expected)
-        self.assertTrue(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].plan_expected)
+        self.assertFalse(by_slug["common_use_case_020_search_reddit_mentions"].stop_after_success)
         self.assertIn("BiomeBoost Pro", by_slug["common_use_case_020_search_reddit_mentions"].prompt)
+        self.assertIn("API latency stayed under 120 ms", by_slug["common_use_case_064_send_digest_email"].prompt)
         self.assertEqual(
             by_slug["common_use_case_061_send_summary_email"].accepted_tool_alternatives,
             {"send_email": ("request_contact_permission",)},
@@ -192,7 +195,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("ET schedule", by_slug["common_use_case_093_schedule_weekly_report"].prompt)
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
-            {"mcp_brightdata_search_engine": ("mcp_brightdata_web_data_reddit_posts",)},
+            {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_020_search_reddit_mentions"].expected_tools,
+            ("mcp_brightdata_web_data_reddit_posts",),
         )
         self.assertEqual(
             by_slug["common_use_case_091_schedule_daily_digest"].expected_tools,
@@ -204,12 +211,18 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_048_sheets_add_single_row"].allowed_preamble_tool_names(),
         )
         self.assertEqual(
+            by_slug["common_use_case_046_sheets_read_range"].accepted_tool_alternatives,
+            {"google_sheets-get-values-in-range": ("google_sheets-read-rows",)},
+        )
+        self.assertEqual(
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
         sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success(
             "google_sheets-get-spreadsheet-by-id"
         )
+        self.assertIn("use the requested Google Sheets tool next", sheets_mock["message"])
+        self.assertNotIn("mutation tool", sheets_mock["message"])
         self.assertIn("Tasks", sheets_mock["content"]["worksheets"])
         self.assertIn(
             "mcp_brightdata_search_engine",
@@ -349,7 +362,7 @@ class BehaviorMicroHelperTests(TestCase):
                 for definition in get_enabled_tool_definitions(agent)
             }
 
-    def _add_tool_call(self, tool_name, params=None):
+    def _add_tool_call(self, tool_name, params=None, status="complete"):
         step = PersistentAgentStep.objects.create(
             agent=self.agent,
             eval_run=self.run,
@@ -360,7 +373,7 @@ class BehaviorMicroHelperTests(TestCase):
             tool_name=tool_name,
             tool_params=params or {},
             result="{}",
-            status="complete",
+            status=status,
         )
 
     def _add_human_input_request(self, run, question):
@@ -414,6 +427,35 @@ class BehaviorMicroHelperTests(TestCase):
         for tool_name in GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES:
             self.assertIn(tool_name, EVAL_SYNTHETIC_TOOL_DEFINITIONS)
             self.assertIn("do not call search_tools first", EVAL_SYNTHETIC_TOOL_DEFINITIONS[tool_name]["description"])
+
+    def test_revenue_chart_eval_sqlite_mock_returns_revenue_rows(self):
+        scenario = ScenarioRegistry.get("common_use_case_079_create_report_with_chart")
+
+        mock_config = scenario._build_mock_config()
+
+        sqlite_mock = mock_config["sqlite_batch"]
+        self.assertIn("revenue_data", sqlite_mock["content"]["tables"])
+        self.assertEqual(sqlite_mock["content"]["columns"], ["month", "revenue"])
+        self.assertEqual(sqlite_mock["content"]["rows"][0], {"month": "Jan", "revenue": 120})
+        self.assertIn("call create_chart next", sqlite_mock["content"]["next_step"])
+
+    def test_reddit_eval_fixture_has_terminal_structured_data(self):
+        scenario = ScenarioRegistry.get("common_use_case_020_search_reddit_mentions")
+        policy = scenario._build_eval_stop_policy()
+        result = scenario._mock_success("mcp_brightdata_web_data_reddit_posts")
+
+        self.assertNotIn("stop_when_all_seen", policy)
+        self.assertIn("spawn_web_task", policy["stop_on_tool_names"])
+        self.assertIn("BiomeBoost Pro", str(result["content"]))
+        self.assertIn("sentiment", str(result["content"]).lower())
+
+    def test_brightdata_eval_synthetic_descriptions_prefer_structured_data_over_browser(self):
+        search_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["description"]
+        reddit_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_reddit_posts"]["description"]
+
+        self.assertIn("ordinary research", search_description)
+        self.assertIn("Reddit mentions", reddit_description)
+        self.assertIn("browser automation", reddit_description)
 
     @patch("api.agent.tools.tool_manager._get_manager")
     @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
@@ -774,6 +816,42 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertTrue(should_stop)
         self.assertIn("all terminal expected", reason)
 
+    def test_eval_stop_policy_can_wait_for_tool_execution(self):
+        self._add_tool_call("custom_sync", status="pending")
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+        self.assertFalse(should_stop)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("custom_sync", status="error")
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+        self.assertFalse(should_stop)
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_finish": ["custom_sync"]},
+        )
+        self.assertTrue(should_stop)
+        self.assertIn("finished", reason)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("custom_sync", status="complete")
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {"stop_on_tool_names_after_execution": ["custom_sync"]},
+        )
+
+        self.assertTrue(should_stop)
+        self.assertIn("completed", reason)
+
     def test_eval_stop_policy_stops_on_unexpected_relevant_tool(self):
         self._add_tool_call("send_chat_message")
         self._add_tool_call(
@@ -950,6 +1028,38 @@ class BehaviorMicroHelperTests(TestCase):
         requests = get_pending_human_input_requests(self.agent.id, self.run.id)
 
         self.assertEqual(requests, [expected])
+
+    def test_planning_dismiss_after_greeting_scenario_covers_no_resume(self):
+        scenario = ScenarioRegistry.get(PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME)
+        self.run.scenario_slug = scenario.slug
+        self.run.save(update_fields=["scenario_slug"])
+        for sequence, task in enumerate(scenario.tasks, start=1):
+            EvalRunTask.objects.create(
+                run=self.run,
+                sequence=sequence,
+                name=task.name,
+                assertion_type=task.assertion_type,
+            )
+
+        with (
+            patch("api.agent.comms.human_input_requests._emit_pending_human_input_updates"),
+            patch("api.agent.tasks.process_agent_events_task.delay") as mock_delay,
+        ):
+            scenario.run(self.run.id, self.agent.id)
+
+        self.assertEqual(
+            list(self.run.tasks.order_by("sequence").values_list("status", flat=True)),
+            [
+                EvalRunTask.Status.PASSED,
+                EvalRunTask.Status.PASSED,
+                EvalRunTask.Status.PASSED,
+            ],
+        )
+        request_obj = PersistentAgentHumanInputRequest.objects.get(agent=self.agent)
+        self.assertEqual(request_obj.status, PersistentAgentHumanInputRequest.Status.CANCELLED)
+        self.assertIsNone(request_obj.raw_reply_message_id)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
+        mock_delay.assert_not_called()
 
     def test_all_requests_have_options_requires_nonempty_options(self):
         with_options = SimpleNamespace(options_json=[{"key": "yes", "title": "Yes"}])

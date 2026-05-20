@@ -80,6 +80,10 @@ export type AllowlistEntry = {
   address: string
   allowInbound: boolean
   allowOutbound: boolean
+  smsContactPurpose?: string | null
+  smsContactPurposeDetails?: string | null
+  smsContactPermissionAttested?: boolean | null
+  smsContactPermissionAttestedAt?: string | null
 }
 
 export type AllowlistInvite = {
@@ -88,6 +92,10 @@ export type AllowlistInvite = {
   address: string
   allowInbound: boolean
   allowOutbound: boolean
+  smsContactPurpose?: string | null
+  smsContactPurposeDetails?: string | null
+  smsContactPermissionAttested?: boolean | null
+  smsContactPermissionAttestedAt?: string | null
 }
 
 export type AllowlistState = {

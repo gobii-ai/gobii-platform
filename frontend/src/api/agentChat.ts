@@ -171,6 +171,14 @@ type PendingContactRequestWire = {
   allow_outbound?: unknown
   canConfigure?: unknown
   can_configure?: unknown
+  smsContactPurpose?: unknown
+  sms_contact_purpose?: unknown
+  smsContactPurposeDetails?: unknown
+  sms_contact_purpose_details?: unknown
+  smsContactPermissionAttested?: unknown
+  sms_contact_permission_attested?: unknown
+  smsContactPermissionAttestedAt?: unknown
+  sms_contact_permission_attested_at?: unknown
   requestedAt?: unknown
   requested_at?: unknown
   expiresAt?: unknown
@@ -322,6 +330,10 @@ function normalizePendingContactRequest(raw: unknown): PendingContactRequest | n
     allowInbound: Boolean(request.allowInbound ?? request.allow_inbound),
     allowOutbound: Boolean(request.allowOutbound ?? request.allow_outbound),
     canConfigure: Boolean(request.canConfigure ?? request.can_configure),
+    smsContactPurpose: asNonEmptyString(request.smsContactPurpose) ?? asNonEmptyString(request.sms_contact_purpose),
+    smsContactPurposeDetails: asNonEmptyString(request.smsContactPurposeDetails) ?? asNonEmptyString(request.sms_contact_purpose_details),
+    smsContactPermissionAttested: Boolean(request.smsContactPermissionAttested ?? request.sms_contact_permission_attested),
+    smsContactPermissionAttestedAt: asNonEmptyString(request.smsContactPermissionAttestedAt) ?? asNonEmptyString(request.sms_contact_permission_attested_at),
     requestedAt: asNonEmptyString(request.requestedAt) ?? asNonEmptyString(request.requested_at),
     expiresAt: asNonEmptyString(request.expiresAt) ?? asNonEmptyString(request.expires_at),
   }
@@ -491,6 +503,7 @@ export async function respondToHumanInputRequest(
 export async function dismissHumanInputRequest(
   agentId: string,
   requestId: string,
+  options: { continueWithoutAnswer?: boolean } = {},
 ): Promise<HumanInputResponseResult> {
   const url = `/console/api/agents/${agentId}/human-input-requests/${requestId}/dismiss/`
   const response = await jsonFetch<{
@@ -500,7 +513,7 @@ export async function dismissHumanInputRequest(
   }>(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    body: JSON.stringify(options.continueWithoutAnswer ? { continue_without_answer: true } : {}),
   })
   return {
     event: response.event,
@@ -564,6 +577,9 @@ export type ContactRequestResolvePayload = {
     allow_inbound?: boolean
     allow_outbound?: boolean
     can_configure?: boolean
+    sms_contact_purpose?: string | null
+    sms_contact_purpose_details?: string | null
+    sms_contact_permission_attested?: boolean | null
   }>
 }
 

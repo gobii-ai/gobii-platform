@@ -3,6 +3,8 @@ import json
 from unittest.mock import patch
 from django.test import TestCase, tag
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
+from waffle.testutils import override_switch
 
 from api.models import (
     PersistentAgent,
@@ -11,7 +13,10 @@ from api.models import (
     CommsChannel,
     BrowserUseAgent,
     Organization,
+    SmsContactPurpose,
 )
+from api.agent.tools.request_contact_permission import execute_request_contact_permission
+from constants.feature_flags import SMS_CONTACT_PURPOSE_REQUIRED
 
 User = get_user_model()
 
@@ -187,8 +192,6 @@ class AllowlistDirectionTests(TestCase):
     
     def test_sms_channel_validation(self):
         """Personal agents may allow SMS; organization-owned agents remain blocked."""
-        from django.core.exceptions import ValidationError
-
         # Personal/manual agent should allow SMS entries
         entry = CommsAllowlistEntry(
             agent=self.agent,
@@ -223,6 +226,131 @@ class AllowlistDirectionTests(TestCase):
         with self.assertRaises(ValidationError) as context:
             org_entry.full_clean()
         self.assertIn("Organization agents only support email", str(context.exception))
+
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    def test_sms_contact_purpose_required_switch_blocks_new_sms_allowlist_without_purpose(self):
+        entry = CommsAllowlistEntry(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            allow_inbound=True,
+            allow_outbound=False,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            entry.save()
+
+        self.assertIn("SMS contacts require an operational purpose", str(context.exception))
+        self.assertIn("Confirm you have permission", str(context.exception))
+
+        entry.sms_contact_purpose = SmsContactPurpose.TEAM_OPERATIONAL
+        entry.sms_contact_purpose_details = "Action item notifications for the internal team."
+        entry.sms_contact_permission_attested = True
+        entry.save()
+
+        entry.refresh_from_db()
+        self.assertEqual(entry.sms_contact_purpose, SmsContactPurpose.TEAM_OPERATIONAL)
+        self.assertEqual(
+            entry.sms_contact_purpose_details,
+            "Action item notifications for the internal team.",
+        )
+
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    def test_sms_contact_request_propagates_purpose_to_approved_allowlist_entry(self):
+        request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            reason="Need to notify the team when action items are assigned.",
+            purpose="Action item notifications",
+            request_inbound=True,
+            request_outbound=True,
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+            sms_contact_purpose_details="Only operational team notifications.",
+            sms_contact_permission_attested=True,
+        )
+
+        entry = request.approve(invited_by=self.owner, skip_invitation=True)
+
+        self.assertEqual(entry.sms_contact_purpose, SmsContactPurpose.TEAM_OPERATIONAL)
+        self.assertEqual(entry.sms_contact_purpose_details, "Only operational team notifications.")
+        self.assertTrue(entry.sms_contact_permission_attested)
+        self.assertIsNotNone(entry.sms_contact_permission_attested_at)
+
+    def test_sms_attestation_partial_save_persists_attestation_pair(self):
+        entry = CommsAllowlistEntry.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+            sms_contact_permission_attested=True,
+        )
+        self.assertIsNotNone(entry.sms_contact_permission_attested_at)
+
+        entry.sms_contact_permission_attested = False
+        entry.allow_inbound = False
+        entry.save(update_fields=["allow_inbound"])
+
+        entry.refresh_from_db()
+        self.assertFalse(entry.allow_inbound)
+        self.assertFalse(entry.sms_contact_permission_attested)
+        self.assertIsNone(entry.sms_contact_permission_attested_at)
+
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    def test_sms_contact_request_approval_requires_permission_attestation(self):
+        request = CommsAllowlistRequest.objects.create(
+            agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15551234567",
+            reason="Need to notify the team when action items are assigned.",
+            purpose="Action item notifications",
+            sms_contact_purpose=SmsContactPurpose.TEAM_OPERATIONAL,
+        )
+
+        with self.assertRaises(ValidationError) as context:
+            request.approve(invited_by=self.owner, skip_invitation=True)
+
+        self.assertIn("Confirm you have permission", str(context.exception))
+
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    def test_request_contact_permission_requires_sms_contact_purpose_when_switch_active(self):
+        result = execute_request_contact_permission(self.agent, {
+            "contacts": [
+                {
+                    "channel": "sms",
+                    "address": "+15551234567",
+                    "reason": "Need to notify the team when action items are assigned.",
+                    "purpose": "Action item notifications",
+                }
+            ]
+        })
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("requires an operational purpose", result["message"])
+        self.assertFalse(CommsAllowlistRequest.objects.exists())
+
+    @override_switch(SMS_CONTACT_PURPOSE_REQUIRED, active=True)
+    def test_request_contact_permission_stores_sms_contact_purpose(self):
+        result = execute_request_contact_permission(self.agent, {
+            "contacts": [
+                {
+                    "channel": "sms",
+                    "address": "+15551234567",
+                    "reason": "Need to notify the team when action items are assigned.",
+                    "purpose": "Action item notifications",
+                    "sms_contact_purpose": SmsContactPurpose.TEAM_OPERATIONAL,
+                    "sms_contact_purpose_details": "Internal team action item alerts only.",
+                }
+            ]
+        })
+
+        self.assertEqual(result["status"], "ok")
+        request = CommsAllowlistRequest.objects.get()
+        self.assertEqual(request.sms_contact_purpose, SmsContactPurpose.TEAM_OPERATIONAL)
+        self.assertEqual(
+            request.sms_contact_purpose_details,
+            "Internal team action item alerts only.",
+        )
     
     def test_case_insensitive_email_with_directions(self):
         """Test that email addresses are case-insensitive with direction settings."""

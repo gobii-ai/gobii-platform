@@ -92,6 +92,33 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(geocoding_result["content"], {"results": []})
         self.assertIn("current_weather", forecast_result["content"])
 
+    def test_eval_mock_result_supports_param_contains_rules(self):
+        mock_config = {
+            "mcp_brightdata_search_engine": {
+                "rules": [
+                    {
+                        "param_contains": {"query": ["linkedin.com/jobs", "remote"]},
+                        "result": {"status": "ok", "content": "linkedin result"},
+                    }
+                ],
+                "default": {"status": "ok", "content": "default result"},
+            }
+        }
+
+        matched_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "mcp_brightdata_search_engine",
+            {"query": 'remote "Full Stack Software Engineer" site:linkedin.com/jobs'},
+        )
+        default_result = ep._resolve_eval_mock_result(
+            mock_config,
+            "mcp_brightdata_search_engine",
+            {"query": 'remote "Full Stack Software Engineer" site:indeed.com'},
+        )
+
+        self.assertEqual(matched_result["content"], "linkedin result")
+        self.assertEqual(default_result["content"], "default result")
+
     def test_http_request_params_strip_linkified_url_artifacts(self):
         params = ep._normalize_tool_params(
             "http_request",

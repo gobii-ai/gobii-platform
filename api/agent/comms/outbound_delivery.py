@@ -1153,6 +1153,24 @@ def deliver_agent_email(message: PersistentAgentMessage):
 @tracer.start_as_current_span("AGENT - Deliver Agent SMS")
 def deliver_agent_sms(message: PersistentAgentMessage):
     """Send an SMS and record the delivery attempt."""
+    agent = getattr(message, "owner_agent", None)
+    if getattr(agent, "sms_disabled", False):
+        error_message = "SMS sending is disabled for this agent."
+        logger.info(
+            "Skipping SMS delivery for message %s because agent %s has SMS disabled.",
+            message.id,
+            getattr(agent, "id", None),
+        )
+        OutboundMessageAttempt.objects.create(
+            message=message,
+            provider="twilio",
+            status=DeliveryStatus.FAILED,
+            error_message=error_message,
+        )
+        message.latest_status = DeliveryStatus.FAILED
+        message.latest_error_message = error_message
+        message.save(update_fields=["latest_status", "latest_error_message"])
+        return False
 
     # Mark the message as sending and record a new attempt
     message.latest_status = DeliveryStatus.SENDING

@@ -211,7 +211,12 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             return False
 
         body = outbound[0].body or ""
-        missing = [snippet for snippet in required_snippets if snippet not in body]
+        body_for_match = body.casefold()
+        missing = [
+            snippet
+            for snippet in required_snippets
+            if snippet.casefold() not in body_for_match
+        ]
         if len(body) <= max_chars and not missing:
             self.record_task_result(
                 run_id,

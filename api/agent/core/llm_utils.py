@@ -278,6 +278,7 @@ def run_completion(
     """Invoke ``litellm.completion`` with shared parameter handling.
 
     - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``allow_implied_send``, ``supports_vision``, and ``supports_reasoning``).
+    - Allows ``reasoning_effort`` through LiteLLM's OpenAI parameter filter when reasoning is supported.
     - Adds ``tool_choice`` when tools are provided and supported.
     - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
       supplied an explicit hint.
@@ -314,6 +315,17 @@ def run_completion(
 
     kwargs.pop("reasoning_effort", None)
     if supports_reasoning:
+        allowed_openai_params = kwargs.get("allowed_openai_params")
+        if allowed_openai_params is None:
+            allowed_openai_params = []
+        elif isinstance(allowed_openai_params, str):
+            allowed_openai_params = [allowed_openai_params]
+        else:
+            allowed_openai_params = list(allowed_openai_params)
+        if "reasoning_effort" not in allowed_openai_params:
+            allowed_openai_params.append("reasoning_effort")
+        kwargs["allowed_openai_params"] = allowed_openai_params
+
         selected_reasoning_effort = extra_reasoning_effort or reasoning_effort
         if selected_reasoning_effort:
             kwargs["reasoning_effort"] = selected_reasoning_effort

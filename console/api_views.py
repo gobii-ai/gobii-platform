@@ -155,6 +155,7 @@ from api.services.web_sessions import (
     start_web_session,
     touch_web_session,
 )
+from api.services.sms_contact_purpose import track_sms_contact_approval
 
 from util import sms
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
@@ -3833,17 +3834,36 @@ class AgentHumanInputRequestDismissAPIView(LoginRequiredMixin, View):
             return JsonResponse({"error": "This request is no longer pending."}, status=400)
 
         try:
+            body = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return HttpResponseBadRequest("Invalid JSON body")
+        if not isinstance(body, dict):
+            return HttpResponseBadRequest("Invalid JSON body")
+
+        continue_without_answer_value = body.get("continue_without_answer", False)
+        if continue_without_answer_value is not False and continue_without_answer_value is not True:
+            return JsonResponse(
+                {"error": "continue_without_answer must be a boolean."},
+                status=400,
+            )
+
+        try:
             message = dismiss_human_input_request(
                 human_input_request,
                 actor_user_id=request.user.id,
+                continue_without_answer=continue_without_answer_value,
             )
         except ValueError as exc:
             return JsonResponse({"error": str(exc)}, status=400)
 
+        payload = _pending_action_payload(agent, request.user)
+        if message is None:
+            return JsonResponse(payload, status=200)
+
         return JsonResponse(
             {
                 "event": serialize_message_event(message),
-                **_pending_action_payload(agent, request.user),
+                **payload,
             },
             status=201,
         )
@@ -4179,6 +4199,15 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                     "allow_inbound": bool(response.get("allow_inbound", True)),
                     "allow_outbound": bool(response.get("allow_outbound", True)),
                     "can_configure": bool(response.get("can_configure", False)),
+                    "sms_contact_purpose": (
+                        str(response.get("sms_contact_purpose") or "").strip() or None
+                    ),
+                    "sms_contact_purpose_details": (
+                        str(response.get("sms_contact_purpose_details") or "").strip() or None
+                    ),
+                    "sms_contact_permission_attested": bool(
+                        response.get("sms_contact_permission_attested", False)
+                    ),
                 }
             )
 
@@ -4215,14 +4244,46 @@ class AgentContactRequestResolveAPIView(ApiLoginRequiredMixin, View):
                         request_obj.request_inbound = response["allow_inbound"]
                         request_obj.request_outbound = response["allow_outbound"]
                         request_obj.request_configure = response["can_configure"]
+                        if request_obj.channel == CommsChannel.SMS:
+                            if response["sms_contact_purpose"] is not None:
+                                request_obj.sms_contact_purpose = response["sms_contact_purpose"]
+                            if response["sms_contact_purpose_details"] is not None:
+                                request_obj.sms_contact_purpose_details = response["sms_contact_purpose_details"]
+                            request_obj.sms_contact_permission_attested = response[
+                                "sms_contact_permission_attested"
+                            ]
                         request_obj.save(
                             update_fields=[
                                 "request_inbound",
                                 "request_outbound",
                                 "request_configure",
+                                "sms_contact_purpose",
+                                "sms_contact_purpose_details",
+                                "sms_contact_permission_attested",
                             ]
                         )
-                        request_obj.approve(invited_by=request.user, skip_invitation=True)
+                        result = request_obj.approve(invited_by=request.user, skip_invitation=True)
+                        if request_obj.channel == CommsChannel.SMS:
+                            sms_event_kwargs = {
+                                "user_id": request.user.id,
+                                "agent": agent,
+                                "address": request_obj.address,
+                                "approval_source": "agent_chat_contact_request_resolve",
+                                "approval_action": "approve",
+                                "allow_inbound": request_obj.request_inbound,
+                                "allow_outbound": request_obj.request_outbound,
+                                "can_configure": request_obj.request_configure,
+                                "sms_contact_purpose": request_obj.sms_contact_purpose,
+                                "sms_contact_purpose_details": request_obj.sms_contact_purpose_details,
+                                "sms_contact_permission_attested": (
+                                    request_obj.sms_contact_permission_attested
+                                ),
+                                "allowlist_entry_id": getattr(result, "id", None),
+                                "contact_request_id": str(request_obj.id),
+                            }
+                            transaction.on_commit(
+                                lambda kwargs=sms_event_kwargs: track_sms_contact_approval(**kwargs)
+                            )
                         approved_count += 1
                         approved_addresses.append(request_obj.name or request_obj.address)
                     else:

@@ -119,6 +119,8 @@ def _message_has_been_read(message, user) -> bool:
 
 
 def _agent_has_sending_endpoint(agent, channel: str) -> bool:
+    if channel == CommsChannel.SMS.value and agent.sms_disabled:
+        return False
     return agent.comms_endpoints.filter(channel=channel).exists()
 
 

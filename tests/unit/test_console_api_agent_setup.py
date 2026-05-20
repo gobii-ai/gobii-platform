@@ -94,3 +94,30 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(payload["agentSms"]["number"], "+16502530001")
         self.assertEqual(payload["preferredContactMethod"], "sms")
         self.assertEqual(payload["userPhone"]["number"], phone.phone_number)
+
+    @patch("console.agent_creation.find_unused_number")
+    def test_agent_sms_enable_rejects_admin_disabled_agent(self, mock_find_unused_number):
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+16502530000",
+            is_verified=True,
+            is_primary=True,
+        )
+        browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Console Tester",
+            charter="Do useful things",
+            browser_use_agent=browser,
+            sms_disabled=True,
+        )
+
+        response = self.client.post(
+            reverse("console_agent_sms_enable", kwargs={"agent_id": agent.id}),
+            data=json.dumps({}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"], "SMS has been disabled for this agent.")
+        mock_find_unused_number.assert_not_called()

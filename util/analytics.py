@@ -201,6 +201,7 @@ class AnalyticsEvent(StrEnum):
     AGENT_CONTACTS_REQUESTED = 'Agent Contacts Requested'
     AGENT_CONTACTS_APPROVED = 'Agent Contacts Approved'
     AGENT_CONTACTS_REJECTED = 'Agent Contacts Rejected'
+    AGENT_SMS_CONTACT_APPROVED = 'Agent SMS Contact Approved'
     AGENT_SPAWN_REQUESTED = 'Agent Spawn Requested'
     AGENT_SPAWN_APPROVED = 'Agent Spawn Approved'
     AGENT_SPAWN_REJECTED = 'Agent Spawn Rejected'

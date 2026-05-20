@@ -166,6 +166,39 @@ class CustomToolsTests(TestCase):
 
         self.assertEqual(normalized, ("custom_weather_tool", "custom_weather_tool"))
 
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_custom_tool_guidance_requires_helpful_side_effect_results(self, _mock_sandbox):
+        create_tool_description = get_create_custom_tool_tool()["function"]["description"]
+        prompt_summary = get_custom_tools_prompt_summary(self.agent)
+
+        for text in (
+            "source_path='/tools/my_tool.py'",
+            "source_code",
+            "Exact final line: `if __name__ == '__main__': main(run)`",
+            "file_path='/tools/my_tool.py'",
+            "mime_type='text/x-python'",
+            "side_effects_completed",
+            "db.row_factory = sqlite3.Row",
+            "target resource ids/names",
+            "source filters or date ranges",
+            "per-destination",
+            "do_not_repeat_manually=true",
+            "read-only verification",
+        ):
+            self.assertIn(text, create_tool_description)
+
+        for text in (
+            "side_effects_completed",
+            "exact final line `if __name__ == '__main__': main(run)`",
+            "db.row_factory = sqlite3.Row",
+            "target resource ids/names",
+            "source filters/date ranges",
+            "per-destination rows/items written",
+            "do_not_repeat_manually=true",
+            "read-only tools",
+        ):
+            self.assertIn(text, prompt_summary)
+
     def test_normalize_custom_tool_parameters_schema_synthesizes_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(
             {
@@ -761,7 +794,9 @@ class CustomToolsTests(TestCase):
         self.assertIn("domain-scoped credential", description)
         self.assertIn("not bare `requests`/`httpx`", description)
         self.assertIn("direct HTTPS tunneling", description)
-        self.assertIn("write `/tools/my_tool.py`", description)
+        self.assertIn("source_path='/tools/my_tool.py'", description)
+        self.assertIn("file_path='/tools/my_tool.py'", description)
+        self.assertIn("content=<python source>", description)
         self.assertIn("`/exports/report.txt` are filespace paths", description)
         self.assertIn("Path('/workspace/exports/report.txt')", description)
         self.assertIn("open('/exports/report.txt', ...)", description)
@@ -771,14 +806,17 @@ class CustomToolsTests(TestCase):
         self.assertIn("Those triggers are not exhaustive", description)
         self.assertIn("err on the side of creating and using one", description)
         self.assertIn("Do not manually repeat MCP/tool/API calls", description)
+        self.assertIn("design the tool to be chunkable by default", description)
+        self.assertIn("include `limit`/`batch_size` and status/id filters", description)
+        self.assertIn("remaining counts", description)
+        self.assertIn("patch it to process smaller resumable batches", description)
+        self.assertIn("manual single-action tool loops", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
         self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
-        self.assertEqual(
-            properties["source_path"]["description"],
-            "Workspace path to the Python source file, for example `/tools/my_tool.py`.",
-        )
+        self.assertIn("Required filespace path", properties["source_path"]["description"])
+        self.assertIn("Still required when source_code is provided", properties["source_path"]["description"])
         self.assertNotIn("entrypoint", properties)
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
@@ -1672,6 +1710,11 @@ class CustomToolsTests(TestCase):
         self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", summary)
         self.assertIn("Prefer patching the same file", summary)
         self.assertIn("Start with a small sample/limit", summary)
+        self.assertIn("chunkable by default", summary)
+        self.assertIn("accept `limit`/`batch_size` and status/id filters", summary)
+        self.assertIn("persist progress in SQLite", summary)
+        self.assertIn("Avoid all-or-nothing full-table batches", summary)
+        self.assertIn("manual single-action tool loops", summary)
         self.assertIn("ANTI-PATTERNS:", summary)
         self.assertIn("Bulk MCP fan-out:", summary)
         self.assertIn("Data sync to SQLite:", summary)

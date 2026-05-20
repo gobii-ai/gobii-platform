@@ -167,6 +167,21 @@
                             Allow sending messages to this contact
                           </label>
                         </div>
+                        {% if request.channel == "sms" %}
+                        <div class="flex items-start gap-x-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2">
+                          <input
+                            type="checkbox"
+                            name="sms_permission_attested_{{ request.id }}"
+                            id="sms_permission_attested_{{ request.id }}"
+                            class="mt-0.5 w-4 h-4 text-amber-600 bg-gray-100 border-gray-300 rounded focus:ring-amber-500"
+                            {% if request.sms_contact_permission_attested %}checked{% endif %}
+                            {% if is_expired %}disabled aria-disabled="true"{% endif %}
+                          >
+                          <label for="sms_permission_attested_{{ request.id }}" class="text-sm text-gray-700 cursor-pointer">
+                            I confirm I have permission to contact this number by SMS.
+                          </label>
+                        </div>
+                        {% endif %}
                       </div>
                     </div>
                   </div>
@@ -223,6 +238,7 @@ function toggleDirectionCheckboxes(requestId) {
   const directionDiv = document.getElementById('direction_' + requestId);
   const inboundCheckbox = document.getElementById('inbound_' + requestId);
   const outboundCheckbox = document.getElementById('outbound_' + requestId);
+  const smsPermissionCheckbox = document.getElementById('sms_permission_attested_' + requestId);
   
   if (approveCheckbox && directionDiv) {
     const shouldDisable = approveCheckbox.disabled || !approveCheckbox.checked;
@@ -235,6 +251,7 @@ function toggleDirectionCheckboxes(requestId) {
 
     if (inboundCheckbox) inboundCheckbox.disabled = shouldDisable;
     if (outboundCheckbox) outboundCheckbox.disabled = shouldDisable;
+    if (smsPermissionCheckbox) smsPermissionCheckbox.disabled = shouldDisable;
   }
 }
 
