@@ -11,12 +11,15 @@ from .global_skill_eval import GlobalSkillEvalScenario
 from .meta_gobii import MetaGobiiSystemSkillScenario
 from .behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
+    PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
     PlanningFirstTurnAsksBoundedQuestionsScenario,
     PlanningClearTaskEndsPlanningFirstScenario,
     PlanningExecuteRequestStaysInPlanningScenario,
     PlanningNoDirectScheduleOrConfigUpdatesScenario,
+    PermanentInstructionsAddsDurablePreferenceScenario,
+    PermanentInstructionsIgnoresOneOffPreferenceScenario,
     ToolChoiceExactJsonUrlUsesHttpRequestScenario,
     ToolChoiceCsvDeliverableUsesCreateCsvScenario,
     ToolChoicePdfDeliverableUsesCreatePdfScenario,

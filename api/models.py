@@ -6444,6 +6444,10 @@ class PersistentAgent(models.Model):
     )
     name = models.CharField(max_length=255)
     charter = models.TextField(blank=True)
+    permanent_instructions = models.TextField(
+        blank=True,
+        help_text="Durable long-term preferences and guidance separate from the agent's current charter.",
+    )
     short_description = models.CharField(
         max_length=280,
         blank=True,

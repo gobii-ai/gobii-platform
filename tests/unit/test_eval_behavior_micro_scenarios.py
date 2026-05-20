@@ -22,6 +22,9 @@ from api.evals.scenarios.behavior_micro import (
     COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
     GOOGLE_SHEETS_EVAL_SYNTHETIC_TOOL_NAMES,
     IGNORED_FIRST_ACTION_TOOL_NAMES,
+    PERMANENT_INSTRUCTIONS_ADDS_DURABLE_PREFERENCE,
+    PERMANENT_INSTRUCTIONS_IGNORES_ONE_OFF_PREFERENCE,
+    PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS,
     PLANNING_MICRO_SCENARIO_SLUGS,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
     TOOL_CHOICE_MICRO_SCENARIO_SLUGS,
@@ -46,6 +49,7 @@ from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingl
 from api.evals.scenarios.weather_lookup import _is_free_weather_request
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
+    sqlite_batch_mutates_agent_config_field,
     sqlite_batch_is_only_eval_bookkeeping_read,
     sqlite_batch_is_only_planning_state_read,
 )
@@ -82,6 +86,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertEqual(agent_behavior_suite.scenario_slugs, BEHAVIOR_MICRO_SCENARIO_SLUGS)
         self.assertEqual(planning_suite.scenario_slugs, PLANNING_MICRO_SCENARIO_SLUGS)
         self.assertEqual(tool_choice_suite.scenario_slugs, TOOL_CHOICE_MICRO_SCENARIO_SLUGS)
+        self.assertTrue(set(PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
+        self.assertFalse(set(PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS) & set(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
+        self.assertIn(PERMANENT_INSTRUCTIONS_ADDS_DURABLE_PREFERENCE, agent_behavior_suite.scenario_slugs)
+        self.assertIn(PERMANENT_INSTRUCTIONS_IGNORES_ONE_OFF_PREFERENCE, agent_behavior_suite.scenario_slugs)
 
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
@@ -929,6 +937,67 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_matches_permanent_instruction_config_field(self):
+        call = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config "
+                    "SET permanent_instructions = 'Always use concise bullets' "
+                    "WHERE id = 1"
+                )
+            },
+        )
+
+        self.assertTrue(sqlite_batch_mutates_agent_config_field(call, "permanent_instructions"))
+
+        should_stop, _reason = should_stop_for_eval_policy(
+            str(self.run.id),
+            {
+                "ignore_sqlite_agent_config_mutations": False,
+                "stop_when_all_seen": [
+                    {
+                        "tool_name": "sqlite_batch",
+                        "agent_config_field": "permanent_instructions",
+                    }
+                ],
+            },
+        )
+
+        self.assertTrue(should_stop)
+
+    def test_eval_stop_policy_can_wait_for_expected_config_mutation_execution(self):
+        policy = {
+            "ignore_sqlite_agent_config_mutations": False,
+            "stop_when_all_seen": [
+                {
+                    "tool_name": "sqlite_batch",
+                    "agent_config_field": "permanent_instructions",
+                    "after_execution": True,
+                }
+            ],
+        }
+        params = {
+            "sql": (
+                "UPDATE __agent_config "
+                "SET permanent_instructions = 'Always use concise bullets' "
+                "WHERE id = 1"
+            )
+        }
+        self._add_tool_call("sqlite_batch", params, status="pending")
+
+        should_stop, _reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertFalse(should_stop)
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        self._add_tool_call("sqlite_batch", params, status="complete")
+
+        should_stop, reason = should_stop_for_eval_policy(str(self.run.id), policy)
+
+        self.assertTrue(should_stop)
+        self.assertIn("all terminal expected", reason)
 
     def test_eval_stop_policy_can_stop_on_sqlite_config_mutation(self):
         self._add_tool_call(

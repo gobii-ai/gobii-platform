@@ -40,6 +40,8 @@ PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_fir
 PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_planning"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
+PERMANENT_INSTRUCTIONS_ADDS_DURABLE_PREFERENCE = "permanent_instructions_adds_durable_preference"
+PERMANENT_INSTRUCTIONS_IGNORES_ONE_OFF_PREFERENCE = "permanent_instructions_ignores_one_off_preference"
 
 TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST = "tool_choice_exact_json_url_uses_http_request"
 TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV = "tool_choice_csv_deliverable_uses_create_csv"
@@ -298,6 +300,11 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
 ]
 
+PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS = [
+    PERMANENT_INSTRUCTIONS_ADDS_DURABLE_PREFERENCE,
+    PERMANENT_INSTRUCTIONS_IGNORES_ONE_OFF_PREFERENCE,
+]
+
 TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
     TOOL_CHOICE_EXACT_JSON_URL_USES_HTTP_REQUEST,
     TOOL_CHOICE_CSV_DELIVERABLE_USES_CREATE_CSV,
@@ -306,7 +313,11 @@ TOOL_CHOICE_MICRO_SCENARIO_SLUGS = [
     *COMMON_USE_CASE_MICRO_SCENARIO_SLUGS,
 ]
 
-BEHAVIOR_MICRO_SCENARIO_SLUGS = PLANNING_MICRO_SCENARIO_SLUGS + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
+BEHAVIOR_MICRO_SCENARIO_SLUGS = (
+    PLANNING_MICRO_SCENARIO_SLUGS
+    + PERMANENT_INSTRUCTIONS_MICRO_SCENARIO_SLUGS
+    + TOOL_CHOICE_MICRO_SCENARIO_SLUGS
+)
 
 SUBSTANTIVE_WORK_TOOL_NAMES = {
     "create_file",
@@ -798,7 +809,7 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
 @register_scenario
 class PlanningNoDirectScheduleOrConfigUpdatesScenario(BehaviorMicroScenario):
     slug = PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES
-    description = "Planning mode should not update schedule, charter, or runtime plan before end_planning."
+    description = "Planning mode should not update schedule, charter, permanent instructions, or runtime plan before end_planning."
     category = "planning"
     tags = ("agent_behavior", "micro", "planning", "guardrail", "schedule")
     tasks = [
@@ -1015,6 +1026,168 @@ class PlanningDismissAfterGreetingDoesNotResumeScenario(BehaviorMicroScenario):
                     f"tool_calls {before_tool_calls}->{after_tool_calls}, "
                     f"pending_requests={pending_requests}, raw_reply_message={request_obj.raw_reply_message_id}."
                 ),
+            )
+
+
+@register_scenario
+class PermanentInstructionsAddsDurablePreferenceScenario(BehaviorMicroScenario):
+    slug = PERMANENT_INSTRUCTIONS_ADDS_DURABLE_PREFERENCE
+    description = "Durable user preferences should be merged into permanent instructions."
+    category = "memory"
+    tags = ("agent_behavior", "micro", "permanent_instructions", "memory")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_permanent_instruction_update", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            permanent_instructions="Prefer concise section titles in reports.",
+        )
+        self._seed_prior_processing_run(agent_id)
+        self._enable_builtin_tools(agent_id, ["sqlite_batch"])
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Going forward, always answer status updates in concise bullets. "
+                    "Keep my existing standing guidance too."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_when_all_seen": [
+                        {
+                            "tool_name": "sqlite_batch",
+                            "agent_config_field": "permanent_instructions",
+                            "after_execution": True,
+                        }
+                    ],
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_permanent_instruction_update",
+        )
+        mutation_calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["sqlite_batch"])
+            if sqlite_batch_mutates_agent_config_field(call, "permanent_instructions")
+        ]
+        agent = PersistentAgent.objects.get(id=agent_id)
+        instructions = (agent.permanent_instructions or "").lower()
+        preserved_existing = "concise section title" in instructions
+        added_preference = "bullet" in instructions
+        if mutation_calls and preserved_existing and added_preference:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_permanent_instruction_update",
+                observed_summary="Agent merged the durable bullet preference into permanent instructions.",
+                artifacts={"step": mutation_calls[0].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_permanent_instruction_update",
+                observed_summary=(
+                    "Expected a permanent_instructions update preserving existing guidance and adding bullets; "
+                    f"mutation_count={len(mutation_calls)}, instructions={agent.permanent_instructions!r}."
+                ),
+                artifacts={"step": mutation_calls[0].step} if mutation_calls else {},
+            )
+
+
+@register_scenario
+class PermanentInstructionsIgnoresOneOffPreferenceScenario(BehaviorMicroScenario):
+    slug = PERMANENT_INSTRUCTIONS_IGNORES_ONE_OFF_PREFERENCE
+    description = "One-off response preferences should not mutate permanent instructions."
+    category = "memory"
+    tags = ("agent_behavior", "micro", "permanent_instructions", "memory")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_no_config_mutation", assertion_type="manual"),
+    ]
+
+    def run(self, run_id, agent_id):
+        existing_instructions = "Prefer concise section titles in reports."
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.SKIPPED)
+        PersistentAgent.objects.filter(id=agent_id).update(
+            permanent_instructions=existing_instructions,
+        )
+        self._seed_prior_processing_run(agent_id)
+        self._enable_builtin_tools(agent_id, ["sqlite_batch"])
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                "For this answer only, use bullet points: list two reasons backups matter.",
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_on_sqlite_agent_config_mutation": True,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_no_config_mutation",
+        )
+        config_mutations = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["sqlite_batch"])
+            if sqlite_batch_mutates_planning_state(call)
+        ]
+        agent = PersistentAgent.objects.get(id=agent_id)
+        if not config_mutations and agent.permanent_instructions == existing_instructions:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_no_config_mutation",
+                observed_summary="Agent left permanent instructions unchanged for a one-off style request.",
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_no_config_mutation",
+                observed_summary=(
+                    "Expected no config mutation for one-off preference; "
+                    f"mutation_count={len(config_mutations)}, instructions={agent.permanent_instructions!r}."
+                ),
+                artifacts={"step": config_mutations[0].step} if config_mutations else {},
             )
 
 

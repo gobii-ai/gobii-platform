@@ -5762,13 +5762,13 @@ def _run_agent_loop(
                     _mark_accepted_human_generation_consumed()
                     return cumulative_token_usage
 
+                if _apply_runtime_updates():
+                    followup_required = True
+
                 if _should_stop_for_eval_policy(agent, budget_ctx=budget_ctx, span=iter_span):
                     _mark_accepted_human_generation_consumed()
                     _attempt_cycle_close_for_sleep(agent, budget_ctx)
                     return cumulative_token_usage
-
-                if _apply_runtime_updates():
-                    followup_required = True
 
                 _mark_accepted_human_generation_consumed()
 
