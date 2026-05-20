@@ -6,13 +6,18 @@ from typing import Any
 from django.core.cache import cache
 from django.db.models import BooleanField, Case, CharField, Count, Exists, F, OuterRef, Q, Value, When
 from django.db.models.functions import Lower
-from django.http import HttpRequest, JsonResponse
-from django.urls import reverse
+from django.http import Http404, HttpRequest, JsonResponse
+from django.shortcuts import redirect
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.generic import TemplateView, View
 
-from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike
+from api.models import PersistentAgentTemplate, PersistentAgentTemplateLike, PersistentAgentTemplateUrlAlias
+from pages.public_template_urls import (
+    public_template_category_slug,
+    public_template_category_slug_from_label,
+    public_template_detail_path,
+)
 
 LIBRARY_CACHE_KEY = "pages:library:payload:v1"
 LIBRARY_CACHE_TTL_SECONDS = 120
@@ -86,6 +91,48 @@ def _get_top_categories() -> list[dict[str, Any]]:
     top_categories = _build_top_categories()
     cache.set(LIBRARY_CACHE_KEY, top_categories, timeout=LIBRARY_CACHE_TTL_SECONDS)
     return top_categories
+
+
+def _resolve_category_from_slug(category_slug: str | None) -> str:
+    normalized_slug = str(category_slug or "").strip().lower()
+    if not normalized_slug:
+        return ""
+
+    category_rows = (
+        _library_queryset()
+        .annotate(normalized_category=_normalized_category_expression())
+        .values_list("normalized_category", flat=True)
+        .distinct()
+    )
+    for category in category_rows:
+        label = _normalize_category(category)
+        if public_template_category_slug_from_label(label) == normalized_slug:
+            return label
+
+    raise Http404("This library category is not available.")
+
+
+def _get_legacy_library_handle_template(template_slug: str | None):
+    template = _library_queryset().filter(
+        public_profile__handle="library",
+        slug=template_slug,
+    ).first()
+    if template:
+        return template
+
+    alias = (
+        PersistentAgentTemplateUrlAlias.objects.select_related("template", "template__public_profile")
+        .filter(
+            public_profile__handle="library",
+            slug=template_slug,
+            template__is_active=True,
+            template__public_profile__isnull=False,
+        )
+        .first()
+    )
+    if alias:
+        return alias.template
+    return None
 
 
 def _parse_json_payload(request: HttpRequest) -> dict[str, Any]:
@@ -176,15 +223,10 @@ def _build_library_payload(
             "tagline": template.tagline,
             "description": template.description,
             "category": template.normalized_category,
+            "categorySlug": public_template_category_slug(template),
             "publicProfileHandle": template.public_profile.handle,
             "templateSlug": template.slug,
-            "templateUrl": reverse(
-                "pages:public_template_detail",
-                kwargs={
-                    "handle": template.public_profile.handle,
-                    "template_slug": template.slug,
-                },
-            ),
+            "templateUrl": public_template_detail_path(template),
             "likeCount": template.like_count,
             "isLiked": template.is_liked,
         }
@@ -207,10 +249,40 @@ def _build_library_payload(
 class LibraryView(TemplateView):
     template_name = "library.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        self.selected_category = ""
+        category_slug = kwargs.get("category_slug")
+        if category_slug:
+            try:
+                self.selected_category = _resolve_category_from_slug(category_slug)
+            except Http404:
+                legacy_template = _get_legacy_library_handle_template(category_slug)
+                if legacy_template:
+                    return redirect(public_template_detail_path(legacy_template), permanent=True)
+                raise
+        return super().dispatch(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        selected_category = self.selected_category
+        page_title = (
+            f"{selected_category} AI Agent Templates | Gobii"
+            if selected_category
+            else "AI Agent Templates & Workers | Gobii"
+        )
+        page_description = (
+            f"Explore Gobii's {selected_category} AI agent templates and workers. Start from a shared template and customize it for your workflow."
+            if selected_category
+            else "Explore Gobii's library of AI agents and workers for sales, research, recruiting, operations, spreadsheets, email, and more. Start from a template or build your own."
+        )
         context["page_name"] = "Agent Discovery"
-        context["library_initial_payload"] = _build_library_payload(self.request)
+        context["library_initial_category"] = selected_category
+        context["library_page_title"] = page_title
+        context["library_page_description"] = page_description
+        context["library_initial_payload"] = _build_library_payload(
+            self.request,
+            category=selected_category,
+        )
         return context
 
 

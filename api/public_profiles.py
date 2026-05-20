@@ -161,6 +161,7 @@ RESERVED_HANDLES = frozenset({
     "learn",
     "legal",
     "legal-notice",
+    "library",
     "license",
     "licenses",
     "login",

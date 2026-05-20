@@ -3,9 +3,11 @@
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div class="space-y-2">
         <p class="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Discover</p>
-        <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Most popular shared Gobii agents</h1>
+        <h1 class="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">
+          {% if selected_category %}{{ selected_category }} AI agent templates{% else %}Most popular shared Gobii agents{% endif %}
+        </h1>
         <p class="max-w-3xl text-sm text-slate-600 sm:text-base">
-          Browse publicly shared agents from across Gobii.
+          {% if selected_category %}Browse publicly shared {{ selected_category }} agents from across Gobii.{% else %}Browse publicly shared agents from across Gobii.{% endif %}
         </p>
         {% if not user.is_authenticated %}
           <p class="text-sm font-medium text-indigo-700">Sign in to like templates.</p>

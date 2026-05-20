@@ -24,7 +24,15 @@ from django.utils.http import url_has_allowed_host_and_scheme
 from django.template.loader import render_to_string
 from django.templatetags.static import static
 from django.db import DatabaseError
-from api.models import MCPServerConfig, PaidPlanIntent, PersistentAgent, PersistentAgentTemplate, TrialPromo, UserBilling
+from api.models import (
+    MCPServerConfig,
+    PaidPlanIntent,
+    PersistentAgent,
+    PersistentAgentTemplate,
+    PersistentAgentTemplateUrlAlias,
+    TrialPromo,
+    UserBilling,
+)
 from api.agent.short_description import build_listing_description, build_mini_description
 from agents.services import PretrainedWorkerTemplateService
 from api.models import OrganizationMembership
@@ -132,6 +140,14 @@ from .utils_markdown import (
 from .homepage_cache import (
     get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
+)
+from .public_template_urls import (
+    public_template_category_label,
+    public_template_category_path,
+    public_template_category_slug,
+    public_template_category_slug_from_label,
+    public_template_detail_path,
+    public_template_hire_path,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
@@ -1594,28 +1610,81 @@ class PretrainedWorkerHireView(View):
         return response
 
 
+def _active_public_template_queryset():
+    return PersistentAgentTemplate.objects.select_related("public_profile").filter(
+        public_profile__isnull=False,
+        is_active=True,
+    )
+
+
+def _get_active_public_template_by_slug(template_slug: str | None):
+    return _active_public_template_queryset().filter(slug=template_slug).first()
+
+
+def _get_active_public_template_by_legacy_path(handle: str | None, template_slug: str | None):
+    template = _active_public_template_queryset().filter(
+        public_profile__handle=handle,
+        slug=template_slug,
+    ).first()
+    if template:
+        return template
+
+    alias = (
+        PersistentAgentTemplateUrlAlias.objects.select_related("template", "template__public_profile")
+        .filter(
+            public_profile__handle=handle,
+            slug=template_slug,
+            template__is_active=True,
+            template__public_profile__isnull=False,
+        )
+        .first()
+    )
+    if alias:
+        return alias.template
+    return None
+
+
+def _canonical_public_template_redirect(template):
+    return redirect(public_template_detail_path(template), permanent=True)
+
+
+class PublicTemplateLegacyDetailRedirectView(View):
+    def get(self, request, *args, **kwargs):
+        template = _get_active_public_template_by_legacy_path(
+            kwargs.get("handle"),
+            kwargs.get("template_slug"),
+        )
+        if not template:
+            raise Http404("This template is no longer available.")
+        return _canonical_public_template_redirect(template)
+
+
 class PublicTemplateDetailView(TemplateView):
     template_name = "public_templates/detail.html"
 
     def dispatch(self, request, *args, **kwargs):
-        handle = kwargs.get("handle")
         template_slug = kwargs.get("template_slug")
-        self.template = (
-            PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(public_profile__handle=handle, slug=template_slug, is_active=True)
-            .first()
-        )
+        self.template = _get_active_public_template_by_slug(template_slug)
         if not self.template:
             raise Http404("This template is no longer available.")
+        if kwargs.get("category_slug") != public_template_category_slug(self.template):
+            return _canonical_public_template_redirect(self.template)
         return super().dispatch(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        detail_path = public_template_detail_path(self.template)
+        category_path = public_template_category_path(self.template)
+        social_title = f"{self.template.display_name} AI Agent Template"
         context["template"] = self.template
         context["public_profile_handle"] = self.template.public_profile.handle
-        context["template_url"] = self.request.build_absolute_uri(
-            f"/{self.template.public_profile.handle}/{self.template.slug}/"
-        )
+        context["template_category_label"] = public_template_category_label(self.template)
+        context["template_category_url"] = self.request.build_absolute_uri(category_path)
+        context["template_hire_url"] = public_template_hire_path(self.template)
+        context["template_social_title"] = social_title
+        context["template_seo_title"] = f"{social_title} | Gobii"
+        context["template_url"] = self.request.build_absolute_uri(detail_path)
+        context["canonical_url"] = context["template_url"]
         context["schedule_jitter_minutes"] = self.template.schedule_jitter_minutes
         context["base_schedule"] = self.template.base_schedule
         context["schedule_description"] = PretrainedWorkerTemplateService.describe_schedule(self.template.base_schedule)
@@ -1633,13 +1702,12 @@ class PublicTemplateDetailView(TemplateView):
 
 class PublicTemplateHireView(View):
     def post(self, request, *args, **kwargs):
-        handle = kwargs.get("handle")
         template_slug = kwargs.get("template_slug")
-        template = (
-            PersistentAgentTemplate.objects.select_related("public_profile")
-            .filter(public_profile__handle=handle, slug=template_slug, is_active=True)
-            .first()
-        )
+        handle = kwargs.get("handle")
+        if handle:
+            template = _get_active_public_template_by_legacy_path(handle, template_slug)
+        else:
+            template = _get_active_public_template_by_slug(template_slug)
         if not template:
             raise Http404("This template is no longer available.")
 
@@ -2823,16 +2891,35 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
         )
 
     def location(self, template):
-        return reverse(
-            "pages:public_template_detail",
-            kwargs={
-                "handle": template.public_profile.handle,
-                "template_slug": template.slug,
-            },
-        )
+        return public_template_detail_path(template)
 
     def lastmod(self, template):
         return getattr(template, "updated_at", None)
+
+
+class PublicTemplateCategorySitemap(sitemaps.Sitemap):
+    changefreq = "weekly"
+    priority = 0.65
+
+    def items(self):
+        category_values = (
+            PersistentAgentTemplate.objects.filter(
+                public_profile__isnull=False,
+                is_active=True,
+            )
+            .exclude(slug="")
+            .values_list("category", flat=True)
+        )
+        return sorted({
+            str(category or "").strip() or "Uncategorized"
+            for category in category_values
+        })
+
+    def location(self, category):
+        return reverse(
+            "pages:library_category",
+            kwargs={"category_slug": public_template_category_slug_from_label(category)},
+        )
 
 
 class SolutionsSitemap(sitemaps.Sitemap):

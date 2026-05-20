@@ -26,7 +26,9 @@ from .views import (
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
     PublicTemplateSitemap,
+    PublicTemplateCategorySitemap,
     PublicTemplateDetailView,
+    PublicTemplateLegacyDetailRedirectView,
     PublicTemplateHireView,
     EngineeringProSignupView,
     SolutionView,
@@ -68,6 +70,7 @@ if settings.GOBII_PROPRIETARY_MODE:
     sitemaps['blog'] = BlogSitemap
 
 sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
+sitemaps['public_template_categories'] = PublicTemplateCategorySitemap
 sitemaps['public_templates'] = PublicTemplateSitemap
 sitemaps['solutions'] = SolutionsSitemap
 
@@ -77,6 +80,9 @@ urlpatterns = [
     path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
     path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
     path("library/", LibraryView.as_view(), name="library"),
+    path("library/<slug:category_slug>/", LibraryView.as_view(), name="library_category"),
+    path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
+    path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
     path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("api/homepage/integrations/search/", HomepageIntegrationsSearchView.as_view(), name="homepage_integrations_search"),
@@ -115,8 +121,8 @@ urlpatterns = [
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 
-    path('<slug:handle>/<slug:template_slug>/', PublicTemplateDetailView.as_view(), name='public_template_detail'),
-    path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_hire'),
+    path('<slug:handle>/<slug:template_slug>/', PublicTemplateLegacyDetailRedirectView.as_view(), name='public_template_legacy_detail'),
+    path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_legacy_hire'),
 
 ]
 

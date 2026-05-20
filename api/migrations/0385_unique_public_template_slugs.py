@@ -1,5 +1,7 @@
 from collections import defaultdict
+import uuid
 
+import django.db.models.deletion
 from django.db import migrations, models
 
 
@@ -23,11 +25,12 @@ def _build_unique_slug(base_slug, used_slugs):
 
 def dedupe_public_template_slugs(apps, schema_editor):
     Template = apps.get_model("api", "PersistentAgentTemplate")
+    Alias = apps.get_model("api", "PersistentAgentTemplateUrlAlias")
 
     public_templates = list(
         Template.objects.filter(public_profile__isnull=False)
         .exclude(slug="")
-        .values("id", "slug")
+        .values("id", "public_profile_id", "slug")
         .order_by("slug", "created_at", "id")
     )
     used_slugs = {template["slug"] for template in public_templates}
@@ -43,6 +46,11 @@ def dedupe_public_template_slugs(apps, schema_editor):
 
         for duplicate in duplicates[1:]:
             new_slug = _build_unique_slug(slug, used_slugs)
+            Alias.objects.get_or_create(
+                public_profile_id=duplicate["public_profile_id"],
+                slug=slug,
+                defaults={"template_id": duplicate["id"]},
+            )
             Template.objects.filter(pk=duplicate["id"]).update(slug=new_slug)
             used_slugs.add(new_slug)
 
@@ -53,6 +61,46 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        migrations.CreateModel(
+            name="PersistentAgentTemplateUrlAlias",
+            fields=[
+                ("id", models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False)),
+                (
+                    "slug",
+                    models.SlugField(
+                        help_text="Legacy public-facing slug that should redirect to the template's canonical URL.",
+                        max_length=80,
+                    ),
+                ),
+                ("created_at", models.DateTimeField(auto_now_add=True)),
+                (
+                    "public_profile",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="template_url_aliases",
+                        to="api.publicprofile",
+                    ),
+                ),
+                (
+                    "template",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="url_aliases",
+                        to="api.persistentagenttemplate",
+                    ),
+                ),
+            ],
+            options={
+                "ordering": ["public_profile", "slug"],
+            },
+        ),
+        migrations.AddConstraint(
+            model_name="persistentagenttemplateurlalias",
+            constraint=models.UniqueConstraint(
+                fields=("public_profile", "slug"),
+                name="unique_public_template_url_alias",
+            ),
+        ),
         migrations.RunPython(dedupe_public_template_slugs, migrations.RunPython.noop),
         migrations.AddConstraint(
             model_name="persistentagenttemplate",

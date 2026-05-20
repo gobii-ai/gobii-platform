@@ -205,8 +205,15 @@ switch (appName) {
     }
     const propsId = mountNode.dataset.propsJsonId
     const initialData = propsId ? readJsonScript<LibraryAgentsPayload>(propsId) : undefined
+    const initialCategory = mountNode.dataset.libraryInitialCategory || null
     screen = import('./screens/LibraryScreen').then(({ LibraryScreen }) => (
-      <LibraryScreen listUrl={listUrl} likeUrl={likeUrl} canLike={canLike} initialData={initialData} />
+      <LibraryScreen
+        listUrl={listUrl}
+        likeUrl={likeUrl}
+        canLike={canLike}
+        initialCategory={initialCategory}
+        initialData={initialData}
+      />
     ))
     break
   }

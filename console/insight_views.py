@@ -42,6 +42,7 @@ from djstripe.models import Price
 from util.subscription_helper import get_organization_plan, reconcile_user_plan_from_stripe
 from util.trial_enforcement import can_user_use_personal_agents_and_api
 from api.services.email_verification import has_verified_email
+from pages.public_template_urls import public_template_detail_path
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ def _build_agent_setup_metadata(
             source_agent=agent,
         ).first()
         if template and template.slug:
-            template_url = request.build_absolute_uri(f"/{public_profile.handle}/{template.slug}/")
+            template_url = request.build_absolute_uri(public_template_detail_path(template))
 
     return {
         "agentId": str(agent.id),

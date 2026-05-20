@@ -9,6 +9,7 @@ type LibraryScreenProps = {
   listUrl: string
   likeUrl: string
   canLike: boolean
+  initialCategory?: string | null
   initialData?: LibraryAgentsPayload
 }
 
@@ -89,13 +90,14 @@ function updateLikeInCachedPayload(
   }
 }
 
-export function LibraryScreen({ listUrl, likeUrl, canLike, initialData }: LibraryScreenProps) {
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
+export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = null, initialData }: LibraryScreenProps) {
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(initialCategory || null)
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('')
   const normalizedSearchQuery = debouncedSearchQuery.trim()
   const queryClient = useQueryClient()
-  const shouldUseInitialData = selectedCategory === null && normalizedSearchQuery.length === 0
+  const initialSelectedCategory = initialCategory || null
+  const shouldUseInitialData = selectedCategory === initialSelectedCategory && normalizedSearchQuery.length === 0
   const initialLibraryData = useMemo<InfiniteData<LibraryAgentsPayload, number> | undefined>(() => {
     if (!initialData || !shouldUseInitialData) {
       return undefined
