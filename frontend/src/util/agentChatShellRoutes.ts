@@ -1,7 +1,7 @@
-export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'email' | 'files'
+export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'email' | 'files' | 'contact-requests'
 
-const APP_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files)'
-const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files)'
+const APP_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
+const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
 
 function normalizeSubviewToken(token?: string | null): AgentChatShellSubview {
   switch (token) {
@@ -9,6 +9,7 @@ function normalizeSubviewToken(token?: string | null): AgentChatShellSubview {
     case 'secrets':
     case 'email':
     case 'files':
+    case 'contact-requests':
       return token
     default:
       return 'chat'
@@ -65,6 +66,8 @@ export function buildAgentChatShellPath(
         return `/app/agents/${agentId}/email`
       case 'files':
         return `/app/agents/${agentId}/files`
+      case 'contact-requests':
+        return `/app/agents/${agentId}/contact-requests`
       default:
         return `/app/agents/${agentId}`
     }
@@ -78,6 +81,8 @@ export function buildAgentChatShellPath(
       return `/console/agents/${agentId}/chat/email/`
     case 'files':
       return `/console/agents/${agentId}/chat/files/`
+    case 'contact-requests':
+      return `/console/agents/${agentId}/chat/contact-requests/`
     default:
       return `/console/agents/${agentId}/chat/`
   }

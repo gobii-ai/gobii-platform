@@ -41,6 +41,7 @@ type PendingActionComposerPanelProps = {
       smsContactPermissionAttested?: boolean
     }>
   ) => Promise<void>
+  onViewAllContactRequests?: () => void
 }
 
 function parseInlineError(error: unknown): string {
@@ -126,6 +127,7 @@ export function PendingActionComposerPanel({
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
   onResolveContactRequests,
+  onViewAllContactRequests,
 }: PendingActionComposerPanelProps) {
   const [busySpawnDecision, setBusySpawnDecision] = useState<'approve' | 'decline' | null>(null)
   const [spawnError, setSpawnError] = useState<string | null>(null)
@@ -310,6 +312,15 @@ export function PendingActionComposerPanel({
             ) : null}
           </div>
         </div>
+        {activeAction.kind === 'contact_requests' && onViewAllContactRequests ? (
+          <button
+            type="button"
+            onClick={onViewAllContactRequests}
+            className="mt-1 shrink-0 text-sm font-semibold text-slate-600 transition hover:text-slate-900"
+          >
+            View all
+          </button>
+        ) : null}
       </div>
 
       {hasActionBody ? (

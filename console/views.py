@@ -205,6 +205,7 @@ from util.urls import (
     append_query_params,
     append_context_query,
     build_immersive_chat_url,
+    build_immersive_contact_requests_url,
     load_daily_limit_action_payload,
 )
 from console.agent_chat.access import (
@@ -4098,7 +4099,12 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 'emailSettings': reverse('agent_email_settings', args=[agent.id]),
                 'manageFiles': reverse('agent_files', args=[agent.id]),
                 'smsEnable': reverse('agent_enable_sms', args=[agent.id]),
-                'contactRequests': reverse('agent_contact_requests', args=[agent.id]),
+                'contactRequests': build_immersive_contact_requests_url(
+                    request,
+                    agent.id,
+                    return_to=request.get_full_path(),
+                    organization_id=str(agent.organization_id) if agent.organization_id else None,
+                ),
                 'delete': reverse('agent_delete', args=[agent.id]),
                 'mcpServersManage': mcp_manage_url,
             },
@@ -7700,9 +7706,8 @@ class AgentWelcomeView(LoginRequiredMixin, DetailView):
 
         return context
 
-class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
-    """View for displaying and approving contact requests from agents."""
-    template_name = "console/agent_contact_requests.html"
+class AgentContactRequestsView(LoginRequiredMixin, View):
+    """Compatibility route for legacy contact request approval links."""
     
     def _resolve_agent_or_issue(self):
         """Return (agent, issue) where issue is one of: None, 'invalid', 'wrong_account'."""
@@ -7743,283 +7748,22 @@ class AgentContactRequestsView(LoginRequiredMixin, TemplateView):
         agent, issue = self._resolve_agent_or_issue()
         if issue:
             return self._issue_response(request, action='view', issue=issue)
-        return super().get(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_object")
-    def get_object(self):
-        agent, issue = self._resolve_agent_or_issue()
-        if issue:
-            # Should have been handled in get/post, but keep safety net
-            raise Http404("Agent not available")
-        return agent
-    
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent and pending contact requests to context."""
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        context['agent'] = agent
-        
-        # Get pending contact requests
-        from api.models import CommsAllowlistRequest, CommsAllowlistEntry, AgentAllowlistInvite
-        pending_requests = CommsAllowlistRequest.objects.filter(
-            agent=agent,
-            status=CommsAllowlistRequest.RequestStatus.PENDING
-        ).order_by('-requested_at')
-        
-        context['pending_requests'] = pending_requests
-        context['has_pending_requests'] = pending_requests.exists()
-        
-        # Get current allowlist usage for limit display
-        max_contacts = get_user_max_contacts_per_agent(
-            agent.user,
-            organization=agent.organization,
-        )
-        active_count = CommsAllowlistEntry.objects.filter(
-            agent=agent, is_active=True
-        ).count()
-        pending_invites = AgentAllowlistInvite.objects.filter(
-            agent=agent, status=AgentAllowlistInvite.InviteStatus.PENDING
-        ).count()
-        total_count = active_count + pending_invites
-        contact_counts = get_agent_contact_counts(agent)
-        if contact_counts is not None:
-            total_count = contact_counts["total"]
-
-        context['max_contacts'] = max_contacts
-        context['contact_cap_unlimited'] = max_contacts <= 0
-        context['active_count'] = active_count
-        context['pending_invites'] = pending_invites
-        context['total_count'] = active_count + pending_invites
-        context['remaining_slots'] = (
-            None if max_contacts <= 0 else max(0, max_contacts - (active_count + pending_invites))
-        )
-        
-        # Create form
-        from console.forms import ContactRequestApprovalForm
-        context['form'] = ContactRequestApprovalForm(contact_requests=pending_requests)
-        
-        return context
+        return self._redirect_to_immersive(request, agent)
     
     def post(self, request, *args, **kwargs):
-        """Handle approval/rejection of contact requests."""
         agent, issue = self._resolve_agent_or_issue()
         if issue:
             return self._issue_response(request, action='update', issue=issue)
+        return self._redirect_to_immersive(request, agent)
 
-        # Safety: agent is present beyond this point
-        # Get pending requests
-        from api.models import (
-            CommsAllowlistEntry,
-            CommsAllowlistRequest,
-            PersistentAgentStep,
-            PersistentAgentSystemStep,
+    def _redirect_to_immersive(self, request, agent):
+        return redirect(
+            build_immersive_contact_requests_url(
+                request,
+                agent.id,
+                organization_id=str(agent.organization_id) if agent.organization_id else None,
+            )
         )
-        pending_requests = CommsAllowlistRequest.objects.filter(
-            agent=agent,
-            status=CommsAllowlistRequest.RequestStatus.PENDING
-        ).order_by('-requested_at')
-        
-        from console.forms import ContactRequestApprovalForm
-        form = ContactRequestApprovalForm(request.POST, contact_requests=pending_requests)
-        
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    approved_count = 0
-                    rejected_count = 0
-                    approved_addresses = []
-                    invitations_sent = []
-                    
-                    for request_obj in pending_requests:
-                        field_name = f'approve_{request_obj.id}'
-                        should_approve = form.cleaned_data.get(field_name, False)
-                        
-                        try:
-                            if should_approve:
-                                # Get the direction and config settings from the form
-                                inbound_field = f'inbound_{request_obj.id}'
-                                outbound_field = f'outbound_{request_obj.id}'
-                                configure_field = f'configure_{request_obj.id}'
-                                attestation_field = f'sms_permission_attested_{request_obj.id}'
-                                allow_inbound = form.cleaned_data.get(inbound_field, True)
-                                allow_outbound = form.cleaned_data.get(outbound_field, True)
-                                can_configure = form.cleaned_data.get(configure_field, False)
-                                sms_contact_permission_attested = form.cleaned_data.get(
-                                    attestation_field,
-                                    False,
-                                )
-
-                                # Update the request's settings before approving
-                                request_obj.request_inbound = allow_inbound
-                                request_obj.request_outbound = allow_outbound
-                                request_obj.request_configure = can_configure
-                                update_fields = ['request_inbound', 'request_outbound', 'request_configure']
-                                if request_obj.channel == CommsChannel.SMS:
-                                    request_obj.sms_contact_permission_attested = (
-                                        sms_contact_permission_attested
-                                    )
-                                    update_fields.append('sms_contact_permission_attested')
-                                request_obj.save(update_fields=update_fields)
-                                
-                                # Try to approve (will directly add to allowlist, skipping invitation)
-                                result = request_obj.approve(invited_by=request.user, skip_invitation=True)
-                                if request_obj.channel == CommsChannel.SMS:
-                                    sms_event_kwargs = {
-                                        "user_id": request.user.id,
-                                        "agent": agent,
-                                        "address": request_obj.address,
-                                        "approval_source": "legacy_contact_request_approval",
-                                        "approval_action": "approve",
-                                        "allow_inbound": request_obj.request_inbound,
-                                        "allow_outbound": request_obj.request_outbound,
-                                        "can_configure": request_obj.request_configure,
-                                        "sms_contact_purpose": request_obj.sms_contact_purpose,
-                                        "sms_contact_purpose_details": request_obj.sms_contact_purpose_details,
-                                        "sms_contact_permission_attested": (
-                                            request_obj.sms_contact_permission_attested
-                                        ),
-                                        "allowlist_entry_id": (
-                                            str(result.id) if isinstance(result, CommsAllowlistEntry) else None
-                                        ),
-                                        "contact_request_id": str(request_obj.id),
-                                    }
-                                    transaction.on_commit(
-                                        lambda kwargs=sms_event_kwargs: track_sms_contact_approval(**kwargs)
-                                    )
-                                approved_count += 1
-                                approved_addresses.append(f"{request_obj.name or request_obj.address}")
-                                
-                                # Check if we created a new invitation that needs email (won't happen with skip_invitation=True)
-                                from api.models import AgentAllowlistInvite
-                                if isinstance(result, AgentAllowlistInvite):
-                                    invitations_sent.append(request_obj.address)
-                            else:
-                                request_obj.reject()
-                                rejected_count += 1
-                        except ValidationError as e:
-                            # Hit the limit, show error
-                            messages.error(
-                                request, 
-                                f"Could not approve {request_obj.address}: {e.message if hasattr(e, 'message') else str(e)}"
-                            )
-                            continue
-                    
-                    if approved_count > 0:
-                        # Switch agent to manual allowlist mode if not already
-                        if agent.whitelist_policy != PersistentAgent.WhitelistPolicy.MANUAL:
-                            agent.whitelist_policy = PersistentAgent.WhitelistPolicy.MANUAL
-                            agent.save(update_fields=['whitelist_policy'])
-                        
-                        # Send invitation emails for new invitations
-                        if invitations_sent:
-                            from django.urls import reverse
-                            from api.models import AgentAllowlistInvite
-                            
-                            for address in invitations_sent:
-                                # Get the invitation we just created
-                                invitation = AgentAllowlistInvite.objects.filter(
-                                    agent=agent,
-                                    address=address,
-                                    status=AgentAllowlistInvite.InviteStatus.PENDING
-                                ).first()
-                                
-                                if invitation and invitation.channel == 'email':
-                                    try:
-                                        # Get the agent's primary email endpoint
-                                        primary_email = agent.comms_endpoints.filter(
-                                            channel=CommsChannel.EMAIL, is_primary=True
-                                        ).first()
-                                        
-                                        if not primary_email:
-                                            primary_email = agent.comms_endpoints.filter(
-                                                channel=CommsChannel.EMAIL
-                                            ).first()
-                                        
-                                        if primary_email:
-                                            # Build accept/reject URLs
-                                            accept_url = request.build_absolute_uri(
-                                                reverse('agent_allowlist_invite_accept', kwargs={'token': invitation.token})
-                                            )
-                                            reject_url = request.build_absolute_uri(
-                                                reverse('agent_allowlist_invite_reject', kwargs={'token': invitation.token})
-                                            )
-                                            
-                                            context = {
-                                                'agent': agent,
-                                                'agent_owner': agent.user,
-                                                'contact_email': address,
-                                                'agent_email': primary_email.address,
-                                                'accept_url': accept_url,
-                                                'reject_url': reject_url,
-                                                'invite': invitation,
-                                            }
-                                            
-                                            subject = f"You're invited to communicate with {agent.name} on Gobii"
-                                            text_body = render_to_string('emails/agent_allowlist_invite.txt', context)
-                                            html_body = render_to_string('emails/agent_allowlist_invite.html', context)
-                                            
-                                            send_mail(
-                                                subject=subject,
-                                                message=text_body,
-                                                from_email=None,  # Use default from email
-                                                recipient_list=[address],
-                                                html_message=html_body,
-                                                fail_silently=True,  # Don't fail the whole process if email fails
-                                            )
-                                    except Exception as e:
-                                        logger.warning("Failed to send allowlist invitation email to %s: %s", address, e)
-                        
-                        # Create system step to record approvals
-                        step = PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description=f"User approved {approved_count} contact request(s)"
-                        )
-                        PersistentAgentSystemStep.objects.create(
-                            step=step,
-                            code=PersistentAgentSystemStep.Code.CONTACTS_APPROVED,
-                            notes=f"Approved: {', '.join(approved_addresses)}"
-                        )
-                        
-                        # Trigger agent event processing
-                        from api.agent.tasks.process_events import process_agent_events_task
-                        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
-                        
-                        Analytics.track_event(
-                            user_id=self.request.user.id,
-                            event=AnalyticsEvent.AGENT_CONTACTS_APPROVED,
-                            source=AnalyticsSource.WEB,
-                            properties={
-                                'agent_id': str(agent.pk),
-                                'agent_name': agent.name,
-                                'approved_count': approved_count,
-                                'rejected_count': rejected_count,
-                                'invitations_sent': len(invitations_sent),
-                            }
-                        )
-                        
-                        # Success message for approved contacts
-                        messages.success(
-                            request, 
-                            f"Successfully approved {approved_count} contact(s) - added to allowlist."
-                        )
-                    
-                    if rejected_count > 0:
-                        messages.info(request, f"Rejected {rejected_count} contact(s)")
-                    
-                    if approved_count > 0 or rejected_count > 0:
-                        return redirect('agent_contact_requests_thanks', pk=agent.pk)
-                    else:
-                        messages.warning(request, "No contacts were selected")
-                        
-            except Exception as e:
-                logger.error(f"Failed to process contact requests for agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to process requests. Please try again.")
-        
-        # If form invalid or failed, redisplay
-        context = self.get_context_data(**kwargs)
-        context['form'] = form
-        return self.render_to_response(context)
 
     def _issue_response(self, request, action: str, issue: str, extra: dict | None = None):
         ctx = {
@@ -8070,7 +7814,13 @@ class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
         agent, issue = self._resolve_agent_or_issue()
         if issue:
             return self._issue_response(request, action='view', issue=issue)
-        return super().get(request, *args, **kwargs)
+        return redirect(
+            build_immersive_contact_requests_url(
+                request,
+                agent.id,
+                organization_id=str(agent.organization_id) if agent.organization_id else None,
+            )
+        )
 
     @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
     def get_object(self):

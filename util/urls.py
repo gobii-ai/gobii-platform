@@ -171,6 +171,34 @@ def build_immersive_chat_url(
     return _build_immersive_url(request, path, return_to=return_to, embed=embed)
 
 
+def build_immersive_contact_requests_path(agent_id) -> str:
+    return f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent_id}/contact-requests"
+
+
+def build_immersive_contact_requests_url(
+    request,
+    agent_id,
+    *,
+    return_to: str | None = None,
+    embed: bool = False,
+    organization_id: str | None = None,
+) -> str:
+    url = _build_immersive_url(
+        request,
+        build_immersive_contact_requests_path(agent_id),
+        return_to=return_to,
+        embed=embed,
+    )
+    return append_context_query(url, organization_id)
+
+
+def build_immersive_contact_requests_site_url(agent_id, organization_id: str | None = None) -> str:
+    return append_context_query(
+        build_site_url(build_immersive_contact_requests_path(agent_id)),
+        organization_id,
+    )
+
+
 def build_immersive_agents_url(
     request,
     *,

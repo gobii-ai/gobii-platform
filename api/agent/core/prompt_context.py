@@ -29,6 +29,7 @@ from config import settings
 from config.plans import PLAN_CONFIG
 from util.subscription_helper import get_owner_plan
 from util.tool_costs import get_default_task_credit_cost, get_tool_cost_overview
+from util.urls import append_context_query, build_immersive_contact_requests_path
 
 from api.services import mcp_servers as mcp_server_service
 from api.services.dedicated_proxy_service import DedicatedProxyService
@@ -1349,7 +1350,14 @@ def _build_agent_settings_section(agent: PersistentAgent, *, plan_id: str | None
     agent_config_url = _build_console_url("agent_detail", pk=agent.id)
     secrets_url = _build_console_url("agent_secrets", pk=agent.id)
     email_settings_url = _build_console_url("agent_email_settings", pk=agent.id)
-    contact_requests_url = _build_console_url("agent_contact_requests", pk=agent.id)
+    contact_requests_url = build_immersive_contact_requests_path(agent.id)
+    base_url = (settings.PUBLIC_SITE_URL or "").rstrip("/")
+    if base_url:
+        contact_requests_url = f"{base_url}{contact_requests_url}"
+    contact_requests_url = append_context_query(
+        contact_requests_url,
+        str(agent.organization_id) if agent.organization_id else None,
+    )
     settings_lines: list[str] = [
         "Agent name.",
         f"Agent secrets: usernames and passwords the agent can use to authenticate to services. Manage secrets at {secrets_url}.",

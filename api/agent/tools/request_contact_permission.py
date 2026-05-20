@@ -7,7 +7,6 @@ these requests before the agent can send messages.
 """
 import logging
 from django.contrib.sites.models import Site
-from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 
@@ -19,6 +18,10 @@ from ...models import (
     SmsContactPurpose,
 )
 from api.services.sms_contact_purpose import sms_contact_purpose_required
+from util.urls import (
+    build_immersive_contact_requests_path,
+    build_immersive_contact_requests_site_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -230,13 +233,13 @@ def execute_request_contact_permission(agent: PersistentAgent, params: dict) -> 
     
     # Generate the full external URL for the contact requests page
     try:
-        current_site = Site.objects.get_current()
-        protocol = 'https://'
-        relative_url = reverse('agent_contact_requests', kwargs={'pk': agent.id})
-        approval_url = f"{protocol}{current_site.domain}{relative_url}"
-    except Exception as e:
-        logger.warning("Failed to generate contact requests URL for agent %s: %s", agent.id, str(e))
-        approval_url = "the agent console"
+        approval_url = build_immersive_contact_requests_site_url(
+            agent.id,
+            str(agent.organization_id) if agent.organization_id else None,
+        )
+    except Site.DoesNotExist:
+        logger.warning("No current Site configured; returning relative contact requests URL for agent %s", agent.id)
+        approval_url = build_immersive_contact_requests_path(agent.id)
     
     # Build response message
     parts = []

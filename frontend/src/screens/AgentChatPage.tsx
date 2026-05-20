@@ -44,6 +44,7 @@ import {
 import type { ConsoleContext } from '../api/context'
 import { fetchUsageBurnRate, fetchUsageSummary } from '../components/usage/api'
 import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
+import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
 import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
@@ -3165,6 +3166,10 @@ export function AgentChatPage({
     navigateToShellSubview('files')
   }, [navigateToShellSubview])
 
+  const handleOpenEmbeddedContactRequests = useCallback(() => {
+    navigateToShellSubview('contact-requests')
+  }, [navigateToShellSubview])
+
   const handleCloseEmbeddedSettings = useCallback(() => {
     if (!activeAgentIdRef.current) {
       return
@@ -4226,6 +4231,8 @@ export function AgentChatPage({
       make_global: makeGlobal,
     })
     replacePendingActionRequestsInCache(queryClient, activeAgentId, result.pendingActionRequests)
+    void queryClient.invalidateQueries({ queryKey: ['agent-settings', activeAgentId], exact: true })
+    void queryClient.invalidateQueries({ queryKey: ['agent-quick-settings', activeAgentId], exact: true })
   }, [activeAgentId, queryClient])
 
   const handleRemoveRequestedSecrets = useCallback(async (secretIds: string[]) => {
@@ -4347,6 +4354,8 @@ export function AgentChatPage({
         return 'Email Settings'
       case 'files':
         return 'Agent Files'
+      case 'contact-requests':
+        return 'Contact Requests'
       case 'settings':
       default:
         return 'Agent Settings'
@@ -4362,6 +4371,7 @@ export function AgentChatPage({
         onOpenSecrets={handleOpenEmbeddedSecrets}
         onOpenEmailSettings={handleOpenEmbeddedEmailSettings}
         onOpenFiles={handleOpenEmbeddedFiles}
+        onOpenContactRequests={handleOpenEmbeddedContactRequests}
       />
     ) : shellSubview === 'secrets' ? (
       <EmbeddedAgentSecretsPanel
@@ -4373,6 +4383,13 @@ export function AgentChatPage({
       <EmbeddedAgentEmailSettingsPanel
         agentId={activeAgentId}
         onBack={handleCloseEmbeddedSettings}
+      />
+    ) : shellSubview === 'contact-requests' ? (
+      <EmbeddedAgentContactRequestsPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        onBack={handleCloseEmbeddedSettings}
+        onResolveContactRequests={handleResolveContactRequests}
       />
     ) : (
       <EmbeddedAgentFilesPanel
@@ -4630,6 +4647,7 @@ export function AgentChatPage({
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
         onResolveContactRequests={handleResolveContactRequests}
+        onViewAllContactRequests={handleOpenEmbeddedContactRequests}
         onJumpToLatest={handleJumpToLatest}
         autoFocusComposer
         autoScrollPinned={autoScrollPinned}
