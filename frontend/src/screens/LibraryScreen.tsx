@@ -168,7 +168,12 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
   const libraryTotalLikes = firstPage?.libraryTotalLikes ?? 0
   const hasMore = Boolean(libraryQuery.hasNextPage)
 
-  const categoryFilters = useMemo(() => topCategories, [topCategories])
+  const categoryFilters = useMemo(() => {
+    if (!selectedCategory || topCategories.some((category) => category.name === selectedCategory)) {
+      return topCategories
+    }
+    return [{ name: selectedCategory, count: totalAgents }, ...topCategories]
+  }, [selectedCategory, topCategories, totalAgents])
 
   useEffect(() => {
     if (!selectedCategory || categoryFilters.length === 0) {
@@ -218,6 +223,10 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
     : selectedCategory
       ? 'Try another category.'
       : 'Check back soon for newly shared agents.'
+  const pageHeading = selectedCategory ? `${selectedCategory} AI agent templates` : 'Most popular shared Gobii agents'
+  const pageDescription = selectedCategory
+    ? `Browse publicly shared ${selectedCategory} agents from across Gobii.`
+    : 'Browse publicly shared agents from across Gobii.'
 
   return (
     <div className="space-y-6 pb-10">
@@ -225,10 +234,8 @@ export function LibraryScreen({ listUrl, likeUrl, canLike, initialCategory = nul
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-[0.14em] text-indigo-700">Discover</p>
-            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">Most popular shared Gobii agents</h1>
-            <p className="max-w-3xl text-sm text-slate-600 sm:text-base">
-              Browse publicly shared agents from across Gobii.
-            </p>
+            <h1 className="text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{pageHeading}</h1>
+            <p className="max-w-3xl text-sm text-slate-600 sm:text-base">{pageDescription}</p>
             {!canLike ? (
               <p className="text-sm font-medium text-indigo-700">Sign in to like templates.</p>
             ) : null}
