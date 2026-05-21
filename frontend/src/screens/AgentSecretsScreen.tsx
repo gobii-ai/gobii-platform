@@ -30,6 +30,7 @@ type AgentSecretsScreenProps = {
   globalSecretsUrl: string
   requestUrl: string
   onBack?: () => void
+  onOpenRequests?: () => void
 }
 
 const PLACEHOLDER_TOKEN = '00000000-0000-0000-0000-000000000000'
@@ -43,6 +44,7 @@ export function AgentSecretsScreen({
   globalSecretsUrl,
   requestUrl,
   onBack,
+  onOpenRequests,
 }: AgentSecretsScreenProps) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-secrets', agentId] as const, [agentId])
@@ -238,12 +240,22 @@ export function AgentSecretsScreen({
                     {requestedSecrets.length} pending request{requestedSecrets.length !== 1 ? 's' : ''} awaiting values
                   </p>
                 </div>
-                <a
-                  href={requestUrl}
-                  className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
-                >
-                  Provide Values
-                </a>
+                {onOpenRequests ? (
+                  <button
+                    type="button"
+                    onClick={onOpenRequests}
+                    className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
+                  >
+                    Provide Values
+                  </button>
+                ) : (
+                  <a
+                    href={requestUrl}
+                    className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
+                  >
+                    Provide Values
+                  </a>
+                )}
               </div>
               <div className="divide-y divide-slate-200/15">
                 {requestedSecrets.map((s) => (

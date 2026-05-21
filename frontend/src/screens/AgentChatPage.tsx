@@ -4541,6 +4541,7 @@ export function AgentChatPage({
         agentId={activeAgentId}
         agentName={resolvedAgentName || 'Agent'}
         onBack={handleCloseEmbeddedSettings}
+        onOpenRequests={handleOpenEmbeddedSecretRequests}
       />
     ) : shellSubview === 'secret-requests' ? (
       <EmbeddedAgentSecretRequestsPanel
