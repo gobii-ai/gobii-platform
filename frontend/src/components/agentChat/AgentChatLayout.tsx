@@ -55,6 +55,7 @@ import {
   filterChangedPlanSnapshot,
   hasCompletedPlanDeliverables,
 } from './planSnapshotUtils'
+import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 
 type TaskQuotaInfo = {
   available: number
@@ -68,30 +69,67 @@ function normalizeAgentSettingsPathname(pathname: string): string {
   return trimmed || '/'
 }
 
-function isCurrentAgentSettingsHref(href: string, agentId: string): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  try {
-    const url = new URL(href, window.location.origin)
-    return normalizeAgentSettingsPathname(url.pathname) === `/console/agents/${agentId}`
-  } catch {
-    return false
+type AgentChatMessageLinkSubview = Exclude<AgentChatShellSubview, 'chat'>
+
+function isAgentChatMessageLinkSubview(value?: string | null): value is AgentChatMessageLinkSubview {
+  switch (value) {
+    case 'settings':
+    case 'secrets':
+    case 'secret-requests':
+    case 'email':
+    case 'files':
+    case 'contact-requests':
+      return true
+    default:
+      return false
   }
 }
 
-function isCurrentAgentContactRequestsHref(href: string, agentId: string): boolean {
+function getCurrentAgentMessageLinkSubview(href: string, agentId: string): AgentChatMessageLinkSubview | null {
   if (typeof window === 'undefined') {
-    return false
+    return null
   }
   try {
     const url = new URL(href, window.location.origin)
     const pathname = normalizeAgentSettingsPathname(url.pathname)
-    return pathname === `/app/agents/${agentId}/contact-requests`
-      || pathname === `/console/agents/${agentId}/contact-requests`
-      || pathname === `/console/agents/${agentId}/chat/contact-requests`
+    const parts = pathname.split('/').filter(Boolean)
+
+    if (parts[0] === 'app' && parts[1] === 'agents' && parts[2] === agentId) {
+      if (
+        parts[3] === 'secrets'
+        && parts[4] === 'request'
+        && (parts.length === 5 || (parts.length === 6 && parts[5] === 'thanks'))
+      ) {
+        return 'secret-requests'
+      }
+      if (parts.length === 4 && isAgentChatMessageLinkSubview(parts[3])) {
+        return parts[3]
+      }
+      return null
+    }
+
+    if (parts[0] === 'console' && parts[1] === 'agents' && parts[2] === agentId) {
+      if (parts.length === 3) {
+        return 'settings'
+      }
+      if (
+        parts[3] === 'secrets'
+        && parts[4] === 'request'
+        && (parts.length === 5 || (parts.length === 6 && parts[5] === 'thanks'))
+      ) {
+        return 'secret-requests'
+      }
+      if (parts[3] === 'chat' && parts.length === 5 && isAgentChatMessageLinkSubview(parts[4])) {
+        return parts[4]
+      }
+      if (parts.length === 4 && isAgentChatMessageLinkSubview(parts[3])) {
+        return parts[3]
+      }
+    }
+
+    return null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -272,6 +310,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
+  onOpenAgentSecrets?: () => void
+  onOpenAgentSecretRequests?: () => void
+  onOpenAgentEmailSettings?: () => void
+  onOpenAgentFiles?: () => void
   onResolveContactRequests?: (
     responses: Array<{
       requestId: string
@@ -449,6 +491,10 @@ export function AgentChatLayout({
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
+  onOpenAgentSecrets,
+  onOpenAgentSecretRequests,
+  onOpenAgentEmailSettings,
+  onOpenAgentFiles,
   onResolveContactRequests,
   onViewAllContactRequests,
 }: AgentChatLayoutProps) {
@@ -932,15 +978,51 @@ export function AgentChatLayout({
     if (!agentId) {
       return false
     }
-    if (onViewAllContactRequests && isCurrentAgentContactRequestsHref(href, agentId)) {
+    const linkedSubview = getCurrentAgentMessageLinkSubview(href, agentId)
+    if (!linkedSubview) {
+      return false
+    }
+    if (linkedSubview === 'contact-requests') {
+      if (!onViewAllContactRequests) {
+        return false
+      }
       onViewAllContactRequests()
       return true
     }
-    if (!isCurrentAgentSettingsHref(href, agentId)) {
-      return false
+    if (linkedSubview === 'secrets') {
+      if (!onOpenAgentSecrets) {
+        return false
+      }
+      onOpenAgentSecrets()
+      return true
+    }
+    if (linkedSubview === 'secret-requests') {
+      if (!onOpenAgentSecretRequests) {
+        return false
+      }
+      onOpenAgentSecretRequests()
+      return true
+    }
+    if (linkedSubview === 'email') {
+      if (!onOpenAgentEmailSettings) {
+        return false
+      }
+      onOpenAgentEmailSettings()
+      return true
+    }
+    if (linkedSubview === 'files') {
+      if (!onOpenAgentFiles) {
+        return false
+      }
+      onOpenAgentFiles()
+      return true
     }
     if (previewActionsDisabled && onBlockedSettingsClick) {
       onBlockedSettingsClick('banner_desktop')
+      return true
+    }
+    if (onOpenFullSettings) {
+      onOpenFullSettings()
       return true
     }
     if (!canOpenQuickSettings) {
@@ -953,6 +1035,11 @@ export function AgentChatLayout({
     canOpenQuickSettings,
     handleSettingsOpen,
     onBlockedSettingsClick,
+    onOpenAgentEmailSettings,
+    onOpenAgentFiles,
+    onOpenAgentSecretRequests,
+    onOpenAgentSecrets,
+    onOpenFullSettings,
     onViewAllContactRequests,
     previewActionsDisabled,
   ])

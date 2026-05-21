@@ -3222,6 +3222,10 @@ export function AgentChatPage({
     navigateToShellSubview('secrets')
   }, [navigateToShellSubview])
 
+  const handleOpenEmbeddedSecretRequests = useCallback(() => {
+    navigateToShellSubview('secret-requests')
+  }, [navigateToShellSubview])
+
   const handleOpenEmbeddedEmailSettings = useCallback(() => {
     navigateToShellSubview('email')
   }, [navigateToShellSubview])
@@ -4829,6 +4833,10 @@ export function AgentChatPage({
         onResolveSpawnRequest={handleResolveSpawnRequest}
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
+        onOpenAgentSecrets={handleOpenEmbeddedSecrets}
+        onOpenAgentSecretRequests={handleOpenEmbeddedSecretRequests}
+        onOpenAgentEmailSettings={handleOpenEmbeddedEmailSettings}
+        onOpenAgentFiles={handleOpenEmbeddedFiles}
         onResolveContactRequests={handleResolveContactRequests}
         onViewAllContactRequests={handleOpenEmbeddedContactRequests}
         onJumpToLatest={handleJumpToLatest}
