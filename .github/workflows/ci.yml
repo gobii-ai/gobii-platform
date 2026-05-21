@@ -154,7 +154,7 @@ jobs:
       matrix:
         include:
           - batch: shard_01
-            tag: batch_pages batch_sms batch_console_email_oauth batch_token_usage batch_event_parallel batch_allowlist_direction batch_tool_costs batch_output_schema batch_soft_expiration batch_console_api_keys batch_console_allowlist batch_pa_shutdown_triggers
+            tag: batch_pages batch_sms batch_console_email_oauth batch_token_usage batch_event_parallel batch_allowlist_direction batch_tool_costs batch_output_schema batch_soft_expiration batch_console_api_keys batch_console_allowlist batch_pa_shutdown_triggers complexity_guardrails_batch
           - batch: shard_02
             tag: batch_mcp_tools batch_human_input batch_eval_fingerprint batch_user_flags batch_api_agents batch_api_tasks pipedream_jit_connect batch_browser_task_db batch_agent_transfer batch_periodic batch_mcp_admin mcp_org_assignment_batch
           - batch: shard_03

@@ -37,14 +37,12 @@ SOURCE_ROOTS = (
     "pages/",
     "proprietary/",
     "sandbox_server/server/",
-    "sandbox_server/tests/",
     "setup/",
     "static/css/",
     "static/js/",
     "tasks/",
     "templates/",
     "templatetags/",
-    "tests/",
     "util/",
 )
 SOURCE_FILES = {
@@ -98,6 +96,43 @@ EXCLUDED_FILENAMES = {
     "package-lock.json",
     "uv.lock",
 }
+TEST_EXCLUDED_PREFIXES = (
+    "frontend/src/test/",
+    "tests/",
+)
+TEST_EXCLUDED_PARTS = (
+    "/__tests__/",
+    "/tests/",
+)
+TEST_EXCLUDED_FILES = {
+    "config/minimal_test_settings.py",
+    "config/test_settings.py",
+}
+TEST_FILE_SUFFIXES = {
+    ".js",
+    ".jsx",
+    ".py",
+    ".ts",
+    ".tsx",
+}
+EVAL_EXCLUDED_PREFIXES = (
+    "api/evals/",
+    "api/templates/evals/",
+    "console/evals/",
+    "frontend/src/components/evals/",
+)
+EVAL_EXCLUDED_FILES = {
+    "api/agent/eval_agents.py",
+    "api/agent/tools/eval_synthetic_tools.py",
+    "api/management/commands/run_evals.py",
+    "config/eval_local_settings.py",
+    "config/eval_postgres_settings.py",
+    "console/templates/console/evals.html",
+    "console/templates/console/evals_detail.html",
+    "frontend/src/api/evals.ts",
+    "frontend/src/screens/EvalsDetailScreen.tsx",
+    "frontend/src/screens/EvalsScreen.tsx",
+}
 
 
 @dataclass(frozen=True)
@@ -130,6 +165,37 @@ def _git_files() -> list[str]:
     ]
 
 
+def _is_test_source(path: str) -> bool:
+    if path in TEST_EXCLUDED_FILES:
+        return True
+    if any(path.startswith(prefix) for prefix in TEST_EXCLUDED_PREFIXES):
+        return True
+    normalized = f"/{path}"
+    if any(part in normalized for part in TEST_EXCLUDED_PARTS):
+        return True
+
+    path_obj = Path(path)
+    if path_obj.suffix not in TEST_FILE_SUFFIXES:
+        return False
+
+    name = path_obj.name
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or any(
+            name.endswith(f".{kind}{path_obj.suffix}")
+            for kind in ("test", "spec")
+        )
+    )
+
+
+def _is_eval_source(path: str) -> bool:
+    return path in EVAL_EXCLUDED_FILES or any(
+        path.startswith(prefix)
+        for prefix in EVAL_EXCLUDED_PREFIXES
+    )
+
+
 def _is_counted_source(path: str) -> bool:
     if path in EXCLUDED_FILENAMES:
         return False
@@ -137,6 +203,8 @@ def _is_counted_source(path: str) -> bool:
         return False
     normalized = f"/{path}"
     if any(part in normalized for part in EXCLUDED_PARTS):
+        return False
+    if _is_test_source(path) or _is_eval_source(path):
         return False
     if path in SOURCE_FILES:
         return True
@@ -377,13 +445,19 @@ def _budget_metadata(baseline_sha: str) -> dict[str, Any]:
         "baseline_sha": baseline_sha,
         "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
         "source_loc": {
-            "description": "Nonblank lines in tracked application/test/frontend source files.",
+            "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
             "include_roots": list(SOURCE_ROOTS),
             "include_files": sorted(SOURCE_FILES),
             "include_suffixes": sorted(SOURCE_SUFFIXES),
             "exclude_prefixes": list(EXCLUDED_PREFIXES),
             "exclude_parts": list(EXCLUDED_PARTS),
             "exclude_filenames": sorted(EXCLUDED_FILENAMES),
+            "exclude_test_prefixes": list(TEST_EXCLUDED_PREFIXES),
+            "exclude_test_parts": list(TEST_EXCLUDED_PARTS),
+            "exclude_test_files": sorted(TEST_EXCLUDED_FILES),
+            "exclude_test_file_suffixes": sorted(TEST_FILE_SUFFIXES),
+            "exclude_eval_prefixes": list(EVAL_EXCLUDED_PREFIXES),
+            "exclude_eval_files": sorted(EVAL_EXCLUDED_FILES),
         },
         "prompt_size": {
             "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
