@@ -51,13 +51,13 @@
   <meta name="theme-color" content="#0ea5e9">
 
   <!-- Connection hints for common third-party script origins -->
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://static.gobii.ai">
-  {% if settings.GOBII_PROPRIETARY_MODE %}
-  <link rel="preconnect" href="https://js.stripe.com">
-  {% endif %}
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <link rel="preconnect" href="https://www.googletagmanager.com">
+  {% endif %}
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  {% if settings.GOBII_PROPRIETARY_MODE %}
+  <link rel="preconnect" href="https://js.stripe.com">
   {% endif %}
 
   <!-- Critical CSS: discover render-blocking styles before analytics scripts. -->
@@ -374,7 +374,7 @@
   <script src="{% static 'js/gobii_analytics.js' %}" defer></script>
   {% if settings.TURNSTILE_ENABLED %}
     {% if cta_signup_modal_config.enabled or request.resolver_match.url_name == 'account_login' or request.resolver_match.url_name == 'account_signup' %}
-  <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
+    <script src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit" async defer></script>
     {% endif %}
   {% endif %}
   <script src="{% static 'js/account_identity_signals.js' %}" defer></script>
