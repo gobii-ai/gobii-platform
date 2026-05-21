@@ -13,8 +13,6 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import DecimalField, Sum, Value
-from django.db.models.functions import Coalesce
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
 from django.views import View
@@ -297,18 +295,8 @@ def _should_include_agent_setup_insights(user: Any, agent: PersistentAgent) -> b
 def _get_month_usage_payload(ctx: InsightContext) -> dict:
     owner = ctx.organization or ctx.user
     current_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
-
-    if ctx.organization is None:
-        total = Decimal(TaskCreditService.get_tasks_entitled_for_owner(owner))
-        used = TaskCreditService.get_owner_task_credits_used(owner, task_credits=current_credits)
-    else:
-        credits_zero = Value(DECIMAL_ZERO, output_field=DecimalField(max_digits=20, decimal_places=6))
-        credit_agg = current_credits.aggregate(
-            total=Coalesce(Sum("credits"), credits_zero),
-            used=Coalesce(Sum("credits_used"), credits_zero),
-        )
-        total = Decimal(credit_agg.get("total") or DECIMAL_ZERO)
-        used = Decimal(credit_agg.get("used") or DECIMAL_ZERO)
+    total = Decimal(TaskCreditService.get_tasks_entitled_for_owner(owner))
+    used = TaskCreditService.get_owner_task_credits_used(owner, task_credits=current_credits)
 
     unlimited = total == Decimal(TASKS_UNLIMITED)
 

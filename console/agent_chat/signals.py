@@ -527,7 +527,7 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
             thinking_payload = serialize_thinking_event(instance)
             if thinking_payload:
                 _send(_group_name(instance.agent_id), "timeline_event", thinking_payload, agent_id=str(instance.agent_id))
-                emit_agent_usage_update(instance.agent)
+                transaction.on_commit(lambda: emit_agent_usage_update(instance.agent))
         except Exception:
             logger.debug("Failed to broadcast thinking event for %s", instance.id, exc_info=True)
     try:

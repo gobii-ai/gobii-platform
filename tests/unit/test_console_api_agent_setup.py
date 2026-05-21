@@ -11,12 +11,15 @@ from django.utils import timezone
 
 from api.models import (
     BrowserUseAgent,
+    Organization,
+    OrganizationMembership,
     PersistentAgent,
     PersistentAgentTemplate,
     PublicProfile,
     TaskCredit,
     UserPhoneNumber,
 )
+from constants.plans import PlanNames
 
 
 User = get_user_model()
@@ -142,7 +145,7 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(response.json()["error"], "SMS has been disabled for this agent.")
         mock_find_unused_number.assert_not_called()
 
-    def _create_agent(self, *, daily_credit_limit=Decimal("10")):
+    def _create_agent(self, *, daily_credit_limit=Decimal("10"), organization=None):
         browser = BrowserUseAgent.objects.create(user=self.user, name="Browser Agent")
         return PersistentAgent.objects.create(
             user=self.user,
@@ -150,17 +153,53 @@ class AgentSetupApiTests(TestCase):
             charter="Do useful things",
             browser_use_agent=browser,
             daily_credit_limit=daily_credit_limit,
+            organization=organization,
         )
 
     def _create_task_credit(self, *, credits=Decimal("100"), credits_used=Decimal("25")):
         now = timezone.now()
-        return TaskCredit.objects.create(
+        task_credit = TaskCredit.objects.filter(
             user=self.user,
-            credits=credits,
-            credits_used=credits_used,
-            granted_date=now - timedelta(days=1),
-            expiration_date=now + timedelta(days=30),
+            organization__isnull=True,
+            plan=PlanNames.FREE,
+            additional_task=False,
+            voided=False,
+        ).first()
+        if task_credit is None:
+            return TaskCredit.objects.create(
+                user=self.user,
+                credits=credits,
+                credits_used=credits_used,
+                granted_date=now - timedelta(days=1),
+                expiration_date=now + timedelta(days=30),
+            )
+
+        task_credit.credits = credits
+        task_credit.credits_used = credits_used
+        task_credit.granted_date = now - timedelta(days=1)
+        task_credit.expiration_date = now + timedelta(days=30)
+        task_credit.save(update_fields=["credits", "credits_used", "granted_date", "expiration_date"])
+        return task_credit
+
+    def _create_org(self):
+        org = Organization.objects.create(name="Acme", slug="acme", created_by=self.user)
+        billing = org.billing
+        billing.subscription = PlanNames.ORG_TEAM
+        billing.purchased_seats = 3
+        billing.max_extra_tasks = 0
+        billing.save(update_fields=["subscription", "purchased_seats", "max_extra_tasks"])
+        OrganizationMembership.objects.create(
+            org=org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
         )
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(org.id)
+        session["context_name"] = org.name
+        session.save()
+        return org
 
     @patch("console.insight_views.get_agent_daily_credit_state")
     def test_insights_usage_metadata_includes_today_and_month_usage(self, mock_daily_state):
@@ -208,6 +247,27 @@ class AgentSetupApiTests(TestCase):
         self.assertIsNone(today_usage["limit"])
         self.assertIsNone(today_usage["percentUsed"])
         self.assertTrue(today_usage["unlimited"])
+
+    @patch("console.insight_views.get_agent_daily_credit_state")
+    def test_insights_org_month_usage_uses_entitlement_without_credit_rows(self, mock_daily_state):
+        org = self._create_org()
+        agent = self._create_agent(organization=org)
+        mock_daily_state.return_value = {
+            "burn_rate_per_hour": Decimal("0"),
+            "used": Decimal("0"),
+            "hard_limit": Decimal("20"),
+            "soft_target": Decimal("10"),
+        }
+
+        response = self.client.get(reverse("console_agent_insights", kwargs={"agent_id": agent.id}))
+
+        self.assertEqual(response.status_code, 200)
+        usage = next(insight for insight in response.json()["insights"] if insight["insightType"] == "burn_rate")
+        month_usage = usage["metadata"]["monthUsage"]
+        self.assertEqual(month_usage["used"], 0.0)
+        self.assertEqual(month_usage["limit"], 1500.0)
+        self.assertEqual(month_usage["percentUsed"], 0.0)
+        self.assertFalse(month_usage["unlimited"])
 
     @patch("console.api_views.generate_handle_suggestion", return_value="shared-agent")
     def test_agent_template_share_info_returns_suggested_handle(self, _mock_suggestion):
