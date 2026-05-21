@@ -242,7 +242,7 @@
 
 .usage-insight-card {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-template-rows: minmax(0, 1fr);
   align-items: stretch;
   gap: 0.75rem;
@@ -254,8 +254,7 @@
   display: contents;
 }
 
-.usage-gauge-card,
-.usage-details-card {
+.usage-gauge-card {
   align-self: stretch;
   justify-self: stretch;
   width: 100%;
@@ -377,47 +376,40 @@
   text-transform: uppercase;
 }
 
-.usage-details-card {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 0.2rem;
-  padding: 0.55rem 0.75rem;
-  color: inherit;
-  text-align: left;
-  text-decoration: none;
-  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
-}
-
-.usage-details-card:hover,
-.usage-details-card:focus-visible {
-  border-color: rgba(170, 116, 206, 0.36);
-  background: rgba(255, 255, 255, 0.78);
-  outline: none;
-  transform: translateY(-1px);
-}
-
-.usage-details-card__title {
-  color: #3d2551;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.usage-details-card__body {
-  color: #7a5a91;
-  font-size: 0.68rem;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.usage-details-card__action {
+.usage-gauge-card__action {
+  grid-column: 1 / -1;
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
-  margin-top: 0.2rem;
-  color: #7c4ca0;
-  font-size: 0.7rem;
+  justify-content: center;
+  width: fit-content;
+  margin-top: 0.12rem;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: #6f4690;
+  font-size: 0.62rem;
   font-weight: 800;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.usage-gauge-card__action:hover,
+.usage-gauge-card__action:focus-visible {
+  color: #3d2551;
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.usage-gauge-card__action--details {
+  color: #7c4ca0;
+}
+
+.usage-gauge-card__action--details:hover,
+.usage-gauge-card__action--details:focus-visible {
+  color: #3d2551;
 }
 
 /* ==========================================================================
@@ -2945,6 +2937,7 @@
 
   .usage-gauge-card__copy {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: center;
     gap: 0.25rem;
@@ -2968,21 +2961,10 @@
     display: none;
   }
 
-  .usage-details-card {
-    align-items: center;
-    justify-content: center;
-    gap: 0.25rem;
-    padding: 0.5rem;
-    text-align: center;
-  }
-
-  .usage-details-card__body {
-    display: none;
-  }
-
-  .usage-details-card__action {
+  .usage-gauge-card__action {
+    flex: 0 0 auto;
     margin-top: 0;
-    font-size: 0.68rem;
+    font-size: 0.58rem;
   }
 }
 
@@ -3021,10 +3003,6 @@
     font-size: 0.54rem;
   }
 
-  .usage-details-card {
-    padding: 0.45rem 0.35rem;
-  }
-
   .insight-metric-cards {
     flex-direction: column;
     gap: 0.5rem;
@@ -3045,13 +3023,11 @@
     gap: 0.5rem;
   }
 
-  .usage-gauge-card__title,
-  .usage-details-card__title {
+  .usage-gauge-card__title {
     font-size: 0.7rem;
   }
 
-  .usage-gauge-card__label,
-  .usage-details-card__body {
+  .usage-gauge-card__label {
     font-size: 0.62rem;
   }
 

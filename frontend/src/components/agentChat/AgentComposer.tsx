@@ -342,6 +342,7 @@ type AgentComposerProps = {
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
   onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
   usageUrl?: string | null
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
@@ -395,6 +396,7 @@ export const AgentComposer = memo(function AgentComposer({
   onPauseChange,
   isInsightsPaused = false,
   onOpenUsage,
+  onOpenQuickSettings,
   usageUrl = '/console/usage/',
   hideInsightsPanel = false,
   intelligenceConfig = null,
@@ -1683,6 +1685,7 @@ export const AgentComposer = memo(function AgentComposer({
                         insight={currentInsight}
                         onDismiss={handleDismissInsight}
                         onOpenUsage={onOpenUsage}
+                        onOpenQuickSettings={onOpenQuickSettings}
                         usageUrl={usageUrl}
                       />
                     ) : (

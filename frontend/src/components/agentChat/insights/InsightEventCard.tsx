@@ -7,6 +7,7 @@ type InsightEventCardProps = {
   insight: InsightEvent
   onDismiss?: (insightId: string) => void
   onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
   usageUrl?: string | null
 }
 
@@ -14,13 +15,22 @@ export function InsightEventCard({
   insight,
   onDismiss,
   onOpenUsage,
+  onOpenQuickSettings,
   usageUrl,
 }: InsightEventCardProps) {
   switch (insight.insightType) {
     case 'time_saved':
       return <TimeSavedInsight insight={insight} onDismiss={onDismiss} />
     case 'burn_rate':
-      return <BurnRateInsight insight={insight} onDismiss={onDismiss} onOpenUsage={onOpenUsage} usageUrl={usageUrl} />
+      return (
+        <BurnRateInsight
+          insight={insight}
+          onDismiss={onDismiss}
+          onOpenUsage={onOpenUsage}
+          onOpenQuickSettings={onOpenQuickSettings}
+          usageUrl={usageUrl}
+        />
+      )
     case 'agent_setup':
       return <AgentSetupInsight insight={insight} />
     default:

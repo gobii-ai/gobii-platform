@@ -1629,6 +1629,7 @@ export function AgentChatLayout({
               onPauseChange={onPauseChange}
               isInsightsPaused={isInsightsPaused}
               onOpenUsage={onOpenUsage}
+              onOpenQuickSettings={canOpenQuickSettings ? handleSettingsOpen : undefined}
               usageUrl={sidebarUsageUrl}
               hideInsightsPanel={hideInsightsPanel}
               intelligenceConfig={llmIntelligence}

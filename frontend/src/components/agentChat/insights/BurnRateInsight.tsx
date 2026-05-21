@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion'
-import { ArrowRight, CalendarDays, Gauge } from 'lucide-react'
+import { CalendarDays, Gauge } from 'lucide-react'
 import type { InsightEvent, BurnRateMetadata, UsageGaugeMetadata } from '../../../types/insight'
 import { InsightGauge } from './InsightGauge'
 
@@ -7,6 +7,7 @@ type BurnRateInsightProps = {
   insight: InsightEvent
   onDismiss?: (insightId: string) => void
   onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
   usageUrl?: string | null
 }
 
@@ -42,10 +43,16 @@ function UsageGauge({
   title,
   usage,
   icon,
+  onAdjust,
+  onDetails,
+  detailsUrl,
 }: {
   title: string
   usage: UsageGaugeMetadata
   icon: 'today' | 'month'
+  onAdjust?: () => void
+  onDetails?: () => void
+  detailsUrl?: string
 }) {
   const displayValue = clampPercent(usage.percentUsed)
   const centerValue = Math.round(displayValue).toString()
@@ -55,6 +62,19 @@ function UsageGauge({
   const iconNode = icon === 'today'
     ? <Gauge size={13} strokeWidth={2.2} />
     : <CalendarDays size={13} strokeWidth={2.2} />
+  const action = onAdjust ? (
+    <button type="button" className="usage-gauge-card__action" onClick={onAdjust}>
+      Adjust
+    </button>
+  ) : onDetails ? (
+    <button type="button" className="usage-gauge-card__action usage-gauge-card__action--details" onClick={onDetails}>
+      Details
+    </button>
+  ) : detailsUrl ? (
+    <a className="usage-gauge-card__action usage-gauge-card__action--details" href={detailsUrl}>
+      Details
+    </a>
+  ) : null
 
   if (usage.unlimited) {
     return (
@@ -70,6 +90,7 @@ function UsageGauge({
           <span className="usage-gauge-card__title">{title}</span>
           <span className="usage-gauge-card__label">{label}</span>
           <span className="usage-gauge-card__status">Unlimited</span>
+          {action}
         </div>
       </div>
     )
@@ -99,6 +120,7 @@ function UsageGauge({
         </span>
         <span className="usage-gauge-card__title">{title}</span>
         <span className="usage-gauge-card__label">{label}</span>
+        {action}
       </div>
     </div>
   )
@@ -108,25 +130,13 @@ export function BurnRateInsight({
   insight,
   onDismiss,
   onOpenUsage,
+  onOpenQuickSettings,
   usageUrl,
 }: BurnRateInsightProps) {
   const metadata = insight.metadata as BurnRateMetadata
   const todayUsage = resolveTodayUsage(metadata)
   const monthUsage = resolveMonthUsage(metadata)
   const detailsUrl = metadata.usageUrl || usageUrl || '/console/usage/'
-  const detailAction = (
-    <span className="usage-details-card__action">
-      Details
-      <ArrowRight size={13} strokeWidth={2.4} />
-    </span>
-  )
-  const detailsContent = (
-    <>
-      <span className="usage-details-card__title">Usage</span>
-      <span className="usage-details-card__body">Open detailed usage and quota trends.</span>
-      {detailAction}
-    </>
-  )
 
   return (
     <motion.div
@@ -142,19 +152,15 @@ export function BurnRateInsight({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.08 }}
       >
-        <UsageGauge title="Today" usage={todayUsage} icon="today" />
-        <UsageGauge title="This month" usage={monthUsage} icon="month" />
+        <UsageGauge title="Today" usage={todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
+        <UsageGauge
+          title="This month"
+          usage={monthUsage}
+          icon="month"
+          onDetails={onOpenUsage}
+          detailsUrl={onOpenUsage ? undefined : detailsUrl}
+        />
       </motion.div>
-
-      {onOpenUsage ? (
-        <button type="button" className="usage-details-card" onClick={onOpenUsage}>
-          {detailsContent}
-        </button>
-      ) : (
-        <a className="usage-details-card" href={detailsUrl}>
-          {detailsContent}
-        </a>
-      )}
 
       {onDismiss && insight.dismissible && (
         <button
