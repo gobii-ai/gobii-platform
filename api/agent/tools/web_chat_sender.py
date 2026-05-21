@@ -213,7 +213,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables to include. Pass attachments here; do not paste file paths into the chat body unless you want them shown as text.",
+                        "description": "Optional filespace paths or $[/path] variables for file deliverables. For create_chart, paste result.inline/inline_html in body instead.",
                     },
                     "will_continue_work": {
                         "type": "boolean",

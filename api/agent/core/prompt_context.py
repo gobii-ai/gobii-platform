@@ -1509,8 +1509,9 @@ def _render_prompt_context_once(
         "Use sqlite_batch when SQL is needed for real filtering, joins, aggregation, charts, truncated/large data, "
         "or durable tables. For multiple prior tool outputs, query __tool_results rows together with IN/CTEs/json_each "
         "or CREATE TABLE AS SELECT; do not read one result_text blob per source. "
-        "Do not poll built-ins for freshness; new messages/tool completions wake you. "
-        "Use read_file for file contents, and source identifiers from schema, tool results, query output, or prompt context."
+        "Do not query __messages for anything new; new inbound messages are already in unified history. "
+        "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
+        "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -2842,7 +2843,7 @@ def _get_web_chat_formatting_guidance() -> str:
         "Web chat and peer DM formatting:\n"
         "Use Markdown. Start with the answer or main finding, then add only the structure the result needs: "
         "short bullets, a compact table, clear links, or a few titled sections. Bold the key numbers or labels. "
-        "Use whitespace to group related facts, not decorative separators. Copy chart paths from create_chart results; never invent them. "
+        "Use whitespace to group related facts, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
         "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
     )
 
@@ -3352,7 +3353,7 @@ def _get_system_instruction(
             "Your response text is a user message. Use it only for questions, blockers, config changes, findings, or final deliverables.\n"
             "When the next step depends on a human answer, call request_human_input instead of sending a text-only or chat-only question so the answer is tracked.\n"
             "If the user explicitly asks you to ask for monitoring targets/scope before setup, use request_human_input before any setup/config mutation.\n"
-            "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, or internal reasoning.\n"
+            "While working, respond with tool calls and no text. If an exact URL/result already succeeded, never search for it or refetch the same successful URL.\n"
             "Text-only user messages auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
@@ -3545,7 +3546,7 @@ def _get_system_instruction(
 
         f"{plan_setup_rule}"
 
-        "Message users only for input, blockers, config changes, or findings; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
+        "User-facing question, blocker, config change, or finding only; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
         "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email can use rich HTML and source links. "
         "For web tasks, give specific URLs/searches/actions; retry with a different prompt if useful. "
 
@@ -3574,9 +3575,8 @@ def _get_system_instruction(
         "numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Link entities with copied result URLs. Present requested/returned data directly, "
         "omitting unavailable extras. "
         "summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
-        "Charts are artifacts: create them only when requested or when table/prose would materially obscure the answer. "
-        "Call create_chart first and copy result.inline/result.inline_html; never invent chart paths, hashes, markdown "
-        "image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact "
+        "Charts: create only when requested/materially useful. "
+        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact "
         "value to send-tool attachments and never say a file is attached when attachments are empty. Use create_csv for "
         "tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must "
         "return exactly one row and one column.\n\n"
@@ -3629,14 +3629,14 @@ def _get_system_instruction(
         "For multi-step research, investigate the leads needed to satisfy the stated scope, then synthesize.\n\n"
 
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company, batch, funding, pricing, product, news, or status asks: use bounded "
-        "research mode. Do one focused search or structured lookup, scrape 1-3 top sources only if snippets are "
-        "insufficient, then send one sectioned answer with takeaways, compact bullets/table, and a compact Sources section using "
-        "copied URLs. After one search result set plus 1-2 strong pages, the next action is the final answer, not "
-        "another query; cite at least two distinct source URLs when two or more results support the answer. Use at most one "
-        "web search query unless it is empty or contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build "
+        "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded "
+        "research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are "
+        "insufficient, then send one sectioned answer with takeaways, bullets/table, and a compact Sources section using "
+        "copied URLs. After one result set plus 1-2 strong pages, the next action is the final answer, not "
+        "another query; cite at least two distinct source URLs when two or more results support it. Use at most one "
+        "web search query unless empty or contradictory. If topical, scrape/rank; no narrower variants. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build "
         "SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, "
-        "exports, list-all, outreach, monitoring, or another scope that truly needs it.\n\n"
+        "exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
         "For explicit deep or exhaustive research, collect a larger but finite source set, usually 4-8 strong "

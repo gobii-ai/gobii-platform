@@ -460,6 +460,9 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. "
             "Make the tool reusable with runtime parameters for source inputs/tables, destination outputs/tables, "
             "dates/status/minimums/batch limits when relevant; when you run it, pass concrete representative values. "
+            "Candidate domains/URLs/tables must be explicit runtime inputs, and any batch/limit/cursor design must "
+            "return remaining_work or next_cursor. Side-effect simulations must make completed writes and read-only "
+            "verification unambiguous. "
             "Simulate any external side effects that would normally happen."
         )
 

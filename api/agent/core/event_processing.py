@@ -743,6 +743,8 @@ def _should_infer_message_tool_continuation(message_text: str) -> bool:
     if not message_text or "?" in message_text:
         return False
     lower_text = message_text.lower()
+    if "$[/" in message_text or "<img" in lower_text or "![](" in message_text:
+        return False
     if len(message_text) > 500 and any(marker in lower_text for marker in ("http://", "https://", "**", "###", "source ")):
         return False
     if _has_completion_signal(message_text):

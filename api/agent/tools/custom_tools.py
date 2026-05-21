@@ -754,12 +754,10 @@ def _validate_schema_runtime_params_for_source(
         return None
 
     input_like_names = {
-        "urls",
-        "url",
-        "input_urls",
-        "input_data",
-        "candidate_urls",
-        "candidate_url",
+        "urls", "url", "domains", "domain",
+        "input_urls", "input_domains", "input_data", "input_values", "inputs", "items",
+        "candidates", "candidate_urls", "candidate_url", "candidate_domains", "candidate_domain",
+        "candidate_inputs", "candidate_list", "company_domains",
         "input_table",
         "source_table",
         "output_table",
@@ -781,7 +779,7 @@ def _validate_schema_runtime_params_for_source(
 
     return (
         "URL/list validator custom tools must require explicit runtime inputs instead of relying on built-in samples "
-        "or hidden defaults. Mark urls/input_table/output_table/minimum/limit params as required as appropriate, then "
+        "or hidden defaults. Mark urls/domains/candidates/input_table/source_table plus output_table/dest_table/minimum/limit params as required as appropriate, then "
         "invoke the tool with concrete values. Patch all validation issues before retrying: undefined names, remaining_work/next_cursor, explicit inputs, and do_not_repeat_manually when writes happen."
     )
 
@@ -1004,7 +1002,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
                 "Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
                 "Do not manually repeat MCP/tool/API calls. For slow batches, design the tool to be chunkable by default: include `limit`/`batch_size` and status/id filters, durable progress, remaining counts/work/cursor, and patch it to process smaller resumable batches instead of manual single-action tool loops. "
                 "Every success or error return dict should include `next_action`; keep returns concise with status, summary, what changed or which outputs are ready, counts/side effects, skipped duplicates, remaining work, and verification guidance. "
-                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values, rejected reasons, and whether more inputs are needed. "
+                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values, rejected reasons, and whether more inputs are needed. URL/domain validators require concrete `urls`, `domains`, or `input_table` params. "
                 "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
                 "Secrets are in os.environ; if missing, request `secret_type='env_var'` rather than a domain-scoped credential. "
                 "Network code needs the SOCKS5 proxy: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]` when needed, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, subprocess curl honors env vars, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx`; direct HTTPS tunneling should use ALL_PROXY. For tool-to-tool calls, use ctx.call_tool. "
@@ -1364,7 +1362,7 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, or destinations. "
         "Never invoke custom_* with empty params just because the code has defaults; pass concrete sample/default values on the first run. "
         "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for dedupe/format jobs expose input_table, output_table, and run_date or equivalents. "
-        "For URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params as required inputs, then pass concrete values when invoking. "
+        "For URL/list validators, accept the candidate URLs/domains or input_table plus output_table and minimum/limit or destination/default params as required inputs, then pass concrete values when invoking. "
         "Parse URL paths, fullmatch/anchor regexes, or capture exact path segments; do not accept/reject based on `url[match.end():]` remainders. "
         "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
         "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "

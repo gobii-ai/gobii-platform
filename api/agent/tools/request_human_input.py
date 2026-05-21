@@ -81,12 +81,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human-input only for a real blocker or planning question. "
+                "Create tracked human-input only for a real blocker or planning question; it appears in web chat and does not send email/SMS. "
+                "If notifying by chat/email/SMS, send the exact question/options there too; questions sent only by chat, email, or SMS are not tracked. "
                 "In Planning Mode, planning questions must use this tool and include options; ask at most three. "
-                "Outside Planning Mode, do not use this for preference surveys, timezone/channel choices, optional formatting, "
-                "category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose afterward. "
+                "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose afterward. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
-                f"Plain text only, max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars; this does not send email/SMS."
+                f"Plain text only, no Markdown/HTML, max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
                 "type": "object",
@@ -119,7 +119,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. true if work or email/SMS notification continues; false if waiting for the answer."
+                            "REQUIRED; use true when you will send an email/SMS containing these questions or keep working; false if waiting."
                         ),
                     },
                 },

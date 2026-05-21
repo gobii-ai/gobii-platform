@@ -192,6 +192,7 @@ class CustomToolsTests(TestCase):
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use values",
+            "URL/domain validators require concrete `urls`, `domains`, or `input_table` params",
             "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
@@ -210,7 +211,7 @@ class CustomToolsTests(TestCase):
             "Never invoke custom_* with empty params",
             "do not stop after seed/setup/preview",
             "dedupe/format jobs expose input_table, output_table, and run_date",
-            "URL/list validators, accept the candidate list or input_table plus output_table and minimum/limit or destination/default params as required inputs",
+            "URL/list validators, accept the candidate URLs/domains or input_table plus output_table and minimum/limit or destination/default params as required inputs",
             "do not accept/reject based on `url[match.end():]` remainders",
             "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
@@ -739,7 +740,7 @@ def run(params, ctx):
                 "source_path": "/tools/url_classifier_valid.py",
                 "source_code": self._build_runnable_tool_source(
                     "def run(params, ctx):\n"
-                    "    urls = params['input_data']\n"
+                    "    urls = params['candidates']\n"
                     "    limit = params['limit']\n"
                     "    accepted = [url for url in urls if '/posts/' in url]\n"
                     "    accepted = accepted[:limit]\n"
@@ -755,10 +756,10 @@ def run(params, ctx):
                 "parameters_schema": {
                     "type": "object",
                     "properties": {
-                        "input_data": {"type": "array", "items": {"type": "string"}},
+                        "candidates": {"type": "array", "items": {"type": "string"}},
                         "limit": {"type": "integer"},
                     },
-                    "required": ["input_data", "limit"],
+                    "required": ["candidates", "limit"],
                 },
                 "enable": False,
             },
