@@ -350,6 +350,40 @@ class DailyLimitPromptContextTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
+    def _render_prompt_content(self, daily_state):
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
+            "api.agent.core.prompt_context.ensure_comms_compacted"
+        ), patch(
+            "api.agent.core.prompt_context.get_llm_config_with_failover",
+            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
+        ):
+            context, _, _ = build_prompt_context(
+                self.agent,
+                daily_credit_state=daily_state,
+            )
+
+        user_message = next(message for message in context if message["role"] == "user")
+        return user_message["content"]
+
+    def test_prompt_collapses_equal_soft_and_hard_limits_with_80_percent_warning(self):
+        content = self._render_prompt_content(
+            {
+                "hard_limit": Decimal("100"),
+                "hard_limit_remaining": Decimal("20"),
+                "soft_target": Decimal("100"),
+                "soft_target_remaining": Decimal("20"),
+                "soft_target_exceeded": False,
+                "used": Decimal("80"),
+                "next_reset": timezone.now(),
+            }
+        )
+
+        self.assertIn("Daily limit progress: 80/100", content)
+        self.assertIn("Getting tired (80%+)", content)
+        self.assertNotIn("Soft target progress", content)
+        self.assertNotIn("Hard limit progress", content)
+        self.assertNotIn("you will not be stopped immediately", content)
+
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     def test_prompt_includes_daily_limit_message_only_links(self):
         daily_state = {
@@ -357,6 +391,7 @@ class DailyLimitPromptContextTests(TestCase):
             "hard_limit_remaining": Decimal("0"),
             "soft_target": Decimal("1"),
             "soft_target_remaining": Decimal("0"),
+            "soft_target_exceeded": True,
             "used": Decimal("2"),
             "next_reset": timezone.now(),
         }
@@ -374,23 +409,12 @@ class DailyLimitPromptContextTests(TestCase):
             )
         )
 
-        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), patch(
-            "api.agent.core.prompt_context.ensure_comms_compacted"
-        ), patch(
-            "api.agent.core.prompt_context.get_llm_config_with_failover",
-            return_value=[("endpoint", "openai/gpt-4o-mini", {})],
-        ):
-            context, _, _ = build_prompt_context(
-                self.agent,
-                daily_credit_state=daily_state,
-            )
-
-        user_message = next(message for message in context if message["role"] == "user")
-        content = user_message["content"]
+        content = self._render_prompt_content(daily_state)
         self.assertIn("DAILY HARD LIMIT MODE", content)
         self.assertIn(settings_url, content)
         self.assertIn(f"double {double_limit_url_prefix}?token=", content)
         self.assertIn(f"unlimited {unlimited_limit_url_prefix}?token=", content)
+        self.assertIn("Only message tools are available until the user raises the limit", content)
         self.assertIn("Once the user raises the limit, you can continue the task.", content)
 
 
@@ -467,6 +491,7 @@ class DailyLimitProcessingTests(TestCase):
             "hard_limit_remaining": Decimal("0"),
             "soft_target": Decimal("1"),
             "soft_target_remaining": Decimal("0"),
+            "soft_target_exceeded": True,
             "used": Decimal("2"),
             "next_reset": timezone.now(),
         },

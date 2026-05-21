@@ -257,6 +257,7 @@ def _daily_credit_state() -> dict[str, Any]:
     return {
         "soft_target": Decimal("20"),
         "soft_target_remaining": Decimal("19"),
+        "soft_target_exceeded": False,
         "hard_limit": Decimal("40"),
         "hard_limit_remaining": Decimal("39"),
         "used": Decimal("1"),

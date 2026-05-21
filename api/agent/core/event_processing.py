@@ -4542,7 +4542,6 @@ def _ensure_credit_for_tool(
                     soft_remaining_after if soft_remaining_after > Decimal("0") else Decimal("0")
                 )
                 daily_state["soft_target_remaining"] = soft_remaining_after
-                daily_state["remaining"] = soft_remaining_after
                 daily_state["soft_target_exceeded"] = soft_remaining_after <= Decimal("0")
         except Exception:
             logger.debug(

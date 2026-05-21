@@ -745,7 +745,7 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         window_minutes=credit_settings.burn_rate_window_minutes,
     )
     burn_24h_details = compute_burn_rate(agent, window_minutes=24 * 60)
-    local_now_for_owner, owner_timezone = resolve_user_local_time(agent.user, now)
+    local_now_for_owner, _ = resolve_user_local_time(agent.user, now)
     is_offpeak = is_offpeak_hour(local_now_for_owner.hour)
     burn_threshold = (
         credit_settings.offpeak_burn_rate_threshold_per_hour
@@ -790,10 +790,8 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
     )
 
     state = {
-        "date": today,
         "soft_target": soft_target,
         "used": used,
-        "remaining": soft_remaining,
         "soft_target_remaining": soft_remaining,
         "hard_limit": hard_limit,
         "hard_limit_remaining": hard_remaining,
@@ -806,10 +804,6 @@ def get_agent_daily_credit_state(agent: PersistentAgent) -> dict:
         "burn_rate_threshold_per_hour": effective_threshold,
         "burn_rate_24h_total": burn_24h_details.get("window_total"),
         "burn_rate_threshold_24h": scaled_24h_threshold,
-        "burn_rate_base_threshold_per_hour": scaled_threshold,
-        "burn_rate_inactive_weeks": inactive_weeks,
-        "burn_rate_offpeak_active": is_offpeak,
-        "burn_rate_timezone": owner_timezone,
     }
     return state
 
@@ -2561,6 +2555,12 @@ def add_budget_awareness_sections(
             used = daily_credit_state.get("used", Decimal("0"))
             next_reset = daily_credit_state.get("next_reset")
             message_only_mode = is_daily_hard_limit_message_only_mode(daily_credit_state)
+            reset_text = f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
+            limits_are_equal = (
+                soft_target is not None
+                and hard_limit is not None
+                and soft_target == hard_limit
+            )
 
             if message_only_mode and agent is not None:
                 links = build_agent_daily_limit_action_links(agent.id, agent.organization_id)
@@ -2578,21 +2578,32 @@ def add_budget_awareness_sections(
                     True,
                 ))
 
-            if soft_target is not None:
-                reset_text = (
-                    f"Next reset at {next_reset.isoformat()}. " if next_reset else ""
-                )
+            hard_limit_warning = ""
+            if hard_limit is not None and hard_limit > Decimal("0"):
+                try:
+                    ratio = used / hard_limit
+                except Exception:
+                    ratio = None
+                if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
+                    hard_limit_warning = (
+                        "😮‍💨 Almost out of energy—one tool call left. Save your place and rest."
+                    )
+                elif ratio is not None and ratio >= Decimal("0.8"):
+                    hard_limit_warning = (
+                        "😅 Getting tired (80%+). Finish current work or preserve enough context to resume."
+                    )
+
+            if soft_target is not None and not limits_are_equal:
                 if used > soft_target:
                     soft_target_warning = (
-                        "😅 Past your soft target for today—getting tired. "
-                        "Wrap up current work and preserve enough context to resume. "
+                        "Past your soft target for today. Slow down and prioritize the remaining work. "
                     )
                 else:
                     soft_target_warning = ""
                 remaining_soft = max(Decimal("0"), soft_target - used)
                 soft_text = (
                     "This is your daily task usage target. Every tool call consumes credits. "
-                    "If you exceed this target, you will not be stopped immediately, but you risk hitting your hard limit sooner. "
+                    "Exceeding this target leaves less room before the enforced hard limit. "
                     f"Soft target progress: {used}/{soft_target} "
                     f"Remaining credits: {remaining_soft} "
                     f"{soft_target_warning}"
@@ -2607,43 +2618,35 @@ def add_budget_awareness_sections(
                 ))
 
             if hard_limit is not None and hard_limit > Decimal("0"):
-                try:
-                    ratio = used / hard_limit
-                except Exception:
-                    ratio = None
-                if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
-                    hard_limit_warning = (
-                        "😮‍💨 Almost out of energy—one tool call left. Save your place and rest."
-                    )
-                elif ratio is not None and ratio >= Decimal("0.9"):
-                    hard_limit_warning = (
-                        "😅 Running on fumes (90%). Finish what you're doing or preserve enough context to resume."
-                    )
-                else:
-                    hard_limit_warning = ""
                 remaining_hard = max(Decimal("0"), hard_limit - used)
-
+                section_name = "daily_limit_progress" if limits_are_equal else "hard_limit_progress"
+                limit_name = "daily limit" if limits_are_equal else "hard limit"
+                intro = (
+                    "This is your daily task usage limit. "
+                    if limits_are_equal
+                    else "This is your task usage hard limit for today. "
+                )
                 if message_only_mode:
-                    hard_text = (
-                        "This is your task usage hard limit for today. "
+                    limit_text = (
+                        f"{intro}"
                         "You are currently limited to message tools until the user raises the limit or it resets. "
                         "Every non-message tool remains blocked while this mode is active. "
-                        f"Hard limit progress: {used}/{hard_limit} "
-                        f"Remaining credits: {remaining_hard} "
-                        f"{hard_limit_warning}"
                     )
                 else:
-                    hard_text = (
-                        f"This is your task usage hard limit for today. Once you reach this limit, "
+                    limit_text = (
+                        f"{intro}Once you reach this limit, "
                         "you will be blocked from making further tool calls until the limit resets. "
-                        "Every tool call you make consumes credits against this limit. "
-                        f"Hard limit progress: {used}/{hard_limit} "
-                        f"Remaining credits: {remaining_hard} "
-                        f"{hard_limit_warning}"
+                        "Every tool call consumes credits against this limit. "
                     )
                 sections.append((
-                    "hard_limit_progress",
-                    hard_text,
+                    section_name,
+                    (
+                        f"{limit_text}"
+                        f"{limit_name.capitalize()} progress: {used}/{hard_limit} "
+                        f"Remaining credits: {remaining_hard} "
+                        f"{hard_limit_warning}"
+                        f"{reset_text if limits_are_equal else ''}"
+                    ),
                     3,
                     True,
                 ))
