@@ -20,9 +20,19 @@
 {% block content %}
 <div class="bg-gradient-to-b from-white via-indigo-50/40 to-white">
   <section class="max-w-5xl mx-auto px-6 pt-16 pb-6">
-    <a href="{% url 'pages:home' %}#pretrained-workers" onclick="const ref=document.referrer; if (ref) { const origin=new URL(ref, window.location.href).origin; if (origin===window.location.origin && window.history.length>1) { window.history.back(); return false; } }" class="inline-flex items-center gap-2 text-sm font-medium text-indigo-600 hover:text-indigo-500 transition">
-      ← Back to pretrained workers
-    </a>
+    <nav aria-label="Breadcrumb" class="text-sm font-medium">
+      <ol class="flex flex-wrap items-center gap-2 text-slate-600">
+        <li>
+          <a href="{% url 'pages:home' %}" class="text-indigo-600 hover:text-indigo-500 transition">Home</a>
+        </li>
+        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li>
+          <a href="{% url 'pages:home' %}#pretrained-workers" class="text-indigo-600 hover:text-indigo-500 transition">Pretrained workers</a>
+        </li>
+        <li aria-hidden="true" class="text-slate-400">/</li>
+        <li aria-current="page" class="text-slate-500">{{ pretrained_worker.display_name }}</li>
+      </ol>
+    </nav>
     <div class="mt-6 rounded-3xl bg-white/80 backdrop-blur shadow-xl overflow-hidden">
       <div class="relative p-10">
         <div class="absolute inset-x-0 -top-40 h-80 bg-gradient-to-br from-indigo-200/40 via-transparent to-blue-200/40 blur-3xl pointer-events-none"></div>
@@ -74,6 +84,27 @@
                   {% if trigger.description %}
                   <p class="mt-1 text-sm text-slate-600">{{ trigger.description }}</p>
                   {% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </section>
+            {% endif %}
+            {% if related_pretrained_workers %}
+            <section>
+              <h2 class="text-xl font-semibold text-slate-900">Related pretrained workers</h2>
+              <ul class="mt-4 space-y-4">
+                {% for worker in related_pretrained_workers %}
+                <li>
+                  <a href="{% url 'pages:pretrained_worker_detail' worker.code %}" class="group block rounded-2xl border border-indigo-100 bg-white/80 px-5 py-4 transition hover:border-indigo-200 hover:bg-white">
+                    <span class="text-xs font-semibold uppercase tracking-wide text-indigo-500">{{ worker.category|default:"General" }}</span>
+                    <span class="mt-2 flex items-start justify-between gap-4">
+                      <span>
+                        <span class="block text-base font-semibold text-slate-900 group-hover:text-indigo-600 transition">{{ worker.display_name }}</span>
+                        <span class="mt-1 block text-sm leading-relaxed text-slate-600">{{ worker.tagline }}</span>
+                      </span>
+                      <span class="shrink-0 text-sm font-medium text-indigo-600">View</span>
+                    </span>
+                  </a>
                 </li>
                 {% endfor %}
               </ul>

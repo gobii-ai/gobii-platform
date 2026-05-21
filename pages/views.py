@@ -1436,6 +1436,28 @@ class PretrainedWorkerDetailView(TemplateView):
             raise Http404("This pretrained worker is no longer available.")
         return super().dispatch(request, *args, **kwargs)
 
+    def get_related_pretrained_workers(self):
+        current_category = (self.employee.category or "").strip().casefold()
+        current_tools = set(self.employee.default_tools or [])
+        candidates = [
+            template
+            for template in PretrainedWorkerTemplateService.get_active_templates()
+            if template.code != self.employee.code
+        ]
+
+        def related_sort_key(template):
+            template_category = (template.category or "").strip().casefold()
+            category_rank = 0 if current_category and template_category == current_category else 1
+            shared_tool_count = len(current_tools.intersection(template.default_tools or []))
+            return (
+                category_rank,
+                -shared_tool_count,
+                getattr(template, "priority", 100),
+                template.display_name.lower(),
+            )
+
+        return sorted(candidates, key=related_sort_key)[:3]
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         detail_url = self.request.build_absolute_uri(
@@ -1453,14 +1475,12 @@ class PretrainedWorkerDetailView(TemplateView):
 
         structured_data = {
             "@context": "https://schema.org",
-            "@type": "SoftwareApplication",
-            "name": self.employee.display_name,
+            "@type": "WebPage",
+            "name": social_title,
             "description": seo_description,
-            "applicationCategory": self.employee.category or "BusinessApplication",
-            "operatingSystem": "Web",
             "url": detail_url,
             "image": default_social_image_url,
-            "creator": {
+            "publisher": {
                 "@type": "Organization",
                 "name": "Gobii",
             },
@@ -1468,6 +1488,19 @@ class PretrainedWorkerDetailView(TemplateView):
                 "@type": "WebSite",
                 "name": "Gobii",
                 "url": home_url,
+            },
+            "mainEntity": {
+                "@type": "Service",
+                "name": self.employee.display_name,
+                "description": seo_description,
+                "url": detail_url,
+                "image": default_social_image_url,
+                "serviceType": "AI agent template",
+                "category": self.employee.category or "General",
+                "provider": {
+                    "@type": "Organization",
+                    "name": "Gobii",
+                },
             },
         }
         breadcrumb_data = {
@@ -1515,6 +1548,7 @@ class PretrainedWorkerDetailView(TemplateView):
         context["contact_method_label"] = PretrainedWorkerTemplateService.describe_contact_channel(
             self.employee.recommended_contact_channel
         )
+        context["related_pretrained_workers"] = self.get_related_pretrained_workers()
         return context
 
 

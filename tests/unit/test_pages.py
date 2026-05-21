@@ -83,7 +83,6 @@ class HomePageTests(TestCase):
             segment for segment in button.stripped_strings if segment and segment != "→"
         ).strip()
 
-    @tag("batch_pages")
     def test_home_page_renders(self):
         """Basic smoke test for home page."""
         response = self.client.get("/")
@@ -94,7 +93,6 @@ class HomePageTests(TestCase):
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_home_page_includes_stripe_js_in_proprietary_mode(self):
         response = self.client.get("/")
 
@@ -102,14 +100,12 @@ class HomePageTests(TestCase):
         self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
-    @tag("batch_pages")
     def test_home_page_omits_stripe_js_in_community_mode(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
-    @tag("batch_pages")
     def test_home_page_shows_fish_in_both_modes(self):
         """The Gobii fish mascot should render in both proprietary and community modes."""
         for proprietary_mode in (False, True):
@@ -119,7 +115,6 @@ class HomePageTests(TestCase):
                     self.assertEqual(response.status_code, 200)
                     self.assertContains(response, 'data-gobii-fish-cursor')
 
-    @tag("batch_pages")
     def test_home_page_has_meta_description(self):
         response = self.client.get("/")
         self.assertContains(
@@ -127,7 +122,6 @@ class HomePageTests(TestCase):
             '<meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">',
         )
 
-    @tag("batch_pages")
     def test_home_page_does_not_render_signup_modal_shell_when_flag_is_off(self):
         response = self.client.get("/")
 
@@ -135,7 +129,6 @@ class HomePageTests(TestCase):
         self.assertNotContains(response, "gobii-cta-signup-modal-config")
         self.assertNotContains(response, 'id="cta-signup-modal"')
 
-    @tag("batch_pages")
     def test_home_page_renders_signup_modal_shell_when_flag_is_on_for_anonymous_users(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
@@ -144,7 +137,6 @@ class HomePageTests(TestCase):
         self.assertContains(response, "gobii-cta-signup-modal-config")
         self.assertContains(response, 'id="cta-signup-modal"')
 
-    @tag("batch_pages")
     def test_home_page_signup_modal_config_includes_analytics_events_when_flag_is_on(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.get("/")
@@ -158,7 +150,6 @@ class HomePageTests(TestCase):
         self.assertEqual(modal_config["events"]["email_routed"], AnalyticsEvent.CTA_AUTH_MODAL_EMAIL_ROUTED.value)
         self.assertEqual(modal_config["events"]["failed"], AnalyticsEvent.CTA_AUTH_MODAL_FAILED.value)
 
-    @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
         TURNSTILE_ENABLED=True,
@@ -175,7 +166,6 @@ class HomePageTests(TestCase):
         self.assertContains(response, "turnstile/v0/api.js?render=explicit")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_home_page_uses_legacy_hero_illustration_when_fish_homepage_is_off(self):
         with override_flag("fish_homepage", active=False):
             response = self.client.get("/")
@@ -187,7 +177,6 @@ class HomePageTests(TestCase):
         self.assertIsNone(soup.select_one("[data-gobii-fish-cursor]"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_home_page_uses_fish_hero_animation_when_fish_homepage_is_on(self):
         with override_flag("fish_homepage", active=True):
             response = self.client.get("/")
@@ -197,7 +186,6 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(soup.select_one("[data-gobii-fish-cursor]"))
         self.assertIsNone(soup.find("img", {"src": "/static/images/undraw/texting.svg"}))
 
-    @tag("batch_pages")
     def test_home_page_excludes_eval_agents(self):
         User = get_user_model()
         user = User.objects.create_user(
@@ -231,7 +219,6 @@ class HomePageTests(TestCase):
         self.assertIn("Visible Agent", names)
         self.assertNotIn("Eval Agent", names)
 
-    @tag("batch_pages")
     def test_home_page_recent_agents_view_all_opens_immersive_app(self):
         User = get_user_model()
         user = User.objects.create_user(
@@ -268,7 +255,6 @@ class HomePageTests(TestCase):
         self.assertEqual(parsed.path, "/app/agents")
         self.assertEqual(parse_qs(parsed.query).get("return_to"), ["/"])
 
-    @tag("batch_pages")
     def test_home_page_exposes_all_pretrained_workers(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         response = self.client.get("/")
@@ -279,7 +265,6 @@ class HomePageTests(TestCase):
         self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(templates))
 
-    @tag("batch_pages")
     def test_home_page_filters_by_category(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         category = None
@@ -301,7 +286,6 @@ class HomePageTests(TestCase):
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
         self.assertEqual(response.context.get("homepage_pretrained_total"), len(templates))
 
-    @tag("batch_pages")
     def test_home_page_filters_by_search(self):
         templates = PretrainedWorkerTemplateService.get_active_templates()
         self.assertGreater(len(templates), 0)
@@ -323,7 +307,6 @@ class HomePageTests(TestCase):
         self.assertEqual(response.context.get("homepage_pretrained_filtered_count"), len(expected))
 
     @patch("pages.views.get_homepage_integrations_payload", return_value={"enabled": False, "builtins": []})
-    @tag("batch_pages")
     def test_home_page_hides_integrations_section_when_pipedream_is_disabled(self, _mock_integrations):
         response = self.client.get("/")
 
@@ -336,7 +319,6 @@ class HomePageTests(TestCase):
         PIPEDREAM_CLIENT_SECRET="",
         PIPEDREAM_PROJECT_ID="",
     )
-    @tag("batch_pages")
     def test_home_page_hides_integrations_when_pipedream_server_exists_but_config_is_missing(self):
         MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.PLATFORM,
@@ -391,7 +373,6 @@ class HomePageTests(TestCase):
             ],
         },
     )
-    @tag("batch_pages")
     def test_home_page_renders_built_in_integrations(self, _mock_integrations):
         response = self.client.get("/")
 
@@ -441,7 +422,6 @@ class HomePageTests(TestCase):
             ],
         },
     )
-    @tag("batch_pages")
     def test_home_page_keeps_integrations_trigger_when_no_inline_icons_match(self, _mock_integrations):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
@@ -454,7 +434,6 @@ class HomePageTests(TestCase):
         return_value={"enabled": True, "builtins": []},
     )
     @patch("pages.views.PipedreamCatalogService.search_apps")
-    @tag("batch_pages")
     def test_homepage_integrations_search_api_error_is_non_fatal(self, mock_search, _mock_integrations):
         mock_search.side_effect = PipedreamCatalogError("Pipedream catalog unavailable.")
 
@@ -484,7 +463,6 @@ class HomePageTests(TestCase):
         },
     )
     @patch("pages.views.PipedreamCatalogService.search_apps")
-    @tag("batch_pages")
     def test_homepage_integrations_search_api_excludes_built_in_integrations(self, mock_search, _mock_integrations):
         mock_search.return_value = [
             MagicMock(
@@ -528,7 +506,6 @@ class HomePageTests(TestCase):
         )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @tag("batch_pages")
     def test_home_cta_text_changes_for_authenticated_users(self):
         unauth_response = self.client.get("/")
         self.assertEqual(unauth_response.status_code, 200)
@@ -578,7 +555,6 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(auth_card_button), "Spawn This Worker")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @tag("batch_pages")
     def test_home_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
         user = get_user_model().objects.create_user(
             username="home_cta_trial_required@example.com",
@@ -610,7 +586,6 @@ class HomePageTests(TestCase):
         self.assertEqual(self._normalized_button_text(card_button), "Start Free Trial")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @tag("batch_pages")
     def test_home_cta_text_stays_spawn_for_grandfathered_user(self):
         user = get_user_model().objects.create_user(
             username="home_cta_grandfathered@example.com",
@@ -642,7 +617,6 @@ class HomePageTests(TestCase):
         self.assertIsNotNone(card_button)
         self.assertEqual(self._normalized_button_text(card_button), "Spawn This Worker")
 
-    @tag("batch_pages")
     def test_home_pretrained_worker_cards_include_trial_onboarding_fields(self):
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
@@ -664,7 +638,6 @@ class HomePageTests(TestCase):
                 )
             )
 
-    @tag("batch_pages")
     def test_custom_spawn_clears_pretrained_worker_selection(self):
         session = self.client.session
         session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
@@ -680,7 +653,6 @@ class HomePageTests(TestCase):
         self.assertEqual(session["agent_charter_source"], "user")
         self.assertEqual(session["agent_charter"], "Custom charter")
 
-    @tag("batch_pages")
     def test_home_spawn_redirects_to_login(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -700,7 +672,6 @@ class HomePageTests(TestCase):
         self.assertEqual(next_params.get("spawn"), ["1"])
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
-    @tag("batch_pages")
     def test_home_spawn_redirects_to_signup_when_cta_signup_first_enabled(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -722,7 +693,6 @@ class HomePageTests(TestCase):
         self.assertEqual(next_params.get("spawn"), ["1"])
         self.assertEqual(params.get("utm_source"), ["newsletter"])
 
-    @tag("batch_pages")
     def test_home_spawn_redirect_stashes_oauth_fallback_cookie(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -802,7 +772,6 @@ class HomePageTests(TestCase):
         self.assertEqual(spawn_intent_payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
         self.assertEqual(spawn_intent_payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
 
-    @tag("batch_pages")
     def test_home_spawn_modal_prep_returns_modal_signup_url_and_preserves_state(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -848,7 +817,6 @@ class HomePageTests(TestCase):
         self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
         self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
 
-    @tag("batch_pages")
     def test_home_spawn_trial_onboarding_sets_session_intent(self):
         response = self.client.post(
             reverse("pages:home_agent_spawn"),
@@ -868,7 +836,6 @@ class HomePageTests(TestCase):
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
-    @tag("batch_pages")
     def test_home_spawn_stores_selected_pipedream_apps_in_session(self):
         response = self.client.post(
             reverse("pages:home_agent_spawn"),
@@ -889,7 +856,6 @@ class HomePageTests(TestCase):
         "pages.views.get_homepage_integrations_payload",
         return_value={"enabled": True, "builtins": []},
     )
-    @tag("batch_pages")
     def test_home_page_uses_session_selected_pipedream_apps_in_modal_props(self, _mock_integrations):
         session = self.client.session
         session[page_views.AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY] = ["slack", "trello"]
@@ -917,7 +883,6 @@ class HomePageTests(TestCase):
         "pages.views.get_homepage_integrations_payload",
         return_value={"enabled": True, "builtins": []},
     )
-    @tag("batch_pages")
     def test_home_page_merges_context_enabled_and_session_selected_pipedream_apps(
         self,
         _mock_integrations,
@@ -955,7 +920,6 @@ class HomePageTests(TestCase):
 
 @tag("batch_pages")
 class LandingPageRedirectTests(TestCase):
-    @tag("batch_pages")
     def test_landing_redirect(self):
         """Landing page shortlink redirects to marketing page."""
         lp = LandingPage.objects.create(charter="x")
@@ -964,21 +928,18 @@ class LandingPageRedirectTests(TestCase):
         self.assertEqual(resp.status_code, 302)
         self.assertTrue(resp["Location"].endswith(f"?g={lp.code}"))
 
-    @tag("batch_pages")
     def test_disabled_landing_returns_404(self):
         lp = LandingPage.objects.create(charter="x", disabled=True)
 
         resp = self.client.get(f"/g/{lp.code}/")
         self.assertEqual(resp.status_code, 404)
 
-    @tag("batch_pages")
     def test_landing_redirect_increments_hits(self):
         lp = LandingPage.objects.create(charter="x", hits=0)
         self.client.get(f"/g/{lp.code}/")
         lp.refresh_from_db()
         self.assertEqual(lp.hits, 1)
 
-    @tag("batch_pages")
     def test_landing_redirect_includes_stored_utms(self):
         lp = LandingPage.objects.create(
             charter="x",
@@ -995,7 +956,6 @@ class LandingPageRedirectTests(TestCase):
         self.assertEqual(params.get("utm_source"), ["newsletter"])
         self.assertEqual(params.get("utm_campaign"), ["october_push"])
 
-    @tag("batch_pages")
     def test_existing_query_params_take_precedence(self):
         lp = LandingPage.objects.create(
             charter="x",
@@ -1012,7 +972,6 @@ class LandingPageRedirectTests(TestCase):
         self.assertEqual(params.get("utm_medium"), ["email"])
         self.assertEqual(params.get("fbclid"), ["abc123"])
 
-    @tag("batch_pages")
     @patch("pages.views.record_fbc_synthesized")
     def test_landing_redirect_refreshes_fbc_when_fbclid_changes(self, mock_record_fbc_synthesized):
         lp = LandingPage.objects.create(charter="x")
@@ -1030,7 +989,6 @@ class LandingPageRedirectTests(TestCase):
             source="pages.views.landing_page_redirect"
         )
 
-    @tag("batch_pages")
     @patch("pages.views.record_fbc_synthesized")
     def test_landing_redirect_does_not_rotate_fbc_for_same_fbclid(self, mock_record_fbc_synthesized):
         lp = LandingPage.objects.create(charter="x")
@@ -1047,7 +1005,6 @@ class LandingPageRedirectTests(TestCase):
 
 @tag("batch_pages")
 class LandingPageLaunchTests(TestCase):
-    @tag("batch_pages")
     def test_landing_launch_redirects_authenticated_user_into_app_spawn(self):
         user = get_user_model().objects.create_user(
             email="launch@test.com",
@@ -1092,7 +1049,6 @@ class LandingPageLaunchTests(TestCase):
         landing.refresh_from_db()
         self.assertEqual(landing.hits, 1)
 
-    @tag("batch_pages")
     def test_landing_launch_redirects_anon_to_login_and_stashes_charter(self):
         landing = LandingPage.objects.create(
             charter="Launch anonymously",
@@ -1151,7 +1107,6 @@ class LandingPageLaunchTests(TestCase):
             "utm_source=paid-social&utm_medium=paid_social&utm_campaign=retargeting",
         )
 
-    @tag("batch_pages")
     def test_landing_launch_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
         landing = LandingPage.objects.create(
             charter="Launch anonymously",
@@ -1187,7 +1142,6 @@ class LandingPageLaunchTests(TestCase):
         self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
         self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
 
-    @tag("batch_pages")
     def test_landing_launch_clears_stale_trial_onboarding_state(self):
         user = get_user_model().objects.create_user(
             email="launch-onboarding@test.com",
@@ -1217,7 +1171,6 @@ class LandingPageLaunchTests(TestCase):
         self.assertIsNone(payload.get("onboarding_target"))
         self.assertFalse(payload.get("requires_plan_selection"))
 
-    @tag("batch_pages")
     def test_landing_launch_persists_landing_utms_into_oauth_attribution(self):
         landing = LandingPage.objects.create(
             charter="Launch with landing defaults",
@@ -1249,7 +1202,6 @@ class LandingPageLaunchTests(TestCase):
             "utm_source=newsletter&utm_medium=email&utm_campaign=spring-launch",
         )
 
-    @tag("batch_pages")
     def test_disabled_landing_launch_returns_404(self):
         landing = LandingPage.objects.create(charter="x", disabled=True)
 
@@ -1259,7 +1211,6 @@ class LandingPageLaunchTests(TestCase):
 
 @tag("batch_pages")
 class RobotsTxtTests(TestCase):
-    @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="prod")
     def test_production_allows_indexing(self):
         response = self.client.get("/robots.txt")
@@ -1273,7 +1224,6 @@ class RobotsTxtTests(TestCase):
         self.assertNotIn("Disallow: /m/", lines)
         self.assertNotIn("Disallow: /", lines)
 
-    @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="staging")
     def test_non_production_blocks_indexing(self):
         response = self.client.get("/robots.txt")
@@ -1285,7 +1235,6 @@ class RobotsTxtTests(TestCase):
 
 @tag("batch_pages")
 class InstallScriptTests(TestCase):
-    @tag("batch_pages")
     def test_install_script_is_served_from_root(self):
         response = self.client.get("/install.sh")
 
@@ -1299,19 +1248,16 @@ class InstallScriptTests(TestCase):
 
 @tag("batch_pages")
 class CanonicalLinkTests(TestCase):
-    @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
     def test_canonical_present_in_production_proprietary(self):
         response = self.client.get("/")
         self.assertContains(response, '<link rel="canonical" href="http://testserver/">')
 
-    @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=False)
     def test_canonical_absent_when_not_proprietary(self):
         response = self.client.get("/")
         self.assertNotContains(response, 'rel="canonical"')
 
-    @tag("batch_pages")
     @override_settings(GOBII_RELEASE_ENV="staging", GOBII_PROPRIETARY_MODE=True)
     def test_canonical_absent_when_not_production(self):
         response = self.client.get("/")
@@ -1320,7 +1266,6 @@ class CanonicalLinkTests(TestCase):
 
 @tag("batch_pages")
 class SitemapTests(TestCase):
-    @tag("batch_pages")
     def test_pretrained_worker_detail_urls_included(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)
@@ -1330,7 +1275,6 @@ class SitemapTests(TestCase):
             response.content.decode(),
         )
 
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
         response = self.client.get("/sitemap.xml")
@@ -1343,7 +1287,6 @@ class SitemapTests(TestCase):
         self.assertNotIn("/subscribe/pro/", content)
         self.assertNotIn("/subscribe/scale/", content)
 
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_community_sitemap_includes_local_docs(self):
         response = self.client.get("/sitemap.xml")
@@ -1353,7 +1296,6 @@ class SitemapTests(TestCase):
 
 @tag("batch_pages")
 class DocsRedirectTests(TestCase):
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_docs_redirects_are_permanent_in_proprietary_mode(self):
         for path in ("/docs/", "/docs/guides/api/"):
@@ -1365,7 +1307,6 @@ class DocsRedirectTests(TestCase):
 
 @tag("batch_pages")
 class ApiDocsRobotsTests(TestCase):
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_swagger_ui_is_noindex_follow(self):
         for url_name in ("schema-swagger-ui", "api_docs"):
@@ -1374,14 +1315,12 @@ class ApiDocsRobotsTests(TestCase):
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_swagger_ui_redirect_is_noindex_follow_in_proprietary_mode(self):
         response = self.client.get(reverse("schema-swagger-ui"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
-    @tag("batch_pages")
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_redoc_robots_header_unchanged(self):
         response = self.client.get(reverse("schema-redoc"))
@@ -1391,13 +1330,11 @@ class ApiDocsRobotsTests(TestCase):
 
 @tag("batch_pages")
 class PretrainedWorkerDirectoryTests(TestCase):
-    @tag("batch_pages")
     def test_directory_redirects_to_home_section(self):
         response = self.client.get("/pretrained-workers/")
         self.assertEqual(response.status_code, 302)
         self.assertTrue(response["Location"].endswith("#pretrained-workers"))
 
-    @tag("batch_pages")
     def test_directory_redirect_preserves_filters(self):
         response = self.client.get(
             "/pretrained-workers/",
@@ -1411,7 +1348,6 @@ class PretrainedWorkerDirectoryTests(TestCase):
         self.assertTrue(location.endswith("#pretrained-workers"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
-    @tag("batch_pages")
     def test_pretrained_worker_detail_omits_trial_onboarding_fields_in_community_mode(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1427,7 +1363,6 @@ class PretrainedWorkerDirectoryTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_pretrained_worker_detail_includes_trial_onboarding_fields_in_proprietary_mode(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1442,7 +1377,6 @@ class PretrainedWorkerDirectoryTests(TestCase):
             f'name="trial_onboarding_target" value="{TRIAL_ONBOARDING_TARGET_AGENT_UI}"',
         )
 
-    @tag("batch_pages")
     def test_pretrained_worker_detail_uses_create_agent_cta_copy(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1467,7 +1401,6 @@ class PretrainedWorkerDirectoryTests(TestCase):
         self.assertEqual(detail_button_text, "Create Agent")
 
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_pretrained_worker_detail_includes_search_metadata(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
         detail_url = f"http://testserver/pretrained-workers/{template.code}/"
@@ -1497,12 +1430,16 @@ class PretrainedWorkerDirectoryTests(TestCase):
             json.loads(script.string)
             for script in soup.find_all("script", {"type": "application/ld+json"})
         ]
-        application_schema = next(
-            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
         )
-        self.assertEqual(application_schema["name"], template.display_name)
-        self.assertEqual(application_schema["url"], detail_url)
-        self.assertEqual(application_schema["creator"]["name"], "Gobii")
+        self.assertEqual(webpage_schema["name"], f"{template.display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["url"], detail_url)
+        self.assertEqual(webpage_schema["publisher"]["name"], "Gobii")
+        self.assertEqual(webpage_schema["mainEntity"]["@type"], "Service")
+        self.assertEqual(webpage_schema["mainEntity"]["name"], template.display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["url"], detail_url)
+        self.assertEqual(webpage_schema["mainEntity"]["provider"]["name"], "Gobii")
 
         breadcrumb_schema = next(
             item for item in structured_data if item.get("@type") == "BreadcrumbList"
@@ -1511,8 +1448,14 @@ class PretrainedWorkerDirectoryTests(TestCase):
             breadcrumb_schema["itemListElement"][-1]["item"],
             detail_url,
         )
+        breadcrumb = soup.find("nav", attrs={"aria-label": "Breadcrumb"})
+        self.assertIsNotNone(breadcrumb)
+        self.assertIn(template.display_name, breadcrumb.get_text(" ", strip=True))
+        related_heading = soup.find("h2", string="Related pretrained workers")
+        self.assertIsNotNone(related_heading)
+        related_links = [link["href"] for link in related_heading.find_parent("section").find_all("a")]
+        self.assertNotIn(reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code}), related_links)
 
-    @tag("batch_pages")
     @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
     def test_pretrained_worker_detail_escapes_json_ld_script_closing_sequence(self, mock_get_template_by_code):
         display_name = 'Bad </script><script>alert("x")</script>'
@@ -1545,11 +1488,13 @@ class PretrainedWorkerDirectoryTests(TestCase):
             json.loads(script.string)
             for script in soup.find_all("script", {"type": "application/ld+json"})
         ]
-        application_schema = next(
-            item for item in structured_data if item.get("@type") == "SoftwareApplication"
+        webpage_schema = next(
+            item for item in structured_data if item.get("@type") == "WebPage"
         )
-        self.assertEqual(application_schema["name"], display_name)
-        self.assertEqual(application_schema["description"], description)
+        self.assertEqual(webpage_schema["name"], f"{display_name} AI Agent Template")
+        self.assertEqual(webpage_schema["description"], description)
+        self.assertEqual(webpage_schema["mainEntity"]["name"], display_name)
+        self.assertEqual(webpage_schema["mainEntity"]["description"], description)
         breadcrumb_schema = next(
             item for item in structured_data if item.get("@type") == "BreadcrumbList"
         )
@@ -1558,7 +1503,6 @@ class PretrainedWorkerDirectoryTests(TestCase):
 
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
-    @tag("batch_pages")
     def test_hire_redirects_to_login(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1611,7 +1555,6 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(attribution_payload.get("fbclid_last"), "last-fbclid")
         self.assertEqual(attribution_payload.get("utm_querystring"), "utm_medium=ads")
 
-    @tag("batch_pages")
     def test_hire_redirects_to_signup_when_cta_signup_first_enabled(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1645,7 +1588,6 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
         self.assertIn(OAUTH_ATTRIBUTION_COOKIE, response.cookies)
 
-    @tag("batch_pages")
     def test_hire_redirects_to_login_for_pro_flow(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1672,7 +1614,6 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             reverse("agent_quick_spawn"),
         )
 
-    @tag("batch_pages")
     def test_hire_redirects_to_signup_for_pro_flow_when_cta_signup_first_enabled(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1700,7 +1641,6 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             reverse("agent_quick_spawn"),
         )
 
-    @tag("batch_pages")
     def test_hire_trial_onboarding_sets_session_intent(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1733,7 +1673,6 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         )
         self.assertFalse(cookie_payload.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
-    @tag("batch_pages")
     def test_hire_modal_prep_returns_modal_signup_url_and_preserves_state(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 
@@ -1787,18 +1726,15 @@ class SolutionCtaCopyTests(TestCase):
         logo = soup.select_one('header.hs-header a[href="/"] img')
         return logo.get("src") if logo else None
 
-    @tag("batch_pages")
     def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
         with override_flag("fish_upper_left", active=False):
             self.assertEqual(self._mini_header_logo_src(), "/static/images/noBgIndigo600.png")
 
-    @tag("batch_pages")
     def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
         with override_flag("fish_upper_left", active=True):
             self.assertEqual(self._mini_header_logo_src(), "/static/images/gobii_fish_with_text_purple_nav.png")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
-    @tag("batch_pages")
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")
         self.assertEqual(unauth_recruiting.status_code, 200)
@@ -1876,7 +1812,6 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(self._normalized_button_text(auth_engineering_button), "Get API Keys")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @tag("batch_pages")
     def test_solution_cta_text_shows_trial_when_authenticated_user_requires_trial(self):
         user = get_user_model().objects.create_user(
             username="solution_cta_trial_required@example.com",
@@ -1911,7 +1846,6 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(self._normalized_button_text(sales_button), "Start Free Trial")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @tag("batch_pages")
     def test_solution_cta_text_stays_spawn_for_grandfathered_user(self):
         user = get_user_model().objects.create_user(
             username="solution_cta_grandfathered@example.com",
@@ -1946,7 +1880,6 @@ class SolutionCtaCopyTests(TestCase):
         self.assertIsNotNone(sales_button)
         self.assertEqual(self._normalized_button_text(sales_button), "Spawn Agent")
 
-    @tag("batch_pages")
     def test_sales_solution_how_it_works_links_include_cta_analytics(self):
         response = self.client.get("/solutions/sales/")
 
@@ -1965,7 +1898,6 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(final_link.get("data-analytics-placement"), "final_cta")
         self.assertEqual(final_link.get("data-analytics-intent"), "view_how_it_works")
 
-    @tag("batch_pages")
     def test_generic_solution_uses_form_backed_spawn_cta(self):
         response = self.client.get("/solutions/operations/")
 
@@ -1977,7 +1909,6 @@ class SolutionCtaCopyTests(TestCase):
         self.assertIsNotNone(form.find("input", {"name": "charter", "value": ""}))
         self.assertIsNotNone(form.find("input", {"name": "source_page", "value": "solutions_generic_hero"}))
 
-    @tag("batch_pages")
     def test_generic_solution_spawn_modal_prep_sets_default_agent_intent(self):
         with override_flag("cta_signup_modal", active=True):
             response = self.client.post(
@@ -2006,7 +1937,6 @@ class SolutionCtaCopyTests(TestCase):
 
 @tag("batch_pages")
 class EngineeringProSignupTests(TestCase):
-    @tag("batch_pages")
     def test_engineering_trial_onboarding_redirects_anon_to_login(self):
         session = self.client.session
         session["utm_querystring"] = "utm_medium=ads"
@@ -2040,7 +1970,6 @@ class EngineeringProSignupTests(TestCase):
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
-    @tag("batch_pages")
     def test_engineering_default_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
         session = self.client.session
         session["utm_querystring"] = "utm_medium=ads"
@@ -2063,7 +1992,6 @@ class EngineeringProSignupTests(TestCase):
             reverse("api_keys"),
         )
 
-    @tag("batch_pages")
     def test_engineering_trial_onboarding_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
         session = self.client.session
         session["utm_querystring"] = "utm_medium=ads"
@@ -2098,7 +2026,6 @@ class EngineeringProSignupTests(TestCase):
         )
         self.assertFalse(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, False))
 
-    @tag("batch_pages")
     def test_engineering_trial_onboarding_redirects_authenticated_to_api_keys(self):
         user = get_user_model().objects.create_user(
             email="engineer@test.com",
@@ -2121,7 +2048,6 @@ class EngineeringProSignupTests(TestCase):
 
 @tag("batch_pages")
 class AgentSpawnIntentApiTests(TestCase):
-    @tag("batch_pages")
     def test_spawn_intent_includes_trial_onboarding_fields(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent@test.com",
@@ -2147,7 +2073,6 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
         self.assertTrue(payload.get("requires_plan_selection"))
 
-    @tag("batch_pages")
     def test_spawn_intent_includes_selected_pipedream_app_slugs(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent-apps@test.com",
@@ -2167,7 +2092,6 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertEqual(payload.get("selected_pipedream_app_slugs"), ["slack", "trello"])
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_spawn_intent_uses_starter_charter_for_proprietary_personal_preview(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent-preview@test.com",
@@ -2193,7 +2117,6 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertIsNone(payload.get("onboarding_target"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    @tag("batch_pages")
     def test_spawn_intent_suppresses_trial_onboarding_modal_for_preview_with_saved_charter(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent-preview-saved@test.com",
@@ -2226,7 +2149,6 @@ class AgentSpawnIntentApiTests(TestCase):
         self.assertNotIn(TRIAL_ONBOARDING_TARGET_SESSION_KEY, session)
         self.assertNotIn(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY, session)
 
-    @tag("batch_pages")
     def test_spawn_intent_restores_onboarding_fields_from_oauth_cookie(self):
         user = get_user_model().objects.create_user(
             email="spawn-intent-cookie@test.com",
@@ -2272,7 +2194,6 @@ class AgentSpawnIntentApiTests(TestCase):
 
 @tag("batch_pages")
 class CheckoutRedirectTests(TestCase):
-    @tag("batch_pages")
     def test_checkout_start_pages_are_noindex_follow(self):
         for url_name in ("proprietary:startup_checkout", "proprietary:pro_checkout", "proprietary:scale_checkout"):
             with self.subTest(url_name=url_name):
@@ -2280,7 +2201,6 @@ class CheckoutRedirectTests(TestCase):
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual(response["X-Robots-Tag"], "noindex, follow")
 
-    @tag("batch_pages")
     @patch("pages.views.reconcile_user_plan_from_stripe")
     @patch("pages.views._prepare_stripe_or_404")
     def test_startup_checkout_skips_paid_users(
@@ -2311,7 +2231,6 @@ class CheckoutRedirectTests(TestCase):
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
 
-    @tag("batch_pages")
     @patch("pages.views.reconcile_user_plan_from_stripe")
     def test_startup_checkout_sets_return_to_param(self, mock_get_user_plan):
         user = get_user_model().objects.create_user(
@@ -2333,7 +2252,6 @@ class CheckoutRedirectTests(TestCase):
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2384,7 +2302,6 @@ class CheckoutRedirectTests(TestCase):
         session = self.client.session
         self.assertIsNone(session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY))
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2544,7 +2461,6 @@ class CheckoutRedirectTests(TestCase):
             checkout_source_url=kwargs["metadata"]["checkout_source_url"],
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(eligible=False))
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2595,7 +2511,6 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
         mock_trial_eligibility.assert_not_called()
 
-    @tag("batch_pages")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
     @patch("pages.views.user_has_prior_individual_history", return_value=True)
     def test_individual_trial_eligibility_uses_one_per_user_flag_before_abuse_matching(
@@ -2619,7 +2534,6 @@ class CheckoutRedirectTests(TestCase):
         mock_prior_history.assert_called_once_with(user)
         mock_trial_eligibility.assert_not_called()
 
-    @tag("batch_pages")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
     @patch("pages.views.user_has_prior_individual_history", return_value=False)
     def test_individual_trial_eligibility_blocks_no_trial_before_one_per_user(
@@ -2648,7 +2562,6 @@ class CheckoutRedirectTests(TestCase):
         )
         mock_prior_history.assert_not_called()
 
-    @tag("batch_pages")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
     @patch("pages.views.user_has_prior_individual_history", return_value=False)
     def test_individual_trial_eligibility_blocks_review_before_one_per_user_when_review_flag_disabled(
@@ -2678,7 +2591,6 @@ class CheckoutRedirectTests(TestCase):
         )
         mock_prior_history.assert_not_called()
 
-    @tag("batch_pages")
     @patch("pages.views.logger.warning")
     @patch("pages.views.evaluate_user_trial_eligibility", side_effect=TypeError("boom"))
     def test_individual_trial_eligibility_defaults_to_ineligible_when_evaluation_fails(
@@ -2706,7 +2618,6 @@ class CheckoutRedirectTests(TestCase):
         )
         mock_warning.assert_called_once()
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="review"))
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2754,7 +2665,6 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(kwargs["subscription_data"]["metadata"]["flow_type"], "trial")
         self.assertEqual(kwargs["subscription_data"]["trial_period_days"], 7)
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2811,7 +2721,6 @@ class CheckoutRedirectTests(TestCase):
             ],
         )
 
-    @tag("batch_pages")
     def test_startup_checkout_tracks_redirected_to_checkout_event(self):
         user = get_user_model().objects.create_user(
             email="redirected_startup@test.com",
@@ -2865,7 +2774,6 @@ class CheckoutRedirectTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2924,7 +2832,6 @@ class CheckoutRedirectTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -2988,7 +2895,6 @@ class CheckoutRedirectTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3044,7 +2950,6 @@ class CheckoutRedirectTests(TestCase):
         self.assertNotIn("billing_address_collection", kwargs)
         self.assertNotIn("name_collection", kwargs)
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3097,7 +3002,6 @@ class CheckoutRedirectTests(TestCase):
         self.assertNotIn("billing_address_collection", kwargs)
         self.assertNotIn("name_collection", kwargs)
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3219,7 +3123,6 @@ class CheckoutRedirectTests(TestCase):
             checkout_source_url=kwargs["metadata"]["checkout_source_url"],
         )
 
-    @tag("batch_pages")
     def test_scale_checkout_tracks_redirected_to_checkout_event(self):
         user = get_user_model().objects.create_user(
             email="redirected_scale@test.com",
@@ -3272,7 +3175,6 @@ class CheckoutRedirectTests(TestCase):
             },
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3317,7 +3219,6 @@ class CheckoutRedirectTests(TestCase):
         mock_customer_modify.assert_called_once()
         mock_session_create.assert_called_once()
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=True)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3413,7 +3314,6 @@ class CheckoutRedirectTests(TestCase):
             "unknown",
         )
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views._is_individual_trial_eligible", return_value=False)
     @patch("pages.views.ensure_single_individual_subscription")
@@ -3499,7 +3399,6 @@ class ProprietaryPricingTrialCopyTests(TestCase):
         view.setup(request)
         return view.get_context_data()
 
-    @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="no_trial"))
     @patch("proprietary.views.get_stripe_settings")
@@ -3525,7 +3424,6 @@ class ProprietaryPricingTrialCopyTests(TestCase):
         self.assertEqual(plans[0]["cta"], "Subscribe to Pro")
         self.assertEqual(plans[1]["cta"], "Subscribe to Scale")
 
-    @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
     @patch("proprietary.views.get_stripe_settings")
@@ -3551,7 +3449,6 @@ class ProprietaryPricingTrialCopyTests(TestCase):
         self.assertEqual(plans[0]["cta"], "Start 7-day Free Trial")
         self.assertEqual(plans[1]["cta"], "Start 14-day Free Trial")
 
-    @tag("batch_pages")
     @patch("proprietary.views.get_user_plan", return_value={"id": PlanNames.FREE})
     @patch("proprietary.views.evaluate_user_trial_eligibility", return_value=SimpleNamespace(decision="eligible"))
     @patch("proprietary.views.get_stripe_settings")
@@ -3607,7 +3504,6 @@ class AuthLinkTests(TestCase):
         app.sites.add(Site.objects.get_current())
         return app
 
-    @tag("batch_pages")
     def test_auth_url_with_utms_preserves_existing_query_and_fragment(self):
         request = SimpleNamespace(
             session={
@@ -3625,7 +3521,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("utm_source"), ["newsletter"])
         self.assertEqual(params.get("utm_campaign"), ["fall"])
 
-    @tag("batch_pages")
     def test_signup_page_signin_link_includes_utms(self):
         session = self.client.session
         session["utm_querystring"] = "utm_source=newsletter"
@@ -3649,7 +3544,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("utm_source"), ["newsletter"])
         self.assertEqual(params.get("next"), [next_url])
 
-    @tag("batch_pages")
     def test_login_page_signup_link_includes_utms(self):
         session = self.client.session
         session["utm_querystring"] = "utm_campaign=fall"
@@ -3673,7 +3567,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("utm_campaign"), ["fall"])
         self.assertEqual(params.get("next"), [next_url])
 
-    @tag("batch_pages")
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         FINGERPRINT_JS_ENABLED=True,
@@ -3695,7 +3588,6 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, 'data-auth-fpjs-request-field')
         self.assertContains(response, 'data-auth-ga-client-field')
 
-    @tag("batch_pages")
     @override_settings(
         GOBII_PROPRIETARY_MODE=True,
         FINGERPRINT_JS_ENABLED=True,
@@ -3713,7 +3605,6 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, 'data-fpjs-enabled="true"')
         self.assertContains(response, 'data-fpjs-loader-url="https://fp.example/v3/loader.js?apiKey=fp_test_key"')
 
-    @tag("batch_pages")
     def test_login_page_renders_configured_social_providers_in_fixed_order_with_tracking_attrs(self):
         for provider in ("facebook", "google", "linkedin", "microsoft"):
             self._create_social_app(provider)
@@ -3736,7 +3627,6 @@ class AuthLinkTests(TestCase):
             self.assertEqual(button["data-analytics-auth-provider"], provider_id)
             self.assertEqual(button["data-analytics-auth-surface"], "login")
 
-    @tag("batch_pages")
     def test_signup_page_omits_unconfigured_social_providers(self):
         for provider in ("facebook", "google"):
             self._create_social_app(provider)
@@ -3758,7 +3648,6 @@ class AuthLinkTests(TestCase):
             self.assertEqual(button["data-social-surface"], "signup")
             self.assertEqual(button["data-analytics-auth-surface"], "signup")
 
-    @tag("batch_pages")
     def test_social_signup_completion_page_uses_custom_template(self):
         app = self._create_social_app("linkedin")
         request = RequestFactory().get(reverse("openid_connect_login", kwargs={"provider_id": "linkedin"}))
@@ -3786,7 +3675,6 @@ class AuthLinkTests(TestCase):
         self.assertContains(response, f'action="{reverse("socialaccount_signup")}"')
         self.assertContains(response, "bg-white max-w-md")
 
-    @tag("batch_pages")
     def test_signup_modal_renders_email_start_and_popup_social_urls(self):
         for provider in ("facebook", "google"):
             self._create_social_app(provider)
@@ -3827,7 +3715,6 @@ class AuthLinkTests(TestCase):
             self.assertIsNotNone(popup_next)
             self.assertEqual(urlparse(popup_next).path, reverse("account_auth_popup_complete"))
 
-    @tag("batch_pages")
     def test_signup_modal_email_continue_routes_existing_account_to_login(self):
         user = get_user_model().objects.create_user(
             username="email-first@example.com",
@@ -3855,7 +3742,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("lock_email"), ["1"])
         self.assertEqual(params.get("next"), ["/pricing/"])
 
-    @tag("batch_pages")
     def test_signup_modal_email_continue_routes_new_email_to_signup_password_step(self):
         response = self.client.post(
             reverse("account_signup_modal"),
@@ -3879,7 +3765,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(params.get("step"), ["password"])
         self.assertEqual(params.get("next"), ["/pricing/"])
 
-    @tag("batch_pages")
     def test_auth_modal_fragments_are_noindex(self):
         for route_name in ("account_signup_modal", "account_login_modal"):
             response = self.client.get(reverse(route_name), **self.MODAL_REQUEST_HEADER)
@@ -3887,7 +3772,6 @@ class AuthLinkTests(TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow, noarchive")
 
-    @tag("batch_pages")
     def test_auth_modal_fragments_require_modal_header(self):
         for route_name in ("account_signup_modal", "account_login_modal"):
             response = self.client.get(reverse(route_name))
@@ -3895,7 +3779,6 @@ class AuthLinkTests(TestCase):
             self.assertEqual(response.status_code, 404)
             self.assertEqual(response["X-Robots-Tag"], "noindex, nofollow, noarchive")
 
-    @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
         TURNSTILE_ENABLED=True,
@@ -3974,7 +3857,6 @@ class AuthLinkTests(TestCase):
         )
         self.assertIsNotNone(signup_button.select_one("[data-auth-modal-submit-spinner]"))
 
-    @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_login_modal_invalid_post_preserves_tab_and_next(self, _mock_turnstile_validate):
         next_url = "/pricing/"
@@ -3998,7 +3880,6 @@ class AuthLinkTests(TestCase):
         self.assertIn(f'value="{next_url}"', payload["html"])
         self.assertIn(reverse("account_login_modal"), payload["html"])
 
-    @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_login_modal_valid_post_returns_next_location(self, _mock_turnstile_validate):
         user = get_user_model().objects.create_user(
@@ -4024,7 +3905,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("location"), checkout_url)
 
-    @tag("batch_pages")
     @override_settings(ACCOUNT_EMAIL_VERIFICATION="none")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_signup_modal_valid_post_returns_next_location(self, _mock_turnstile_validate):
@@ -4046,7 +3926,6 @@ class AuthLinkTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json().get("location"), checkout_url)
 
-    @tag("batch_pages")
     def test_popup_complete_page_uses_auth_popup_template(self):
         response = self.client.get(reverse("account_auth_popup_complete"), {"auth_popup_state": "test-state"})
 
@@ -4064,7 +3943,6 @@ class LoginTurnstilePageTests(TestCase):
             request.META["HTTP_X_REQUESTED_WITH"] = "XMLHttpRequest"
         return request
 
-    @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_invalid_login_post_logs_missing_password_diagnostics(self, _mock_turnstile_validate):
         from turnstile_signup import LoginFormWithTurnstile
@@ -4093,7 +3971,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertTrue(record.turnstile_token_present)
         self.assertEqual(record.error_fields, "password")
 
-    @tag("batch_pages")
     def test_invalid_login_post_logs_missing_turnstile_diagnostics(self):
         from turnstile_signup import LoginFormWithTurnstile
 
@@ -4119,7 +3996,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertFalse(record.turnstile_token_present)
         self.assertEqual(record.error_fields, "turnstile")
 
-    @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_invalid_login_post_logs_once_per_form_instance(self, _mock_turnstile_validate):
         from turnstile_signup import LoginFormWithTurnstile
@@ -4138,7 +4014,6 @@ class LoginTurnstilePageTests(TestCase):
 
         self.assertEqual(len(captured.records), 1)
 
-    @tag("batch_pages")
     @patch("turnstile.fields.TurnstileField.validate", return_value=None)
     def test_invalid_login_post_sanitizes_and_truncates_redacted_login(self, _mock_turnstile_validate):
         from turnstile_signup import LoginFormWithTurnstile
@@ -4161,7 +4036,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertNotIn("turnstile_token_present=true", record.login)
         self.assertIn("login=j***@example.com_turnstile_token_present_true", record.getMessage())
 
-    @tag("batch_pages")
     def test_login_turnstile_success_does_not_auto_submit(self):
         with open("static/js/account_auth_forms.js", encoding="utf-8") as js_file:
             script = js_file.read()
@@ -4179,7 +4053,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertNotIn("submitPending", success_callback)
         self.assertIn("Complete the verification, then sign in.", script)
 
-    @tag("batch_pages")
     def test_modal_auth_navigation_fallback_uses_full_auth_pages(self):
         with open("static/js/account_auth_forms.js", encoding="utf-8") as js_file:
             script = js_file.read()
@@ -4191,7 +4064,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertIn("window.location.assign(getModalNavFallbackUrl(modalUrl));", script)
         self.assertNotIn("window.location.assign(modalUrl);", script)
 
-    @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
         TURNSTILE_ENABLED=True,
@@ -4215,7 +4087,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertContains(response, 'data-error-callback="gobiiLoginTurnstileError"')
         self.assertContains(response, 'data-callback="gobiiLoginTurnstileSuccess"')
 
-    @tag("batch_pages")
     @modify_settings(INSTALLED_APPS={"append": "turnstile"})
     @override_settings(
         TURNSTILE_ENABLED=True,
@@ -4233,7 +4104,6 @@ class LoginTurnstilePageTests(TestCase):
         self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
-    @tag("batch_pages")
     def test_terms_meta_description(self):
         response = self.client.get("/tos/")
         self.assertContains(
@@ -4241,7 +4111,6 @@ class MarketingMetaTests(TestCase):
             "<meta name=\"description\" content=\"Review Gobii's Terms of Service covering usage policies, billing, and compliance for our pretrained worker platform.\">",
         )
 
-    @tag("batch_pages")
     def test_privacy_meta_description(self):
         response = self.client.get("/privacy/")
         self.assertContains(
@@ -4251,7 +4120,6 @@ class MarketingMetaTests(TestCase):
 
 
 
-    @tag("batch_pages")
     def test_careers_meta_description(self):
         response = self.client.get("/careers/")
         self.assertContains(
@@ -4260,7 +4128,6 @@ class MarketingMetaTests(TestCase):
         )
 
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
@@ -4357,7 +4224,6 @@ class SubscriptionPriceParsingTests(TestCase):
         self.assertTrue(page_views._subscription_contains_meter_price(sub, "price_meter"))
         self.assertFalse(page_views._subscription_contains_meter_price(sub, "price_missing"))
 
-    @tag("batch_pages")
     @patch("pages.views._prepare_stripe_or_404")
     @patch("pages.views.ensure_single_individual_subscription")
     @patch("pages.views.get_existing_individual_subscriptions")
