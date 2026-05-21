@@ -933,8 +933,6 @@ class PersistentAgentToolCreditTests(TestCase):
             burn_rate_per_hour=Decimal("1"),
         )
 
-        self.assertEqual(state["burn_rate_inactive_weeks"], 0)
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
         self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("8.000"))
 
     def test_daily_credit_state_burn_threshold_one_week_halves(self):
@@ -943,8 +941,6 @@ class PersistentAgentToolCreditTests(TestCase):
             burn_rate_per_hour=Decimal("5"),
         )
 
-        self.assertEqual(state["burn_rate_inactive_weeks"], 1)
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
         self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
 
     def test_daily_credit_state_multi_week_decay_enables_pause(self):
@@ -953,11 +949,9 @@ class PersistentAgentToolCreditTests(TestCase):
             burn_rate_per_hour=Decimal("6"),
         )
 
-        self.assertEqual(state["burn_rate_inactive_weeks"], 3)
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("8"))
         self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
+        self.assertEqual(state["burn_rate_per_hour"], Decimal("6"))
         self.assertLess(state["burn_rate_threshold_per_hour"], state["burn_rate_per_hour"])
-        self.assertLess(state["burn_rate_per_hour"], state["burn_rate_base_threshold_per_hour"])
 
         with patch(
             "api.agent.core.burn_control.has_recent_user_message",
@@ -980,9 +974,7 @@ class PersistentAgentToolCreditTests(TestCase):
             now_value=now_value,
         )
 
-        self.assertTrue(state["burn_rate_offpeak_active"])
-        self.assertEqual(state["burn_rate_timezone"], "America/New_York")
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("2"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("2.000"))
 
     def test_daily_credit_state_uses_standard_threshold_outside_offpeak(self):
         now_value = datetime(2026, 3, 10, 16, 0, tzinfo=dt_timezone.utc)
@@ -991,9 +983,7 @@ class PersistentAgentToolCreditTests(TestCase):
             now_value=now_value,
         )
 
-        self.assertFalse(state["burn_rate_offpeak_active"])
-        self.assertEqual(state["burn_rate_timezone"], "America/New_York")
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("6"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("6.000"))
 
     def test_daily_credit_state_uses_utc_when_timezone_unset(self):
         now_value = datetime(2026, 3, 10, 23, 0, tzinfo=dt_timezone.utc)
@@ -1002,9 +992,7 @@ class PersistentAgentToolCreditTests(TestCase):
             now_value=now_value,
         )
 
-        self.assertTrue(state["burn_rate_offpeak_active"])
-        self.assertEqual(state["burn_rate_timezone"], "UTC")
-        self.assertEqual(state["burn_rate_base_threshold_per_hour"], Decimal("2"))
+        self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("2.000"))
 
     def test_daily_credit_state_offpeak_boundary_hours(self):
         # America/New_York (EDT, UTC-4 on March 10, 2026)
@@ -1026,10 +1014,10 @@ class PersistentAgentToolCreditTests(TestCase):
             now_value=datetime(2026, 3, 10, 10, 0, tzinfo=dt_timezone.utc),
         )
 
-        self.assertFalse(state_2159["burn_rate_offpeak_active"])
-        self.assertTrue(state_2200["burn_rate_offpeak_active"])
-        self.assertTrue(state_0559["burn_rate_offpeak_active"])
-        self.assertFalse(state_0600["burn_rate_offpeak_active"])
+        self.assertEqual(state_2159["burn_rate_threshold_per_hour"], Decimal("6.000"))
+        self.assertEqual(state_2200["burn_rate_threshold_per_hour"], Decimal("2.000"))
+        self.assertEqual(state_0559["burn_rate_threshold_per_hour"], Decimal("2.000"))
+        self.assertEqual(state_0600["burn_rate_threshold_per_hour"], Decimal("6.000"))
 
     @patch(
         "api.agent.core.prompt_context.get_tool_cost_overview",
