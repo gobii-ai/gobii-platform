@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
-from django.db.models import Count, DecimalField, Sum, Value
+from django.db.models import DecimalField, Sum, Value
 from django.db.models.functions import Coalesce
 from django.http import HttpRequest, JsonResponse
 from django.utils import timezone
@@ -21,10 +21,8 @@ from django.views import View
 from django.urls import reverse
 
 from api.models import (
-    BrowserUseAgentTask,
     CommsChannel,
     PersistentAgent,
-    PersistentAgentStep,
 )
 from api.agent.core.prompt_context import get_agent_daily_credit_state
 from billing.services import BillingService
@@ -45,11 +43,6 @@ logger = logging.getLogger(__name__)
 
 # Feature flag
 INSIGHTS_ENABLED = getattr(settings, "INSIGHTS_ENABLED", True)
-
-# Time saved estimation constants (in minutes)
-TIME_SAVED_PER_SIMPLE_TASK = 5  # Web search, simple email
-TIME_SAVED_PER_MEDIUM_TASK = 15  # Multi-step research
-TIME_SAVED_PER_COMPLEX_TASK = 30  # Browser automation, analysis
 
 DECIMAL_ZERO = Decimal("0")
 CURRENCY_SYMBOLS = {
@@ -301,117 +294,6 @@ def _should_include_agent_setup_insights(user: Any, agent: PersistentAgent) -> b
     return can_user_use_personal_agents_and_api(user)
 
 
-def _estimate_time_saved_minutes(tasks_completed: int, credits_used: Decimal) -> float:
-    """
-    Estimate time saved based on task count and credit usage.
-
-    Methodology:
-    - Base estimate: 10 minutes per task
-    - Adjusted by credit intensity (higher credits = more complex task)
-    - Conservative multiplier to avoid overclaiming
-    """
-    if tasks_completed <= 0:
-        return 0.0
-
-    # Average credits per task indicates complexity
-    avg_credits = float(credits_used) / tasks_completed if tasks_completed > 0 else 0
-
-    # Base time per task, scaled by complexity
-    if avg_credits < 0.5:
-        minutes_per_task = TIME_SAVED_PER_SIMPLE_TASK
-    elif avg_credits < 2.0:
-        minutes_per_task = TIME_SAVED_PER_MEDIUM_TASK
-    else:
-        minutes_per_task = TIME_SAVED_PER_COMPLEX_TASK
-
-    return tasks_completed * minutes_per_task
-
-
-def _get_time_saved_insight(ctx: InsightContext) -> Optional[dict]:
-    """Generate time saved insight for user."""
-    # Query completed tasks in period
-    task_filters = {
-        "is_deleted": False,
-        "status": BrowserUseAgentTask.StatusChoices.COMPLETED,
-        "created_at__gte": ctx.period_start,
-        "created_at__lte": ctx.period_end,
-    }
-
-    if ctx.organization:
-        task_filters["organization"] = ctx.organization
-    else:
-        task_filters["user"] = ctx.user
-        task_filters["organization__isnull"] = True
-
-    # Get task count and total credits
-    task_stats = BrowserUseAgentTask.objects.filter(**task_filters).aggregate(
-        count=Count("id"),
-        credits=Coalesce(Sum("credits_cost"), DECIMAL_ZERO),
-    )
-
-    # Also get persistent agent step credits
-    step_filters = {
-        "created_at__gte": ctx.period_start,
-        "created_at__lte": ctx.period_end,
-    }
-    if ctx.organization:
-        step_filters["agent__organization"] = ctx.organization
-    else:
-        step_filters["agent__user"] = ctx.user
-        step_filters["agent__organization__isnull"] = True
-
-    step_stats = PersistentAgentStep.objects.filter(**step_filters).aggregate(
-        credits=Coalesce(Sum("credits_cost"), DECIMAL_ZERO),
-    )
-
-    tasks_completed = task_stats.get("count", 0) or 0
-    task_credits = task_stats.get("credits", DECIMAL_ZERO) or DECIMAL_ZERO
-    step_credits = step_stats.get("credits", DECIMAL_ZERO) or DECIMAL_ZERO
-    total_credits = task_credits + step_credits
-
-    # Need at least some activity to show this insight
-    if tasks_completed < 1 and total_credits < Decimal("0.1"):
-        return None
-
-    # Use task count as proxy, or estimate from credits if no tasks
-    if tasks_completed > 0:
-        estimated_tasks = tasks_completed
-    else:
-        # Estimate ~1 task per 0.5 credits as a rough proxy
-        estimated_tasks = max(1, int(float(total_credits) / 0.5))
-
-    time_saved_minutes = _estimate_time_saved_minutes(estimated_tasks, total_credits)
-    hours_saved = time_saved_minutes / 60
-
-    # Only show if meaningful time saved
-    if hours_saved < 0.1:
-        return None
-
-    # Determine period label
-    period_days = (ctx.period_end - ctx.period_start).days + 1
-    if period_days <= 7:
-        period_label = "week"
-    elif period_days <= 31:
-        period_label = "month"
-    else:
-        period_label = "all_time"
-
-    return {
-        "insightId": f"time_saved_{uuid.uuid4().hex[:8]}",
-        "insightType": "time_saved",
-        "priority": 10,
-        "title": "Time saved",
-        "body": f"You've saved approximately {hours_saved:.1f} hours this {period_label}",
-        "metadata": {
-            "hoursSaved": round(hours_saved, 1),
-            "tasksCompleted": estimated_tasks,
-            "comparisonPeriod": period_label,
-            "methodology": "Estimate based on typical manual effort per task type",
-        },
-        "dismissible": True,
-    }
-
-
 def _get_month_usage_payload(ctx: InsightContext) -> dict:
     owner = ctx.organization or ctx.user
     current_credits = TaskCreditService.get_current_task_credit_for_owner(owner)
@@ -445,7 +327,6 @@ def _get_burn_rate_metadata(ctx: InsightContext) -> dict:
         logger.info("Failed to get daily credit state for agent %s: %s", ctx.agent.id, e)
         # Return a fallback insight with zero values
         daily_state = {
-            "burn_rate_per_hour": Decimal("0"),
             "used": Decimal("0"),
             "hard_limit": None,
             "soft_target": Decimal("100"),
@@ -453,13 +334,11 @@ def _get_burn_rate_metadata(ctx: InsightContext) -> dict:
 
     if not daily_state:
         daily_state = {
-            "burn_rate_per_hour": Decimal("0"),
             "used": Decimal("0"),
             "hard_limit": None,
             "soft_target": Decimal("100"),
         }
 
-    burn_rate = daily_state.get("burn_rate_per_hour")
     used_today = daily_state.get("used", DECIMAL_ZERO)
     hard_limit = daily_state.get("hard_limit")
     soft_target = daily_state.get("soft_target")
@@ -476,10 +355,6 @@ def _get_burn_rate_metadata(ctx: InsightContext) -> dict:
 
     return {
         "agentName": ctx.agent.name,
-        "agentCreditsPerHour": round(float(burn_rate or 0), 2),
-        "allAgentsCreditsPerDay": round(month_usage["used"], 2),
-        "dailyLimit": today_usage["limit"],
-        "percentUsed": today_usage["percentUsed"],
         "todayUsage": today_usage,
         "monthUsage": month_usage,
         "usageUrl": reverse("usage"),

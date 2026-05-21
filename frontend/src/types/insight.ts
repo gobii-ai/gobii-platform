@@ -3,7 +3,7 @@
  * Insights are contextual, helpful information shown inline during processing.
  */
 
-export type InsightType = 'time_saved' | 'burn_rate' | 'agent_setup'
+export type InsightType = 'burn_rate' | 'agent_setup'
 
 // Timing constants for insight display
 export const INSIGHT_TIMING = {
@@ -14,23 +14,10 @@ export const INSIGHT_TIMING = {
   minProcessingMs: 3000, // Don't show insights if processing < 3s
 } as const
 
-// Type-specific metadata shapes
-
-export type TimeSavedMetadata = {
-  hoursSaved: number
-  tasksCompleted: number
-  comparisonPeriod: 'week' | 'month' | 'all_time'
-  methodology: string
-}
-
 export type BurnRateMetadata = {
   agentName: string
-  agentCreditsPerHour: number
-  allAgentsCreditsPerDay: number
-  dailyLimit: number | null
-  percentUsed: number | null
-  todayUsage?: UsageGaugeMetadata
-  monthUsage?: UsageGaugeMetadata
+  todayUsage: UsageGaugeMetadata
+  monthUsage: UsageGaugeMetadata
   usageUrl?: string
 }
 
@@ -98,7 +85,7 @@ export type AgentSetupMetadata = {
   utmQuerystring?: string
 }
 
-export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata | AgentSetupMetadata
+export type InsightMetadata = BurnRateMetadata | AgentSetupMetadata
 
 export type InsightEvent = {
   insightId: string

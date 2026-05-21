@@ -31,7 +31,7 @@ type TrackProperties = Record<string, unknown>
  * @example
  * ```ts
  * track('insight_viewed', { insightType: 'burn_rate', insightId: '123' })
- * track('insight_dismissed', { insightType: 'time_saved' })
+ * track('insight_dismissed', { insightType: 'agent_setup' })
  * ```
  */
 export function track(event: string, properties?: TrackProperties): void {

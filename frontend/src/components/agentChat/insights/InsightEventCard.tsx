@@ -1,5 +1,4 @@
 import type { InsightEvent } from '../../../types/insight'
-import { TimeSavedInsight } from './TimeSavedInsight'
 import { BurnRateInsight } from './BurnRateInsight'
 import { AgentSetupInsight } from './AgentSetupInsight'
 
@@ -19,8 +18,6 @@ export function InsightEventCard({
   usageUrl,
 }: InsightEventCardProps) {
   switch (insight.insightType) {
-    case 'time_saved':
-      return <TimeSavedInsight insight={insight} onDismiss={onDismiss} />
     case 'burn_rate':
       return (
         <BurnRateInsight

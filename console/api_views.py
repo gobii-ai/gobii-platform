@@ -3648,16 +3648,12 @@ def _serialize_agent_template_share_state(request: HttpRequest, agent: Persisten
     }
 
 
-class AgentTemplateShareInfoAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["get"]
+class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["get", "post"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
         return JsonResponse(_serialize_agent_template_share_state(request, agent))
-
-
-class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
@@ -3688,7 +3684,6 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
         if not template.slug or not result.public_profile.handle:
             return JsonResponse({"error": "Template URL could not be generated."}, status=500)
 
-        template_url = request.build_absolute_uri(public_template_detail_path(template))
         if result.created:
             transaction.on_commit(
                 lambda: emit_configured_custom_capi_event(
@@ -3705,10 +3700,7 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
             )
         return JsonResponse({
             "created": result.created,
-            "templateUrl": template_url,
-            "templateSlug": template.slug,
-            "publicProfileHandle": result.public_profile.handle,
-            "displayName": template.display_name,
+            **_serialize_agent_template_share_state(request, agent),
         })
 
 

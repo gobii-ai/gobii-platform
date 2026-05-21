@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Check, Copy, Globe, Loader2, Share2 } from 'lucide-react'
 
 import {
@@ -6,6 +6,7 @@ import {
   fetchAgentTemplateShareInfo,
   type TemplateShareInfoResponse,
 } from '../../api/agentTemplates'
+import { useIsMobile } from '../../hooks/useIsMobile'
 import { Modal } from '../common/Modal'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 
@@ -35,24 +36,12 @@ export function PublicAgentShareDialog({
   const [busy, setBusy] = useState(false)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
-
-  const displayName = useMemo(() => {
-    return (shareInfo?.agentName || agentName || '').trim() || 'this agent'
-  }, [agentName, shareInfo?.agentName])
+  const isMobile = useIsMobile()
+  const displayName = (shareInfo?.agentName || agentName || '').trim() || 'this agent'
   const title = `Share ${displayName}`
   const hasTemplate = Boolean(shareInfo?.templateUrl)
   const hasProfile = Boolean(shareInfo?.publicProfileHandle)
   const shortUrl = shareInfo?.templateUrl?.replace(/^https?:\/\//, '') ?? ''
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 768)
-    }
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
 
   useEffect(() => {
     if (!open) {
@@ -91,7 +80,7 @@ export function PublicAgentShareDialog({
     }
   }, [agentId, open])
 
-  const handleCreateShare = useCallback(async (event?: FormEvent<HTMLFormElement>) => {
+  async function handleCreateShare(event?: FormEvent<HTMLFormElement>) {
     event?.preventDefault()
     if (!agentId || !shareInfo?.canShare) {
       return
@@ -106,26 +95,16 @@ export function PublicAgentShareDialog({
     setError(null)
     try {
       const result = await cloneAgentTemplate(agentId, handle)
-      setShareInfo((current) => ({
-        agentId,
-        agentName: current?.agentName ?? displayName,
-        canShare: true,
-        disabledReason: null,
-        publicProfileHandle: result.publicProfileHandle,
-        suggestedHandle: null,
-        templateUrl: result.templateUrl,
-        templateSlug: result.templateSlug,
-        displayName: result.displayName ?? current?.displayName ?? null,
-      }))
+      setShareInfo(result)
       setHandleInput(result.publicProfileHandle)
     } catch (err) {
       setError(describeShareError(err))
     } finally {
       setBusy(false)
     }
-  }, [agentId, displayName, handleInput, hasProfile, shareInfo?.canShare])
+  }
 
-  const handleCopy = useCallback(async () => {
+  async function handleCopy() {
     const url = shareInfo?.templateUrl
     if (!url) return
     try {
@@ -135,7 +114,7 @@ export function PublicAgentShareDialog({
     } catch {
       setError('Unable to copy the link.')
     }
-  }, [shareInfo?.templateUrl])
+  }
 
   if (!open) {
     return null

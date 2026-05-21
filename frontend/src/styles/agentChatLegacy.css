@@ -2730,27 +2730,6 @@
   display: none;
 }
 
-/* Apply gradients to wrapper based on card type */
-.composer-working-insight:has(.insight-card-v2--time-saved) {
-  background: transparent;
-}
-
-.composer-working-insight:has(.insight-card-v2--burn-rate) {
-  background: transparent;
-}
-
-.composer-working-insight:has(.insight-card-v2--burn-rate-warning) {
-  background: transparent;
-}
-
-.composer-working-insight:has(.insight-card-v2--burn-rate-critical) {
-  background: transparent;
-}
-
-.composer-working-insight:has(.insight-card-v2--agent-setup) {
-  background: transparent;
-}
-
 /* Colored pill tabs for composer insights - in header row */
 .composer-insight-tabs {
   flex-shrink: 1;

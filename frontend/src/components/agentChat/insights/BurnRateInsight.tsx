@@ -1,6 +1,6 @@
 import { motion } from 'framer-motion'
 import { CalendarDays, Gauge } from 'lucide-react'
-import type { InsightEvent, BurnRateMetadata, UsageGaugeMetadata } from '../../../types/insight'
+import type { BurnRateMetadata, InsightEvent, UsageGaugeMetadata } from '../../../types/insight'
 import { InsightGauge } from './InsightGauge'
 
 type BurnRateInsightProps = {
@@ -19,24 +19,6 @@ function formatCredits(value: number): string {
   if (value >= 100) return Math.round(value).toString()
   if (value >= 10) return value.toFixed(1).replace(/\.0$/, '')
   return value.toFixed(2).replace(/\.?0+$/, '')
-}
-
-function resolveTodayUsage(metadata: BurnRateMetadata): UsageGaugeMetadata {
-  return metadata.todayUsage ?? {
-    used: metadata.allAgentsCreditsPerDay ?? 0,
-    limit: metadata.dailyLimit ?? null,
-    percentUsed: metadata.percentUsed ?? null,
-    unlimited: metadata.percentUsed == null,
-  }
-}
-
-function resolveMonthUsage(metadata: BurnRateMetadata): UsageGaugeMetadata {
-  return metadata.monthUsage ?? {
-    used: metadata.allAgentsCreditsPerDay ?? 0,
-    limit: metadata.dailyLimit ?? null,
-    percentUsed: metadata.percentUsed ?? null,
-    unlimited: false,
-  }
 }
 
 function UsageGauge({
@@ -134,8 +116,6 @@ export function BurnRateInsight({
   usageUrl,
 }: BurnRateInsightProps) {
   const metadata = insight.metadata as BurnRateMetadata
-  const todayUsage = resolveTodayUsage(metadata)
-  const monthUsage = resolveMonthUsage(metadata)
   const detailsUrl = metadata.usageUrl || usageUrl || '/console/usage/'
 
   return (
@@ -152,10 +132,10 @@ export function BurnRateInsight({
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35, delay: 0.08 }}
       >
-        <UsageGauge title="Today" usage={todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
+        <UsageGauge title="Today" usage={metadata.todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
         <UsageGauge
           title="This month"
-          usage={monthUsage}
+          usage={metadata.monthUsage}
           icon="month"
           onDetails={onOpenUsage}
           detailsUrl={onOpenUsage ? undefined : detailsUrl}

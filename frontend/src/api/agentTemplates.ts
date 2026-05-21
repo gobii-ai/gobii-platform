@@ -12,12 +12,11 @@ export type TemplateShareInfoResponse = {
   displayName?: string | null
 }
 
-export type TemplateCloneResponse = {
+export type TemplateCloneResponse = TemplateShareInfoResponse & {
   created: boolean
   templateUrl: string
   templateSlug: string
   publicProfileHandle: string
-  displayName?: string | null
 }
 
 export function cloneAgentTemplate(agentId: string, handle?: string | null): Promise<TemplateCloneResponse> {
@@ -29,5 +28,5 @@ export function cloneAgentTemplate(agentId: string, handle?: string | null): Pro
 }
 
 export function fetchAgentTemplateShareInfo(agentId: string): Promise<TemplateShareInfoResponse> {
-  return jsonRequest<TemplateShareInfoResponse>(`/console/api/agents/${agentId}/templates/share-info/`)
+  return jsonRequest<TemplateShareInfoResponse>(`/console/api/agents/${agentId}/templates/clone/`)
 }

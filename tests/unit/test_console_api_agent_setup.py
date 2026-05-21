@@ -163,7 +163,7 @@ class AgentSetupApiTests(TestCase):
         )
 
     @patch("console.insight_views.get_agent_daily_credit_state")
-    def test_insights_usage_metadata_omits_deprecated_cards(self, mock_daily_state):
+    def test_insights_usage_metadata_includes_today_and_month_usage(self, mock_daily_state):
         agent = self._create_agent()
         self._create_task_credit()
         mock_daily_state.return_value = {
@@ -177,15 +177,6 @@ class AgentSetupApiTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         insights = response.json()["insights"]
-        self.assertNotIn("time_saved", {insight["insightType"] for insight in insights})
-        setup_panels = {
-            insight["metadata"].get("panel")
-            for insight in insights
-            if insight["insightType"] == "agent_setup"
-        }
-        self.assertNotIn("template", setup_panels)
-        self.assertNotIn("org_transfer", setup_panels)
-
         usage = next(insight for insight in insights if insight["insightType"] == "burn_rate")
         metadata = usage["metadata"]
         self.assertEqual(metadata["todayUsage"]["used"], 3.0)
@@ -222,7 +213,7 @@ class AgentSetupApiTests(TestCase):
     def test_agent_template_share_info_returns_suggested_handle(self, _mock_suggestion):
         agent = self._create_agent()
 
-        response = self.client.get(reverse("console_agent_template_share_info", kwargs={"agent_id": agent.id}))
+        response = self.client.get(reverse("console_agent_template_clone", kwargs={"agent_id": agent.id}))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
@@ -246,7 +237,7 @@ class AgentSetupApiTests(TestCase):
             category="Operations",
         )
 
-        response = self.client.get(reverse("console_agent_template_share_info", kwargs={"agent_id": agent.id}))
+        response = self.client.get(reverse("console_agent_template_clone", kwargs={"agent_id": agent.id}))
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()

@@ -132,16 +132,15 @@ function makeSecondRequestedSecretsAction(): PendingActionRequest {
 function makeInsight(): InsightEvent {
   return {
     insightId: 'insight-1',
-    insightType: 'time_saved',
+    insightType: 'burn_rate',
     priority: 1,
-    title: 'Time saved this week',
-    body: 'You saved time.',
+    title: 'Usage',
+    body: 'Track usage.',
     dismissible: true,
     metadata: {
-      hoursSaved: 4,
-      tasksCompleted: 2,
-      comparisonPeriod: 'week',
-      methodology: 'test',
+      agentName: 'Test Agent',
+      todayUsage: { used: 1, limit: 10, percentUsed: 10, unlimited: false },
+      monthUsage: { used: 5, limit: 100, percentUsed: 5, unlimited: false },
     },
   }
 }

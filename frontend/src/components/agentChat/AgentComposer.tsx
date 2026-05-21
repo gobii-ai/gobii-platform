@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -32,9 +32,8 @@ function shouldShowSubmitShortcutHint(): boolean {
 
 function getBurnRateUsagePercent(metadata: BurnRateMetadata): number {
   return Math.max(
-    metadata.todayUsage?.percentUsed ?? -1,
-    metadata.monthUsage?.percentUsed ?? -1,
-    metadata.percentUsed ?? -1,
+    metadata.todayUsage.percentUsed ?? -1,
+    metadata.monthUsage.percentUsed ?? -1,
     0,
   )
 }
@@ -46,11 +45,7 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
   return 'normal'
 }
 
-// Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
-  if (insight.insightType === 'time_saved') {
-    return '#10b981' // emerald-500
-  }
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
     const level = getBurnRateUsageLevel(meta)
@@ -64,11 +59,7 @@ function getInsightTabColor(insight: InsightEvent): string {
   return '#6b7280' // gray-500 fallback
 }
 
-// Get a short label for the insight tab
 function getInsightTabLabel(insight: InsightEvent): string {
-  if (insight.insightType === 'time_saved') {
-    return 'Time'
-  }
   if (insight.insightType === 'burn_rate') {
     return 'Usage'
   }
@@ -91,9 +82,6 @@ function getInsightTabLabel(insight: InsightEvent): string {
 }
 
 function getInsightTabIcon(insight: InsightEvent) {
-  if (insight.insightType === 'time_saved') {
-    return <Clock3 size={11} strokeWidth={2.2} />
-  }
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
     const level = getBurnRateUsageLevel(meta)

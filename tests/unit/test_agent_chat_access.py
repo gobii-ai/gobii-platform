@@ -177,7 +177,14 @@ class AgentChatAccessTests(TestCase):
 
         self.assertEqual(agent.id, self.org_agent.id)
 
-    def test_resolve_agent_allows_personal_agent_outside_current_org_context(self):
+    @patch(
+        "console.agent_chat.access.can_user_use_personal_agents_and_api",
+        return_value=True,
+    )
+    def test_resolve_agent_allows_personal_agent_outside_current_org_context(
+        self,
+        _mock_personal_access,
+    ):
         self._set_org_context()
 
         agent = resolve_agent(
@@ -624,14 +631,12 @@ class AgentChatAccessTests(TestCase):
             self.assertTrue(can_user_access_personal_agent_chat(self.user))
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @patch("console.insight_views._get_time_saved_insight", return_value=None)
     @patch("console.insight_views._get_burn_rate_insight", return_value=None)
     @patch("util.trial_enforcement.get_active_subscription", return_value=None)
     def test_insights_omit_setup_cards_for_past_due_personal_chat(
         self,
         _mock_get_active_subscription,
         _mock_burn_rate,
-        _mock_time_saved,
     ):
         customer = self._fake_customer_with_subscription_status("past_due")
         with patch("util.trial_enforcement.get_stripe_customer", return_value=customer):
