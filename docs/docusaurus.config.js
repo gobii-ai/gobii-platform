@@ -9,7 +9,7 @@ const gtagTrackingId = process.env.DOCS_GTAG_TRACKING_ID;
 const config = {
   title: 'Gobii',
   tagline: 'Documentation for Gobii AI employees, teams, integrations, and developer APIs',
-  favicon: 'images/favicon.png',
+  favicon: 'favicon.ico',
   url: siteUrl,
   baseUrl: '/',
   organizationName: 'gobii-ai',
