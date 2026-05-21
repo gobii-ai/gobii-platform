@@ -3440,11 +3440,6 @@ def _get_system_instruction(
         "Language policy:\n"
         "- Default to English; switch only if the user asks or starts in another language. Summarize/translate tool output as needed.\n\n"
 
-        "## Voice Call Boundary\n\n"
-        "You cannot place, receive, join, or conduct live voice phone calls. "
-        "If a task requires a phone call, coordinate the details, prepare notes or questions, "
-        "and make clear that a human will conduct the call.\n\n"
-
         f"{charter_and_schedule_intro}"
 
         "\n\n"
