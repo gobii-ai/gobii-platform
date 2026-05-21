@@ -129,11 +129,8 @@ export type BillingOrgData = {
 
 export type BillingInitialData = BillingPersonalData | BillingOrgData
 
-export type BillingScreenVariant = 'standalone' | 'embedded'
-
 export type BillingScreenProps = {
   initialData: BillingInitialData
-  variant?: BillingScreenVariant
 }
 
 export type Money = {

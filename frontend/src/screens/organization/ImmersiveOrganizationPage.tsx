@@ -11,7 +11,7 @@ export function ImmersiveOrganizationPage({
 }: ImmersiveOrganizationPageProps) {
   return (
     <div className={layout === 'sidebar-shell' ? 'w-full px-1 pb-4' : 'mx-auto w-full max-w-5xl px-4 pb-6'}>
-      <OrganizationScreen key={refreshKey} variant="embedded" />
+      <OrganizationScreen key={refreshKey} />
     </div>
   )
 }

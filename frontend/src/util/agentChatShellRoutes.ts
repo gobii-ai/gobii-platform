@@ -1,12 +1,12 @@
-export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'email' | 'files' | 'contact-requests'
+export type AgentChatShellSubview = 'chat' | 'settings' | 'secrets' | 'secret-requests' | 'email' | 'files' | 'contact-requests'
 
-const APP_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
 const CONSOLE_SHELL_SUBVIEW_PATTERN = '(settings|secrets|email|files|contact-requests)'
 
 function normalizeSubviewToken(token?: string | null): AgentChatShellSubview {
   switch (token) {
     case 'settings':
     case 'secrets':
+    case 'secret-requests':
     case 'email':
     case 'files':
     case 'contact-requests':
@@ -23,7 +23,22 @@ function normalizePathname(pathname: string): string {
 
 export function extractAgentChatShellAgentId(pathname: string): string | null {
   const normalized = normalizePathname(pathname)
-  const appMatch = normalized.match(new RegExp(`^/app/agents/([^/]+)(?:/${APP_SHELL_SUBVIEW_PATTERN})?$`))
+  const appParts = normalized.split('/').filter(Boolean)
+  if (
+    appParts[0] === 'app'
+    && appParts[1] === 'agents'
+    && appParts[2]
+    && (
+      appParts.length === 3
+      || (appParts.length === 4 && ['settings', 'secrets', 'email', 'files', 'contact-requests'].includes(appParts[3]))
+      || (appParts.length === 5 && appParts[3] === 'secrets' && appParts[4] === 'request')
+      || (appParts.length === 6 && appParts[3] === 'secrets' && appParts[4] === 'request' && appParts[5] === 'thanks')
+    )
+  ) {
+    return appParts[2]
+  }
+
+  const appMatch = normalized.match(/^\/app\/agents\/([^/]+)$/)
   if (appMatch) {
     return appMatch[1]
   }
@@ -38,9 +53,14 @@ export function extractAgentChatShellAgentId(pathname: string): string | null {
 
 export function getAgentChatShellSubview(pathname: string): AgentChatShellSubview {
   const normalized = normalizePathname(pathname)
-  const appMatch = normalized.match(new RegExp(`^/app/agents/[^/]+(?:/${APP_SHELL_SUBVIEW_PATTERN})?$`))
-  if (appMatch) {
-    return normalizeSubviewToken(appMatch[1])
+  const appParts = normalized.split('/').filter(Boolean)
+  if (appParts[0] === 'app' && appParts[1] === 'agents' && appParts[2]) {
+    if (appParts[3] === 'secrets' && appParts[4] === 'request' && (appParts.length === 5 || (appParts.length === 6 && appParts[5] === 'thanks'))) {
+      return 'secret-requests'
+    }
+    if (appParts.length === 3 || appParts.length === 4) {
+      return normalizeSubviewToken(appParts[3])
+    }
   }
 
   const consoleMatch = normalized.match(new RegExp(`^/console/agents/[^/]+/chat(?:/${CONSOLE_SHELL_SUBVIEW_PATTERN})?$`))
@@ -62,6 +82,8 @@ export function buildAgentChatShellPath(
         return `/app/agents/${agentId}/settings`
       case 'secrets':
         return `/app/agents/${agentId}/secrets`
+      case 'secret-requests':
+        return `/app/agents/${agentId}/secrets/request`
       case 'email':
         return `/app/agents/${agentId}/email`
       case 'files':
@@ -77,6 +99,8 @@ export function buildAgentChatShellPath(
       return `/console/agents/${agentId}/chat/settings/`
     case 'secrets':
       return `/console/agents/${agentId}/chat/secrets/`
+    case 'secret-requests':
+      return `/console/agents/${agentId}/secrets/request/`
     case 'email':
       return `/console/agents/${agentId}/chat/email/`
     case 'files':

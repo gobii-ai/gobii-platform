@@ -80,7 +80,6 @@ export function EmbeddedAgentEmailSettingsPanel({
         emailSettingsUrl={`/console/api/agents/${agentId}/email-settings/`}
         ensureAccountUrl={`/console/api/agents/${agentId}/email-settings/ensure-account/`}
         testUrl={`/console/api/agents/${agentId}/email-settings/test/`}
-        variant="embedded"
         onBack={onBack}
         onSaved={handleSaved}
       />

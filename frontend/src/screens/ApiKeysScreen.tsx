@@ -15,10 +15,6 @@ import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } f
 import { Modal } from '../components/common/Modal'
 import { useModal } from '../hooks/useModal'
 
-type ApiKeysScreenProps = {
-  variant?: 'standalone' | 'embedded'
-}
-
 type CreatedKeyState = {
   name: string
   rawKey: string
@@ -268,7 +264,7 @@ function ConfirmApiKeyActionModal({
   )
 }
 
-export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
+export function ApiKeysScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['api-keys'] as const, [])
   const [modal, showModal] = useModal()
@@ -279,7 +275,6 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
     queryFn: ({ signal }) => fetchApiKeys(signal),
   })
 
-  const isEmbedded = variant === 'embedded'
   const keys = data?.api_keys ?? []
   const canManage = Boolean(data?.can_manage)
   const emailVerified = data?.email_verified !== false
@@ -343,21 +338,15 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
     ))
   }, [refresh, showModal])
 
-  const frameClassName = isEmbedded
-    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
-    : 'rounded-xl border border-blue-200/60 bg-blue-50/80 shadow-xl'
-  const tableClassName = isEmbedded ? 'min-w-full divide-y divide-slate-200/15' : 'min-w-full divide-y divide-blue-200/60'
-  const tableHeadClassName = isEmbedded ? 'bg-slate-900/40' : 'bg-blue-100/70'
-  const tableBodyClassName = isEmbedded ? 'divide-y divide-slate-200/15' : 'divide-y divide-blue-100 bg-white'
-  const rowClassName = isEmbedded ? 'hover:bg-slate-900/30' : 'hover:bg-blue-50/60'
-  const headerTextClassName = isEmbedded ? 'px-6 py-3 text-left text-xs font-semibold uppercase text-slate-300' : 'px-6 py-3 text-left text-xs font-semibold uppercase text-blue-950'
-  const cellTextClassName = isEmbedded ? 'px-6 py-4 text-sm text-slate-300' : 'px-6 py-4 text-sm text-slate-700'
-  const actionClassName = isEmbedded
-    ? 'inline-flex items-center gap-1 rounded border border-slate-300/70 bg-transparent px-2 py-1 text-xs font-medium text-slate-100 transition-colors hover:border-slate-200 hover:text-white disabled:opacity-50'
-    : 'inline-flex items-center gap-1 rounded border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-50 disabled:opacity-50'
-  const destructiveClassName = isEmbedded
-    ? 'inline-flex items-center gap-1 rounded border border-rose-300/40 bg-rose-950/20 px-2 py-1 text-xs font-medium text-rose-100 transition-colors hover:border-rose-200 hover:bg-rose-900/30'
-    : 'inline-flex items-center gap-1 rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 transition-colors hover:bg-red-100'
+  const frameClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
+  const tableClassName = 'min-w-full divide-y divide-slate-200/15'
+  const tableHeadClassName = 'bg-slate-900/40'
+  const tableBodyClassName = 'divide-y divide-slate-200/15'
+  const rowClassName = 'hover:bg-slate-900/30'
+  const headerTextClassName = 'px-6 py-3 text-left text-xs font-semibold uppercase text-slate-300'
+  const cellTextClassName = 'px-6 py-4 text-sm text-slate-300'
+  const actionClassName = 'inline-flex items-center gap-1 rounded border border-slate-300/70 bg-transparent px-2 py-1 text-xs font-medium text-slate-100 transition-colors hover:border-slate-200 hover:text-white disabled:opacity-50'
+  const destructiveClassName = 'inline-flex items-center gap-1 rounded border border-rose-300/40 bg-rose-950/20 px-2 py-1 text-xs font-medium text-rose-100 transition-colors hover:border-rose-200 hover:bg-rose-900/30'
 
   return (
     <div className="space-y-6 pb-6">
@@ -365,15 +354,15 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
       {createdKey ? <CreatedApiKeyModal created={createdKey} onClose={() => setCreatedKey(null)} /> : null}
 
       <SettingsBanner
-        variant={variant}
-        eyebrow={isEmbedded ? 'Workspace' : undefined}
+        variant="embedded"
+        eyebrow="Workspace"
         title="API Keys"
         subtitle={subtitle}
         actions={canManage && emailVerified ? (
           <button
             type="button"
             onClick={openCreateModal}
-            className={isEmbedded ? 'inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto' : 'inline-flex w-max items-center gap-x-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'}
+            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
           >
             <Plus className="h-4 w-4" />
             Create New Key
@@ -382,26 +371,26 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
       />
 
       {!emailVerified ? (
-        <div className={isEmbedded ? 'rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100' : 'rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800'}>
+        <div className="rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
           Please verify your email address to create API keys.
         </div>
       ) : null}
 
       {data && !canManage ? (
-        <div className={isEmbedded ? 'flex items-center gap-2 rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100' : 'flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800'}>
+        <div className="flex items-center gap-2 rounded-lg border border-amber-300/30 bg-amber-950/20 px-4 py-3 text-sm text-amber-100">
           <ShieldAlert className="h-4 w-4 shrink-0" />
           <span>Read-only access. Contact an owner or admin to create or manage keys.</span>
         </div>
       ) : null}
 
       {banner ? (
-        <div className={isEmbedded ? 'rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100' : 'rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800'}>
+        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
           {banner}
         </div>
       ) : null}
 
       {listError ? (
-        <div className={isEmbedded ? 'rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100' : 'rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800'}>
+        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
           {listError}
         </div>
       ) : null}
@@ -409,16 +398,16 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
       <div className={frameClassName}>
         {isLoading ? (
           <div className="flex justify-center py-12">
-            <div className={isEmbedded ? 'h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200' : 'h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600'} />
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200" />
           </div>
         ) : keys.length === 0 ? (
           <div className="p-8 text-center">
             <div className="mb-4 flex justify-center">
-              <div className={isEmbedded ? 'flex h-12 w-12 items-center justify-center rounded-full border border-slate-300/70 bg-slate-900/40' : 'flex h-12 w-12 items-center justify-center rounded-full bg-blue-100'}>
-                <KeyRound className={isEmbedded ? 'h-6 w-6 text-slate-400' : 'h-6 w-6 text-blue-500'} />
+              <div className="flex h-12 w-12 items-center justify-center rounded-full border border-slate-300/70 bg-slate-900/40">
+                <KeyRound className="h-6 w-6 text-slate-400" />
               </div>
             </div>
-            <p className={isEmbedded ? 'text-sm text-slate-400' : 'text-sm text-slate-600'}>
+            <p className="text-sm text-slate-400">
               No API keys found.{canManage && emailVerified ? ' Create one to get started.' : ''}
             </p>
           </div>
@@ -439,8 +428,8 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
                 {keys.map((apiKey) => (
                   <tr key={apiKey.id} className={rowClassName}>
                     <td className={cellTextClassName}>
-                      <div className={isEmbedded ? 'font-medium text-slate-100' : 'font-medium text-slate-950'}>{apiKey.name}</div>
-                      <div className={isEmbedded ? 'mt-1 text-xs text-slate-400' : 'mt-1 text-xs text-slate-500'}>Prefix: {apiKey.prefix}</div>
+                      <div className="font-medium text-slate-100">{apiKey.name}</div>
+                      <div className="mt-1 text-xs text-slate-400">Prefix: {apiKey.prefix}</div>
                     </td>
                     {ownerScope === 'organization' ? (
                       <td className={cellTextClassName}>{apiKey.created_by ?? '-'}</td>
@@ -449,12 +438,8 @@ export function ApiKeysScreen({ variant = 'standalone' }: ApiKeysScreenProps) {
                     <td className={cellTextClassName}>{formatDate(apiKey.last_used_at)}</td>
                     <td className={cellTextClassName}>
                       <span className={apiKey.is_active
-                        ? isEmbedded
-                          ? 'inline-flex rounded-full border border-green-300/30 bg-green-950/20 px-2 py-0.5 text-xs font-medium text-green-100'
-                          : 'inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800'
-                        : isEmbedded
-                          ? 'inline-flex rounded-full border border-red-300/30 bg-red-950/20 px-2 py-0.5 text-xs font-medium text-red-100'
-                          : 'inline-flex rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800'}
+                        ? 'inline-flex rounded-full border border-green-300/30 bg-green-950/20 px-2 py-0.5 text-xs font-medium text-green-100'
+                        : 'inline-flex rounded-full border border-red-300/30 bg-red-950/20 px-2 py-0.5 text-xs font-medium text-red-100'}
                       >
                         {apiKey.is_active ? 'Active' : 'Revoked'}
                       </span>

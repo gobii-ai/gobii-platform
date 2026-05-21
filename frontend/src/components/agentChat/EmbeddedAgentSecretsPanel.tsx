@@ -22,10 +22,8 @@ export function EmbeddedAgentSecretsPanel({
         listUrl={`/console/api/agents/${agentId}/secrets/`}
         detailUrlTemplate={`/console/api/agents/${agentId}/secrets/${SECRET_PLACEHOLDER_ID}/`}
         promoteUrlTemplate={`/console/api/agents/${agentId}/secrets/${SECRET_PLACEHOLDER_ID}/promote/`}
-        agentDetailUrl={`/app/agents/${agentId}/settings`}
         globalSecretsUrl="/app/secrets"
-        requestUrl={`/console/agents/${agentId}/secrets/request/`}
-        variant="embedded"
+        requestUrl={`/app/agents/${agentId}/secrets/request`}
         onBack={onBack}
       />
     </EmbeddedAgentShellPanel>

@@ -17,10 +17,6 @@ import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { Modal } from '../components/common/Modal'
 
-type OrganizationScreenProps = {
-  variant?: 'standalone' | 'embedded'
-}
-
 type ConfirmAction = {
   kind: 'remove-member'
   member: OrganizationMember
@@ -273,8 +269,7 @@ function AddMemberModal({
   )
 }
 
-export function OrganizationScreen({ variant = 'standalone' }: OrganizationScreenProps) {
-  const isEmbedded = variant === 'embedded'
+export function OrganizationScreen() {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['current-organization'] as const, [])
   const { data, error, isLoading } = useQuery({
@@ -381,7 +376,7 @@ export function OrganizationScreen({ variant = 'standalone' }: OrganizationScree
 
   if (isLoading) {
     return (
-      <div className={isEmbedded ? 'profile-screen profile-screen--embedded' : 'profile-screen'}>
+      <div className="profile-screen profile-screen--embedded">
         <section className="profile-screen__section">
           <p className="profile-screen__muted">Loading organization...</p>
         </section>
@@ -392,7 +387,7 @@ export function OrganizationScreen({ variant = 'standalone' }: OrganizationScree
   if (error || !data) {
     return (
       <SettingsBanner
-        variant={isEmbedded ? 'embedded' : 'standalone'}
+        variant="embedded"
         title="Organization Context Required"
         subtitle={formatErrors(error, 'Switch to an organization context to manage organization settings.')[0]}
       />
@@ -406,7 +401,7 @@ export function OrganizationScreen({ variant = 'standalone' }: OrganizationScree
   const addMemberDisabledLabel = addMemberDisabled ? 'No seats available' : undefined
 
   return (
-    <div className={isEmbedded ? 'profile-screen profile-screen--embedded organization-screen' : 'profile-screen organization-screen'}>
+    <div className="profile-screen profile-screen--embedded organization-screen">
       <header className="profile-screen__header">
         <div className="profile-screen__title-icon" aria-hidden="true">
           <Building2 className="h-5 w-5" />
@@ -419,7 +414,7 @@ export function OrganizationScreen({ variant = 'standalone' }: OrganizationScree
 
       {!canEditOrganization && !canManageMembers ? (
         <SettingsBanner
-          variant={isEmbedded ? 'embedded' : 'standalone'}
+          variant="embedded"
           title="Read-Only Access"
           subtitle={`Your ${data.viewer.roleLabel} role can view this organization, but cannot edit settings or membership.`}
         />

@@ -22,10 +22,9 @@ import { useModal } from '../hooks/useModal'
 type GlobalSecretsScreenProps = {
   listUrl: string
   ownerScope?: string
-  variant?: 'standalone' | 'embedded'
 }
 
-export function GlobalSecretsScreen({ listUrl, ownerScope, variant = 'standalone' }: GlobalSecretsScreenProps) {
+export function GlobalSecretsScreen({ listUrl, ownerScope }: GlobalSecretsScreenProps) {
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['global-secrets', listUrl] as const, [listUrl])
   const [modal, showModal] = useModal()
@@ -41,7 +40,6 @@ export function GlobalSecretsScreen({ listUrl, ownerScope, variant = 'standalone
   const listError = error instanceof Error ? error.message : null
   const resolvedOwnerScope = ownerScope ?? data?.owner_scope
   const isOrganizationScope = resolvedOwnerScope === 'organization'
-  const isEmbedded = variant === 'embedded'
   const description = isOrganizationScope
     ? 'Manage encrypted secrets for this organization.'
     : 'Manage encrypted secrets for your account.'
@@ -114,15 +112,15 @@ export function GlobalSecretsScreen({ listUrl, ownerScope, variant = 'standalone
       {modal}
 
       <SettingsBanner
-        variant={variant}
-        eyebrow={isEmbedded ? 'Workspace' : undefined}
+        variant="embedded"
+        eyebrow="Workspace"
         title="Secrets"
         subtitle={description}
         actions={(
           <button
             type="button"
             onClick={handleCreate}
-            className={isEmbedded ? 'inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto' : 'inline-flex w-max items-center gap-x-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'}
+            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
           >
             <Plus className="w-4 h-4" />
             Add Secret
@@ -130,15 +128,15 @@ export function GlobalSecretsScreen({ listUrl, ownerScope, variant = 'standalone
         )}
       />
 
-      <div className={isEmbedded ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none` : 'bg-blue-50/80 backdrop-blur-sm border border-blue-200/60 shadow-xl rounded-xl overflow-hidden'}>
+      <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
         <div className="p-4 sm:p-6">
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
-              <ShieldCheck className={isEmbedded ? 'h-6 w-6 text-slate-300' : 'w-6 h-6 text-blue-600'} />
+              <ShieldCheck className="h-6 w-6 text-slate-300" />
             </div>
             <div>
-              <h3 className={isEmbedded ? 'mb-1 text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-blue-800 mb-1'}>Secure Encryption</h3>
-              <p className={isEmbedded ? 'text-sm text-slate-300' : 'text-sm text-blue-700'}>
+              <h3 className="mb-1 text-sm font-semibold text-slate-100">Secure Encryption</h3>
+              <p className="text-sm text-slate-300">
                 All secrets are encrypted with AES-256-GCM before storage. Global secrets are automatically
                 available to all your agents.
               </p>
@@ -148,26 +146,26 @@ export function GlobalSecretsScreen({ listUrl, ownerScope, variant = 'standalone
       </div>
 
       {banner && (
-        <div className={isEmbedded ? 'rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100' : 'rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800'}>
+        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
           {banner}
         </div>
       )}
       {(errorBanner || listError) && (
-        <div className={isEmbedded ? 'rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100' : 'rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800'}>
+        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
           {errorBanner || listError}
         </div>
       )}
 
       {isLoading && (
         <div className="flex justify-center py-12">
-          <div className={isEmbedded ? 'h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200' : 'h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600'} />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200" />
         </div>
       )}
 
       {!isLoading && (
         <SecretTable
           secrets={secrets}
-          embedded={isEmbedded}
+          embedded
           title="Global Secrets"
           subtitle={subtitle}
           emptyMessage="No global secrets configured yet. Add your first secret to get started."

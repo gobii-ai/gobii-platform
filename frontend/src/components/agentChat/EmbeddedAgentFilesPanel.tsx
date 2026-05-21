@@ -44,7 +44,6 @@ export function EmbeddedAgentFilesPanel({
     <EmbeddedAgentShellPanel>
       <AgentFilesScreen
         initialData={initialData}
-        variant="embedded"
         onBack={onBack}
       />
     </EmbeddedAgentShellPanel>

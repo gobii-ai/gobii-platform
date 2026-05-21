@@ -30,19 +30,13 @@ import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 
 
 type SelectionMode = 'billing' | 'custom'
-type UsageScreenVariant = 'standalone' | 'embedded'
-
-type UsageScreenProps = {
-  variant?: UsageScreenVariant
-}
 
 const formatContextCaption = (contextName: string, timezone: string): string => {
   const tzLabel = timezone || 'UTC'
   return `Context: ${contextName} · Timezone: ${tzLabel}`
 }
 
-export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
-  const isEmbedded = variant === 'embedded'
+export function UsageScreen() {
   const [appliedRange, setAppliedRange] = useState<DateRangeValue | null>(null)
   const [calendarRange, setCalendarRange] = useState<DateRangeValue | null>(null)
   const [isPickerOpen, setPickerOpen] = useState(false)
@@ -308,31 +302,19 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
   }, [summary, summaryStatus])
 
   const selectedAgentArray = useMemo(() => Array.from(selectedAgentIds).sort(), [selectedAgentIds])
-  const rootClassName = isEmbedded
-    ? 'flex w-full flex-col gap-5'
-    : 'mx-auto flex max-w-5xl flex-col gap-6 py-8'
   const description = 'Monitor agent and API activity alongside metered consumption for the current billing cycle.'
 
   return (
-    <div className={rootClassName}>
+    <div className="flex w-full flex-col gap-5">
       <header className="flex flex-col gap-3">
-        {isEmbedded ? (
-          <SettingsBanner
-            variant="embedded"
-            eyebrow="Workspace"
-            title="Usage"
-            subtitle={description}
-          />
-        ) : (
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800">Usage</h1>
-            <p className="mt-2 text-base text-slate-600">
-              {description}
-            </p>
-          </div>
-        )}
+        <SettingsBanner
+          variant="embedded"
+          eyebrow="Workspace"
+          title="Usage"
+          subtitle={description}
+        />
         <UsagePeriodHeader
-          embedded={isEmbedded}
+          embedded
           periodInfo={periodInfo}
           isPickerOpen={isPickerOpen}
           onOpenChange={handlePickerOpenChange}
@@ -356,15 +338,15 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
             selectedAgentIds,
             onSelectionChange: handleAgentSelectionChange,
             variant: 'condensed',
-            embedded: isEmbedded,
+            embedded: true,
           }}
         />
       </header>
 
-      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} embedded={isEmbedded}/>
+      <UsageMetricsGrid queryInput={queryInput} agentIds={selectedAgentArray} embedded />
 
       <UsageTrendSection
-        embedded={isEmbedded}
+        embedded
         effectiveRange={boundedEffectiveRange}
         fallbackRange={boundedSummaryRange}
         timezone={summary?.period.timezone}
@@ -372,7 +354,7 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
       />
 
       <UsageToolChart
-        embedded={isEmbedded}
+        embedded
         effectiveRange={boundedEffectiveRange}
         fallbackRange={boundedSummaryRange}
         agentIds={selectedAgentArray}
@@ -380,17 +362,14 @@ export function UsageScreen({ variant = 'standalone' }: UsageScreenProps) {
       />
 
       <UsageAgentLeaderboard
-        embedded={isEmbedded}
+        embedded
         effectiveRange={boundedEffectiveRange}
         fallbackRange={boundedSummaryRange}
         agentIds={selectedAgentArray}
       />
 
       {summaryStatus === 'error' && summaryErrorMessage ? (
-        <div className={isEmbedded
-          ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
-          : 'rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'}
-        >
+        <div className="rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100">
           {summaryErrorMessage}
         </div>
       ) : null}

@@ -48,6 +48,7 @@ import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
+import { EmbeddedAgentSecretRequestsPanel } from '../components/agentChat/EmbeddedAgentSecretRequestsPanel'
 import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
 import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgentSecretsPanel'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
@@ -4506,6 +4507,8 @@ export function AgentChatPage({
     switch (shellSubview) {
       case 'secrets':
         return 'Agent Secrets'
+      case 'secret-requests':
+        return 'Secret Requests'
       case 'email':
         return 'Email Settings'
       case 'files':
@@ -4534,6 +4537,17 @@ export function AgentChatPage({
         agentId={activeAgentId}
         agentName={resolvedAgentName || 'Agent'}
         onBack={handleCloseEmbeddedSettings}
+      />
+    ) : shellSubview === 'secret-requests' ? (
+      <EmbeddedAgentSecretRequestsPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        initialSuccess={/\/secrets\/request\/thanks\/?$/.test(shellPathname)}
+        onBack={handleCloseEmbeddedSettings}
+        onOpenChat={handleExitEmbeddedSettings}
+        onOpenSecrets={handleOpenEmbeddedSecrets}
+        onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
+        onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
       />
     ) : shellSubview === 'email' ? (
       <EmbeddedAgentEmailSettingsPanel

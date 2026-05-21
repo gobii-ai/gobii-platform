@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
-import { AlertTriangle, CreditCard, GlobeLock, ShieldAlert } from 'lucide-react'
+import { AlertTriangle, GlobeLock, ShieldAlert } from 'lucide-react'
 
 import { getCsrfToken, jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
@@ -140,12 +140,9 @@ function isDraftDirty(initialData: BillingInitialData, draft: BillingDraftState)
   return addonsDirty || dedicatedDirty || seatsDirty
 }
 
-export function BillingScreen({ initialData, variant = 'standalone' }: BillingScreenProps) {
+export function BillingScreen({ initialData }: BillingScreenProps) {
   const isOrg = initialData.contextType === 'organization'
   const accountPaused = Boolean(initialData.accountPause?.paused)
-  const isEmbedded = variant === 'embedded'
-  const rootClassName = isEmbedded ? 'billing-screen billing-screen--embedded grid w-full gap-6' : 'billing-screen app-shell'
-  const mainClassName = isEmbedded ? 'billing-screen__main grid gap-6' : 'billing-screen__main app-main'
   const trialEndsLabel = useMemo(() => {
     const iso = initialData.trial?.trialEndsAtIso
     if (!iso) return null
@@ -578,29 +575,10 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
   }, [])
 
   return (
-    <div className={rootClassName}>
-      {!isEmbedded ? (
-        <div className="card card--header">
-          <div className="card__body card__body--header flex flex-col gap-4 py-4 sm:py-3">
-            <div className="flex items-center gap-3">
-              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-white/90 text-blue-700 shadow-sm">
-                <CreditCard className="h-6 w-6" aria-hidden="true" />
-              </div>
-              <div className="min-w-0">
-                <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Billing</h1>
-                <p className="text-slate-700 font-medium">
-                  {isOrg ? `Organization: ${initialData.organization.name}` : 'Personal subscription and add-ons.'}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      <main className={mainClassName}>
+    <div className="billing-screen billing-screen--embedded grid w-full gap-6">
+      <main className="billing-screen__main grid gap-6">
         <BillingHeader
           initialData={initialData}
-          variant={variant}
           onChangePlan={showPlanAction ? handlePlanActionClick : undefined}
           onCancel={!isOrg && initialData.contextType === 'personal' && initialData.paidSubscriber ? openCancelFlow : undefined}
           onResume={!isOrg
@@ -657,15 +635,15 @@ export function BillingScreen({ initialData, variant = 'standalone' }: BillingSc
       <SaveBar
         visible={hasAnyChanges && !summaryActionsVisible && nearTop}
         onCancel={resetDraft}
-        onSave={isEmbedded ? scrollToBillingSummary : handleSave}
+        onSave={scrollToBillingSummary}
         busy={saving}
         error={saveError}
-        title={isEmbedded ? 'You have unsaved changes.' : undefined}
-        variant={isEmbedded ? 'embedded' : 'standalone'}
-        placement={isEmbedded ? 'sticky' : 'fixed'}
-        showCancel={!isEmbedded}
-        saveLabel={isEmbedded ? 'Review and update' : undefined}
-        showSaveIcon={!isEmbedded}
+        title="You have unsaved changes."
+        variant="embedded"
+        placement="sticky"
+        showCancel={false}
+        saveLabel="Review and update"
+        showSaveIcon={false}
       />
 
       {isUpgradeModalOpen && !isOrg && isProprietaryMode ? (

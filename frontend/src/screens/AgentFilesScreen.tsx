@@ -14,7 +14,6 @@ import { sortNodes } from '../components/agentFiles/utils'
 
 export type AgentFilesScreenProps = {
   initialData: AgentFilesPageData
-  variant?: 'standalone' | 'embedded'
   onBack?: () => void
 }
 
@@ -111,10 +110,8 @@ async function moveNode(url: string, payload: MovePayload): Promise<AgentFsNode>
 
 export function AgentFilesScreen({
   initialData,
-  variant = 'standalone',
   onBack,
 }: AgentFilesScreenProps) {
-  const isEmbedded = variant === 'embedded'
   const queryClient = useQueryClient()
   const canManage = initialData.permissions.canManage
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null)
@@ -408,11 +405,9 @@ export function AgentFilesScreen({
 
   return (
     <div className="space-y-6 pb-6">
-      <div className={isEmbedded ? 'overflow-hidden rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base overflow-hidden'}>
+      <div className="overflow-hidden rounded-none border-0 bg-transparent shadow-none">
         <FileManagerHeader
           agentName={initialData.agent.name}
-          backLink={initialData.backLink}
-          variant={variant}
           onBack={onBack}
           canManage={canManage}
           uploadInputId={uploadInputId}
@@ -427,34 +422,34 @@ export function AgentFilesScreen({
           onRefresh={handleRefresh}
         />
 
-        <div className={isEmbedded ? 'flex flex-col gap-3 px-0 py-4' : 'flex flex-col gap-3 px-6 py-4'}>
+        <div className="flex flex-col gap-3 px-0 py-4">
           {!canManage && (
-            <div className={isEmbedded ? 'rounded-lg border border-sky-300/30 bg-sky-950/20 px-3 py-2 text-xs text-slate-200' : 'rounded-lg border border-sky-100 bg-sky-50/60 px-3 py-2 text-xs text-slate-700'}>
+            <div className="rounded-lg border border-sky-300/30 bg-sky-950/20 px-3 py-2 text-xs text-slate-200">
               Collaborators can upload and download files. Folder changes are disabled.
             </div>
           )}
           {uploadMutation.isPending && uploadInfo ? (
-            <div className={isEmbedded ? 'flex flex-wrap items-center gap-3 rounded-lg border border-blue-300/30 bg-blue-950/20 px-3 py-2 text-sm text-blue-100' : 'flex flex-wrap items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700'}>
+            <div className="flex flex-wrap items-center gap-3 rounded-lg border border-blue-300/30 bg-blue-950/20 px-3 py-2 text-sm text-blue-100">
               <RefreshCw className="h-4 w-4 animate-spin" aria-hidden="true" />
               <span>
                 Uploading {uploadInfo.fileCount} file{uploadInfo.fileCount === 1 ? '' : 's'} to {uploadTargetName}
               </span>
-              <span className={isEmbedded ? 'h-1.5 w-32 overflow-hidden rounded-full bg-blue-900/60' : 'h-1.5 w-32 overflow-hidden rounded-full bg-blue-200'}>
-                <span className={isEmbedded ? 'block h-full w-1/2 animate-pulse rounded-full bg-blue-300' : 'block h-full w-1/2 animate-pulse rounded-full bg-blue-600'} />
+              <span className="h-1.5 w-32 overflow-hidden rounded-full bg-blue-900/60">
+                <span className="block h-full w-1/2 animate-pulse rounded-full bg-blue-300" />
               </span>
             </div>
           ) : null}
-          <FileManagerBreadcrumbs breadcrumbs={breadcrumbs} embedded={isEmbedded} onNavigate={handleNavigateTo} />
+          <FileManagerBreadcrumbs breadcrumbs={breadcrumbs} embedded onNavigate={handleNavigateTo} />
           {canManage && isCreatingFolder ? (
             <CreateFolderForm
               folderName={newFolderName}
               isBusy={isBusy}
-              embedded={isEmbedded}
+              embedded
               onNameChange={handleFolderNameChange}
               onSubmit={handleCreateFolderSubmit}
             />
           ) : null}
-          {actionError && <p className={isEmbedded ? 'text-sm text-rose-300' : 'text-sm text-rose-600'}>{actionError}</p>}
+          {actionError && <p className="text-sm text-rose-300">{actionError}</p>}
         </div>
 
         <FileTable
@@ -462,7 +457,7 @@ export function AgentFilesScreen({
           isBusy={isBusy}
           isLoading={filesQuery.isPending}
           errorMessage={errorMessage}
-          embedded={isEmbedded}
+          embedded
           canManage={canManage}
           currentFolderId={currentFolderId}
           parentFolderPath={parentFolderPath}

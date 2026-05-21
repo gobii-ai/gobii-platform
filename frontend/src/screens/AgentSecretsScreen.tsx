@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, ExternalLink, Plus, ShieldCheck } from 'lucide-react'
+import { ExternalLink, Plus, ShieldCheck } from 'lucide-react'
 
 import {
   fetchAgentSecrets,
@@ -27,10 +27,8 @@ type AgentSecretsScreenProps = {
   listUrl: string
   detailUrlTemplate: string
   promoteUrlTemplate: string
-  agentDetailUrl: string
   globalSecretsUrl: string
   requestUrl: string
-  variant?: 'standalone' | 'embedded'
   onBack?: () => void
 }
 
@@ -42,10 +40,8 @@ export function AgentSecretsScreen({
   listUrl,
   detailUrlTemplate,
   promoteUrlTemplate,
-  agentDetailUrl,
   globalSecretsUrl,
   requestUrl,
-  variant = 'standalone',
   onBack,
 }: AgentSecretsScreenProps) {
   const queryClient = useQueryClient()
@@ -79,7 +75,6 @@ export function AgentSecretsScreen({
 
   const secretDetailUrl = (secretId: string) => detailUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId)
   const secretPromoteUrl = (secretId: string) => promoteUrlTemplate.replace(PLACEHOLDER_TOKEN, secretId)
-  const isEmbedded = variant === 'embedded'
 
   const handleCreate = useCallback(() => {
     showModal((onClose) => (
@@ -145,25 +140,15 @@ export function AgentSecretsScreen({
       {modal}
 
       <SettingsBanner
-        variant={isEmbedded ? 'embedded' : 'standalone'}
-        leading={isEmbedded ? <EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to settings" /> : undefined}
-        eyebrow={isEmbedded ? 'Agent secrets' : undefined}
-        title={isEmbedded ? agentName : 'Agent Secrets'}
-        subtitle={isEmbedded ? undefined : `Manage encrypted secrets for ${agentName}`}
-        supportingContent={!isEmbedded ? (
-          <a
-            href={agentDetailUrl}
-            className="group inline-flex items-center gap-2 text-sm text-blue-600 transition-colors hover:text-blue-800"
-          >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-            Back to Agent
-          </a>
-        ) : undefined}
+        variant="embedded"
+        leading={<EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to settings" />}
+        eyebrow="Agent secrets"
+        title={agentName}
         actions={(
           <button
             type="button"
             onClick={handleCreate}
-            className={isEmbedded ? 'inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto' : 'inline-flex w-max items-center gap-x-2 rounded-lg border border-transparent bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2'}
+            className="inline-flex w-full items-center justify-center gap-x-2 rounded-lg border border-blue-300/40 bg-blue-950/20 px-4 py-2 text-sm font-medium text-blue-100 transition-colors hover:border-blue-200 hover:bg-blue-900/30 focus:outline-none sm:w-auto"
           >
             <Plus className="w-4 h-4" />
             Add Secret
@@ -172,15 +157,15 @@ export function AgentSecretsScreen({
       />
 
       {/* Security Notice */}
-      <div className={isEmbedded ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none` : 'bg-blue-50/80 backdrop-blur-sm border border-blue-200/60 shadow-xl rounded-xl overflow-hidden'}>
+      <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
         <div className="p-4 sm:p-6">
           <div className="flex gap-x-4">
             <div className="flex-shrink-0">
-              <ShieldCheck className={isEmbedded ? 'h-6 w-6 text-slate-300' : 'w-6 h-6 text-blue-600'} />
+              <ShieldCheck className="h-6 w-6 text-slate-300" />
             </div>
             <div>
-              <h3 className={isEmbedded ? 'mb-1 text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-blue-800 mb-1'}>Secure Encryption</h3>
-              <p className={isEmbedded ? 'text-sm text-slate-300' : 'text-sm text-blue-700'}>
+              <h3 className="mb-1 text-sm font-semibold text-slate-100">Secure Encryption</h3>
+              <p className="text-sm text-slate-300">
                 All secrets are encrypted with AES-256-GCM before storage. Credential secrets can be used via
                 placeholders.
               </p>
@@ -191,12 +176,12 @@ export function AgentSecretsScreen({
 
       {/* Banners */}
       {banner && (
-        <div className={isEmbedded ? 'rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100' : 'rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800'}>
+        <div className="rounded-lg border border-green-300/30 bg-green-950/20 px-4 py-3 text-sm text-green-100">
           {banner}
         </div>
       )}
       {(errorBanner || listError) && (
-        <div className={isEmbedded ? 'rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100' : 'rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800'}>
+        <div className="rounded-lg border border-red-300/30 bg-red-950/20 px-4 py-3 text-sm text-red-100">
           {errorBanner || listError}
         </div>
       )}
@@ -204,7 +189,7 @@ export function AgentSecretsScreen({
       {/* Loading */}
       {isLoading && (
         <div className="flex justify-center py-12">
-          <div className={isEmbedded ? 'h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200' : 'h-8 w-8 animate-spin rounded-full border-4 border-blue-200 border-t-blue-600'} />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-blue-300/30 border-t-blue-200" />
         </div>
       )}
 
@@ -213,7 +198,7 @@ export function AgentSecretsScreen({
         <>
           <SecretTable
             secrets={agentSecrets}
-            embedded={isEmbedded}
+            embedded
             title="Agent Secrets"
             subtitle={`Secrets specific to ${agentName}`}
             emptyMessage="No agent-specific secrets configured."
@@ -226,7 +211,7 @@ export function AgentSecretsScreen({
           <div>
             <SecretTable
               secrets={globalSecrets}
-              embedded={isEmbedded}
+              embedded
               readOnly
               title="Global Secrets"
               subtitle="Shared across all your agents. Agent-specific secrets override these on key conflict."
@@ -235,7 +220,7 @@ export function AgentSecretsScreen({
             <div className="mt-2 px-1">
               <a
                 href={globalSecretsUrl}
-                className={isEmbedded ? 'inline-flex items-center gap-1.5 text-sm text-blue-300 transition-colors hover:text-blue-200' : 'inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800 transition-colors'}
+                className="inline-flex items-center gap-1.5 text-sm text-blue-300 transition-colors hover:text-blue-200"
               >
                 Manage global secrets
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -245,33 +230,33 @@ export function AgentSecretsScreen({
 
           {/* Requested Secrets */}
           {requestedSecrets.length > 0 && (
-            <div className={isEmbedded ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none` : 'gobii-card-base'}>
-              <div className={isEmbedded ? 'flex items-center justify-between border-b border-slate-200/15 px-6 py-4' : 'flex items-center justify-between border-b border-gray-200/70 px-6 py-4'}>
+            <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
+              <div className="flex items-center justify-between border-b border-slate-200/15 px-6 py-4">
                 <div>
-                  <h2 className={isEmbedded ? 'text-lg font-semibold text-slate-100' : 'text-lg font-semibold text-gray-800'}>Requested Secrets</h2>
-                  <p className={isEmbedded ? 'mt-1 text-sm text-slate-400' : 'text-sm text-gray-500 mt-1'}>
+                  <h2 className="text-lg font-semibold text-slate-100">Requested Secrets</h2>
+                  <p className="mt-1 text-sm text-slate-400">
                     {requestedSecrets.length} pending request{requestedSecrets.length !== 1 ? 's' : ''} awaiting values
                   </p>
                 </div>
                 <a
                   href={requestUrl}
-                  className={isEmbedded ? 'inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30' : 'py-2 px-3 inline-flex items-center gap-x-2 text-sm font-medium rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}
+                  className="inline-flex items-center gap-x-2 rounded-lg border border-indigo-300/40 bg-indigo-950/20 px-3 py-2 text-sm font-medium text-indigo-100 hover:border-indigo-200 hover:bg-indigo-900/30"
                 >
                   Provide Values
                 </a>
               </div>
-              <div className={isEmbedded ? 'divide-y divide-slate-200/15' : 'divide-y divide-gray-100'}>
+              <div className="divide-y divide-slate-200/15">
                 {requestedSecrets.map((s) => (
                   <div key={s.id} className="px-6 py-4 flex items-center justify-between">
                     <div>
-                      <div className={isEmbedded ? 'text-sm font-medium text-slate-100' : 'text-sm font-medium text-gray-900'}>
+                      <div className="text-sm font-medium text-slate-100">
                         {s.name}{' '}
-                        <span className={isEmbedded ? 'text-xs text-slate-400' : 'text-xs text-gray-500'}>(Key: {s.key})</span>
+                        <span className="text-xs text-slate-400">(Key: {s.key})</span>
                       </div>
                       {s.secret_type === 'env_var' ? (
-                        <div className={isEmbedded ? 'text-xs text-slate-400' : 'text-xs text-gray-500'}>Type: Environment Variable</div>
+                        <div className="text-xs text-slate-400">Type: Environment Variable</div>
                       ) : (
-                        <div className={isEmbedded ? 'text-xs text-slate-400' : 'text-xs text-gray-500'}>
+                        <div className="text-xs text-slate-400">
                           Type: Credential &bull; Domain: {s.domain_pattern}
                         </div>
                       )}

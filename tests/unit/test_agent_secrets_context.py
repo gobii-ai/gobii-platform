@@ -868,13 +868,11 @@ class AgentSecretsRequestViewTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("Missing or invalid", result["message"])
 
-    @patch('api.agent.tools.secure_credentials_request.reverse')
     @patch('django.contrib.sites.models.Site.objects.get_current')
-    def test_url_generation_in_response(self, mock_site, mock_reverse):
+    def test_url_generation_in_response(self, mock_site):
         """Test that the response includes the correct URL for user to provide secrets."""
         # Mock the site and URL generation
         mock_site.return_value = Mock(domain="example.com")
-        mock_reverse.return_value = f"/console/agents/{self.agent.id}/secrets/request/"
 
         params = {
             "credentials": [
@@ -890,7 +888,7 @@ class AgentSecretsRequestViewTests(TestCase):
         result = execute_secure_credentials_request(self.agent, params)
 
         self.assertEqual(result["status"], "ok")
-        expected_url = f"https://example.com/console/agents/{self.agent.id}/secrets/request/"
+        expected_url = f"https://example.com/app/agents/{self.agent.id}/secrets/request"
         self.assertIn(expected_url, result["message"])
         self.assertIn("securely enter the requested credentials", result["message"])
 

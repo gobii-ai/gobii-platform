@@ -14,7 +14,6 @@ export function ImmersiveSecretsPage({
       <GlobalSecretsScreen
         key={refreshKey}
         listUrl="/console/api/secrets/"
-        variant="embedded"
       />
     </div>
   )

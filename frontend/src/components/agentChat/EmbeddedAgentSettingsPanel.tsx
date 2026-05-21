@@ -140,7 +140,6 @@ export function EmbeddedAgentSettingsPanel({
       <AgentSettingsWorkspace
         key={data.agent.id}
         initialData={data}
-        variant="embedded"
         onBack={onBack}
         onSaved={handleSaved}
         onDeleted={onDeleted}
