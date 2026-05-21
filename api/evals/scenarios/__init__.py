@@ -45,6 +45,15 @@ from .custom_tool_result_contract import (
     CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
     CustomToolResultContractScenario,
 )
+from .daily_credit_prompt import (
+    DAILY_CREDIT_PROMPT_SCENARIO_SLUGS,
+    DAILY_CREDIT_PROMPT_SUITE_SLUG,
+    DailyCreditPromptHardLimitHitScenario,
+    DailyCreditPromptNearLimitScenario,
+    DailyCreditPromptNotNearLimitScenario,
+    DailyCreditPromptOneToolLeftScenario,
+    DailyCreditPromptSoftTargetDistinctScenario,
+)
 from .sqlite_tool_results import (
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
