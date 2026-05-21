@@ -22,6 +22,7 @@ from api.evals.scenarios.effort_calibration import (
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
     EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
+    EffortCalibrationScenario,
     EffortTrivialAnswerStopsScenario,
     _find_near_duplicate_texts,
     _hierarchical_report_shape,
@@ -29,6 +30,7 @@ from api.evals.scenarios.effort_calibration import (
     _sqlite_result_text_reads,
     _web_query_value,
 )
+from api.evals.scenarios.sqlite_tool_results import SqliteToolResultScenario
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
 from api.models import (
@@ -123,6 +125,42 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         )
 
         self.assertTrue(ok, summary)
+
+    def test_sqlite_tool_result_sourced_answer_rejects_progress_before_final(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        messages = [SimpleNamespace(body="I have the results. Now I will query SQLite."), SimpleNamespace(body="Final: https://api.example.test/products/caremesh.json HIPAA")]
+        with patch("api.evals.scenarios.sqlite_tool_results._outbound_messages_after", return_value=messages):
+            passed = scenario._record_sourced_answer("run", agent_id="agent", after=None, task_name="verify_sourced_answer", source_urls=["https://api.example.test/products/caremesh.json"], required_terms=["HIPAA"], min_sources=1)
+        self.assertFalse(passed)
+        self.assertIn("progress_messages=1", recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_tool_result_usage_rejects_manual_values_working_table(self):
+        scenario, recorded = SqliteToolResultScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [SimpleNamespace(step="step", tool_name="sqlite_batch", tool_params={"sql": "CREATE TABLE plan_candidates(vendor TEXT); INSERT INTO plan_candidates VALUES ('CareMesh'); SELECT * FROM plan_candidates;"})]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_sqlite_usage("run", after=None, task_name="verify_working_table_sqlite_usage", require_working_table=True)
+        self.assertFalse(passed)
+        self.assertIn("no aggregate __tool_results query", recorded[-1][1]["observed_summary"])
+
+    def test_effort_no_question_check_rejects_progress_only_message(self):
+        scenario, recorded = EffortCalibrationScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        messages = [SimpleNamespace(body="Good, I have the search results identifying YC Winter 2026 as the latest batch.")]
+        with (
+            patch("api.evals.scenarios.effort_calibration._human_input_requests_for_run", return_value=[]),
+            patch("api.evals.scenarios.effort_calibration._outbound_messages_after", return_value=messages),
+        ):
+            passed = scenario._record_no_question_battery(
+                "run",
+                agent_id="agent",
+                after=None,
+                task_name="verify_no_question_or_progress_message",
+                max_message_questions=0,
+            )
+        self.assertFalse(passed)
+        self.assertIn("progress_messages=1", recorded[-1][1]["observed_summary"])
 
     def test_question_count_ignores_source_url_query_strings(self):
         self.assertEqual(

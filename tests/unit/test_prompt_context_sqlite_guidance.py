@@ -77,6 +77,23 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
         self.assertIn("grep_context_all(\n        json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)", examples)
         self.assertIn("try wider context (200 chars)", examples)
 
+    def test_examples_prefer_shaped_multi_result_queries(self):
+        examples = prompt_context._get_sqlite_examples()
+        self.assertIn("multiple_results", examples)
+        self.assertIn("working_table", examples)
+        self.assertIn("avoid → one result_text fetch per source", examples)
+
+    def test_sqlite_retry_warning_flags_blob_fetch_loops(self):
+        warning = prompt_context._build_sqlite_retry_warning(
+            [
+                ({"sql": "SELECT result_text FROM __tool_results WHERE result_id='a1'"}, "{}"),
+                ({"sql": "SELECT result_text FROM __tool_results WHERE result_id='b2'"}, "{}"),
+            ]
+        )
+
+        self.assertIn("SQLite efficiency warning", warning)
+        self.assertIn("one shaped query", warning)
+
     def test_examples_prefer_patch_and_retry_for_named_missing_parameters(self):
         examples = prompt_context._get_sqlite_examples()
         self.assertIn(

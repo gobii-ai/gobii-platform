@@ -1789,7 +1789,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 "ok": True,
                 "spreadsheet_id": "sheet-123",
                 "title": "Eval Sales Tracker",
-                "worksheets": ["Leads", "Pipeline", "Research", "Accounts", "Tasks"],
+                **({"worksheets": ["Leads", "Pipeline", "Research", "Accounts", "Tasks"]} if tool_name == "google_sheets-list-worksheets" else {}),
                 "columns": ["company", "priority", "owner", "status", "follow_up_due"],
                 "rows": [
                     {"row_number": 12, "company": "Acme", "status": "Open"},

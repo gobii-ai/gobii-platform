@@ -29,6 +29,7 @@ from api.agent.tools.custom_tools import (
     get_custom_tools_prompt_summary,
     normalize_custom_tool_name,
     normalize_custom_tool_parameters_schema,
+    validate_custom_tool_source_code,
 )
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
@@ -177,30 +178,20 @@ class CustomToolsTests(TestCase):
             "do not pass only `source_path` unless you already wrote that file",
             "Exact final line: `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
-            "mime_type='text/x-python'",
             "db.row_factory = sqlite3.Row",
             "after the block exits the DB is closed",
-            "target resource ids/names",
-            "source filters or date ranges",
-            "pass concrete values on the first invocation",
-            "do not stop after seed/setup/preview",
-            "dedupe/format tools expose input_table, output_table, and run_date",
-            "URL/list validators expose input_table/output_table or urls plus minimum/limit params",
-            "do not accept/reject based on `url[match.end():]` remainders",
             "before any `db.execute(...).fetchall()`/SELECT",
-            "setting it after fetching does not convert existing tuple rows",
-            "not `row.get(...)`",
             "datetime.now(timezone.utc)",
-            "not `datetime.timezone`",
+            "not datetime.timezone",
             "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
             "source-code next_action text exactly",
             "what changed or which outputs are ready",
-            "remaining work/cursor",
+            "remaining work",
             "verification guidance",
             "direct_post_urls",
             "scrape_ready_urls",
-            "accepted ready-to-use list",
+            "accepted ready-to-use values",
             "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
@@ -233,6 +224,63 @@ class CustomToolsTests(TestCase):
             "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, prompt_summary)
+
+    def test_side_effect_source_requires_manual_replay_prevention(self):
+        source = self._build_runnable_tool_source(
+            """
+def run(params, ctx):
+    return {
+        "status": "ok",
+        "summary": "Appended 10 rows to Sheets.",
+        "side_effects": [{"target": "Sheet1", "rows_written": 10}],
+        "next_action": "Verify the sheet.",
+    }
+"""
+        )
+
+        error = validate_custom_tool_source_code(source, "/tools/sheets_sync.py")
+
+        self.assertIn("manual replay prevention", error or "")
+
+        valid_source = source.replace(
+            '"next_action": "Verify the sheet.",',
+            '"do_not_repeat_manually": True,\n'
+            '        "next_action": "Do not repeat manually; verify read-only; do not append/add/update again.",',
+        )
+        self.assertIsNone(validate_custom_tool_source_code(valid_source, "/tools/sheets_sync.py"))
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_saves_invalid_source_for_patch_loop(self, _mock_sandbox):
+        source = self._build_runnable_tool_source(
+            """
+def run(params, ctx):
+    return {
+        "status": "ok",
+        "summary": "Appended 10 rows to Sheets.",
+        "side_effects": [{"target": "Sheet1", "rows_written": 10}],
+        "next_action": "Verify the sheet.",
+    }
+"""
+        )
+
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Patchable Sheets Sync",
+                "description": "Append rows to Sheets.",
+                "source_path": "/tools/patchable_sheets_sync.py",
+                "source_code": source,
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertEqual(result["source_path"], "/tools/patchable_sheets_sync.py")
+        self.assertIn("manual replay prevention", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_patchable_sheets_sync").exists())
+        node = AgentFsNode.objects.get(path="/tools/patchable_sheets_sync.py")
+        with node.content.open("rb") as handle:
+            self.assertIn(b"Appended 10 rows", handle.read())
 
     def test_normalize_custom_tool_parameters_schema_synthesizes_missing_required_fields(self):
         schema = normalize_custom_tool_parameters_schema(

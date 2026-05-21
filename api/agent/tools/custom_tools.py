@@ -576,6 +576,22 @@ _BATCH_PROGRESS_TERMS = (
     "cursor",
 )
 
+_REPLAY_PREVENTION_TERMS = (
+    "do_not_repeat_manually",
+    "read-only",
+    "read only",
+    "do not repeat",
+    "do not replay",
+    "do not manually",
+    "not another append",
+    "not replay",
+)
+_SIDE_EFFECT_CONTEXT_TERMS = ("side_effect", "sheet", "worksheet", "external", "ctx.call_tool", "call_tool")
+_SIDE_EFFECT_ACTION_RE = re.compile(
+    r"\b(?:append(?:ed|ing)?|sync(?:ed|ing)?|insert(?:ed|ing)?|update(?:d|ing)?|"
+    r"upsert(?:ed|ing)?|delete(?:d|ing)?|write|writes|written)\b"
+)
+
 
 def _source_string_literals(tree: ast.Module) -> set[str]:
     return {
@@ -637,6 +653,18 @@ def _needs_batch_progress_signal(source_text: str) -> bool:
 def _has_batch_progress_signal(tree: ast.Module) -> bool:
     terms = _source_string_literals(tree) | _source_identifiers(tree)
     return any(progress_term in term for term in terms for progress_term in _BATCH_PROGRESS_TERMS)
+
+
+def _needs_replay_prevention_signal(source_text: str) -> bool:
+    source_lower = source_text.lower()
+    return any(term in source_lower for term in _SIDE_EFFECT_CONTEXT_TERMS) and bool(
+        _SIDE_EFFECT_ACTION_RE.search(source_lower)
+    )
+
+
+def _has_replay_prevention_signal(source_text: str) -> bool:
+    source_lower = source_text.lower()
+    return any(term in source_lower for term in _REPLAY_PREVENTION_TERMS)
 
 
 def _invalid_datetime_timezone_refs(tree: ast.Module) -> list[str]:
@@ -720,19 +748,8 @@ def _validate_schema_runtime_params_for_source(
             json.dumps(parameters_schema, sort_keys=True).lower(),
         )
     )
-    is_url_or_list_validator = "url" in combined_text and any(
-        term in combined_text
-        for term in (
-            "validator",
-            "validate",
-            "classifier",
-            "classify",
-            "accepted",
-            "rejected",
-            "direct_post_urls",
-            "scrape_ready_urls",
-        )
-    )
+    url_specific_markers = ("candidate url", "candidate_urls", "input_urls", "direct_post_urls", "scrape_ready_urls", "url classifier", "url validator", "linkedin", "/posts/", "fully qualified url", "scrape-ready")
+    is_url_or_list_validator = "url" in combined_text and any(marker in combined_text for marker in url_specific_markers)
     if not is_url_or_list_validator:
         return None
 
@@ -765,7 +782,7 @@ def _validate_schema_runtime_params_for_source(
     return (
         "URL/list validator custom tools must require explicit runtime inputs instead of relying on built-in samples "
         "or hidden defaults. Mark urls/input_table/output_table/minimum/limit params as required as appropriate, then "
-        "invoke the tool with concrete values."
+        "invoke the tool with concrete values. Patch all validation issues before retrying: undefined names, remaining_work/next_cursor, explicit inputs, and do_not_repeat_manually when writes happen."
     )
 
 
@@ -824,7 +841,7 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     missing_fstring_names = _find_likely_undefined_fstring_names(tree)
     if missing_fstring_names:
         names = ", ".join(missing_fstring_names)
-        return f"Custom tool source may reference undefined f-string name(s): {names}. Fix the source before registering."
+        return f"Custom tool source may reference undefined f-string name(s): {names}. Patch all validation issues before retrying: remaining_work/next_cursor, explicit inputs, and do_not_repeat_manually when writes happen."
     invalid_datetime_refs = _invalid_datetime_timezone_refs(tree)
     if invalid_datetime_refs:
         refs = ", ".join(invalid_datetime_refs)
@@ -842,14 +859,24 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
     if _needs_actionable_result_signal(source_text) and not _has_actionable_result_signal(tree):
         return (
             "Custom tool source writes, syncs, batches, or calls tools but lacks actionable result guidance. "
-            "Return next_action, verification, remaining_work, or next_cursor so the agent knows whether to verify or continue."
+            "Return next_action, verification, remaining_work, or next_cursor so the agent knows whether to verify or continue. Patch all validation issues before retrying."
         )
     if _needs_batch_progress_signal(source_text) and not _has_batch_progress_signal(tree):
         return (
             "Custom tool source accepts batch/limit params but lacks remaining-work or cursor reporting. "
-            "Return remaining_work or next_cursor so the agent can resume bounded work."
+            "Return remaining_work or next_cursor so the agent can resume bounded work. Patch all validation issues before retrying: explicit inputs and do_not_repeat_manually when writes happen."
+        )
+    if _needs_replay_prevention_signal(source_text) and not _has_replay_prevention_signal(source_text):
+        return (
+            "Custom tool source performs side effects but lacks manual replay prevention. "
+            "Return do_not_repeat_manually=True or next_action like "
+            "'Do not repeat manually; verify read-only; do not append/add/update again.' Patch all validation issues before retrying."
         )
     return None
+
+
+def _normalize_pep723_fences(source_text: str) -> str:
+    return re.sub(r"(?m)^(# ///)[ \t]+$", r"\1", source_text)
 
 
 def validate_custom_tool_source_code(source_text: str, source_path: str) -> Optional[str]:
@@ -967,73 +994,22 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "name": "create_custom_tool",
             "description": (
                 "Create or update a sandboxed Python custom tool for this agent. "
-                "Prefer custom tools over manual multi-step procedures — they are far more efficient. "
-                "Write tools eagerly: if work involves 3+ steps, loops, data transforms, or API calls, make a tool. "
-                "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-                "Deterministic, repeatable, structured data work is an especially strong trigger for a small custom tool plus shared SQLite, even if the user did not explicitly ask for a custom tool or mention SQLite. "
-                "Small disposable tools are good; do not over-engineer. "
-                "Source is a complete Python script run via `uv run`. Structure:\n"
-                "1. PEP 723 metadata at top for third-party deps (if any): `# /// script\\n# dependencies = [\"requests[socks]\"]\\n# ///`\n"
-                "PEP 723 dependencies are only for third-party packages. Never list Python standard-library modules "
-                "such as `difflib`, `sqlite3`, `json`, `re`, or `pathlib`; import them directly without dependencies. "
-                "2. `from _gobii_ctx import main` (plus ToolContext if you need type hints)\n"
-                "3. `def run(params, ctx): ...` — your tool logic, return JSON-serializable data\n"
-                "4. Exact final line: `if __name__ == '__main__': main(run)`\n"
-                "For one-shot creation, pass both `source_path` and complete `source_code`; do not pass only `source_path` unless you already wrote that file. "
-                "ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools). "
-                "Write results directly to the shared agent SQLite DB instead of returning large intermediate data. "
-                "For normal DB work, use `with ctx.sqlite() as db:`; it opens the shared DB, commits on success, rolls back on errors, and closes automatically. "
-                "Keep every read, write, and summary query using that connection inside the `with ctx.sqlite()` block; after the block exits the DB is closed. "
-                "Treat ctx.sqlite_db_path as an internal/advanced escape hatch; most tools should not need it. "
-                "That DB may look sandbox-local during execution, but it is still the same durable agent SQLite DB that sqlite_batch reads. "
-                "SQLite row counts live on the cursor returned by `db.execute(...)` (or use `SELECT changes()`); `sqlite3.Connection` has no `rowcount` attribute. "
-                "If you want `dict(row)` from SQLite query results, set `db.row_factory = sqlite3.Row` before any `db.execute(...).fetchall()`/SELECT; setting it after fetching does not convert existing tuple rows. `sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Otherwise build dicts from `cursor.description` and tuple rows. "
-                "For UTC timestamps after `from datetime import datetime`, also import `timezone` and use `datetime.now(timezone.utc)`, not `datetime.timezone`. "
-                "Do not ATTACH sandbox file paths in sqlite_batch. "
-                "Do not manually repeat MCP/tool/API calls or paste long SQL insert/update lists in your own loop — put the loop in Python and use bulk writes in one transaction. "
-                "For external API/MCP fan-out, Google Sheets syncs, or other slow network batches, design the tool to be chunkable by default: "
-                "include `limit`/`batch_size` and status/id filters, update durable progress in SQLite, and return a concise summary with remaining counts. "
-                "Avoid all-or-nothing full-table batches that can time out; start with a small batch, then run the same patched tool iteratively. "
-                "If a batch tool times out or partially fails, patch it to process smaller resumable batches instead of falling back to manual single-action tool loops. "
-                "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, or destinations. "
-                "Never use an empty parameters_schema for data transforms, syncs, validators, or dedupe jobs; expose the tables, filters, limits, destinations, URLs, or modes you can vary, then pass values when invoking the tool. "
-                "For dedupe/format tools expose input_table, output_table, and run_date or equivalents; for URL/list validators expose input_table/output_table or urls plus minimum/limit params. "
-                "Even for representative/sample runs, put sample inputs/defaults in runtime params and pass concrete values on the first invocation; do not invoke custom_* with empty params just because the code has defaults. "
-                "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for URL/list validators, accept the candidate list and destination/default options as required params. "
-                "For URL/list validators, parse URL paths, fullmatch/anchor regexes, or capture exact path segments; do not accept/reject based on `url[match.end():]` remainders. "
-                "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
-                "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "
-                "When a custom tool performs side effects such as appending Google Sheets rows, updating external systems, sending messages, or syncing data, "
-                "its return value must make the side effects unambiguous. Every success or error return dict should include `next_action`, including validation-only/filtering tools. Keep results concise: status, summary, what changed or which outputs are ready, counts, side_effects_completed or target resource ids/names, source filters or date ranges, skipped/duplicate counts when relevant, remaining work/cursor when resumable, and verification guidance are usually enough. "
-                "Name ready outputs for the next tool or step, for example `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or `records_to_sync`; avoid only generic names like `kept` when the downstream agent needs a specific accepted list. "
-                "For validator/classifier tools, return the accepted ready-to-use list, rejected inputs with reasons, the rule used, and whether more inputs are needed. "
-                "If the tool already wrote or synced records, return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
-                "SECRETS: API keys, DB credentials, and sensitive values are in os.environ — always use them, never hardcode. "
-                "If a needed env var secret is missing, request it with `secure_credentials_request` using `secret_type='env_var'` "
-                "rather than a domain-scoped credential. "
-                "PROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
-                "For direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]) "
-                "or subprocess curl, and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
-                "If your tool imports `requests` or `httpx` for outbound network access, declare the SOCKS-capable package in PEP 723 metadata by default "
-                "(`requests[socks]` or `httpx[socks]`), not bare `requests`/`httpx`. "
-                "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
-                "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
-                "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
-                "For tool-to-tool calls, use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
-                "Most reliable creation flow: call create_custom_tool once with `source_path='/tools/my_tool.py'` "
-                "and the complete Python script in `source_code`; `source_path` is still required when `source_code` is provided. "
-                "Only use create_file first when you intentionally need a reusable filespace source file; if you do, call create_file with "
-                "`file_path='/tools/my_tool.py'`, `mime_type='text/x-python'`, and `content=<python source>` before registering the same source_path. "
-                "PATHS: `/tools/my_tool.py` and `/exports/report.txt` are filespace paths for Gobii tool arguments. "
-                "Inside custom tool Python code, write real files under `/workspace/...`, for example `Path('/workspace/exports/report.txt')`. "
-                "Do not use `open('/exports/report.txt', ...)` in custom tool code; that writes outside the synced workspace. "
-                "When writing scraped, browser, PDF, or web text, use explicit UTF-8 with replacement, e.g. "
-                "`Path('/workspace/exports/report.txt').write_text(text, encoding='utf-8', errors='replace')`, "
-                "so invalid surrogate characters do not crash the tool. "
-                "After writing `/workspace/exports/report.txt`, return or reference the user-facing path `$[/exports/report.txt]`. "
-                "Latest workspace edits are synced automatically before registration and execution. "
-                "Prefer patching the same file and reusing the same tool over creating near-duplicate tools. "
-                "Provide `source_code` to write the file now, or point at an existing `.py` file in the workspace. "
+                "Use it for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes. Small disposable tools are good. Those triggers are not exhaustive: err on the side of creating and using one. "
+                "Source is a complete Python script run via `uv run`: PEP 723 deps such as `# dependencies = [\"requests[socks]\"]`, `from _gobii_ctx import main`, `def run(params, ctx): ...`, and Exact final line: `if __name__ == '__main__': main(run)`. "
+                "Never list stdlib modules as dependencies. "
+                "For one-shot creation use source_path='/tools/my_tool.py' plus source_code; do not pass only `source_path` unless you already wrote that file. "
+                "ctx.call_tool(name, params) invokes agent tools. Prefer writing large/intermediate results to the same durable agent SQLite DB that sqlite_batch reads; Do not ATTACH sandbox file paths in sqlite_batch. "
+                "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. ctx.sqlite_db_path is only an advanced escape hatch. Use cursor.rowcount or SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT, because setting it later does not convert tuple rows and rows are not row.get(...). "
+                "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. "
+                "Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
+                "Do not manually repeat MCP/tool/API calls. For slow batches, design the tool to be chunkable by default: include `limit`/`batch_size` and status/id filters, durable progress, remaining counts/work/cursor, and patch it to process smaller resumable batches instead of manual single-action tool loops. "
+                "Every success or error return dict should include `next_action`; keep returns concise with status, summary, what changed or which outputs are ready, counts/side effects, skipped duplicates, remaining work, and verification guidance. "
+                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values, rejected reasons, and whether more inputs are needed. "
+                "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
+                "Secrets are in os.environ; if missing, request `secret_type='env_var'` rather than a domain-scoped credential. "
+                "Network code needs the SOCKS5 proxy: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]` when needed, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, subprocess curl honors env vars, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx`; direct HTTPS tunneling should use ALL_PROXY. For tool-to-tool calls, use ctx.call_tool. "
+                "Paths `/tools/my_tool.py` and `/exports/report.txt` are filespace paths for Gobii tool arguments; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. Inside code write real files under `/workspace/...`, e.g. Path('/workspace/exports/report.txt'), not open('/exports/report.txt', ...), and return `$[/exports/report.txt]`. "
+                "Latest workspace edits are synced automatically. Prefer patching the same file and reusing the same tool over creating near-duplicate tools. "
                 "The saved tool gets a canonical id like `custom_my_tool` and is enabled by default."
             ),
             "parameters": {
@@ -1140,12 +1116,7 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         return {"status": "error", "message": "source_code must be a string when provided."}
 
     if isinstance(source_code, str):
-        validation_error = _validate_source_code(source_code, source_path)
-        if validation_error:
-            return {"status": "error", "message": validation_error}
-        validation_error = _validate_schema_runtime_params_for_source(source_code, description, parameters_schema)
-        if validation_error:
-            return {"status": "error", "message": validation_error}
+        source_code = _normalize_pep723_fences(source_code)
         write_result = write_bytes_to_dir(
             agent=agent,
             content_bytes=source_code.encode("utf-8"),
@@ -1156,6 +1127,12 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         )
         if write_result.get("status") != "ok":
             return write_result
+        validation_error = _validate_source_code(source_code, source_path)
+        if validation_error:
+            return {"status": "error", "message": validation_error, "source_path": source_path}
+        validation_error = _validate_schema_runtime_params_for_source(source_code, description, parameters_schema)
+        if validation_error:
+            return {"status": "error", "message": validation_error, "source_path": source_path}
     else:
         sync_error = _sync_workspace_source(agent, source_path)
         if sync_error:
@@ -1166,10 +1143,10 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
         assert source_text is not None
         validation_error = _validate_source_code(source_text, source_path)
         if validation_error:
-            return {"status": "error", "message": validation_error}
+            return {"status": "error", "message": validation_error, "source_path": source_path}
         validation_error = _validate_schema_runtime_params_for_source(source_text, description, parameters_schema)
         if validation_error:
-            return {"status": "error", "message": validation_error}
+            return {"status": "error", "message": validation_error, "source_path": source_path}
 
     tool, created = PersistentAgentCustomTool.objects.update_or_create(
         agent=agent,

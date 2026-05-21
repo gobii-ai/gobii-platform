@@ -2,6 +2,7 @@ import json
 import os
 import sqlite3
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import mock_open, patch
 
 from django.contrib.auth import get_user_model
@@ -32,6 +33,11 @@ from api.agent.tools.sqlite_batch import (
     _should_skip_memory_limits_for_virtualapple_emulation,
     _strip_markdown_fences,
     _strip_trailing_tool_params,
+)
+from api.agent.tools.sqlite_query_quality import (
+    build_tool_result_query_advisories,
+    summarize_sqlite_tool_result_calls,
+    summarize_sqlite_tool_result_sql,
 )
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.models import BrowserUseAgent, PersistentAgent
@@ -195,9 +201,107 @@ class SqliteBatchToolTests(TestCase):
         definition = get_sqlite_batch_tool()
         description = definition["function"]["description"]
 
-        self.assertIn("Use sqlite_batch to query and batch-update structured data you already have", description)
-        self.assertIn("prefer a custom tool that writes to SQLite", description)
-        self.assertIn("do not ATTACH sandbox file paths", description)
+        self.assertIn("Query/update structured data you already have", description)
+        self.assertIn("one shaped query with CTEs", description)
+        self.assertIn("from __tool_results", description)
+        self.assertIn("prefer a custom tool writing to SQLite", description)
+        self.assertIn("no ATTACH", description)
+
+    def test_single_tool_result_blob_fetch_returns_efficiency_advisory(self):
+        with self._with_temp_db() as (db_path, _token, _tmp):
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute("CREATE TABLE __tool_results (result_id TEXT PRIMARY KEY, result_text TEXT)")
+                conn.executemany(
+                    "INSERT INTO __tool_results (result_id, result_text) VALUES (?, ?)",
+                    [("r1", "alpha"), ("r2", "beta")],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT result_text FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(out.get("status"), "warning")
+            self.assertEqual(out.get("advisories", [{}])[0].get("code"), "single_tool_result_blob_fetch")
+            self.assertIn("query the needed rows together", out.get("message", ""))
+
+            preview = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": "SELECT substr(result_text,1,2) AS preview FROM __tool_results WHERE result_id='r1'",
+                    "will_continue_work": True,
+                },
+            )
+            self.assertEqual(preview.get("status"), "ok")
+            self.assertNotIn("advisories", preview)
+
+    def test_tool_result_quality_detects_smart_queries_and_advisories(self):
+        sql = """
+        CREATE TABLE candidate_sources(url TEXT);
+        INSERT INTO candidate_sources
+        SELECT json_extract(result_json,'$.url') AS url
+        FROM __tool_results
+        WHERE result_id='r1'
+        UNION ALL
+        SELECT json_extract(result_json,'$.url') FROM __tool_results WHERE result_id='r2';
+        SELECT url FROM candidate_sources ORDER BY url;
+        """
+        summary = summarize_sqlite_tool_result_sql([sql])
+        self.assertEqual(summary.smart_tool_result_queries, 1)
+        self.assertEqual(summary.creates_working_table, 1)
+        self.assertEqual(summary.reads_working_table, 1)
+
+        sql_values = [
+            "SELECT result_text FROM __tool_results WHERE result_id='r1'",
+            "SELECT result_text FROM __tool_results WHERE result_id='r1'",
+        ]
+        summary = summarize_sqlite_tool_result_sql(sql_values)
+        preview = summarize_sqlite_tool_result_sql(
+            ["SELECT substr(result_text,1,800) AS preview FROM __tool_results WHERE result_id='r1'"]
+        )
+        aggregate = summarize_sqlite_tool_result_sql(
+            ["SELECT result_text FROM __tool_results WHERE result_id IN ('r1','r2')"]
+        )
+        advisories = build_tool_result_query_advisories(sql_values, available_tool_result_rows=3)
+        self.assertEqual(summary.duplicate_direct_fetches, 1)
+        self.assertEqual(preview.direct_result_text_fetches, 0)
+        self.assertEqual(preview.single_result_id_filters, 1)
+        self.assertEqual(aggregate.direct_result_text_fetches, 0)
+        self.assertEqual(advisories[0].code, "tool_result_blob_fetch_loop")
+
+        summary = summarize_sqlite_tool_result_sql(
+            ["CREATE TABLE plan_candidates(vendor TEXT); INSERT INTO plan_candidates VALUES ('CareMesh');"]
+        )
+        advisories = build_tool_result_query_advisories(
+            ["CREATE TABLE plan_candidates(vendor TEXT); INSERT INTO plan_candidates VALUES ('CareMesh');"],
+            available_tool_result_rows=4,
+        )
+        self.assertEqual(summary.manual_values_working_tables, 1)
+        self.assertEqual(advisories[0].code, "manual_working_table_from_visible_results")
+        self.assertIn("__tool_results", advisories[0].message)
+
+        calls = [
+            SimpleNamespace(
+                tool_name="sqlite_batch",
+                tool_params={
+                    "queries": [
+                        "SELECT json_extract(result_json,'$.url') FROM __tool_results WHERE result_id IN ('r1','r2')",
+                        "SELECT COUNT(*) FROM __tool_results",
+                    ]
+                },
+            )
+        ]
+        summary = summarize_sqlite_tool_result_calls(calls)
+        self.assertEqual(summary.sqlite_call_count, 1)
+        self.assertEqual(summary.statement_count, 2)
+        self.assertEqual(summary.smart_tool_result_queries, 1)
 
     def test_attach_database_is_blocked(self):
         with self._with_temp_db() as (_db_path, _token, tmp):

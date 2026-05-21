@@ -5,7 +5,9 @@ from typing import Iterable
 from django.db.models import Sum
 
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.sqlite_query_quality import summarize_sqlite_tool_result_calls
 from api.agent.tools.tool_manager import mark_tool_enabled_without_discovery
+from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
@@ -467,14 +469,17 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         requests = _human_input_requests_for_run(run_id, after=after)
         outbound = _outbound_messages_after(agent_id, after)
         question_marks = sum(_question_count(message.body or "") for message in outbound)
-        if not requests and question_marks <= max_message_questions:
+        progress_messages = [
+            message for message in outbound if _looks_like_routine_progress_message(message.body or "")
+        ]
+        if not requests and not progress_messages and question_marks <= max_message_questions:
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name=task_name,
                 observed_summary=(
-                    "No tracked human-input request and final message question count was "
+                    "No tracked human-input request, progress-only message, and final message question count was "
                     f"{question_marks}/{max_message_questions}."
                 ),
                 artifacts={"message": outbound[-1]} if outbound else {},
@@ -488,9 +493,10 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             task_name=task_name,
             observed_summary=(
                 f"Expected no request_human_input and at most {max_message_questions} question mark(s); "
-                f"human_input_requests={len(requests)}, message_question_marks={question_marks}."
+                f"human_input_requests={len(requests)}, progress_messages={len(progress_messages)}, "
+                f"message_question_marks={question_marks}."
             ),
-            artifacts={"message": outbound[-1]} if outbound else {},
+            artifacts={"message": progress_messages[0] if progress_messages else outbound[-1]} if outbound else {},
         )
         return False
 
@@ -643,14 +649,17 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
         reads = []
         first_bad_call = None
-        for call in _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"}):
+        sqlite_calls = _tool_calls_for_run(run_id, after=after, tool_names={"sqlite_batch"})
+        for call in sqlite_calls:
             call_reads = _sqlite_result_text_reads(sqlite_batch_sql(call))
             if call_reads and first_bad_call is None:
                 first_bad_call = call
             reads.extend(call_reads)
 
+        usage = summarize_sqlite_tool_result_calls(sqlite_calls)
         duplicate_reads = [first for first, _second in _find_near_duplicate_texts(reads)]
-        if len(reads) <= max_result_text_reads and not duplicate_reads:
+        duplicate_blob_fetches = usage.duplicate_direct_fetches
+        if len(reads) <= max_result_text_reads and not duplicate_reads and not duplicate_blob_fetches:
             self.record_task_result(
                 run_id,
                 None,
@@ -658,7 +667,8 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                 task_name=task_name,
                 observed_summary=(
                     f"Observed {len(reads)} __tool_results.result_text read(s), "
-                    f"within budget {max_result_text_reads}, with no reread loop."
+                    f"within budget {max_result_text_reads}, with no reread loop. "
+                    f"Smart aggregate queries={usage.smart_tool_result_queries}."
                 ),
             )
             return True
@@ -670,7 +680,7 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             task_name=task_name,
             observed_summary=(
                 f"Expected at most {max_result_text_reads} result_text read(s) and no duplicate reads; "
-                f"saw reads={reads[:8]}."
+                f"saw reads={reads[:8]}, duplicate_blob_fetches={duplicate_blob_fetches}."
             ),
             artifacts={"step": first_bad_call.step} if first_bad_call else {},
         )

@@ -34,11 +34,11 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "channel": {
                 "type": "string",
                 "enum": [CommsChannel.WEB, CommsChannel.EMAIL, CommsChannel.SMS],
-                "description": "Channel for the explicitly targeted recipient.",
+                "description": "Explicit recipient channel.",
             },
             "address": {
                 "type": "string",
-                "description": "Recipient address for the selected channel.",
+                "description": "Recipient address.",
             },
         },
         "required": ["channel", "address"],
@@ -48,11 +48,11 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "properties": {
             "title": {
                 "type": "string",
-                "description": "Short option label shown to the user.",
+                "description": "Short user-facing label.",
             },
             "description": {
                 "type": "string",
-                "description": "One-sentence explanation of the option.",
+                "description": "One-sentence option detail.",
             },
         },
         "required": ["title", "description"],
@@ -63,14 +63,13 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "question": {
                 "type": "string",
                 "maxLength": MAX_HUMAN_INPUT_QUESTION_LENGTH,
-                "description": "Primary question or prompt for the user. Plain text only; do not use Markdown or HTML.",
+                "description": "Question text. Plain text only.",
             },
             "options": {
                 "type": "array",
                 "items": option_schema,
                 "description": (
-                    "Optional list of user-facing choices. Omit or pass [] for a free-text-only request. "
-                    "Required in Planning Mode; include an 'Other / I'll explain' option for open-ended questions."
+                    "Optional choices; omit or [] for free text. Required in Planning Mode; include an open-ended option."
                 ),
             },
         },
@@ -82,17 +81,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human-input only for a real blocker or planning question. It appears in web chat; "
-                "options still allow free-text replies. In Planning Mode, planning questions must use this tool; "
-                "questions sent only by chat, email, or SMS are not tracked. Include options and ask at most three. "
-                "Do not ask non-blocking backfill/lookback questions for clear "
-                "recurring digests or monitors. Outside Planning Mode, do not use this for preference surveys, "
-                "timezone/channel choices, optional formatting choices, category example choices such as which "
-                "vendor/company to use for a clear one-off task, or reversible defaults you can safely choose and disclose afterward. "
-                "Do use it when the user explicitly asks you to ask for targets/scope before setup, or missing targets/scope block a recurring monitor. "
-                "If truly blocked outside Planning Mode, ask one concise question. This tool does not send email/SMS; "
-                "if notifying those channels, send the exact question/options there too. Plain text only, no Markdown/HTML, "
-                f"max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
+                "Create tracked human-input only for a real blocker or planning question. "
+                "In Planning Mode, planning questions must use this tool and include options; ask at most three. "
+                "Outside Planning Mode, do not use this for preference surveys, timezone/channel choices, optional formatting, "
+                "category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose afterward. "
+                "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
+                f"Plain text only, max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars; this does not send email/SMS."
             ),
             "parameters": {
                 "type": "object",
@@ -100,38 +94,32 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "question": {
                         "type": "string",
                         "maxLength": MAX_HUMAN_INPUT_QUESTION_LENGTH,
-                        "description": "Primary question or prompt for the user. Plain text only; do not use Markdown or HTML.",
+                        "description": "Question text. Plain text only.",
                     },
                     "options": {
                         "type": "array",
                         "items": option_schema,
                         "description": (
-                            "Optional list of user-facing choices. Omit or pass [] for a free-text-only request. "
-                            "Required in Planning Mode; include an 'Other / I'll explain' option for open-ended questions."
+                            "Optional choices; omit or [] for free text. Required in Planning Mode; include an open-ended option."
                         ),
                     },
                     "requests": {
                         "type": "array",
                         "items": request_schema,
                         "description": (
-                            "Multiple input requests. Omit top-level question/options when provided. "
-                            "Planning Mode: at most three. Outside Planning Mode: only for explicit surveys or multiple real blockers."
+                            "Multiple requests. Omit top-level question/options. Planning Mode: at most three."
                         ),
                     },
                     "recipient": {
                         "description": (
-                            "Optional explicit recipient target. When omitted, the request is sent "
-                            "to the current implicit conversation target and can only be answered "
-                            "by the agent owner, active org members, or collaborators."
+                            "Optional explicit recipient. Omit for the current implicit conversation target."
                         ),
                         **recipient_schema,
                     },
                     "will_continue_work": {
                         "type": "boolean",
                         "description": (
-                            "REQUIRED. true = you'll take another action in the same response or after creating this request; "
-                            "use true when you will send an email/SMS containing these questions. "
-                            "false = you're waiting for the user's answer and should stop after the request is visible/delivered."
+                            "REQUIRED. true if work or email/SMS notification continues; false if waiting for the answer."
                         ),
                     },
                 },

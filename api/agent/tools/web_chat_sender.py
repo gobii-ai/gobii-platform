@@ -34,19 +34,19 @@ from .outbound_duplicate_guard import detect_recent_duplicate_message
 _PROGRESS_PREFIX_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?(?:now\s+)?"
     r"(?:let me|i(?:'ll| will| am going to| want to| need to)|i'm going to)\s+"
-    r"(?:(?:actually|just|quickly|then|also)\s+)?"
+    r"(?:(?:actually|first|just|quickly|then|also)\s+)?"
     r"(?:(?:do\s+)?(?:start|begin|continue|check|fetch|find|grab|investigate|pull|look|search|research|extract|compile|process|analy[sz]e|verify)|"
     r"do\s+(?:proper\s+|additional\s+|more\s+|some\s+|a\s+few\s+|new\s+)?(?:search(?:es)?|queries|lookups?)|"
-    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|format|summarize|structure|try)\b",
+    r"inspect|scrape|organize|build|create|prepare|generate|run|hit|parse|get|read|patch|rewrite|seed|register|format|summarize|structure|try)\b",
     re.IGNORECASE,
 )
 _INTERNAL_PROGRESS_RE = re.compile(
     r"\b(?:the user|already greeted|actual research|tool|tools|parallel|compile the results|extract the data|"
     r"mark the plan complete|plan complete|delivered message|wrap up|left the last cycle mid-stream|"
     r"deliver the final report now|want to verify|actually scraping|scrape results|inspect the actual|"
-    r"real data is coming back|got what i need|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|verify|analy[sz]e|compile|process|inspect|do (?:proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?))|let me send it over|let me end planning|"
+    r"real data is coming back|got what i need|let me (?:also |now |actually |just |quickly |then )?(?:grab|fetch|find|investigate|check|pull|get|look|search|research|query|verify|analy[sz]e|compile|process|inspect|fix|patch|clean(?: up)?|seed|register|do (?:a |the |thorough |proper |additional |more |some |a few |new )?(?:search(?:es)?|queries|lookups?|cleanup|clean up))|let me send it over|let me end planning|"
     r"got (?:the )?(?:result|results|data|source material).{0,180}\blet me (?:report|send|share|set up|configure)|"
-    r"i now have (?:detailed )?data|source pages|mark the research steps|deliver the synthesized|"
+    r"i now have (?:detailed )?(?:data|source pages)|mark the research steps|deliver the synthesized|"
     r"good (?:initial )?data gathered|let me (?:now )?scrape|let me do (?:a couple|some) more|"
     r"strengthen the competitive analysis|then synthesize|synthesize the full memo|"
     r"already have [^.?!]{0,80}\bdata)\b",
@@ -54,6 +54,16 @@ _INTERNAL_PROGRESS_RE = re.compile(
 )
 _OPTIONAL_PROGRESS_QUESTION_RE = re.compile(
     r"\b(?:any tweaks|any changes|anything to adjust|otherwise\b|if not\b|unless you want)\b",
+    re.IGNORECASE,
+)
+_RESULTS_STATUS_PROGRESS_RE = re.compile(
+    r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?"
+    r"(?:(?:i(?:'ve)?|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:search\s+)?(?:result|results|data|sources?)|all\s+(?:\w+|\d+)\s+(?:sources?|pages?|results?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|the\s+data\s+is\s+in)\b",
+    re.IGNORECASE,
+)
+_FORWARD_PROGRESS_ACTION_RE = re.compile(
+    r"\b(?:let me|i(?:'ll| will| need to| can| am going to)|next|then)\s+"
+    r"(?:open|scrape|fetch|query|read|review|use|analy[sz]e|synthesi[sz]e|compile|prepare|write|send|deliver|report|summari[sz]e|extract|check|update|configure|set up)\b",
     re.IGNORECASE,
 )
 _TRAILING_OPTIONAL_FOLLOWUP_RE = re.compile(
@@ -136,7 +146,15 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     lower = text.lower()
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
+    result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
+    if result_status and not re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I) and (
+        _FORWARD_PROGRESS_ACTION_RE.search(text)
+        or ("http://" not in lower and "https://" not in lower and len(text) <= 500)
+    ):
+        return True
     progress_signal = bool(_PROGRESS_PREFIX_RE.search(text) or _INTERNAL_PROGRESS_RE.search(text))
+    if progress_signal and re.search(r"\b(?:claims extracted|strongest unique claims|source urls?)\b|(?:^|\s)\|[^|]+\|", text, re.I):
+        return False
     if "?" in text and _OPTIONAL_PROGRESS_QUESTION_RE.search(text):
         return progress_signal
     if any(marker in lower for marker in ("as requested", "you asked", "blocking", "blocked", "?")):

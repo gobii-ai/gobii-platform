@@ -1,9 +1,3 @@
-"""
-SQLite batch tool for persistent agents.
-
-Simplified multi-query executor aligned with sqlite_query.
-"""
-
 import json
 import logging
 import os
@@ -28,16 +22,15 @@ from .sqlite_guardrails import (
     stop_query_timer,
 )
 from .sqlite_autocorrect import build_cte_column_candidates, build_sqlglot_candidates
-from .sqlite_helpers import is_write_statement
+from .sqlite_query_quality import build_tool_result_query_advisories
 from .sqlite_state import EPHEMERAL_TABLES, _sqlite_db_path_var  # type: ignore
 
 if TYPE_CHECKING:
     from ...models import PersistentAgent
 
-# Context protection limits
-MAX_RESULT_ROWS = 100  # Hard cap on rows returned
-MAX_RESULT_BYTES = 8000  # ~2K tokens worth of result data
-WARN_RESULT_ROWS = 50  # Warn if exceeding this
+MAX_RESULT_ROWS = 100
+MAX_RESULT_BYTES = 8000
+WARN_RESULT_ROWS = 50
 MAX_AUTO_CORRECTION_ATTEMPTS = 8
 MAX_AUTO_CORRECTION_CANDIDATES = 20
 
@@ -200,24 +193,15 @@ def _extract_cte_names(sql: str) -> list[str]:
     return re.findall(pattern, sql, re.IGNORECASE)
 
 
-# -----------------------------------------------------------------------------
-# LLM artifact cleanup - fix common formatting mistakes before execution
-# -----------------------------------------------------------------------------
-
 def _strip_trailing_tool_params(sql: str) -> tuple[str, str | None]:
     """Strip trailing tool call parameters that LLMs mistakenly include in SQL.
 
     Example: '...ORDER BY price", will_continue_work=true' -> '...ORDER BY price'
     """
-    # Pattern: trailing ", param=value or ", "param": value} patterns
     patterns = [
-        # Trailing ", will_continue_work=true/false (with optional closing brace/quote)
         r'"\s*,\s*will_continue_work\s*=\s*(true|false)\s*[}"\']?\s*$',
-        # Trailing ", "will_continue_work": true/false}
         r'"\s*,\s*"will_continue_work"\s*:\s*(true|false)\s*}\s*$',
-        # Trailing "} or '}
         r'"\s*}\s*$',
-        # Trailing ", followed by any param=value pattern
         r'"\s*,\s*\w+\s*=\s*\w+\s*$',
     ]
     for pattern in patterns:
@@ -234,9 +218,7 @@ def _strip_markdown_fences(sql: str) -> tuple[str, str | None]:
     Example: '```sql\nSELECT * FROM t\n```' -> 'SELECT * FROM t'
     """
     original = sql
-    # Strip leading ```sql or ```
     sql = re.sub(r'^```(?:sql)?\s*\n?', '', sql, flags=re.IGNORECASE)
-    # Strip trailing ```
     sql = re.sub(r'\n?```\s*$', '', sql)
     if sql != original:
         return sql.strip(), "stripped markdown fences"
@@ -327,13 +309,11 @@ def _fix_python_operators(sql: str) -> tuple[str, str | None]:
     # == to = (but not inside strings)
     # Use a simple heuristic: replace == that's not inside quotes
     if '==' in sql:
-        # Only fix if it looks like a comparison, not inside a string
         new_sql = re.sub(r'(?<![\'"])\s*==\s*(?![\'"])', ' = ', sql)
         if new_sql != sql:
             sql = new_sql
             corrections.append("'==' -> '='")
 
-    # && to AND (outside strings)
     if '&&' in sql:
         new_sql = re.sub(r'\s*&&\s*', ' AND ', sql)
         if new_sql != sql:
@@ -1090,6 +1070,16 @@ def _get_schema_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
         return []
 
 
+def _table_row_count(conn: sqlite3.Connection, table_name: str) -> int:
+    try:
+        cur = conn.cursor()
+        cur.execute(f'SELECT COUNT(*) FROM "{table_name}";')
+        row = cur.fetchone()
+        return int(row[0] or 0) if row else 0
+    except sqlite3.Error:
+        return 0
+
+
 def _autocorrect_missing_table_with_schema(
     sql: str,
     error_msg: str,
@@ -1701,7 +1691,6 @@ def _execute_sqlite_batch_inner(
     had_error = False
     had_warning = False
     error_message = ""
-    only_write_queries = True
     all_corrections: List[str] = []
 
     try:
@@ -1736,8 +1725,6 @@ def _execute_sqlite_batch_inner(
                 break
 
             query = _apply_tool_results_result_id_compat(query, conn)
-            only_write_queries = only_write_queries and is_write_statement(query)
-
             result_entry, final_query, applied_corrections, failure_message = _execute_with_autocorrections(
                 conn,
                 cur,
@@ -1755,9 +1742,6 @@ def _execute_sqlite_batch_inner(
                 had_error = True
                 error_message = f"Query {idx} failed: no result produced."
                 break
-
-            if result_entry.get("result") is not None:
-                only_write_queries = False
 
             if result_entry.get("warning"):
                 had_warning = True
@@ -1777,6 +1761,15 @@ def _execute_sqlite_batch_inner(
         if db_size_mb > 50:
             size_warning = " WARNING: DB SIZE EXCEEDS 50MB. YOU MUST EXECUTE MORE QUERIES TO SHRINK THE SIZE, OR THE WHOLE DB WILL BE WIPED!!!"
 
+        advisories = []
+        if not had_error:
+            advisories = build_tool_result_query_advisories(
+                queries,
+                available_tool_result_rows=_table_row_count(conn, "__tool_results"),
+            )
+            if advisories:
+                had_warning = True
+
         # Build success message with any auto-corrections noted
         if had_error:
             msg = error_message
@@ -1789,6 +1782,10 @@ def _execute_sqlite_batch_inner(
                     "For other patterns: escape single quotes as '' in SQL strings. "
                     + msg
                 )
+            if advisories:
+                msg += " [!] SQLITE QUERY ADVICE: " + " ".join(
+                    advisory.message for advisory in advisories
+                )
 
         response: Dict[str, Any] = {
             "status": "error" if had_error else ("warning" if had_warning else "ok"),
@@ -1799,6 +1796,11 @@ def _execute_sqlite_batch_inner(
 
         if not had_error and not had_warning and will_continue_work is False:
             response["auto_sleep_ok"] = True
+        if advisories:
+            response["advisories"] = [
+                {"code": advisory.code, "message": advisory.message}
+                for advisory in advisories
+            ]
 
         return response
     except Exception as outer:
@@ -1835,11 +1837,9 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "name": "sqlite_batch",
             "description": (
                 "Durable SQLite memory for structured data. "
-                "Use sqlite_batch to query and batch-update structured data you already have. "
-                "For repetitive imports, bulk MCP/API fan-out, or large row writes, prefer a custom tool that writes to SQLite, then query it here. "
-                "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-                "Deterministic, repeatable, data-oriented work is an especially strong trigger for that custom-tool-plus-SQLite flow, even if the user did not explicitly ask for a custom tool or mention SQLite. "
-                "Tables written by custom tools are queried here directly; do not ATTACH sandbox file paths. "
+                "Query/update structured data you already have. "
+                "For multiple tool outputs, use one shaped query with CTEs/IN/json_extract/json_each/joins/aggregation; persist extracts from __tool_results with CREATE TABLE ... AS SELECT, not hand-entered VALUES. "
+                "For repetitive imports, API fan-out, or large writes, prefer a custom tool writing to SQLite; query those tables here, no ATTACH. "
                 "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
                 "ESCAPE single quotes by DOUBLING them: 'O''Brien' (NOT backslash). "
                 "grep_context_all/split_sections return STRING arrays: use json_each(...) then ctx.value directly, NOT json_extract. "
