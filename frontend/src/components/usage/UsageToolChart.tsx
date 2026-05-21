@@ -258,7 +258,7 @@ export function UsageToolChart({ effectiveRange, fallbackRange, agentIds, timezo
 
   const totalCredits = toolData?.total_credits ?? processedSegments.reduce((acc, segment) => acc + segment.value, 0)
   const sectionClassName = embedded
-    ? 'flex flex-col gap-4 rounded-xl border border-slate-200/20 bg-slate-950/35 p-6'
+    ? 'settings-card-surface settings-card-surface--embedded flex flex-col gap-4 rounded-xl border border-slate-200/20 p-6'
     : 'gobii-card-base flex flex-col gap-4 p-6'
   const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'
   const subtitleClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'

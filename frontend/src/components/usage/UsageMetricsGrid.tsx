@@ -191,7 +191,7 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   }, [creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
 
   const cardClassName = embedded
-    ? 'flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 bg-slate-950/35 p-5'
+    ? 'settings-card-surface settings-card-surface--embedded flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 p-5'
     : 'gobii-card-base flex h-full flex-col justify-between gap-3 p-5'
   const labelClassName = embedded
     ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'

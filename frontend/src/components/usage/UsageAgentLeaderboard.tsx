@@ -330,7 +330,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   })
 
   const sectionClassName = embedded
-    ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
+    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
     : 'gobii-card-base'
   const headerClassName = embedded ? 'px-6 py-4' : 'border-b border-white/50 px-6 py-4'
   const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'

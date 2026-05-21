@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, EyeOff, Globe, Inbox, KeyRound, Loader2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { AlertTriangle, Check, EyeOff, Globe, Inbox, KeyRound, Loader2, ShieldCheck, Trash2 } from 'lucide-react'
 
 import { fulfillRequestedSecrets, removeRequestedSecrets } from '../../api/agentChat'
 import { HttpError } from '../../api/http'
 import { fetchAgentSecrets, type AgentSecretListResponse, type SecretDTO } from '../../api/secrets'
 import { SettingsBanner } from '../agentSettings/SettingsBanner'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../agentSettings/settingsSurfaceClasses'
 import { EmbeddedAgentShellBackButton } from './EmbeddedAgentShellBackButton'
 import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
 
@@ -117,7 +118,7 @@ export function EmbeddedAgentSecretRequestsPanel({
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [requestErrors, setRequestErrors] = useState<RequestErrors>({ message: null, fieldErrors: {} })
 
-  const { data, isLoading, error, refetch, isFetching } = useQuery<AgentSecretListResponse>({
+  const { data, isLoading, error, refetch } = useQuery<AgentSecretListResponse>({
     queryKey,
     queryFn: ({ signal }) => fetchAgentSecrets(`/console/api/agents/${agentId}/secrets/`, signal),
     enabled: Boolean(agentId),
@@ -249,20 +250,9 @@ export function EmbeddedAgentSecretRequestsPanel({
         eyebrow="Agent settings"
         title="Secret Requests"
         subtitle={`Provide values ${agentName} requested during setup or task execution.`}
-        actions={(
-          <button
-            type="button"
-            onClick={() => void refetch()}
-            disabled={isFetching || busy}
-            className="inline-flex items-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {isFetching ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <RefreshCw className="h-4 w-4" aria-hidden="true" />}
-            Refresh
-          </button>
-        )}
       />
 
-      <div className="space-y-4 pb-8">
+      <div className="mt-4 space-y-4 pb-8">
         {successMessage ? (
           <div className="rounded-xl border border-emerald-300/25 bg-emerald-950/35 px-4 py-3 text-sm text-emerald-50">
             <div className="flex items-start gap-3">
@@ -291,10 +281,10 @@ export function EmbeddedAgentSecretRequestsPanel({
         ) : error ? (
           <div className="rounded-xl border border-rose-300/25 bg-rose-950/35 px-4 py-4 text-sm text-rose-100">
             <p className="font-medium">Unable to load secret requests.</p>
-            <p className="mt-1 text-rose-100/75">Refresh the panel or try opening this agent again.</p>
+            <p className="mt-1 text-rose-100/75">Try opening this agent again.</p>
           </div>
         ) : requests.length === 0 ? (
-          <div className="flex min-h-[18rem] items-center justify-center rounded-2xl border border-slate-200/15 bg-slate-950/25 px-6 py-10 text-center">
+          <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} flex min-h-[18rem] items-center justify-center px-6 py-10 text-center shadow-none`}>
             <div className="max-w-sm space-y-4">
               <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
                 <Inbox className="h-5 w-5" aria-hidden="true" />
@@ -318,7 +308,7 @@ export function EmbeddedAgentSecretRequestsPanel({
           </div>
         ) : (
           <>
-            <div className="rounded-2xl border border-slate-200/15 bg-slate-950/25 px-4 py-4 text-slate-100">
+            <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} px-4 py-4 text-slate-100 shadow-none`}>
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex min-w-0 items-start gap-3">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200/20 bg-slate-900/45 text-slate-200">
@@ -386,7 +376,7 @@ export function EmbeddedAgentSecretRequestsPanel({
                 return (
                   <article
                     key={request.id}
-                    className="rounded-2xl border border-slate-200/15 bg-slate-950/25 px-4 py-4 text-slate-100"
+                    className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} px-4 py-4 text-slate-100 shadow-none`}
                   >
                     <div className="flex items-start gap-3">
                       <input

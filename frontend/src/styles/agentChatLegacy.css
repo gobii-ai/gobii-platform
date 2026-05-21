@@ -6624,13 +6624,6 @@
   color: var(--chat-sidebar-settings-text);
 }
 
-.chat-sidebar-settings-shell {
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 1.35rem;
-  padding: 0.95rem 1rem 1.25rem;
-  background: var(--console-card-surface);
-}
-
 .chat-sidebar-settings-theme .text-slate-900,
 .chat-sidebar-settings-theme .text-slate-800,
 .chat-sidebar-settings-theme .text-slate-700,
@@ -9927,7 +9920,7 @@
 }
 
 .billing-screen--embedded .bg-white {
-  background: rgba(14, 11, 33, 0.74);
+  background: var(--console-card-surface);
 }
 
 .billing-screen--embedded .bg-blue-50 {
@@ -9996,12 +9989,13 @@
 .profile-screen--embedded {
   color-scheme: dark;
   color: rgba(248, 245, 255, 0.94);
+  --console-card-surface: #0f172a;
 }
 
 .profile-screen__header,
 .profile-screen__section {
   border: 1px solid rgba(196, 181, 253, 0.16);
-  background: rgba(15, 23, 42, 0.82);
+  background: var(--console-card-surface);
   box-shadow: none;
 }
 

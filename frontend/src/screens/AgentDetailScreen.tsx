@@ -34,6 +34,7 @@ import { Modal } from '../components/common/Modal'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
@@ -1750,10 +1751,10 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
-  const sectionClassName = 'group rounded-none border-0 bg-transparent shadow-none'
-  const sectionSummaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
-  const sectionBodyClassName = 'px-0 pt-5'
-  const stackedSectionBodyClassName = 'px-0 pt-5 space-y-6'
+  const sectionClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+  const sectionSummaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
+  const sectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5'
+  const stackedSectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5 space-y-6'
   const embeddedUtilityLinkClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white sm:w-auto'
   const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
   const embeddedDestructiveButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
@@ -2761,14 +2762,20 @@ function IntegrationsSection({
   onConfirmAction,
 }: IntegrationsSectionProps) {
   const embedded = variant === 'embedded'
-  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const sectionClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    : 'gobii-card-base group'
   const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-6 px-0 py-5' : 'p-6 sm:p-8 space-y-6'
-  const cardClassName = embedded ? 'rounded-xl border border-slate-200/20 bg-slate-950/35 p-4 space-y-4' : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
-  const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35' : 'overflow-hidden border border-gray-200 rounded-xl'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-6 px-5 py-5' : 'p-6 sm:p-8 space-y-6'
+  const cardClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} p-4 space-y-4 shadow-none`
+    : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
+  const tableWrapperClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} overflow-hidden shadow-none`
+    : 'overflow-hidden border border-gray-200 rounded-xl'
   const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
   const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
   const primaryActionButtonClassName = embedded
@@ -3525,12 +3532,14 @@ function ActionsSection({
   deleteError,
 }: ActionsSectionProps) {
   const embedded = variant === 'embedded'
-  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const sectionClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    : 'gobii-card-base group'
   const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-4 px-0 py-5' : 'p-6 sm:p-8 space-y-4'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-4 px-5 py-5' : 'p-6 sm:p-8 space-y-4'
 
   return (
     <details className={sectionClassName} id="agent-ownership">

@@ -7,9 +7,7 @@ type EmbeddedAgentShellPanelProps = {
 export function EmbeddedAgentShellPanel({ children }: EmbeddedAgentShellPanelProps) {
   return (
     <div className="chat-sidebar-settings-theme">
-      <div className="chat-sidebar-settings-shell">
-        {children}
-      </div>
+      {children}
     </div>
   )
 }
