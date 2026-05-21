@@ -323,9 +323,8 @@ class AgentEmailOAuthApiTests(TestCase):
     def test_settings_page_mounts_react_email_app(self):
         url = reverse("agent_email_settings", args=[self.agent.pk])
         response = self.client.get(url)
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-app="agent-email-settings"')
-        self.assertContains(response, reverse("console_agent_email_settings", args=[self.agent.pk]))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.url, f"/app/agents/{self.agent.pk}/email")
 
     def test_settings_page_creates_account_with_imap_idle_enabled_by_default(self):
         with patch.object(BrowserUseAgent, "select_random_proxy", return_value=None):
@@ -343,8 +342,12 @@ class AgentEmailOAuthApiTests(TestCase):
             is_primary=True,
         )
 
-        url = reverse("agent_email_settings", args=[second_agent.pk])
-        response = self.client.get(url)
+        url = reverse("console_agent_email_settings_ensure_account", args=[second_agent.pk])
+        response = self.client.post(
+            url,
+            data=json.dumps({"endpointAddress": endpoint.address}),
+            content_type="application/json",
+        )
         self.assertEqual(response.status_code, 200)
 
         account = AgentEmailAccount.objects.get(endpoint=endpoint)

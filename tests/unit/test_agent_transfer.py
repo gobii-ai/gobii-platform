@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.core import mail
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 from unittest.mock import patch
@@ -30,6 +30,7 @@ def _create_browser(user: User, name: str) -> BrowserUseAgent:
 
 
 @tag('batch_agent_transfer')
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class AgentTransferServiceTests(TestCase):
     def setUp(self) -> None:
         self.analytics_patcher = patch('util.analytics.Analytics.track_event')
@@ -85,7 +86,7 @@ class AgentTransferServiceTests(TestCase):
 
     def _send_transfer_invite_via_console(self, email: str = "new-owner@example.com", message: str = "Please take it over.") -> AgentTransferInvite:
         self.client.login(username="owner", password="pw")
-        url = reverse('agent_detail', args=[self.agent.id])
+        url = reverse('console_agent_settings', args=[self.agent.id])
         response = self.client.post(
             url,
             {

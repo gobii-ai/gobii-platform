@@ -106,7 +106,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
             build_immersive_chat_url(
                 response.wsgi_request,
                 self.agent.id,
-                return_to=reverse("agents"),
+                return_to="/app/agents",
             ),
         )
         self.assertTrue(
@@ -134,7 +134,7 @@ class AgentCollaboratorInviteViewTests(TestCase):
             build_immersive_chat_url(
                 response.wsgi_request,
                 self.agent.id,
-                return_to=reverse("agents"),
+                return_to="/app/agents",
             ),
         )
         system_step = PersistentAgentSystemStep.objects.filter(
@@ -337,6 +337,7 @@ class AgentCollaboratorInviteExpiryTests(TestCase):
 
 @tag("batch_agent_collaborators")
 @override_settings(GOBII_PROPRIETARY_MODE=True)
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class AgentCollaboratorReinviteTests(TestCase):
     def setUp(self):
         self.client = Client()
@@ -371,7 +372,7 @@ class AgentCollaboratorReinviteTests(TestCase):
 
         self.client.force_login(self.owner)
         response = self.client.post(
-            reverse("agent_detail", kwargs={"pk": self.agent.id}),
+            reverse("console_agent_settings", kwargs={"agent_id": self.agent.id}),
             data={
                 "action": "add_collaborator",
                 "email": self.collaborator.email,

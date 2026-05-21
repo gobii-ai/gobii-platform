@@ -1,6 +1,6 @@
 from django.urls import reverse
 from django.contrib.auth import get_user_model
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 
 from waffle.models import Flag
 
@@ -16,6 +16,7 @@ User = get_user_model()
 
 
 @tag('batch_console_context')
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class AgentReassignContextTests(TestCase):
     def setUp(self):
         # Ensure organizations UI/flows are enabled
@@ -47,7 +48,7 @@ class AgentReassignContextTests(TestCase):
         )
 
     def test_reassign_sets_session_to_org(self):
-        url = reverse("agent_detail", kwargs={"pk": self.agent.id})
+        url = reverse("console_agent_settings", kwargs={"agent_id": self.agent.id})
 
         # AJAX post to reassign
         resp = self.client.post(
@@ -72,7 +73,7 @@ class AgentReassignContextTests(TestCase):
 
     def test_move_back_to_personal_sets_session(self):
         # First, move to org
-        url = reverse("agent_detail", kwargs={"pk": self.agent.id})
+        url = reverse("console_agent_settings", kwargs={"agent_id": self.agent.id})
         resp = self.client.post(
             url,
             data={"action": "reassign_org", "target_org_id": str(self.org.id)},
@@ -118,7 +119,7 @@ class AgentReassignContextTests(TestCase):
         )
 
         self.client.force_login(solutions_partner)
-        url = reverse("agent_detail", kwargs={"pk": agent.id})
+        url = reverse("console_agent_settings", kwargs={"agent_id": agent.id})
         resp = self.client.post(
             url,
             data={"action": "reassign_org", "target_org_id": str(self.org.id)},

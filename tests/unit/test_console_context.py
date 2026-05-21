@@ -1,6 +1,7 @@
 import uuid
 import json
 import tempfile
+from urllib.parse import parse_qs, urlsplit
 
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -19,8 +20,6 @@ from api.models import (
     BrowserUseAgentTask,
     TaskCredit,
     OrganizationInvite,
-    ProxyServer,
-    DedicatedProxyAllocation,
 )
 from django.utils import timezone
 from constants.plans import PlanNamesChoices
@@ -307,6 +306,13 @@ class ConsoleContextTests(TestCase):
             granted_date=timezone.now(),
             expiration_date=timezone.now() + timezone.timedelta(days=30),
         )
+        TaskCredit.objects.create(
+            user=self.owner,
+            credits=10,
+            credits_used=0,
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timezone.timedelta(days=30),
+        )
 
         # Tasks: one personal, one org-owned, one agent-less
         self.personal_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=self.personal_browser)
@@ -498,16 +504,16 @@ class ConsoleContextTests(TestCase):
         self._set_personal_context()
         url = reverse("agent_detail", kwargs={"pk": self.org_agent.id})
 
-        # Direct navigation to another context's agent should still render.
+        # Direct navigation to a legacy agent page should redirect into the app
+        # without mutating the user's persisted session context.
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["current_context"]["type"], "organization")
-        self.assertEqual(resp.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, f"/app/agents/{self.org_agent.id}/settings")
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
-        # Explicit context override query should also render and not mutate session.
+        # Explicit context override query should be preserved for the app shell.
         resp_with_override = self.client.get(
             url,
             {
@@ -515,17 +521,20 @@ class ConsoleContextTests(TestCase):
                 "context_id": str(self.org.id),
             },
         )
-        self.assertEqual(resp_with_override.status_code, 200)
-        self.assertEqual(resp_with_override.context["current_context"]["type"], "organization")
-        self.assertEqual(resp_with_override.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(resp_with_override.status_code, 302)
+        redirect = urlsplit(resp_with_override.url)
+        self.assertEqual(redirect.path, f"/app/agents/{self.org_agent.id}/settings")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
-        # Org context with membership: should 200
         self._set_org_context()
         resp2 = self.client.get(url)
-        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.status_code, 302)
+        self.assertEqual(resp2.url, f"/app/agents/{self.org_agent.id}/settings")
 
     def test_agent_targeted_views_use_agent_owner_context_without_persisting_session(self):
         self._set_personal_context()
@@ -533,23 +542,20 @@ class ConsoleContextTests(TestCase):
         chat_response = self.client.get(
             reverse("agent_chat_shell", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(chat_response.status_code, 200)
-        self.assertEqual(chat_response.context["current_context"]["type"], "organization")
-        self.assertEqual(chat_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(chat_response.status_code, 302)
+        self.assertEqual(chat_response.url, f"/app/agents/{self.org_agent.id}")
 
         files_response = self.client.get(
             reverse("agent_files", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(files_response.status_code, 200)
-        self.assertEqual(files_response.context["current_context"]["type"], "organization")
-        self.assertEqual(files_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(files_response.status_code, 302)
+        self.assertEqual(files_response.url, f"/app/agents/{self.org_agent.id}/files")
 
         email_response = self.client.get(
             reverse("agent_email_settings", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(email_response.status_code, 200)
-        self.assertEqual(email_response.context["current_context"]["type"], "organization")
-        self.assertEqual(email_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(email_response.status_code, 302)
+        self.assertEqual(email_response.url, f"/app/agents/{self.org_agent.id}/email")
 
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
@@ -590,7 +596,12 @@ class ConsoleContextTests(TestCase):
         # Visiting org detail should set session context to organization
         url = reverse("organization_detail", kwargs={"org_id": self.org.id})
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        redirect = urlsplit(resp.url)
+        self.assertEqual(redirect.path, "/app/organization")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get("context_type"), "organization")
         self.assertEqual(session.get("context_id"), str(self.org.id))
@@ -633,53 +644,27 @@ class ConsoleContextTests(TestCase):
         self.assertIn("Profile", html2)
 
     def test_sidebar_nav_reflects_context(self):
-        # Org context: sidebar should show Organization link
         self._set_org_context()
         resp = self.client.get(reverse("agents"))
-        self.assertEqual(resp.status_code, 200)
-        content = resp.content.decode()
-        self.assertIn("Organization", content)
-        # Personal context: sidebar should show Profile link
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "/app/agents")
+
         self._set_personal_context()
         resp2 = self.client.get(reverse("agents"))
-        self.assertEqual(resp2.status_code, 200)
-        content2 = resp2.content.decode()
-        self.assertIn("Profile", content2)
-
-    def test_agent_detail_includes_dedicated_ip_counts(self):
-        self._set_personal_context()
-        proxy = ProxyServer.objects.create(
-            name="Dedicated Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTP,
-            host="dedicated.example.com",
-            port=8080,
-            username="dedicated",
-            password="secret",
-            static_ip="203.0.113.5",
-            is_active=True,
-            is_dedicated=True,
-        )
-        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.owner)
-
-        url = reverse("agent_detail", kwargs={"pk": self.personal_agent.id})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        props = resp.context.get("agent_detail_props") or {}
-        dedicated_ips = props.get("dedicatedIps") or {}
-        self.assertEqual(dedicated_ips.get("total"), 1)
-        self.assertEqual(dedicated_ips.get("available"), 1)
-        self.assertEqual(dedicated_ips.get("ownerType"), "user")
-        self.assertEqual(dedicated_ips.get("selectedId"), None)
-        options = dedicated_ips.get("options") or []
-        self.assertEqual(len(options), 1)
-        self.assertEqual(options[0]["label"], "203.0.113.5")
-        self.assertEqual(options[0]["assignedNames"], [])
+        self.assertEqual(resp2.status_code, 302)
+        self.assertEqual(resp2.url, "/app/agents")
 
     def test_billing_query_switches_to_org_context(self):
         self._set_personal_context()
         billing_url = f"{reverse('billing')}?org_id={self.org.id}"
         resp = self.client.get(billing_url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        redirect = urlsplit(resp.url)
+        self.assertEqual(redirect.path, "/app/billing")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
+        self.assertEqual(query.get("org_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get('context_type'), 'organization')
         self.assertEqual(session.get('context_id'), str(self.org.id))

@@ -292,7 +292,7 @@ class ConsoleBillingUpdateApiTests(TestCase):
         payload = resp.json()
         self.assertTrue(payload.get("ok"))
         self.assertIn("/subscribe/scale/", payload.get("redirectUrl", ""))
-        self.assertIn("return_to=%2Fconsole%2Fbilling%2F", payload.get("redirectUrl", ""))
+        self.assertIn("return_to=%2Fapp%2Fbilling", payload.get("redirectUrl", ""))
         ensure_kwargs = mock_ensure_single_subscription.call_args.kwargs
         self.assertNotIn("metered_price_id", ensure_kwargs)
 

@@ -155,5 +155,5 @@ class AgentAvatarThumbnailTests(TestCase):
         self.assertIn("/avatar/thumb/", timeline_response.json()["agent_avatar_url"])
 
         shell_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": self.agent.id}))
-        self.assertEqual(shell_response.status_code, 200)
-        self.assertContains(shell_response, "/avatar/thumb/")
+        self.assertEqual(shell_response.status_code, 302)
+        self.assertEqual(shell_response.url, f"/app/agents/{self.agent.id}")
