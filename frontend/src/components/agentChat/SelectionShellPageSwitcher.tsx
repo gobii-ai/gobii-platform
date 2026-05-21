@@ -44,14 +44,20 @@ const PAGE_OPTIONS: SelectionPageOption[] = [
 type SelectionShellPageSwitcherProps = {
   currentPage: SelectionShellPage
   onSelectPage: (page: SelectionShellPage) => void
+  showOrganization?: boolean
 }
 
 export function SelectionShellPageSwitcher({
   currentPage,
   onSelectPage,
+  showOrganization = true,
 }: SelectionShellPageSwitcherProps) {
   const [open, setOpen] = useState(false)
   const selectedKeys = useMemo(() => new Set<Key>([currentPage]), [currentPage])
+  const pageOptions = useMemo(
+    () => PAGE_OPTIONS.filter((option) => showOrganization || option.key !== 'organization'),
+    [showOrganization],
+  )
 
   const handleSelectionChange = useCallback(
     (keys: Selection) => {
@@ -68,7 +74,7 @@ export function SelectionShellPageSwitcher({
       if (!resolvedKey) {
         return
       }
-      const nextPage = PAGE_OPTIONS.find((option) => option.key === resolvedKey)?.key
+      const nextPage = pageOptions.find((option) => option.key === resolvedKey)?.key
       if (!nextPage) {
         return
       }
@@ -77,7 +83,7 @@ export function SelectionShellPageSwitcher({
         onSelectPage(nextPage)
       }
     },
-    [currentPage, onSelectPage],
+    [currentPage, onSelectPage, pageOptions],
   )
 
   return (
@@ -103,7 +109,7 @@ export function SelectionShellPageSwitcher({
             onSelectionChange={(keys) => handleSelectionChange(keys as Selection)}
             className="selection-shell-switcher__list"
           >
-            {PAGE_OPTIONS.map((option) => {
+            {pageOptions.map((option) => {
               const Icon = option.icon
               return (
                 <ListBoxItem

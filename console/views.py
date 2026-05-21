@@ -237,6 +237,10 @@ def _posted_bool(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _wants_json_response(request) -> bool:
+    return "application/json" in (request.headers.get("Accept") or "").lower()
+
+
 def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> None:
     if (
         agent.organization_id is None
@@ -954,9 +958,12 @@ class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         customer = get_stripe_customer(request.user)
         if not customer or not getattr(customer, "id", None):
+            detail = "We couldn't find a Stripe customer for your account. Please contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_customer_missing", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We couldn't find a Stripe customer for your account. Please contact support.",
+                detail,
             )
             return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
@@ -968,12 +975,17 @@ class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
                 api_key=stripe.api_key,
                 return_url=return_url,
             )
+            if _wants_json_response(request):
+                return JsonResponse({"ok": True, "redirectUrl": session.url})
             return redirect(session.url)
         except stripe.error.StripeError:
             logger.exception("Failed to create Stripe billing portal session for user %s", request.user.id)
+            detail = "We weren't able to open the Stripe billing portal. Please try again or contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_error", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We weren't able to open the Stripe billing portal. Please try again or contact support.",
+                detail,
             )
             return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
@@ -5022,12 +5034,10 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
 
     waffle_flag = ORGANIZATIONS
 
-    def _accept(self, request, token: str):
+    def _accept_invite(self, request, token: str, *, add_message: bool = True):
         invite, issue, extra = self._resolve_invite_or_issue(request, token)
         if issue:
-            ctx = {"issue": issue, "context_type": "organization_invite", "action": "accept"}
-            ctx.update(extra)
-            return render(request, "console/approval_link_issue.html", ctx, status=200)
+            return None, issue, extra
 
         # Set console context to the invited organization for continuity
         request.session['context_type'] = 'organization'
@@ -5107,7 +5117,16 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
                 source=AnalyticsSource.WEB,
                 properties=seat_props.copy(),
             ))
-        messages.success(request, f"Joined {invite.org.name}.")
+        if add_message:
+            messages.success(request, f"Joined {invite.org.name}.")
+        return invite, None, {}
+
+    def _accept(self, request, token: str):
+        invite, issue, extra = self._accept_invite(request, token)
+        if issue:
+            ctx = {"issue": issue, "context_type": "organization_invite", "action": "accept"}
+            ctx.update(extra)
+            return render(request, "console/approval_link_issue.html", ctx, status=200)
         return redirect(_organization_app_path(invite.org.id))
 
     @tracer.start_as_current_span("CONSOLE Organization Invite Accept")
@@ -5119,6 +5138,45 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
     @transaction.atomic
     def get(self, request, token: str):
         return self._accept(request, token)
+
+
+class OrganizationInviteAcceptAPIView(OrganizationInviteAcceptView):
+    """Accept an organization invite from the immersive app shell."""
+
+    http_method_names = ["post"]
+
+    @tracer.start_as_current_span("APP Organization Invite Accept")
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._accept_invite(request, token, add_message=False)
+        if issue:
+            payload: dict[str, object] = {
+                "ok": False,
+                "issue": issue,
+                "action": "accept",
+            }
+            org = extra.get("org")
+            if org is not None:
+                payload["organization"] = {
+                    "id": str(org.id),
+                    "name": org.name,
+                }
+            invited_email = extra.get("invited_email")
+            if invited_email:
+                payload["invitedEmail"] = invited_email
+            invited_by = extra.get("invited_by")
+            if invited_by is not None:
+                payload["invitedBy"] = invited_by.email or invited_by.username
+            return JsonResponse(payload)
+
+        return JsonResponse({
+            "ok": True,
+            "organization": {
+                "id": str(invite.org.id),
+                "name": invite.org.name,
+            },
+            "redirectUrl": _organization_app_path(invite.org.id),
+        })
 
 
 class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -5825,6 +5883,9 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
 
         billing = getattr(org, "billing", None)
         if not billing or not billing.stripe_customer_id:
+            detail = "This organization does not have an active Stripe subscription yet."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_customer_missing", "detail": detail}, status=400)
             messages.error(request, "This organization does not have an active Stripe subscription yet.")
             return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
@@ -5839,12 +5900,17 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
                 return_url=return_url,
             )
 
+            if _wants_json_response(request):
+                return JsonResponse({"ok": True, "redirectUrl": session.url})
             return redirect(session.url)
         except stripe.error.StripeError:
             logger.exception("Failed to create Stripe billing portal session for org %s", org.id)
+            detail = "We weren’t able to open the Stripe billing portal. Please try again or contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_error", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
+                detail,
             )
             return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
@@ -5951,7 +6017,7 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
 
         try:
             accept_url = request.build_absolute_uri(
-                reverse("org_invite_accept", kwargs={"token": invite.token})
+                f"/app/organizations/invites/{invite.token}/accept"
             )
             reject_url = request.build_absolute_uri(
                 reverse("org_invite_reject", kwargs={"token": invite.token})

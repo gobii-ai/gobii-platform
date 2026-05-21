@@ -175,7 +175,7 @@ def _require_current_org(request):
 
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
     accept_url = request.build_absolute_uri(
-        reverse("org_invite_accept", kwargs={"token": invite.token})
+        f"/app/organizations/invites/{invite.token}/accept"
     )
     reject_url = request.build_absolute_uri(
         reverse("org_invite_reject", kwargs={"token": invite.token})

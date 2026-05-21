@@ -50,6 +50,21 @@ export type CurrentOrganizationPayload = {
   } | null
 }
 
+export type OrganizationInviteAcceptIssue = 'invalid' | 'expired' | 'wrong_account'
+
+export type OrganizationInviteAcceptPayload = {
+  ok: boolean
+  issue?: OrganizationInviteAcceptIssue
+  action?: 'accept'
+  invitedEmail?: string
+  invitedBy?: string
+  organization?: {
+    id: string
+    name: string
+  }
+  redirectUrl?: string
+}
+
 const CURRENT_ORGANIZATION_URL = '/console/api/organization/'
 
 export function fetchCurrentOrganization(signal?: AbortSignal): Promise<CurrentOrganizationPayload> {
@@ -75,6 +90,13 @@ export function inviteOrganizationMember(email: string, role: string): Promise<C
 export function revokeOrganizationInvite(token: string): Promise<CurrentOrganizationPayload> {
   return jsonRequest<CurrentOrganizationPayload>(`/console/api/organization/invites/${token}/`, {
     method: 'DELETE',
+    includeCsrf: true,
+  })
+}
+
+export function acceptOrganizationInvite(token: string): Promise<OrganizationInviteAcceptPayload> {
+  return jsonRequest<OrganizationInviteAcceptPayload>(`/console/api/organizations/invites/${token}/accept/`, {
+    method: 'POST',
     includeCsrf: true,
   })
 }

@@ -641,6 +641,23 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/portal")
         mock_portal.assert_called_once()
 
+    @patch("console.views.stripe.billing_portal.Session.create")
+    def test_seat_portal_returns_json_redirect_for_app(self, mock_portal):
+        mock_portal.return_value = MagicMock(url="https://stripe.test/portal")
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_customer_id = "cus_portal"
+        billing.stripe_subscription_id = "sub_portal"
+        billing.save(update_fields=["purchased_seats", "stripe_customer_id", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_portal", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, headers={"accept": "application/json"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "redirectUrl": "https://stripe.test/portal"})
+        mock_portal.assert_called_once()
+
     def test_seat_portal_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="another@example.com", password="pw", username="another")
         self.client.force_login(stranger)
@@ -1002,9 +1019,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.ADMIN, token="tok-reactivate")
 
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 302)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
 
         m = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
         self.assertEqual(m.status, OrganizationMembership.OrgStatus.ACTIVE)
@@ -1021,9 +1039,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.ADMIN, token="tok-update")
 
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 302)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
 
         m = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
@@ -1032,10 +1051,13 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.MEMBER, token="tok-wrong")
 
         self.client.force_login(self.other_user)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("not associated", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "wrong_account")
+        self.assertEqual(payload["invitedEmail"], self.invitee.email)
 
     def test_accept_expired_invite_shows_friendly_page_and_no_membership_created(self):
         expired_invite = self._create_invite(
@@ -1046,10 +1068,12 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         )
 
         self.client.force_login(self.other_user)
-        url = reverse("org_invite_accept", kwargs={"token": expired_invite.token})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": expired_invite.token})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("expired", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "expired")
         self.assertFalse(
             OrganizationMembership.objects.filter(org=self.org, user=self.other_user).exists()
         )
@@ -1069,10 +1093,24 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
 
     def test_accept_invalid_token_shows_friendly_page(self):
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": "nonexistent-token"})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": "nonexistent-token"})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("invalid", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "invalid")
+
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
+    def test_legacy_accept_get_redirects_to_app_invite_page(self):
+        invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.MEMBER, token="tok-legacy")
+
+        self.client.force_login(self.invitee)
+        url = reverse("org_invite_accept", kwargs={"token": invite.token})
+        resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/app/organizations/invites/{invite.token}/accept")
+        self.assertFalse(OrganizationMembership.objects.filter(org=self.org, user=self.invitee).exists())
 
     @tag("batch_organizations")
     def test_admin_can_approve_pending_invite(self):

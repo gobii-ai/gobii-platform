@@ -103,6 +103,9 @@ def get_legacy_console_redirect_path(request) -> str | None:
     org_prefix = "/console/organizations/"
     if path.startswith(org_prefix):
         remainder = path[len(org_prefix):].strip("/")
+        parts = remainder.split("/") if remainder else []
+        if len(parts) == 3 and parts[0] == "invites" and parts[2] == "accept":
+            return _with_original_query(request, f"/app/organizations/invites/{parts[1]}/accept")
         if not remainder or "/" in remainder:
             return None
         target_path = "/app/organization"

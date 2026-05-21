@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react'
 import { AlertTriangle, GlobeLock, ShieldAlert } from 'lucide-react'
 
-import { getCsrfToken, jsonRequest } from '../../api/http'
+import { jsonRequest } from '../../api/http'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { SaveBar } from '../../components/common/SaveBar'
 import { SubscriptionUpgradeModal } from '../../components/common/SubscriptionUpgradeModal'
@@ -23,6 +23,12 @@ import { useConfirmPostAction } from './useConfirmPostAction'
 type DedicatedRemovePrompt = {
   proxyId: string
   proxyLabel: string
+}
+
+type BillingRedirectResponse = {
+  ok: boolean
+  redirectUrl?: string
+  stripeActionUrl?: string
 }
 
 const CANCEL_FEEDBACK_MAX_LENGTH = 500
@@ -58,6 +64,13 @@ function buildChurnKeyBaseAnalytics(initialData: BillingInitialData) {
     hasSubscriptionId: Boolean(churnKeyConfig?.subscriptionId),
     planId: String(initialData.plan?.id ?? ''),
     isTrialing: Boolean(initialData.trial?.isTrialing),
+  }
+}
+
+function navigateInCurrentPage(url: string) {
+  const opened = window.open(url, '_self')
+  if (!opened) {
+    window.location.assign(url)
   }
 }
 
@@ -255,30 +268,29 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     handleFreeUpgradeClick()
   }, [showPlanAction, initialData.paidSubscriber, openUpgradeModal, handleFreeUpgradeClick])
 
-  const handleManageInStripe = useCallback(() => {
+  const handleManageInStripe = useCallback(async () => {
     const stripePortalUrl = initialData.endpoints.stripePortalUrl
-    if (!stripePortalUrl || typeof document === 'undefined') {
+    if (!stripePortalUrl || saving) {
       return
     }
-
-    const form = document.createElement('form')
-    form.method = 'POST'
-    form.action = stripePortalUrl
-    form.target = '_top'
-
-    const csrfToken = getCsrfToken()
-    if (csrfToken) {
-      const csrfInput = document.createElement('input')
-      csrfInput.type = 'hidden'
-      csrfInput.name = 'csrfmiddlewaretoken'
-      csrfInput.value = csrfToken
-      form.appendChild(csrfInput)
+    setSaving(true)
+    setSaveError(null)
+    try {
+      const result = await jsonRequest<BillingRedirectResponse>(stripePortalUrl, {
+        method: 'POST',
+        includeCsrf: true,
+      })
+      if (result?.redirectUrl) {
+        navigateInCurrentPage(result.redirectUrl)
+        return
+      }
+      window.location.reload()
+    } catch (error) {
+      setSaveError(safeErrorMessage(error))
+    } finally {
+      setSaving(false)
     }
-
-    document.body.appendChild(form)
-    form.submit()
-    form.remove()
-  }, [initialData.endpoints.stripePortalUrl])
+  }, [initialData.endpoints.stripePortalUrl, saving])
 
   useEffect(() => {
     const appId = initialData.contextType === 'personal' ? initialData.churnKey?.appId : null
@@ -311,7 +323,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     setSaving(true)
     setSaveError(null)
     try {
-      const result = await jsonRequest<{ ok: boolean; redirectUrl?: string; stripeActionUrl?: string }>(
+      const result = await jsonRequest<BillingRedirectResponse>(
         initialData.endpoints.updateUrl,
         {
           method: 'POST',
@@ -321,11 +333,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
       )
 
       if (result?.redirectUrl) {
-        window.location.assign(result.redirectUrl)
+        navigateInCurrentPage(result.redirectUrl)
         return
       }
       if (result?.stripeActionUrl) {
-        window.location.assign(result.stripeActionUrl)
+        navigateInCurrentPage(result.stripeActionUrl)
         return
       }
       window.location.reload()
@@ -811,7 +823,7 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
           setPlanConfirmBusy(true)
           setPlanConfirmError(null)
           try {
-            const result = await jsonRequest<{ ok: boolean; redirectUrl?: string; stripeActionUrl?: string }>(
+            const result = await jsonRequest<BillingRedirectResponse>(
               initialData.endpoints.updateUrl,
               {
                 method: 'POST',
@@ -820,11 +832,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
               },
             )
             if (result?.redirectUrl) {
-              window.location.assign(result.redirectUrl)
+              navigateInCurrentPage(result.redirectUrl)
               return
             }
             if (result?.stripeActionUrl) {
-              window.location.assign(result.stripeActionUrl)
+              navigateInCurrentPage(result.stripeActionUrl)
               return
             }
             window.location.reload()
