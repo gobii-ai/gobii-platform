@@ -1,8 +1,6 @@
 from decimal import Decimal, DivisionByZero, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
-# Baseline for standard tier; higher tiers scale this via multipliers.
-STANDARD_TIER_DAILY_CREDIT_MAX = Decimal("20")
 _DEFAULT_TIER_MULTIPLIER = Decimal("1")
 
 
@@ -28,11 +26,6 @@ def get_agent_credit_multiplier(agent: Any | None) -> Decimal:
     return get_tier_credit_multiplier(getattr(agent, "preferred_llm_tier", None))
 
 
-def get_tier_slider_limit_max(tier_multiplier: Decimal | None) -> Decimal:
-    multiplier = _coerce_multiplier(tier_multiplier)
-    return (STANDARD_TIER_DAILY_CREDIT_MAX * multiplier).to_integral_value(rounding=ROUND_HALF_UP)
-
-
 def calculate_daily_credit_slider_bounds(
     credit_settings,
     *,
@@ -46,7 +39,12 @@ def calculate_daily_credit_slider_bounds(
     if slider_step <= Decimal("0"):
         slider_step = Decimal("1")
 
-    slider_limit_max = get_tier_slider_limit_max(tier_multiplier)
+    configured_slider_max = credit_settings.slider_max
+    if configured_slider_max < Decimal("1"):
+        configured_slider_max = Decimal("1")
+
+    multiplier = _coerce_multiplier(tier_multiplier)
+    slider_limit_max = (configured_slider_max * multiplier).to_integral_value(rounding=ROUND_HALF_UP)
     if slider_limit_max < slider_min:
         slider_limit_max = slider_min
 
@@ -54,6 +52,7 @@ def calculate_daily_credit_slider_bounds(
 
     return {
         "slider_min": slider_min,
+        "standard_slider_limit": configured_slider_max,
         "slider_limit_max": slider_limit_max,
         "slider_step": slider_step,
         "slider_unlimited_value": slider_unlimited_value,

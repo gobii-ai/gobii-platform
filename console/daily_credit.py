@@ -8,7 +8,6 @@ from django.utils.formats import date_format
 
 from api.models import PersistentAgentSystemStep
 from api.services.daily_credit_limits import (
-    STANDARD_TIER_DAILY_CREDIT_MAX,
     calculate_daily_credit_slider_bounds,
     get_agent_credit_multiplier,
 )
@@ -52,6 +51,7 @@ def build_agent_daily_credit_context(agent, owner=None) -> dict[str, Any]:
         "daily_credit_slider_max": slider_bounds["slider_unlimited_value"],
         "daily_credit_slider_step": slider_bounds["slider_step"],
         "daily_credit_slider_limit_max": slider_bounds["slider_limit_max"],
+        "daily_credit_standard_slider_limit": slider_bounds["standard_slider_limit"],
     }
 
     try:
@@ -187,7 +187,7 @@ def serialize_daily_credit_payload(context: dict[str, Any]) -> dict[str, Any]:
         or _decimal_to_float(context.get("daily_credit_slider_min"))
         or 0.0,
         "sliderEmptyValue": _decimal_to_float(context.get("daily_credit_slider_max")) or 0.0,
-        "standardSliderLimit": _decimal_to_float(STANDARD_TIER_DAILY_CREDIT_MAX) or 0.0,
+        "standardSliderLimit": _decimal_to_float(context.get("daily_credit_standard_slider_limit")) or 0.0,
     }
 
 
