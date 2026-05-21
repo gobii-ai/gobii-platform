@@ -6609,6 +6609,7 @@
 }
 
 .chat-sidebar-settings-theme {
+  --console-card-surface: #0f172a;
   --chat-sidebar-settings-banner-surface: rgba(15, 23, 42, 0.82);
   --chat-sidebar-settings-surface: rgba(2, 6, 23, 0.44);
   --chat-sidebar-settings-surface-soft: rgba(2, 6, 23, 0.32);
@@ -6627,7 +6628,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 1.35rem;
   padding: 0.95rem 1rem 1.25rem;
-  background: var(--chat-sidebar-settings-banner-surface);
+  background: var(--console-card-surface);
 }
 
 .chat-sidebar-settings-theme .text-slate-900,
@@ -9883,7 +9884,7 @@
 .billing-screen--embedded {
   color-scheme: dark;
   color: rgba(248, 245, 255, 0.94);
-  --console-card-surface: rgba(15, 23, 42, 0.82);
+  --console-card-surface: #0f172a;
   --console-card-border: 1px solid rgba(196, 181, 253, 0.16);
   --console-card-radius: 1.1rem;
   --console-card-shadow: none;

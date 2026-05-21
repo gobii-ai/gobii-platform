@@ -4547,9 +4547,7 @@ export function AgentChatPage({
       <EmbeddedAgentSecretRequestsPanel
         agentId={activeAgentId}
         agentName={resolvedAgentName || 'Agent'}
-        initialSuccess={/\/secrets\/request\/thanks\/?$/.test(shellPathname)}
         onBack={handleCloseEmbeddedSettings}
-        onOpenChat={handleExitEmbeddedSettings}
         onOpenSecrets={handleOpenEmbeddedSecrets}
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}

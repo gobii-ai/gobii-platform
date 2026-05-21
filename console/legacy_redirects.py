@@ -91,8 +91,6 @@ def get_legacy_console_redirect_path(request) -> str | None:
         if len(parts) >= 3 and parts[1] == "secrets" and parts[2] == "request":
             if len(parts) == 3:
                 return _with_original_query(request, f"/app/agents/{agent_id}/secrets/request")
-            if len(parts) == 4 and parts[3] == "thanks":
-                return _with_original_query(request, f"/app/agents/{agent_id}/secrets/request/thanks")
             if len(parts) >= 4 and parts[3] == "remove":
                 return _with_original_query(request, f"/app/agents/{agent_id}/secrets/request")
             return None

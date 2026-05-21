@@ -12,9 +12,7 @@ import { EmbeddedAgentShellPanel } from './EmbeddedAgentShellPanel'
 type EmbeddedAgentSecretRequestsPanelProps = {
   agentId: string
   agentName: string
-  initialSuccess?: boolean
   onBack?: () => void
-  onOpenChat?: () => void
   onOpenSecrets?: () => void
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
@@ -105,9 +103,7 @@ function parseRequestErrors(error: unknown, fallback: string): RequestErrors {
 export function EmbeddedAgentSecretRequestsPanel({
   agentId,
   agentName,
-  initialSuccess = false,
   onBack,
-  onOpenChat,
   onOpenSecrets,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
@@ -118,9 +114,7 @@ export function EmbeddedAgentSecretRequestsPanel({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [makeGlobal, setMakeGlobal] = useState(false)
   const [busyAction, setBusyAction] = useState<'save' | 'remove' | null>(null)
-  const [successMessage, setSuccessMessage] = useState<string | null>(
-    initialSuccess ? 'Secret values were saved.' : null,
-  )
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [requestErrors, setRequestErrors] = useState<RequestErrors>({ message: null, fieldErrors: {} })
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<AgentSecretListResponse>({
@@ -137,12 +131,6 @@ export function EmbeddedAgentSecretRequestsPanel({
   )
   const allSelected = requests.length > 0 && selectedIds.size === requests.length
   const busy = busyAction !== null
-
-  useEffect(() => {
-    if (initialSuccess) {
-      setSuccessMessage('Secret values were saved.')
-    }
-  }, [initialSuccess])
 
   useEffect(() => {
     const requestIds = new Set(requests.map((request) => request.id))
@@ -315,17 +303,8 @@ export function EmbeddedAgentSecretRequestsPanel({
                 <p className="text-sm font-semibold text-slate-100">No pending secret requests</p>
                 <p className="mt-1 text-sm text-slate-300">New requests will appear here when this agent needs a credential or environment variable.</p>
               </div>
-              <div className="flex flex-wrap justify-center gap-2">
-                {onOpenChat ? (
-                  <button
-                    type="button"
-                    onClick={onOpenChat}
-                    className="rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55"
-                  >
-                    Return to chat
-                  </button>
-                ) : null}
-                {onOpenSecrets ? (
+              {onOpenSecrets ? (
+                <div className="flex flex-wrap justify-center gap-2">
                   <button
                     type="button"
                     onClick={onOpenSecrets}
@@ -333,8 +312,8 @@ export function EmbeddedAgentSecretRequestsPanel({
                   >
                     Manage secrets
                   </button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           </div>
         ) : (

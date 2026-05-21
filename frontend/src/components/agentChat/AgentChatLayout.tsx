@@ -98,7 +98,7 @@ function getCurrentAgentMessageLinkSubview(href: string, agentId: string): Agent
       if (
         parts[3] === 'secrets'
         && parts[4] === 'request'
-        && (parts.length === 5 || (parts.length === 6 && parts[5] === 'thanks'))
+        && parts.length === 5
       ) {
         return 'secret-requests'
       }
@@ -115,7 +115,7 @@ function getCurrentAgentMessageLinkSubview(href: string, agentId: string): Agent
       if (
         parts[3] === 'secrets'
         && parts[4] === 'request'
-        && (parts.length === 5 || (parts.length === 6 && parts[5] === 'thanks'))
+        && parts.length === 5
       ) {
         return 'secret-requests'
       }

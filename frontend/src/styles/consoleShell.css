@@ -76,6 +76,22 @@
   gap: 1.5rem;
 }
 
+.settings-card-surface {
+  background: var(--console-card-surface, #ffffff);
+}
+
+.settings-card-surface--embedded {
+  --console-card-surface: #0f172a;
+}
+
+.settings-card-surface--standalone {
+  --console-card-surface: #ffffff;
+}
+
+.settings-banner-surface {
+  background: var(--chat-sidebar-settings-banner-surface, var(--console-card-surface, #ffffff));
+}
+
 .card--header {
   position: relative;
   overflow: hidden;

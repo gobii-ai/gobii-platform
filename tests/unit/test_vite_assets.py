@@ -317,7 +317,6 @@ class LegacyConsolePageRedirectTests(TestCase):
             f"/console/agents/{agent_id}/chat/secrets/": f"/app/agents/{agent_id}/secrets",
             f"/console/agents/{agent_id}/email/": f"/app/agents/{agent_id}/email",
             f"/console/agents/{agent_id}/secrets/request/": f"/app/agents/{agent_id}/secrets/request",
-            f"/console/agents/{agent_id}/secrets/request/thanks/": f"/app/agents/{agent_id}/secrets/request/thanks",
             f"/console/agents/{agent_id}/secrets/request/remove/": f"/app/agents/{agent_id}/secrets/request",
             "/console/profile/": "/app/profile",
             "/console/usage/": "/app/usage",

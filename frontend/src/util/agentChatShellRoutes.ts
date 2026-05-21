@@ -32,7 +32,6 @@ export function extractAgentChatShellAgentId(pathname: string): string | null {
       appParts.length === 3
       || (appParts.length === 4 && ['settings', 'secrets', 'email', 'files', 'contact-requests'].includes(appParts[3]))
       || (appParts.length === 5 && appParts[3] === 'secrets' && appParts[4] === 'request')
-      || (appParts.length === 6 && appParts[3] === 'secrets' && appParts[4] === 'request' && appParts[5] === 'thanks')
     )
   ) {
     return appParts[2]
@@ -55,7 +54,7 @@ export function getAgentChatShellSubview(pathname: string): AgentChatShellSubvie
   const normalized = normalizePathname(pathname)
   const appParts = normalized.split('/').filter(Boolean)
   if (appParts[0] === 'app' && appParts[1] === 'agents' && appParts[2]) {
-    if (appParts[3] === 'secrets' && appParts[4] === 'request' && (appParts.length === 5 || (appParts.length === 6 && appParts[5] === 'thanks'))) {
+    if (appParts[3] === 'secrets' && appParts[4] === 'request' && appParts.length === 5) {
       return 'secret-requests'
     }
     if (appParts.length === 3 || appParts.length === 4) {
