@@ -26,6 +26,7 @@ import {
 } from './agentEmailSettingsProviders'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 
 type AgentEmailSettingsScreenProps = {
   agentId: string
@@ -290,6 +291,7 @@ export function AgentEmailSettingsScreen({
   const oauthSecondaryButtonClassName = 'rounded-lg border border-slate-300/70 bg-transparent px-3 py-2 text-sm font-semibold text-slate-100'
   const primaryActionButtonClassName = 'rounded-lg bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-900 disabled:opacity-60'
   const secondaryActionButtonClassName = 'rounded-lg border border-rose-300/40 bg-rose-950/20 px-4 py-2 text-sm font-semibold text-rose-100 disabled:opacity-60'
+  const settingsCardClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`
   const queryClient = useQueryClient()
   const queryKey = useMemo(() => ['agent-email-settings', agentId, emailSettingsUrl], [agentId, emailSettingsUrl])
   const [draft, setDraft] = useState<DraftState | null>(null)
@@ -627,7 +629,7 @@ export function AgentEmailSettingsScreen({
 
   if (settingsQuery.error && !settings) {
     return (
-      <div className="rounded-xl border border-amber-300/30 bg-amber-950/20 p-6 text-sm text-amber-100">
+      <div className={`${settingsCardClassName} p-6 text-sm text-amber-100`}>
         Failed to load email settings. {describeHttpError(settingsQuery.error)}
       </div>
     )
@@ -635,7 +637,7 @@ export function AgentEmailSettingsScreen({
 
   if (settingsQuery.isLoading || !settings || !draft) {
     return (
-      <div className="rounded-xl border border-slate-200/70 bg-transparent p-6 text-sm text-slate-200">
+      <div className={`${settingsCardClassName} p-6 text-sm text-slate-200`}>
         Loading email settings...
       </div>
     )
@@ -663,7 +665,7 @@ export function AgentEmailSettingsScreen({
         </div>
       )}
 
-      <div className="rounded-xl border border-slate-200/70 bg-transparent p-5 shadow-none">
+      <div className={`${settingsCardClassName} p-5`}>
         <div className="space-y-4">
             <div className="rounded-lg border border-blue-300/30 bg-blue-950/20 px-4 py-3">
               <p className="text-sm font-semibold text-slate-100">Regular Gobii Address</p>

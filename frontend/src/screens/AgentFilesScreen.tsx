@@ -11,6 +11,7 @@ import { FileTable } from '../components/agentFiles/FileTable'
 import type { AgentFilesPageData, AgentFilesResponse, AgentFsNode } from '../components/agentFiles/types'
 import { useFileDragAndDrop } from '../components/agentFiles/useFileDragAndDrop'
 import { sortNodes } from '../components/agentFiles/utils'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 
 export type AgentFilesScreenProps = {
   initialData: AgentFilesPageData
@@ -405,24 +406,24 @@ export function AgentFilesScreen({
 
   return (
     <div className="space-y-6 pb-6">
-      <div className="overflow-hidden rounded-none border-0 bg-transparent shadow-none">
-        <FileManagerHeader
-          agentName={initialData.agent.name}
-          onBack={onBack}
-          canManage={canManage}
-          uploadInputId={uploadInputId}
-          isBusy={isBusy}
-          isCreatingFolder={isCreatingFolder}
-          selectedRows={selectedRows}
-          isRefreshing={filesQuery.isFetching}
-          onUploadRequest={() => handleUploadRequest(currentFolderId)}
-          onTriggerUploadInput={triggerUploadInput}
-          onToggleCreateFolder={handleToggleCreateFolder}
-          onBulkDelete={handleBulkDelete}
-          onRefresh={handleRefresh}
-        />
+      <FileManagerHeader
+        agentName={initialData.agent.name}
+        onBack={onBack}
+        canManage={canManage}
+        uploadInputId={uploadInputId}
+        isBusy={isBusy}
+        isCreatingFolder={isCreatingFolder}
+        selectedRows={selectedRows}
+        isRefreshing={filesQuery.isFetching}
+        onUploadRequest={() => handleUploadRequest(currentFolderId)}
+        onTriggerUploadInput={triggerUploadInput}
+        onToggleCreateFolder={handleToggleCreateFolder}
+        onBulkDelete={handleBulkDelete}
+        onRefresh={handleRefresh}
+      />
 
-        <div className="flex flex-col gap-3 px-0 py-4">
+      <div className={`${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} shadow-none`}>
+        <div className="flex flex-col gap-3 px-5 py-4">
           {!canManage && (
             <div className="rounded-lg border border-sky-300/30 bg-sky-950/20 px-3 py-2 text-xs text-slate-200">
               Collaborators can upload and download files. Folder changes are disabled.
@@ -452,26 +453,28 @@ export function AgentFilesScreen({
           {actionError && <p className="text-sm text-rose-300">{actionError}</p>}
         </div>
 
-        <FileTable
-          rows={currentRows}
-          isBusy={isBusy}
-          isLoading={filesQuery.isPending}
-          errorMessage={errorMessage}
-          embedded
-          canManage={canManage}
-          currentFolderId={currentFolderId}
-          parentFolderPath={parentFolderPath}
-          rowSelection={rowSelection}
-          onRowSelectionChange={setRowSelection}
-          onNavigateToParent={handleParentClick}
-          onOpenFolder={handleOpenFolder}
-          onRequestUpload={handleUploadRequest}
-          onTriggerUploadInput={triggerUploadInput}
-          onDeleteNode={handleSingleDelete}
-          downloadBaseUrl={initialData.urls.download}
-          uploadInputId={uploadInputId}
-          dragAndDrop={dragAndDrop}
-        />
+        <div className="border-t border-slate-200/15">
+          <FileTable
+            rows={currentRows}
+            isBusy={isBusy}
+            isLoading={filesQuery.isPending}
+            errorMessage={errorMessage}
+            embedded
+            canManage={canManage}
+            currentFolderId={currentFolderId}
+            parentFolderPath={parentFolderPath}
+            rowSelection={rowSelection}
+            onRowSelectionChange={setRowSelection}
+            onNavigateToParent={handleParentClick}
+            onOpenFolder={handleOpenFolder}
+            onRequestUpload={handleUploadRequest}
+            onTriggerUploadInput={triggerUploadInput}
+            onDeleteNode={handleSingleDelete}
+            downloadBaseUrl={initialData.urls.download}
+            uploadInputId={uploadInputId}
+            dragAndDrop={dragAndDrop}
+          />
+        </div>
       </div>
 
       <input
