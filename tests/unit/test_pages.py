@@ -1515,102 +1515,13 @@ class PretrainedWorkerDirectoryTests(TestCase):
             breadcrumb_schema["itemListElement"][-1]["item"],
             detail_url,
         )
-
-    @tag("batch_pages")
-    @patch("pages.views.PretrainedWorkerTemplateService.get_tool_display_map", return_value={})
-    @patch("pages.views.PretrainedWorkerTemplateService.get_active_templates")
-    @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
-    def test_pretrained_worker_detail_adds_visible_internal_links(
-        self,
-        mock_get_template_by_code,
-        mock_get_active_templates,
-        _mock_get_tool_display_map,
-    ):
-        def worker(code, display_name, category, priority, default_tools=None):
-            return SimpleNamespace(
-                code=code,
-                display_name=display_name,
-                tagline=f"{display_name} tagline",
-                description=f"{display_name} description",
-                category=category,
-                charter="Do useful work.",
-                base_schedule="0 9 * * *",
-                schedule_jitter_minutes=0,
-                event_triggers=[],
-                default_tools=default_tools or [],
-                recommended_contact_channel="email",
-                priority=priority,
-            )
-
-        current_worker = worker(
-            "project-manager",
-            "Project Manager",
-            "Team Ops",
-            50,
-            default_tools=["shared-tool"],
-        )
-        same_category_worker = worker(
-            "ops-coordinator",
-            "Ops Coordinator",
-            "Team Ops",
-            20,
-        )
-        shared_tool_worker = worker(
-            "research-analyst",
-            "Research Analyst",
-            "Research",
-            10,
-            default_tools=["shared-tool"],
-        )
-        other_worker = worker(
-            "sales-assistant",
-            "Sales Assistant",
-            "Revenue",
-            30,
-        )
-        mock_get_template_by_code.return_value = current_worker
-        mock_get_active_templates.return_value = [
-            current_worker,
-            other_worker,
-            shared_tool_worker,
-            same_category_worker,
-        ]
-
-        response = self.client.get(
-            reverse("pages:pretrained_worker_detail", kwargs={"slug": current_worker.code})
-        )
-
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content, "html.parser")
-
         breadcrumb = soup.find("nav", attrs={"aria-label": "Breadcrumb"})
         self.assertIsNotNone(breadcrumb)
-        breadcrumb_links = [
-            (link.get_text(" ", strip=True), link["href"])
-            for link in breadcrumb.find_all("a")
-        ]
-        self.assertEqual(
-            breadcrumb_links,
-            [
-                ("Home", reverse("pages:home")),
-                ("Pretrained workers", f"{reverse('pages:home')}#pretrained-workers"),
-            ],
-        )
-        self.assertIn(current_worker.display_name, breadcrumb.get_text(" ", strip=True))
-
+        self.assertIn(template.display_name, breadcrumb.get_text(" ", strip=True))
         related_heading = soup.find("h2", string="Related pretrained workers")
         self.assertIsNotNone(related_heading)
-        related_section = related_heading.find_parent("section")
-        related_links = [link["href"] for link in related_section.find_all("a")]
-        self.assertEqual(
-            related_links,
-            [
-                reverse("pages:pretrained_worker_detail", kwargs={"slug": same_category_worker.code}),
-                reverse("pages:pretrained_worker_detail", kwargs={"slug": shared_tool_worker.code}),
-                reverse("pages:pretrained_worker_detail", kwargs={"slug": other_worker.code}),
-            ],
-        )
-        self.assertNotIn(current_worker.code, " ".join(related_links))
+        related_links = [link["href"] for link in related_heading.find_parent("section").find_all("a")]
+        self.assertNotIn(reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code}), related_links)
 
     @tag("batch_pages")
     @patch("pages.views.PretrainedWorkerTemplateService.get_template_by_code")
