@@ -1,8 +1,8 @@
 import json
 from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import timedelta
 from decimal import Decimal
-from unittest.mock import patch
 
 import zstandard as zstd
 from django.core.files.storage import default_storage
@@ -27,6 +27,32 @@ from api.services.daily_credit_settings import DailyCreditSettings
 from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
 from util.urls import build_agent_detail_url, build_site_url
+
+_daily_credit_settings_override = ContextVar("daily_credit_settings_override", default=None)
+_daily_credit_settings_override_installed = False
+_original_daily_credit_settings_for_owner = None
+
+
+def _install_daily_credit_settings_override() -> None:
+    global _daily_credit_settings_override_installed, _original_daily_credit_settings_for_owner
+    if _daily_credit_settings_override_installed:
+        return
+
+    from api.agent.core import prompt_context
+    from api.services import daily_credit_settings
+
+    _original_daily_credit_settings_for_owner = daily_credit_settings.get_daily_credit_settings_for_owner
+
+    def get_daily_credit_settings_for_owner(owner):
+        settings = _daily_credit_settings_override.get()
+        if settings is not None:
+            return settings
+        return _original_daily_credit_settings_for_owner(owner)
+
+    daily_credit_settings.get_daily_credit_settings_for_owner = get_daily_credit_settings_for_owner
+    prompt_context.get_daily_credit_settings_for_owner = get_daily_credit_settings_for_owner
+    _daily_credit_settings_override_installed = True
+
 
 DAILY_CREDIT_PROMPT_SUITE_SLUG = "daily_credit_prompt"
 DAILY_CREDIT_PROMPT_NOT_NEAR_LIMIT = "daily_credit_prompt_not_near_limit"
@@ -146,6 +172,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
 
     @contextmanager
     def _mock_daily_credit_settings(self):
+        _install_daily_credit_settings_override()
         settings = DailyCreditSettings(
             slider_min=Decimal("0"),
             slider_max=Decimal("50"),
@@ -157,14 +184,11 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
             burn_rate_threshold_24h=Decimal("0"),
             hard_limit_multiplier=self.hard_limit_multiplier,
         )
-        with patch(
-            "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
-            return_value=settings,
-        ), patch(
-            "api.services.daily_credit_settings.get_daily_credit_settings_for_owner",
-            return_value=settings,
-        ):
+        token = _daily_credit_settings_override.set(settings)
+        try:
             yield
+        finally:
+            _daily_credit_settings_override.reset(token)
 
     def _record_prompt_archive_expectations(self, run_id: str, agent_id: str, *, after) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_prompt_archive")
