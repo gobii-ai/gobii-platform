@@ -1,28 +1,31 @@
 import json
+from contextlib import contextmanager
+from datetime import timedelta
 from decimal import Decimal
+from unittest.mock import patch
 
 import zstandard as zstd
 from django.core.files.storage import default_storage
 from django.urls import reverse
+from django.utils import timezone
 
 from api.agent.core.daily_limit_mode import DAILY_LIMIT_MESSAGE_TOOL_NAMES
 from api.evals.base import EvalScenario, ScenarioTask
 from api.evals.execution import ScenarioExecutionTools
 from api.evals.registry import register_scenario
 from api.models import (
-    DailyCreditConfig,
     EvalRunTask,
-    Plan,
-    PlanVersion,
+    Organization,
     PersistentAgent,
     PersistentAgentPromptArchive,
     PersistentAgentStep,
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
+    TaskCredit,
 )
-from api.services.daily_credit_settings import invalidate_daily_credit_settings_cache
+from api.services.daily_credit_settings import DailyCreditSettings
+from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNames
-from util.subscription_helper import mark_user_billing_with_plan
 from util.urls import build_agent_detail_url, build_site_url
 
 DAILY_CREDIT_PROMPT_SUITE_SLUG = "daily_credit_prompt"
@@ -71,7 +74,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
         self._configure_daily_credit_state(run_id, agent_id)
 
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
-        with self.wait_for_agent_idle(agent_id, timeout=120):
+        with self._mock_daily_credit_settings(), self.wait_for_agent_idle(agent_id, timeout=120):
             inbound = self.inject_message(
                 agent_id,
                 self.user_prompt,
@@ -112,29 +115,27 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
     def _configure_daily_credit_state(self, run_id: str, agent_id: str) -> None:
         agent = PersistentAgent.objects.select_related("user").get(id=agent_id)
         suffix = str(run_id).replace("-", "")[:16]
-        plan = Plan.objects.create(
-            slug=f"eval-daily-credit-{suffix}",
-            is_org=False,
-            is_active=False,
+        organization = Organization.objects.create(
+            name=f"Daily Credit Eval {suffix}",
+            slug=f"daily-credit-eval-{suffix}",
+            created_by=agent.user,
         )
-        plan_version = PlanVersion.objects.create(
-            plan=plan,
-            version_code="daily-credit-eval",
-            display_name="Daily Credit Eval Plan",
+        organization.billing.purchased_seats = 1
+        organization.billing.save(update_fields=["purchased_seats"])
+        TaskCredit.objects.create(
+            organization=organization,
+            credits=Decimal("1000.000"),
+            credits_used=Decimal("0.000"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            plan=PlanNames.FREE,
+            grant_type=GrantTypeChoices.COMPENSATION,
+            comments="Daily credit prompt eval execution credits.",
         )
-        DailyCreditConfig.objects.create(
-            plan_version=plan_version,
-            default_daily_credit_target=int(self.daily_credit_limit),
-            hard_limit_multiplier=self.hard_limit_multiplier,
+        PersistentAgent.objects.filter(id=agent_id).update(
+            daily_credit_limit=int(self.daily_credit_limit),
+            organization=organization,
         )
-        mark_user_billing_with_plan(
-            agent.user,
-            PlanNames.FREE,
-            update_anchor=False,
-            plan_version=plan_version,
-        )
-        invalidate_daily_credit_settings_cache()
-        PersistentAgent.objects.filter(id=agent_id).update(daily_credit_limit=int(self.daily_credit_limit))
         if self.usage_today > Decimal("0"):
             step = PersistentAgentStep.objects.create(
                 agent_id=agent_id,
@@ -142,6 +143,28 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
                 description=f"Seeded eval daily credit usage: {self.usage_today}",
             )
             PersistentAgentStep.objects.filter(id=step.id).update(credits_cost=self.usage_today)
+
+    @contextmanager
+    def _mock_daily_credit_settings(self):
+        settings = DailyCreditSettings(
+            slider_min=Decimal("0"),
+            slider_max=Decimal("50"),
+            slider_step=Decimal("1"),
+            default_daily_credit_target=int(self.daily_credit_limit),
+            burn_rate_threshold_per_hour=Decimal("3"),
+            offpeak_burn_rate_threshold_per_hour=Decimal("3"),
+            burn_rate_window_minutes=60,
+            burn_rate_threshold_24h=Decimal("0"),
+            hard_limit_multiplier=self.hard_limit_multiplier,
+        )
+        with patch(
+            "api.agent.core.prompt_context.get_daily_credit_settings_for_owner",
+            return_value=settings,
+        ), patch(
+            "api.services.daily_credit_settings.get_daily_credit_settings_for_owner",
+            return_value=settings,
+        ):
+            yield
 
     def _record_prompt_archive_expectations(self, run_id: str, agent_id: str, *, after) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_prompt_archive")
@@ -193,7 +216,7 @@ class DailyCreditPromptScenario(EvalScenario, ScenarioExecutionTools):
         archives = PersistentAgentPromptArchive.objects.filter(
             agent_id=agent_id,
             rendered_at__gte=after,
-        ).order_by("-rendered_at")
+        ).order_by("rendered_at")
         for archive in archives:
             try:
                 with default_storage.open(archive.storage_key, "rb") as handle:
