@@ -2160,7 +2160,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             primaryEmail={initialData.primaryEmail}
             primarySms={initialData.primarySms}
             emailSettingsUrl={initialData.urls.emailSettings}
-            smsEnableUrl={initialData.urls.smsEnable}
             embedded
             onOpenEmailSettings={onOpenEmailSettings}
           />
@@ -2418,7 +2417,6 @@ type PrimaryContactsProps = {
   primaryEmail: PrimaryEndpoint | null
   primarySms: PrimaryEndpoint | null
   emailSettingsUrl: string
-  smsEnableUrl: string | null
   embedded?: boolean
   onOpenEmailSettings?: () => void
 }
@@ -2427,7 +2425,6 @@ function PrimaryContacts({
   primaryEmail,
   primarySms,
   emailSettingsUrl,
-  smsEnableUrl,
   embedded = false,
   onOpenEmailSettings,
 }: PrimaryContactsProps) {
@@ -2468,13 +2465,6 @@ function PrimaryContacts({
             <p className="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
             <div className="mt-2 space-y-1">
               {manageEmailSettingsLink}
-              {!primarySms && smsEnableUrl && (
-                <div>
-                  <a href={smsEnableUrl} className="text-sm text-blue-600 hover:text-blue-800">
-                    Enable SMS
-                  </a>
-                </div>
-              )}
             </div>
           </>
         ) : (

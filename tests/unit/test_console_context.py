@@ -1,7 +1,6 @@
 import uuid
 import json
 import tempfile
-from unittest.mock import patch
 
 from django.urls import reverse
 from django.contrib.auth import get_user_model
@@ -685,79 +684,6 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(session.get('context_type'), 'organization')
         self.assertEqual(session.get('context_id'), str(self.org.id))
         self.assertEqual(session.get('context_name'), self.org.name)
-
-    def test_agent_contact_view_shows_org_context_banner(self):
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "help the organization"
-        session.save()
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn('id="agent-owner-selector-contact"', html)
-        self.assertIn(self.org.name, html)
-        self.assertNotIn('disabled aria-disabled="true"', html)
-
-    def test_agent_contact_view_blocks_member_role(self):
-        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
-        membership.role = OrganizationMembership.OrgRole.MEMBER
-        membership.save(update_fields=["role"])
-
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "help the organization"
-        session.save()
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn('id="agent-owner-selector-contact"', html)
-        self.assertIn("You need to be an organization owner or admin", html)
-        self.assertIn('disabled aria-disabled="true"', html)
-
-    @patch("console.views.AgentService.has_agents_available")
-    def test_agent_contact_view_allows_when_personal_capacity_available(self, mock_has_capacity):
-        """Users can proceed when personal capacity exists even if org is full."""
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "coordinate research across teams"
-        session.save()
-
-        def _side_effect(owner):
-            if isinstance(owner, Organization):
-                return False
-            return True
-
-        mock_has_capacity.side_effect = _side_effect
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        self.assertGreaterEqual(mock_has_capacity.call_count, 2)
-
-    def test_agent_contact_post_denied_for_member_role(self):
-        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
-        membership.role = OrganizationMembership.OrgRole.MEMBER
-        membership.save(update_fields=["role"])
-
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "orchestrate research"
-        session.save()
-
-        payload = {
-            "preferred_contact_method": "email",
-            "contact_endpoint_email": "owner@example.com",
-            "email_enabled": "on",
-        }
-
-        resp = self.client.post(reverse("agent_create_contact"), data=payload)
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn("You need to be an organization owner or admin", html)
-        # Ensure no additional org-owned agents were created
-        org_agent_count = PersistentAgent.objects.filter(organization=self.org).count()
-        self.assertEqual(org_agent_count, 1)
 
     def test_org_invite_accept_sets_context_and_membership(self):
         # Create invite for a new user

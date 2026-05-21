@@ -218,7 +218,6 @@ export type AgentSettingsUrls = {
   secrets: string
   emailSettings: string
   manageFiles: string
-  smsEnable: string | null
   contactRequests: string
   delete: string
   mcpServersManage: string | null

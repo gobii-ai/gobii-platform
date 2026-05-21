@@ -26,10 +26,9 @@ from api.services.mcp_config_validation import (
     validate_environment_mapping,
     validate_mcp_metadata_environment_references,
 )
-from api.models import CommsChannel, SmsContactPurpose
+from api.models import CommsChannel
 from api.services.sms_contact_purpose import (
     SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
-    sms_contact_purpose_required,
 )
 from util import sms
 import logging
@@ -492,84 +491,6 @@ class PersistentAgentCharterForm(forms.Form):
     )
 
 
-class PersistentAgentContactForm(forms.Form):
-    """Form for step 2: contact preferences."""
-
-    CONTACT_METHOD_CHOICES = [
-        ('email', '📧 Email'),
-        ('sms', '📱 SMS (New!)'),
-    ]
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    preferred_contact_method = forms.ChoiceField(
-        choices=CONTACT_METHOD_CHOICES,
-        initial='email',
-        required=True,
-        widget=forms.Select(attrs={
-            'class': 'py-3 ps-12 pe-4 block w-full rounded-xl border border-indigo-100 bg-white/90 text-base text-slate-700 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-indigo-100 transition-all duration-200 disabled:opacity-50 disabled:pointer-events-none'
-        }),
-        label='Preferred Contact Method',
-        help_text='How would you like your agent to contact you?'
-    )
-
-    contact_endpoint_email = forms.EmailField(
-        widget=forms.EmailInput(
-            attrs={
-                'placeholder': 'your.email@example.com',
-                'class': 'py-3 pe-4 ps-11 block w-full rounded-xl border border-indigo-100 bg-white/90 shadow-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-indigo-100 text-base text-slate-700 placeholder:text-slate-400 transition-all duration-200'
-            },
-        ),
-        required=False,
-        label='Your email address:',
-        help_text='Once created, your agent will contact you at this address.'
-    )
-
-    email_enabled = forms.BooleanField(
-        widget=forms.CheckboxInput(
-            attrs={
-                'class': 'sr-only peer',
-                'checked': True,
-                'disabled': False
-            }
-        ),
-        initial=True,
-        required=False,
-    )
-
-    sms_enabled = forms.BooleanField(
-        widget=forms.CheckboxInput(
-            attrs={
-                'class': 'sr-only peer',
-                'checked': False,
-                'disabled': False
-            }
-        ),
-        initial=False,
-        required=False,
-    )
-
-
-    def clean_preferred_contact_method(self):
-        contact_method = self.cleaned_data['preferred_contact_method']
-        return contact_method
-
-    def clean(self):
-        cleaned = super().clean()
-        method = cleaned.get('preferred_contact_method')
-        email_address = cleaned.get('contact_endpoint_email')
-
-        if method == 'email' and not email_address:
-            self.add_error('contact_endpoint_email', 'This field is required when email is selected.')
-
-        return cleaned
-
-
-# Keep the original form for backward compatibility
-PersistentAgentForm = PersistentAgentContactForm
-
-
 class PersistentAgentSecretsForm(forms.Form):
     """Form for managing persistent agent secrets."""
     
@@ -601,124 +522,6 @@ class PersistentAgentSecretsForm(forms.Form):
             raise forms.ValidationError("Secret value must be a string.")
         
         return value
-
-
-class AllowlistEntryForm(forms.Form):
-    """Form to add a manual allowlist entry for an agent."""
-
-    CHANNEL_CHOICES = [
-        (CommsChannel.EMAIL, 'Email'),
-        (CommsChannel.SMS, 'SMS'),
-    ]
-
-    channel = forms.ChoiceField(
-        choices=CHANNEL_CHOICES,
-        required=True,
-        widget=forms.Select(attrs={
-            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
-        })
-    )
-    address = forms.CharField(
-        required=True,
-        widget=forms.TextInput(attrs={
-            'placeholder': 'email@example.com or +15551234567',
-            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
-        }),
-        label='Email or Phone',
-        help_text='Emails are case-insensitive. Phone must be in E.164 (+15551234567).'
-    )
-    allow_inbound = forms.BooleanField(
-        required=False,
-        initial=True,
-        widget=forms.CheckboxInput(attrs={
-            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
-        }),
-        label='Allow Inbound',
-        help_text='Allow this contact to send messages to the agent'
-    )
-    allow_outbound = forms.BooleanField(
-        required=False,
-        initial=True,
-        widget=forms.CheckboxInput(attrs={
-            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
-        }),
-        label='Allow Outbound',
-        help_text='Allow the agent to send messages to this contact'
-    )
-    sms_contact_purpose = forms.ChoiceField(
-        choices=[("", "Select a purpose")] + list(SmsContactPurpose.choices),
-        required=False,
-        label="SMS Purpose",
-        help_text="Required for SMS contacts when the rollout switch is enabled.",
-        widget=forms.Select(attrs={
-            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
-        }),
-    )
-    sms_contact_purpose_details = forms.CharField(
-        required=False,
-        label="SMS Purpose Details",
-        widget=forms.Textarea(attrs={
-            'rows': 2,
-            'placeholder': 'Optional operational context for this SMS contact',
-            'class': 'py-2 px-3 block w-full border-gray-300 rounded-lg text-sm focus:border-indigo-500 focus:ring-indigo-500'
-        }),
-    )
-    sms_contact_permission_attested = forms.BooleanField(
-        required=False,
-        label=SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
-        help_text="Required for SMS contacts when the rollout switch is enabled.",
-        widget=forms.CheckboxInput(attrs={
-            'class': 'rounded border-gray-300 text-indigo-600 focus:ring-indigo-500'
-        }),
-    )
-
-    def clean(self):
-        cleaned = super().clean()
-        channel = cleaned.get('channel')
-        address = (cleaned.get('address') or '').strip()
-        if not address:
-            self.add_error('address', 'Address is required.')
-            return cleaned
-
-        if channel == CommsChannel.EMAIL:
-            if '@' not in address or '.' not in address.split('@')[-1]:
-                self.add_error('address', 'Enter a valid email address.')
-            cleaned['address'] = address.lower()
-        elif channel == CommsChannel.SMS:
-            from util.phone import validate_and_format_e164
-            try:
-                cleaned['address'] = validate_and_format_e164(address)
-            except ValidationError as e:
-                if getattr(e, 'code', None) == 'unsupported_region':
-                    self.add_error('address', 'Phone numbers from this country are not yet supported.')
-                else:
-                    self.add_error('address', 'Enter a valid E.164 phone number (e.g., +15551234567).')
-            cleaned['sms_contact_purpose'] = (cleaned.get('sms_contact_purpose') or '').strip() or None
-            cleaned['sms_contact_purpose_details'] = (
-                cleaned.get('sms_contact_purpose_details') or ''
-            ).strip() or None
-            cleaned['sms_contact_permission_attested'] = bool(
-                cleaned.get('sms_contact_permission_attested')
-            )
-            if sms_contact_purpose_required() and not cleaned['sms_contact_purpose']:
-                self.add_error('sms_contact_purpose', 'Select an operational purpose for this SMS contact.')
-            if sms_contact_purpose_required() and not cleaned['sms_contact_permission_attested']:
-                self.add_error(
-                    'sms_contact_permission_attested',
-                    'Confirm you have permission to contact this number by SMS.',
-                )
-        else:
-            self.add_error('channel', 'Unsupported channel.')
-            cleaned['sms_contact_purpose'] = None
-            cleaned['sms_contact_purpose_details'] = None
-            cleaned['sms_contact_permission_attested'] = None
-
-        if channel != CommsChannel.SMS:
-            cleaned['sms_contact_purpose'] = None
-            cleaned['sms_contact_purpose_details'] = None
-            cleaned['sms_contact_permission_attested'] = None
-
-        return cleaned
 
 
 class AgentEmailAccountConsoleForm(forms.Form):

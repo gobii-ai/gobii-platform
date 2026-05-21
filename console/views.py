@@ -44,7 +44,7 @@ import uuid
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from agents.services import AgentService, PretrainedWorkerTemplateService
+from agents.services import AgentService
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_CHARTER_COOKIE,
@@ -380,8 +380,6 @@ def _resolve_dedicated_ip_pricing(plan):
 
 from .forms import (
     ApiKeyForm,
-    PersistentAgentForm,
-    PersistentAgentContactForm,
     MCPServerConfigForm,
     UserProfileForm,
     UserPhoneNumberForm,
@@ -427,13 +425,12 @@ from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
 from api.services import mcp_servers as mcp_server_service
-from console.agent_creation import create_persistent_agent_from_charter, enable_agent_sms_contact
+from console.agent_creation import create_persistent_agent_from_charter
 from console.agent_reassignment import reassign_agent_organization
 from console.extra_tasks_settings import derive_extra_tasks_settings
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
-from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
 User = get_user_model()
@@ -636,8 +633,6 @@ def _get_personal_signup_preview_config(
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
-SKIP_VERIFIED_SMS_SCREEN = True
-
 OWNER_EQUIVALENT_ROLES = (
     OrganizationMembership.OrgRole.OWNER,
     OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
@@ -2831,160 +2826,6 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
         return context
 
 
-class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
-    """Step 2: Contact preferences for agent creation."""
-    template_name = "console/agent_create_contact.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact View")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-
-        # Pre-populate with user's email and SMS if verified
-        if 'form' not in kwargs:
-            initial_data = {'contact_endpoint_email': self.request.user.email}
-
-            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
-
-            if template:
-                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                    template.default_tools or []
-                )
-                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
-                    template.recommended_contact_channel
-                )
-                context['selected_pretrained_worker'] = template
-                preferred = (template.recommended_contact_channel or '').lower()
-                valid_choices = {choice for choice, _ in PersistentAgentContactForm.CONTACT_METHOD_CHOICES}
-                if preferred in valid_choices:
-                    initial_data['preferred_contact_method'] = preferred
-
-            context['form'] = PersistentAgentContactForm(initial=initial_data)
-        else:
-            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
-            if template:
-                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                    template.default_tools or []
-                )
-                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
-                    template.recommended_contact_channel
-                )
-                context['selected_pretrained_worker'] = template
-
-        current_context = context.get('current_context', {
-            'type': 'personal',
-            'name': self.request.user.get_full_name() or self.request.user.username,
-        })
-
-        if current_context.get('type') == 'organization':
-            context['agent_owner_label'] = current_context.get('name')
-        else:
-            context['agent_owner_label'] = self.request.user.get_full_name() or self.request.user.username
-
-        context.setdefault('can_manage_org_agents', True)
-        context['show_org_permission_warning'] = (
-            current_context.get('type') == 'organization' and not context['can_manage_org_agents']
-        )
-
-        return context
-
-    def get(self, request, *args, **kwargs):
-        """Render the contact preferences form."""
-        resolved_context = build_console_context(request)
-        organization = None
-        if resolved_context.current_context.type == "organization" and resolved_context.current_membership:
-            organization = resolved_context.current_membership.org
-
-        availability_checks: list[bool] = []
-        if organization is not None:
-            availability_checks.append(AgentService.has_agents_available(organization))
-        availability_checks.append(AgentService.has_agents_available(request.user))
-
-        if not any(availability_checks):
-            messages.error(request, "You do not have any persistent agents available. Please upgrade to spawn more.")
-            return redirect('pages:home')
-
-        # Check if we have charter data from step 1
-        if 'agent_charter' not in self.request.session:
-            messages.error(self.request, "Please start by describing what your agent should do.")
-            return redirect('agents')
-
-        return self.render_to_response(self.get_context_data())
-
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact - Create Agent")
-    def post(self, request, *args, **kwargs):
-        """Handle step 2: create the agent with contact preferences."""
-
-        resp = self._handle_phone_post()
-        if resp:  # phone add/verify/delete handled
-            return resp
-
-        form = PersistentAgentContactForm(request.POST)
-        phone = self._current_phone()  # helper from PhoneNumberMixin
-
-        form_is_valid = form.is_valid()
-        if form_is_valid and form.cleaned_data['preferred_contact_method'] == 'sms':
-            if not phone or not phone.is_verified:
-                form.add_error(None, "Please verify a phone number before selecting SMS.")
-
-        if form.errors:
-            return self.render_to_response(self.get_context_data(form=form))
-
-        # Check if we have charter data from step 1
-        if 'agent_charter' not in request.session:
-            messages.error(request, "Please start by describing what your agent should do.")
-            return redirect('agents')
-
-        initial_user_message = request.session.get('agent_charter')
-        user_contact_email = form.cleaned_data.get('contact_endpoint_email') or ''
-        sms_enabled = form.cleaned_data.get('sms_enabled', False)
-        email_enabled = form.cleaned_data.get('email_enabled', False)
-        preferred_contact_method = form.cleaned_data['preferred_contact_method']
-        preferred_llm_tier_key = request.session.get("agent_preferred_llm_tier")
-
-        try:
-            result = create_persistent_agent_from_charter(
-                request,
-                initial_message=initial_user_message,
-                contact_email=user_contact_email,
-                email_enabled=email_enabled,
-                sms_enabled=sms_enabled,
-                preferred_contact_method=preferred_contact_method,
-                preferred_llm_tier_key=preferred_llm_tier_key,
-            )
-            if preferred_llm_tier_key:
-                request.session.pop("agent_preferred_llm_tier", None)
-            invalidate_account_info_cache(request.user.id)
-            return redirect('agent_welcome', pk=result.agent.id)
-        except ValidationError as exc:
-            error_messages = []
-            if hasattr(exc, 'message_dict'):
-                for field_errors in exc.message_dict.values():
-                    error_messages.extend(field_errors)
-            error_messages.extend(getattr(exc, 'messages', []))
-            if not error_messages:
-                error_messages.append(
-                    "We couldn't create that agent. Please check your organization settings and try again."
-                )
-            for message_text in error_messages:
-                form.add_error(None, message_text)
-                messages.error(request, message_text)
-        except Exception:
-            logger.exception("Error creating persistent agent")
-            messages.error(
-                request,
-                "We ran into a problem creating your agent. Please try again.",
-            )
-
-        # If form is invalid or has errors, re-render with them
-        context = self.get_context_data(form=form)
-        context['form'] = form
-        return self.render_to_response(context)
-
-
 class AgentQuickSpawnView(LoginRequiredMixin, View):
     """Create an agent from the saved charter and jump straight into chat."""
 
@@ -3076,59 +2917,6 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
             response.delete_cookie(OAUTH_ATTRIBUTION_COOKIE)
 
         return response
-
-
-class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
-    """Enable SMS communication for an existing agent."""
-
-    template_name = "console/agent_enable_sms.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        self.agent = get_object_or_404(
-            PersistentAgent.objects.non_eval().alive(),
-            pk=kwargs["pk"],
-            user=request.user,
-        )
-        _enforce_personal_agent_access_or_raise(request.user, self.agent)
-        return super().dispatch(request, *args, **kwargs)
-
-    def get(self, request, *args, **kwargs):
-        phone = self._current_phone()
-        if SKIP_VERIFIED_SMS_SCREEN and phone and phone.is_verified:
-            return self._enable_sms_and_redirect(phone)
-        return super().get(request, *args, **kwargs)
-
-    def post(self, request, *args, **kwargs):
-        resp = self._handle_phone_post()
-        if resp:
-            return resp
-
-        if "enable_sms" in request.POST:
-            phone = self._current_phone()
-            if not phone or not phone.is_verified:
-                messages.error(request, "Please verify a phone number before enabling SMS.")
-                return redirect(request.path)
-            return self._enable_sms_and_redirect(phone)
-
-        return super().get(request, *args, **kwargs)
-
-    def _enable_sms_and_redirect(self, phone: UserPhoneNumber):
-        try:
-            enable_agent_sms_contact(self.agent, phone)
-        except ValidationError as exc:
-            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Error enabling SMS."
-            messages.error(self.request, message_text)
-            return redirect("agent_detail", pk=self.agent.pk)
-        except Exception as exc:
-            logger.exception("Error enabling SMS", exc_info=True)
-            messages.error(
-                self.request,
-                f"Error enabling SMS: {str(exc)}",
-            )
-            return redirect("agent_detail", pk=self.agent.pk)
-
-        messages.success(self.request, "SMS has been enabled for this agent.")
-        return redirect("agent_detail", pk=self.agent.pk)
 
 
 class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
@@ -4040,7 +3828,6 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 'secrets': f"/app/agents/{agent.id}/secrets",
                 'emailSettings': reverse('agent_email_settings', args=[agent.id]),
                 'manageFiles': reverse('agent_files', args=[agent.id]),
-                'smsEnable': reverse('agent_enable_sms', args=[agent.id]),
                 'contactRequests': build_immersive_contact_requests_url(
                     request,
                     agent.id,
@@ -6187,125 +5974,6 @@ class PublicAgentAvatarThumbnailView(View):
         return _serve_agent_avatar_thumbnail(agent, cache_control="public, max-age=86400")
 
 
-class AgentAllowlistView(LoginRequiredMixin, TemplateView):
-    """Manage manual allowlist and policy for an agent."""
-    template_name = "console/agent_allowlist.html"
-
-    def _get_agent(self):
-        pk = self.kwargs.get('pk')
-        agent = (
-            PersistentAgent.objects.non_eval().alive()
-            .filter(pk=pk)
-            .select_related('organization')
-            .first()
-        )
-        if not agent:
-            raise Http404
-        if not self._can_manage(self.request.user, agent):
-            raise PermissionDenied
-        return agent
-
-    def _can_manage(self, user, agent: PersistentAgent) -> bool:
-        if user.is_staff:
-            return True
-        if agent.organization_id:
-            return OrganizationMembership.objects.filter(
-                org=agent.organization,
-                user=user,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                role__in=MEMBER_MANAGE_ROLES,
-            ).exists()
-        return user_can_manage_agent(user, agent)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self._get_agent()
-        context['agent'] = agent
-        context['entries'] = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-        context['form'] = kwargs.get('form') or AllowlistEntryForm()
-        context['policy'] = agent.whitelist_policy
-        return context
-
-    def get(self, request, *args, **kwargs):
-        return render(request, self.template_name, self.get_context_data())
-
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        agent = self._get_agent()
-        action = request.POST.get('action')
-
-        if action == 'add':
-            form = AllowlistEntryForm(request.POST)
-            if not form.is_valid():
-                messages.error(request, "Please correct the errors below.")
-                if request.headers.get('HX-Request'):
-                    # Return entries list unchanged
-                    ctx = self.get_context_data(form=form)
-                    return render(request, 'console/partials/_allowlist_entries.html', { 'entries': ctx['entries'] })
-                return render(request, self.template_name, self.get_context_data(form=form))
-            try:
-                from django.db import IntegrityError
-
-                entry = CommsAllowlistEntry(
-                    agent=agent,
-                    channel=form.cleaned_data['channel'],
-                    address=form.cleaned_data['address'],
-                    allow_inbound=form.cleaned_data.get('allow_inbound', True),
-                    allow_outbound=form.cleaned_data.get('allow_outbound', True),
-                    sms_contact_purpose=form.cleaned_data.get('sms_contact_purpose'),
-                    sms_contact_purpose_details=form.cleaned_data.get('sms_contact_purpose_details'),
-                    sms_contact_permission_attested=form.cleaned_data.get(
-                        'sms_contact_permission_attested'
-                    ),
-                )
-                entry.full_clean()  # This will run model validation
-                entry.save()
-                if entry.channel == CommsChannel.SMS:
-                    track_sms_contact_approval(
-                        user_id=request.user.id,
-                        agent=agent,
-                        address=entry.address,
-                        approval_source="legacy_agent_allowlist",
-                        approval_action="create",
-                        allow_inbound=entry.allow_inbound,
-                        allow_outbound=entry.allow_outbound,
-                        can_configure=entry.can_configure,
-                        sms_contact_purpose=entry.sms_contact_purpose,
-                        sms_contact_purpose_details=entry.sms_contact_purpose_details,
-                        sms_contact_permission_attested=entry.sms_contact_permission_attested,
-                        allowlist_entry_id=str(entry.id),
-                    )
-
-                messages.success(request, "Allowlist entry added.")
-            except (ValidationError, IntegrityError) as e:
-                messages.error(request, f"Could not add entry: {e}")
-            if request.headers.get('HX-Request'):
-                entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
-
-        elif action == 'delete':
-            entry_id = request.POST.get('entry_id')
-            deleted = CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()[0]
-            if deleted:
-                messages.success(request, "Allowlist entry deleted.")
-            else:
-                messages.error(request, "Entry not found.")
-            if request.headers.get('HX-Request'):
-                entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
-
-        elif action == 'policy':
-            policy = request.POST.get('whitelist_policy')
-            if policy in dict(PersistentAgent.WhitelistPolicy.choices):
-                agent.whitelist_policy = policy
-                agent.save(update_fields=['whitelist_policy'])
-                messages.success(request, "Whitelist policy updated.")
-            else:
-                messages.error(request, "Invalid policy value.")
-
-        return redirect('agent_allowlist', pk=agent.pk)
-
-
 class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
     """File browser page for a single agent."""
     model = PersistentAgent
@@ -6872,97 +6540,6 @@ def grant_credits(request):
         return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
 
 
-class AgentWelcomeView(LoginRequiredMixin, DetailView):
-    """Welcome page shown immediately after creating an agent."""
-    model = PersistentAgent
-    template_name = "console/agent_welcome.html"
-    context_object_name = "agent"
-    pk_url_kwarg = "pk"
-
-    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_queryset")
-    def get_queryset(self):
-        # Ensure users can only access their own agents
-        qs = (
-            super()
-            .get_queryset()
-            .alive()
-            .filter(user=self.request.user)
-            .select_related('organization__billing')
-        )
-        if can_user_use_personal_agents_and_api(self.request.user):
-            return qs
-        return qs.exclude(organization__isnull=True)
-
-    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_context_data")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-
-        # Show agent endpoints for each channel if they exist, regardless of primary flag
-        primary_email = agent.comms_endpoints.filter(
-            channel=CommsChannel.EMAIL
-        ).first()
-        primary_sms = agent.comms_endpoints.filter(
-            channel=CommsChannel.SMS
-        ).first()
-
-        context['primary_email'] = primary_email
-        context['primary_sms'] = primary_sms
-
-        # Determine the user's preferred contact channel from the agent's preference
-        preferred_channel = None
-        try:
-            preferred_ep = agent.preferred_contact_endpoint
-            if preferred_ep and preferred_ep.channel in (CommsChannel.SMS, CommsChannel.EMAIL):
-                preferred_channel = 'sms' if preferred_ep.channel == CommsChannel.SMS else 'email'
-        except Exception:
-            preferred_channel = None
-        # Fallback to detect a likely preference if not set
-        if preferred_channel is None:
-            if primary_sms and getattr(primary_sms, 'is_primary', False):
-                preferred_channel = 'sms'
-            elif primary_email and getattr(primary_email, 'is_primary', False):
-                preferred_channel = 'email'
-        context['preferred_channel'] = preferred_channel
-
-        owner_plan = reconcile_user_plan_from_stripe(self.request.user)
-        organization_name = None
-        org_has_paid_seats = False
-
-        if agent.organization_id:
-            organization = agent.organization
-            organization_name = getattr(organization, "name", None)
-            owner_plan = get_organization_plan(organization)
-            billing = getattr(organization, "billing", None)
-            org_has_paid_seats = bool(getattr(billing, "purchased_seats", 0) > 0)
-
-        plan_id = str(owner_plan.get("id", "")).lower() if owner_plan else ""
-
-        show_pro_scale_upsell = plan_id == PlanNamesChoices.FREE.value
-        show_scale_upsell = plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.STARTUP.value)
-
-        upsell_count = 0
-        if show_pro_scale_upsell:
-            upsell_count += 1
-        if show_scale_upsell:
-            upsell_count += 1
-        if agent.organization_id and not org_has_paid_seats:
-            upsell_count += 1
-
-        context.update({
-            'owner_plan': owner_plan,
-            'owner_plan_id': plan_id,
-            'owner_plan_name': owner_plan.get("name", "") if owner_plan else "",
-            'agent_has_org': bool(agent.organization_id),
-            'agent_org_name': organization_name,
-            'org_has_paid_seats': org_has_paid_seats if agent.organization_id else None,
-            'show_pro_scale_upsell': show_pro_scale_upsell,
-            'show_scale_upsell': show_scale_upsell,
-            'upsell_count': upsell_count,
-        })
-
-        return context
-
 class AgentContactRequestsView(LoginRequiredMixin, View):
     """Compatibility route for legacy contact request approval links."""
     
@@ -7032,76 +6609,6 @@ class AgentContactRequestsView(LoginRequiredMixin, View):
             ctx.update(extra)
         return render(request, "console/approval_link_issue.html", ctx, status=200)
 
-
-class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
-    """Thank you page after approving contact requests."""
-    template_name = "console/agent_contact_requests_thanks.html"
-    
-    def _resolve_agent_or_issue(self):
-        pk = self.kwargs['pk']
-        current_span = trace.get_current_span()
-        exists = PersistentAgent.objects.non_eval().alive().filter(pk=pk).exists()
-        if not exists:
-            if current_span:
-                current_span.set_attribute("approval.issue", "invalid")
-            logger.info("Agent contact-requests-thanks invalid agent id", extra={"agent_id": str(pk)})
-            return None, 'invalid'
-        agent = (
-            PersistentAgent.objects.non_eval().alive()
-            .filter(pk=pk, user=self.request.user)
-            .first()
-        )
-        if not agent:
-            if current_span:
-                current_span.set_attribute("approval.issue", "wrong_account")
-            logger.info("Agent contact-requests-thanks wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
-            return None, 'wrong_account'
-        if agent.organization_id is None and not can_user_use_personal_agents_and_api(self.request.user):
-            if current_span:
-                current_span.set_attribute("approval.issue", "wrong_account")
-            logger.info(
-                "Agent contact-requests-thanks blocked by personal trial enforcement",
-                extra={"agent_id": str(pk), "user_id": self.request.user.id},
-            )
-            return None, "wrong_account"
-        return agent, None
-
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get")
-    def get(self, request, *args, **kwargs):
-        agent, issue = self._resolve_agent_or_issue()
-        if issue:
-            return self._issue_response(request, action='view', issue=issue)
-        return redirect(
-            build_immersive_contact_requests_url(
-                request,
-                agent.id,
-                organization_id=str(agent.organization_id) if agent.organization_id else None,
-            )
-        )
-
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
-    def get_object(self):
-        agent, issue = self._resolve_agent_or_issue()
-        if issue:
-            raise Http404("Agent not available")
-        return agent
-
-    def _issue_response(self, request, action: str, issue: str, extra: dict | None = None):
-        ctx = {
-            'issue': issue,
-            'context_type': 'agent_allowlist',
-            'action': action,
-        }
-        if extra:
-            ctx.update(extra)
-        return render(request, "console/approval_link_issue.html", ctx, status=200)
-    
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent to context."""
-        context = super().get_context_data(**kwargs)
-        context['agent'] = self.get_object()
-        return context
 
 @tracer.start_as_current_span("CONSOLE Profile - handle_send_verification")
 def handle_send_verification(request, phone):
