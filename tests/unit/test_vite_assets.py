@@ -135,6 +135,7 @@ class AppShellAuthenticationTests(TestCase):
             "/app/agents/new",
             "/app/billing",
             "/app/api-keys",
+            "/app/organization",
             f"/app/agents/{uuid.uuid4()}/settings",
             f"/app/agents/{uuid.uuid4()}/secrets",
             f"/app/agents/{uuid.uuid4()}/email",

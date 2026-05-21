@@ -152,6 +152,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenApiKeys?: () => void
   sidebarProfileUrl?: string | null
   onOpenProfile?: () => void
+  sidebarOrganizationUrl?: string | null
+  onOpenOrganization?: () => void
   sidebarSecretsUrl?: string | null
   onOpenSecrets?: () => void
   sidebarIntegrationsUrl?: string | null
@@ -199,6 +201,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
+  showPurchaseSeatsPrompt?: boolean
   showTaskCreditsWarning?: boolean
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
@@ -333,6 +336,8 @@ export function AgentChatLayout({
   onOpenApiKeys,
   sidebarProfileUrl = '/console/profile/',
   onOpenProfile,
+  sidebarOrganizationUrl = null,
+  onOpenOrganization,
   sidebarSecretsUrl = '/console/secrets/',
   onOpenSecrets,
   sidebarIntegrationsUrl = '/console/advanced/mcp-servers/',
@@ -380,6 +385,7 @@ export function AgentChatLayout({
   stopProcessingRequested = false,
   addonsTrial = null,
   taskQuota = null,
+  showPurchaseSeatsPrompt = false,
   showTaskCreditsWarning = false,
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
@@ -558,6 +564,16 @@ export function AgentChatLayout({
     onOpenFullSettings?.()
   }, [onOpenFullSettings])
 
+  const handlePurchaseSeats = useCallback(() => {
+    if (onOpenBilling) {
+      onOpenBilling()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(sidebarBillingUrl ?? '/console/billing/')
+    }
+  }, [onOpenBilling, sidebarBillingUrl])
+
   const handleAddonsOpen = useCallback((mode: 'contacts' | 'tasks') => {
     setAddonsMode(mode)
     onRefreshAddons?.()
@@ -722,7 +738,7 @@ export function AgentChatLayout({
 
   useEffect(() => {
     if (typeof window === 'undefined' || !agentId) return
-    const showTaskCredits = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+    const showTaskCredits = Boolean(showTaskCreditsWarning && !showPurchaseSeatsPrompt && !taskCreditsDismissed)
     if (!showTaskCredits) return
     const messageType = taskCreditsWarningVariant === 'out' ? 'task_credits_exhausted' : 'task_credits_low'
     const storageKey = `upsell-tracked:${agentId}:${messageType}`
@@ -735,7 +751,7 @@ export function AgentChatLayout({
       recipient_type: 'owner',
       upsell_shown: showTaskCreditsUpgrade,
     })
-  }, [agentId, showTaskCreditsWarning, taskCreditsDismissed, taskCreditsWarningVariant, showTaskCreditsUpgrade])
+  }, [agentId, showPurchaseSeatsPrompt, showTaskCreditsWarning, taskCreditsDismissed, taskCreditsWarningVariant, showTaskCreditsUpgrade])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !agentId) return
@@ -855,7 +871,8 @@ export function AgentChatLayout({
     }
   }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
-  const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+  const showNoSeatsCallout = Boolean(showPurchaseSeatsPrompt)
+  const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !showNoSeatsCallout && !taskCreditsDismissed)
   const showHighPriorityBanner = Boolean(
     highPriorityBanner && (!highPriorityBannerDismissible || !highPriorityDismissed),
   )
@@ -1217,6 +1234,7 @@ export function AgentChatLayout({
     usageUrl: sidebarUsageUrl,
     apiKeysUrl: sidebarApiKeysUrl,
     profileUrl: sidebarProfileUrl,
+    organizationUrl: sidebarOrganizationUrl,
     secretsUrl: sidebarSecretsUrl,
     integrationsUrl: sidebarIntegrationsUrl,
     notificationsEnabled: sidebarNotificationsEnabled,
@@ -1226,6 +1244,7 @@ export function AgentChatLayout({
     onOpenUsage,
     onOpenApiKeys,
     onOpenProfile,
+    onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
     taskCredits: taskQuota
@@ -1244,12 +1263,14 @@ export function AgentChatLayout({
     onOpenUsage,
     onOpenApiKeys,
     onOpenProfile,
+    onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
     sidebarBillingUrl,
     sidebarUsageUrl,
     sidebarApiKeysUrl,
     sidebarProfileUrl,
+    sidebarOrganizationUrl,
     sidebarSecretsUrl,
     sidebarIntegrationsUrl,
     sidebarCreditsResetOn,
@@ -1332,6 +1353,8 @@ export function AgentChatLayout({
           onPlanHoverChange={showPlanInterface ? handlePlanHoverChange : undefined}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
+          showPurchaseSeatsButton={showPurchaseSeatsPrompt}
+          onPurchaseSeats={handlePurchaseSeats}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
           settingsDisabled={previewActionsDisabled}
           settingsDisabledReason={previewActionsDisabledReason}
@@ -1463,7 +1486,13 @@ export function AgentChatLayout({
                     showUpsell={hardLimitShowUpsell}
                   />
                 ) : null}
-                {showTaskCreditsCallout ? (
+                {showNoSeatsCallout ? (
+                  <TaskCreditsCalloutCard
+                    billingIssue="no_org_seats"
+                    onPurchaseSeats={handlePurchaseSeats}
+                    variant="out"
+                  />
+                ) : showTaskCreditsCallout ? (
                   <TaskCreditsCalloutCard
                     onOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0
                       ? () => handleAddonsOpen('tasks')

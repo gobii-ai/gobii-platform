@@ -82,6 +82,166 @@ class OrganizationCreateAPITests(TestCase):
         self.assertFalse(Organization.objects.filter(name="Disabled Org").exists())
 
 
+@tag("batch_console_context")
+@override_settings(
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
+)
+class CurrentOrganizationAPITests(TestCase):
+    def setUp(self):
+        Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
+        self.owner = User.objects.create_user(username="org-owner", email="owner@example.com", password="pw")
+        self.admin = User.objects.create_user(username="org-admin", email="admin@example.com", password="pw")
+        self.member = User.objects.create_user(username="org-member", email="member@example.com", password="pw")
+        self.org = Organization.objects.create(
+            name="Acme Team",
+            slug="acme-team",
+            plan="free",
+            created_by=self.owner,
+        )
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.admin,
+            role=OrganizationMembership.OrgRole.ADMIN,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+    def _login_in_org_context(self, user):
+        self.client.force_login(user)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
+
+    def test_current_organization_api_lists_members_and_invites_for_org_context(self):
+        self._login_in_org_context(self.owner)
+
+        resp = self.client.get(reverse("console-current-organization"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["organization"]["id"], str(self.org.id))
+        self.assertEqual(payload["viewer"]["role"], OrganizationMembership.OrgRole.OWNER)
+        self.assertTrue(payload["viewer"]["canEditOrganization"])
+        self.assertTrue(payload["viewer"]["canManageMembers"])
+        self.assertEqual({member["email"] for member in payload["members"]}, {
+            "owner@example.com",
+            "admin@example.com",
+            "member@example.com",
+        })
+
+    def test_current_organization_api_requires_org_context(self):
+        self.client.force_login(self.owner)
+
+        resp = self.client.get(reverse("console-current-organization"))
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_owner_can_update_organization_name(self):
+        self._login_in_org_context(self.owner)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"name": "Renamed Team"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, "Renamed Team")
+        session = self.client.session
+        self.assertEqual(session["context_name"], "Renamed Team")
+
+    def test_admin_cannot_update_organization_name(self):
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"name": "Blocked Name"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, "Acme Team")
+
+    def test_admin_can_invite_member_and_update_non_owner_role(self):
+        self._login_in_org_context(self.admin)
+
+        invite_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "new@example.com", "role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+        role_resp = self.client.patch(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.member.id}),
+            data=json.dumps({"role": OrganizationMembership.OrgRole.VIEWER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(invite_resp.status_code, 201)
+        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email="new@example.com").exists())
+        self.assertEqual(role_resp.status_code, 200)
+        membership = OrganizationMembership.objects.get(org=self.org, user=self.member)
+        self.assertEqual(membership.role, OrganizationMembership.OrgRole.VIEWER)
+
+    def test_admin_cannot_modify_owner_role(self):
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.owner.id}),
+            data=json.dumps({"role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
+        self.assertEqual(membership.role, OrganizationMembership.OrgRole.OWNER)
+
+    def test_owner_can_remove_member_and_revoke_invite(self):
+        self._login_in_org_context(self.owner)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+
+        remove_resp = self.client.delete(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.member.id}),
+        )
+        revoke_resp = self.client.delete(
+            reverse("console-current-organization-invite-detail", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(remove_resp.status_code, 200)
+        self.assertEqual(revoke_resp.status_code, 200)
+        self.assertEqual(
+            OrganizationMembership.objects.get(org=self.org, user=self.member).status,
+            OrganizationMembership.OrgStatus.REMOVED,
+        )
+        invite.refresh_from_db()
+        self.assertIsNotNone(invite.revoked_at)
+
+
 @override_settings(
     DATABASES={
         'default': {

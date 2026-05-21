@@ -16,6 +16,7 @@ APP_PATH_PREFIX = "/app"
 APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
+APP_ORGANIZATION_PATH_PREFIX = f"{APP_PATH_PREFIX}/organization"
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 
 
@@ -290,6 +291,8 @@ class AppShellMiddleware:
             or path.startswith(f"{APP_BILLING_PATH_PREFIX}/")
             or path == APP_API_KEYS_PATH_PREFIX
             or path.startswith(f"{APP_API_KEYS_PATH_PREFIX}/")
+            or path == APP_ORGANIZATION_PATH_PREFIX
+            or path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/")
         )
 
     def _etag_matches(self, request_etag: str | None) -> bool:

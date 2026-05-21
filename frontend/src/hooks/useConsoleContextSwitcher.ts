@@ -54,6 +54,34 @@ export function useConsoleContextSwitcher({
     dataRef.current = data
   }, [data])
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+    const handleContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ConsoleContext>).detail
+      if (!detail || !detail.type || !detail.id) {
+        return
+      }
+      setData((prev) => (
+        prev
+          ? {
+              ...prev,
+              context: detail,
+              organizations: detail.type === 'organization'
+                ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
+                : prev.organizations,
+            }
+          : prev
+      ))
+      storeConsoleContext(detail)
+    }
+    window.addEventListener('gobii:console-context-updated', handleContextUpdated)
+    return () => {
+      window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
+    }
+  }, [])
+
   const refresh = useCallback(async () => {
     if (!enabled) {
       return

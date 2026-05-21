@@ -303,6 +303,12 @@ from console.views import (
     console_billing_update,
 )
 from console.context_views import OrganizationCreateAPIView, SwitchContextView
+from console.organization_api_views import (
+    CurrentOrganizationAPIView,
+    CurrentOrganizationInviteAPIView,
+    CurrentOrganizationInviteDetailAPIView,
+    CurrentOrganizationMemberAPIView,
+)
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
 
@@ -628,6 +634,10 @@ urlpatterns = [
     path("console/api/secrets/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console-global-secret-detail"),
     path("console/api/api-keys/", ApiKeyListAPIView.as_view(), name="console-api-key-list"),
     path("console/api/api-keys/<uuid:api_key_id>/", ApiKeyDetailAPIView.as_view(), name="console-api-key-detail"),
+    path("console/api/organization/", CurrentOrganizationAPIView.as_view(), name="console-current-organization"),
+    path("console/api/organization/invites/", CurrentOrganizationInviteAPIView.as_view(), name="console-current-organization-invites"),
+    path("console/api/organization/invites/<str:token>/", CurrentOrganizationInviteDetailAPIView.as_view(), name="console-current-organization-invite-detail"),
+    path("console/api/organization/members/<int:user_id>/", CurrentOrganizationMemberAPIView.as_view(), name="console-current-organization-member-detail"),
     path(
         "console/api/system-skills/<slug:skill_key>/profiles/",
         SystemSkillProfileListAPIView.as_view(),

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState, type MouseEvent, type PointerEvent } from 'react'
 import { Check, ChevronDown, Plus, UserRound, Users } from 'lucide-react'
 import {
   Button,
@@ -53,9 +53,16 @@ export function AgentChatContextSwitcher({
     [organizations],
   )
   const handleCreateOrganization = useCallback(() => {
-    setOpen(false)
     onCreateOrganization?.()
+    setOpen(false)
   }, [onCreateOrganization])
+  const handleCreateOrganizationPress = useCallback((
+    event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>,
+  ) => {
+    event.preventDefault()
+    event.stopPropagation()
+    handleCreateOrganization()
+  }, [handleCreateOrganization])
   const selectedKey = current.type === 'personal' ? personalKey : `org:${current.id}`
   const selectedKeys = useMemo(() => new Set<Key>([selectedKey]), [selectedKey])
   const contextByKey = useMemo(() => {
@@ -181,7 +188,8 @@ export function AgentChatContextSwitcher({
               <button
                 type="button"
                 className="chat-context-switcher__create"
-                onClick={handleCreateOrganization}
+                onPointerDown={handleCreateOrganizationPress}
+                onClick={handleCreateOrganizationPress}
               >
                 <Plus className="chat-context-switcher__item-icon" aria-hidden="true" />
                 <span>Add Organization</span>

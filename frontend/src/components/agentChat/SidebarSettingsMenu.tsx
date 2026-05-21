@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Bell,
+  Building2,
   ChevronDown,
   ClipboardList,
   CreditCard,
@@ -35,6 +36,8 @@ export type SidebarSettingsInfo = {
   onOpenApiKeys?: (() => void) | null
   profileUrl?: string | null
   onOpenProfile?: (() => void) | null
+  organizationUrl?: string | null
+  onOpenOrganization?: (() => void) | null
   secretsUrl?: string | null
   onOpenSecrets?: (() => void) | null
   globalSecretsUrl?: string | null
@@ -108,6 +111,8 @@ export function SidebarSettingsMenu({
   onOpenApiKeys = null,
   profileUrl = '/console/profile/',
   onOpenProfile = null,
+  organizationUrl = null,
+  onOpenOrganization = null,
   secretsUrl = null,
   onOpenSecrets = null,
   globalSecretsUrl = '/console/secrets/',
@@ -162,6 +167,7 @@ export function SidebarSettingsMenu({
   const canShowUsage = Boolean(usageUrl || onOpenUsage)
   const canShowApiKeys = Boolean(apiKeysUrl || onOpenApiKeys)
   const canShowProfile = Boolean(profileUrl || onOpenProfile)
+  const canShowOrganization = Boolean(context?.type === 'organization' && (organizationUrl || onOpenOrganization))
   const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
   const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
   const resolvedIntegrationsUrl = integrationsUrl ?? advancedMcpUrl
@@ -254,6 +260,26 @@ export function SidebarSettingsMenu({
                 <a className="sidebar-settings__link" href={profileUrl ?? undefined} target="_blank" rel="noreferrer">
                   <User className="sidebar-settings__link-icon" aria-hidden="true" />
                   <span>Profile</span>
+                </a>
+              )
+            ) : null}
+            {canShowOrganization ? (
+              onOpenOrganization ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenOrganization()
+                  }}
+                >
+                  <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Organization</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={organizationUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Organization</span>
                 </a>
               )
             ) : null}

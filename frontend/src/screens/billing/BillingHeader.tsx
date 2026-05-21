@@ -33,7 +33,10 @@ export function BillingHeader({
   const accountPause = initialData.accountPause ?? null
   const accountPaused = Boolean(accountPause?.paused)
   const isEmbedded = variant === 'embedded'
-  const planName = (initialData.plan?.name as string | undefined) ?? (isOrg ? 'Team' : 'Plan')
+  const seatCount = isOrg ? (seatTarget ?? initialData.seats.purchased) : null
+  const basePlanName = isOrg
+    ? `${seatCount} seat${seatCount === 1 ? '' : 's'}`
+    : ((initialData.plan?.name as string | undefined) ?? 'Plan')
   const planCurrency = isOrg
     ? normalizeCurrency(initialData.seats.currency || (initialData.plan?.currency as string | undefined) || 'USD')
     : normalizeCurrency((initialData.plan?.currency as string | undefined) || 'USD')
@@ -85,7 +88,7 @@ export function BillingHeader({
             <span>Base plan</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <div className="text-2xl font-bold text-slate-900">{planName}</div>
+            <div className="text-2xl font-bold text-slate-900">{basePlanName}</div>
             {isTrialing ? (
               <span
                 className={

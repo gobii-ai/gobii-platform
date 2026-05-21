@@ -10,6 +10,7 @@ import { AgentChatPage } from './AgentChatPage'
 import { ImmersiveApiKeysPage } from './apiKeys/ImmersiveApiKeysPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
+import { ImmersiveOrganizationPage } from './organization/ImmersiveOrganizationPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
 import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
@@ -22,12 +23,14 @@ const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 const DEFAULT_CLOSE_PATH = '/console/agents/'
 const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
+const APP_NAVIGATE_EVENT = 'gobii:app:navigate'
 
 type AppRoute =
   | { kind: 'command-center' }
   | { kind: 'agent-select' }
   | { kind: 'billing' }
   | { kind: 'profile' }
+  | { kind: 'organization' }
   | { kind: 'secrets' }
   | { kind: 'usage' }
   | { kind: 'integrations' }
@@ -35,7 +38,7 @@ type AppRoute =
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -54,7 +57,7 @@ type ImmersiveAppProps = {
   pipedreamAppSearchUrl?: string | null
 }
 
-type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
+type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
 const AGENT_SHELL_PRESERVED_QUERY_KEYS = ['embed', 'return_to'] as const
 
 function readLocation(): LocationSnapshot {
@@ -118,6 +121,10 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'profile' }
   }
 
+  if (parts[0] === 'organization') {
+    return { kind: 'organization' }
+  }
+
   if (parts[0] === 'secrets') {
     return { kind: 'secrets' }
   }
@@ -150,6 +157,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   if (route.kind === 'profile') {
     return 'profile'
   }
+  if (route.kind === 'organization') {
+    return 'organization'
+  }
   if (route.kind === 'secrets') {
     return 'secrets'
   }
@@ -180,6 +190,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   }
   if (route.kind === 'profile') {
     return '/app/profile'
+  }
+  if (route.kind === 'organization') {
+    return '/app/organization'
   }
   if (route.kind === 'secrets') {
     return '/app/secrets'
@@ -212,6 +225,9 @@ function getAnalyticsTitle(route: AppRoute): string {
   if (route.kind === 'profile') {
     return 'Profile · Gobii'
   }
+  if (route.kind === 'organization') {
+    return 'Organization · Gobii'
+  }
   if (route.kind === 'secrets') {
     return 'Secrets · Gobii'
   }
@@ -240,7 +256,7 @@ function cleanQueryForTracking(search: string): string {
 
 function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
   const page = new URLSearchParams(search).get('shell')
-  return page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys' ? page : 'agents'
+  return page === 'billing' || page === 'profile' || page === 'organization' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys' ? page : 'agents'
 }
 
 function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentSearch = ''): string {
@@ -253,7 +269,7 @@ function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentS
       nextParams.set(key, value)
     }
   }
-  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys') {
+  if (page === 'billing' || page === 'profile' || page === 'organization' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys') {
     nextParams.set('shell', page)
   }
   const query = nextParams.toString()
@@ -487,6 +503,10 @@ function navigateTo(path: string) {
   window.dispatchEvent(new PopStateEvent('popstate'))
 }
 
+function isAppNavigationEvent(event: Event): event is CustomEvent<{ path: string }> {
+  return event instanceof CustomEvent && typeof event.detail?.path === 'string'
+}
+
 export function ImmersiveApp({
   maxChatUploadSizeBytes = null,
   pipedreamAppsSettingsUrl = null,
@@ -494,6 +514,17 @@ export function ImmersiveApp({
 }: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
+
+  useEffect(() => {
+    const handleAppNavigate = (event: Event) => {
+      if (!isAppNavigationEvent(event)) {
+        return
+      }
+      navigateTo(event.detail.path)
+    }
+    window.addEventListener(APP_NAVIGATE_EVENT, handleAppNavigate)
+    return () => window.removeEventListener(APP_NAVIGATE_EVENT, handleAppNavigate)
+  }, [])
   const activeAgentShellPage = useMemo(() => parseAgentShellPage(location.search), [location.search])
   const embed = useMemo(() => {
     if (parseBooleanFlag(new URLSearchParams(location.search).get('embed'))) {
@@ -658,6 +689,10 @@ export function ImmersiveApp({
       navigateTo('/app/profile')
       return
     }
+    if (route.kind === 'organization') {
+      navigateTo('/app/organization')
+      return
+    }
     if (route.kind === 'secrets') {
       navigateTo('/app/secrets')
       return
@@ -688,6 +723,10 @@ export function ImmersiveApp({
     }
     if (page === 'profile') {
       navigateTo('/app/profile')
+      return
+    }
+    if (page === 'organization') {
+      navigateTo('/app/organization')
       return
     }
     if (page === 'secrets') {
@@ -723,6 +762,14 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/profile')
+  }, [location.search, route])
+
+  const handleOpenOrganization = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'organization', location.search))
+      return
+    }
+    navigateTo('/app/organization')
   }, [location.search, route])
 
   const handleOpenSecrets = useCallback(() => {
@@ -813,6 +860,8 @@ export function ImmersiveApp({
                 <ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : activeAgentShellPage === 'profile' ? (
                 <ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
+              ) : activeAgentShellPage === 'organization' ? (
+                <ImmersiveOrganizationPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : activeAgentShellPage === 'secrets' ? (
                 <ImmersiveSecretsPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : activeAgentShellPage === 'usage' ? (
@@ -832,6 +881,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -855,6 +905,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -880,6 +931,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -905,6 +957,33 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
+            onOpenSecrets={handleOpenSecrets}
+            onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
+          />
+        ) : null}
+        {route.kind === 'organization' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="organization"
+            selectionShellPanel={<ImmersiveOrganizationPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveOrganizationPage layout="main" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
+            onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -930,6 +1009,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -955,6 +1035,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -994,6 +1075,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}
@@ -1019,6 +1101,7 @@ export function ImmersiveApp({
             onOpenBilling={handleOpenBilling}
             onOpenUsage={handleOpenUsage}
             onOpenProfile={handleOpenProfile}
+            onOpenOrganization={handleOpenOrganization}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
             onOpenApiKeys={handleOpenApiKeys}

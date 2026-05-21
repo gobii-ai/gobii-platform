@@ -924,6 +924,7 @@ export type AgentChatPageProps = {
   onOpenUsage?: () => void
   onOpenApiKeys?: () => void
   onOpenProfile?: () => void
+  onOpenOrganization?: () => void
   onOpenSecrets?: () => void
   onOpenIntegrations?: () => void
 }
@@ -976,6 +977,7 @@ export function AgentChatPage({
   onOpenUsage,
   onOpenApiKeys,
   onOpenProfile,
+  onOpenOrganization,
   onOpenSecrets,
   onOpenIntegrations,
 }: AgentChatPageProps) {
@@ -3790,11 +3792,16 @@ export function AgentChatPage({
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
+  const organizationPurchasedSeats = usageSummary?.context.type === 'organization'
+    ? usageSummary.billing?.purchasedSeats
+    : undefined
+  const organizationHasNoPurchasedSeats = organizationPurchasedSeats !== undefined && organizationPurchasedSeats <= 0
   const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
   // Use < 1 threshold to catch "dust credits" (e.g., 0.001) that aren't enough to do anything
   const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available < 1)
   const showTaskCreditsWarning = Boolean(
     taskQuota
+    && !organizationHasNoPurchasedSeats
     && !hasUnlimitedQuota
     && !extraTasksEnabled
     && (
@@ -3860,6 +3867,18 @@ export function AgentChatPage({
       window.location.assign(profileUrl)
     }
   }, [onOpenProfile, profileUrl])
+  const organizationUrl = effectiveContext?.type === 'organization'
+    ? (isImmersiveShellPath ? '/app/organization' : `/console/organizations/${effectiveContext.id}/`)
+    : null
+  const handleOpenOrganization = useCallback(() => {
+    if (onOpenOrganization) {
+      onOpenOrganization()
+      return
+    }
+    if (organizationUrl && typeof window !== 'undefined') {
+      window.location.assign(organizationUrl)
+    }
+  }, [onOpenOrganization, organizationUrl])
   const secretsUrl = isImmersiveShellPath ? '/app/secrets' : '/console/secrets/'
   const handleOpenSecrets = useCallback(() => {
     if (onOpenSecrets) {
@@ -3931,12 +3950,14 @@ export function AgentChatPage({
     usageUrl,
     apiKeysUrl,
     profileUrl,
+    organizationUrl,
     secretsUrl,
     integrationsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
     onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
     onOpenApiKeys: isImmersiveShellPath ? handleOpenApiKeys : null,
     onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
+    onOpenOrganization: isImmersiveShellPath ? handleOpenOrganization : null,
     onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
     onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
     taskCredits: taskQuota
@@ -3953,6 +3974,7 @@ export function AgentChatPage({
     handleOpenBilling,
     handleOpenUsage,
     handleOpenProfile,
+    handleOpenOrganization,
     handleOpenSecrets,
     handleOpenIntegrations,
     isProprietaryMode,
@@ -3962,6 +3984,7 @@ export function AgentChatPage({
     usageUrl,
     apiKeysUrl,
     profileUrl,
+    organizationUrl,
     secretsUrl,
     integrationsUrl,
     taskQuota,
@@ -4000,12 +4023,70 @@ export function AgentChatPage({
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
     '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_DARK_TEXTURE_URL}")`,
   }), [])
+  const createOrganizationModal = createOrganizationOpen ? (
+    <Modal
+      title="Add Organization"
+      onClose={() => {
+        if (!createOrganizationBusy) {
+          setCreateOrganizationOpen(false)
+        }
+      }}
+      widthClass="sm:max-w-lg"
+      icon={Building2}
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-600"
+      dismissible={!createOrganizationBusy}
+    >
+      <form id="create-organization-form" onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
+        {createOrganizationErrors.length > 0 ? (
+          <div className="rounded-md border border-red-200 bg-red-50 p-3">
+            {createOrganizationErrors.map((message) => (
+              <p key={message} className="text-sm text-red-700">{message}</p>
+            ))}
+          </div>
+        ) : null}
+        <div>
+          <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
+            Organization Name
+          </label>
+          <input
+            id="organization-name"
+            type="text"
+            required
+            value={createOrganizationName}
+            onChange={(event) => setCreateOrganizationName(event.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="Acme Operations"
+            autoFocus
+          />
+        </div>
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row-reverse">
+          <button
+            type="submit"
+            className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+            disabled={createOrganizationBusy}
+          >
+            {createOrganizationBusy ? 'Creating...' : 'Create Organization'}
+          </button>
+          <button
+            type="button"
+            className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+            onClick={() => setCreateOrganizationOpen(false)}
+            disabled={createOrganizationBusy}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
+  ) : null
   const renderSelectionLayout = (content: ReactNode) => (
     <div
       className="agent-chat-page agent-chat-page--framed"
       data-processing="false"
       style={agentChatPageStyle}
     >
+      {createOrganizationModal}
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName} data-sidebar-mode={selectionSidebarMode}>
         <div id="agent-workspace-root">
@@ -4596,63 +4677,7 @@ export function AgentChatPage({
         agentName={resolvedAgentName || agentName}
         onClose={handleClosePublicShare}
       />
-      {createOrganizationOpen ? (
-        <Modal
-          title="Add Organization"
-          onClose={() => {
-            if (!createOrganizationBusy) {
-              setCreateOrganizationOpen(false)
-            }
-          }}
-          widthClass="sm:max-w-lg"
-          icon={Building2}
-          iconBgClass="bg-blue-100"
-          iconColorClass="text-blue-600"
-          dismissible={!createOrganizationBusy}
-        >
-          <form id="create-organization-form" onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
-            {createOrganizationErrors.length > 0 ? (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3">
-                {createOrganizationErrors.map((message) => (
-                  <p key={message} className="text-sm text-red-700">{message}</p>
-                ))}
-              </div>
-            ) : null}
-            <div>
-              <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
-                Organization Name
-              </label>
-              <input
-                id="organization-name"
-                type="text"
-                required
-                value={createOrganizationName}
-                onChange={(event) => setCreateOrganizationName(event.target.value)}
-                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                placeholder="Acme Operations"
-                autoFocus
-              />
-            </div>
-            <div className="flex flex-col gap-3 pt-2 sm:flex-row-reverse">
-              <button
-                type="submit"
-                className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
-                disabled={createOrganizationBusy}
-              >
-                {createOrganizationBusy ? 'Creating...' : 'Create Organization'}
-              </button>
-              <button
-                type="button"
-                className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
-                onClick={() => setCreateOrganizationOpen(false)}
-                disabled={createOrganizationBusy}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Modal>
-      ) : null}
+      {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
@@ -4662,7 +4687,7 @@ export function AgentChatPage({
         agentSms={resolvedAgentSms}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         auditUrl={activeAuditUrl}
-        agentIsOrgOwned={resolvedIsOrgOwned}
+        agentIsOrgOwned={resolvedIsOrgOwned || effectiveContext?.type === 'organization'}
         isCollaborator={isCollaboratorOnly}
         canManageAgent={activeCanManageAgent}
         hideInsightsPanel={isCollaboratorOnly}
@@ -4698,6 +4723,8 @@ export function AgentChatPage({
         onOpenApiKeys={isImmersiveShellPath ? handleOpenApiKeys : undefined}
         sidebarProfileUrl={profileUrl}
         onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
+        sidebarOrganizationUrl={organizationUrl}
+        onOpenOrganization={isImmersiveShellPath ? handleOpenOrganization : undefined}
         sidebarSecretsUrl={secretsUrl}
         onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
         sidebarIntegrationsUrl={integrationsUrl}
@@ -4739,6 +4766,7 @@ export function AgentChatPage({
         onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
         addonsTrial={addonsTrial}
         taskQuota={taskQuota}
+        showPurchaseSeatsPrompt={organizationHasNoPurchasedSeats}
         showTaskCreditsWarning={showTaskCreditsWarning}
         taskCreditsWarningVariant={taskCreditsWarningVariant}
         showTaskCreditsUpgrade={taskPackShowUpgrade}
