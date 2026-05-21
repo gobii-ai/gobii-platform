@@ -971,6 +971,9 @@ def _sender_is_authorized_for_request(
     request_obj: PersistentAgentHumanInputRequest,
     message: PersistentAgentMessage,
 ) -> bool:
+    if message.owner_agent_id and request_obj.agent_id != message.owner_agent_id:
+        return False
+
     sender_address = _get_message_sender_address(message)
     if not sender_address:
         return False
@@ -1021,6 +1024,7 @@ def _get_authorized_pending_requests_for_conversation(
     request_objects = (
         PersistentAgentHumanInputRequest.objects.select_related("agent", "conversation")
         .filter(
+            agent_id=message.owner_agent_id,
             conversation_id=message.conversation_id,
             status=PersistentAgentHumanInputRequest.Status.PENDING,
         )
