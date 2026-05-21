@@ -7,6 +7,7 @@ import type { SelectionShellPage } from '../components/agentChat/SelectionShellP
 import { AnalyticsEvent } from '../constants/analyticsEvents'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
+import { ImmersiveApiKeysPage } from './apiKeys/ImmersiveApiKeysPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
 import { ImmersiveProfilePage } from './profile/ImmersiveProfilePage'
@@ -30,10 +31,11 @@ type AppRoute =
   | { kind: 'secrets' }
   | { kind: 'usage' }
   | { kind: 'integrations' }
+  | { kind: 'api-keys' }
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -52,7 +54,7 @@ type ImmersiveAppProps = {
   pipedreamAppSearchUrl?: string | null
 }
 
-type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations'>
+type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
 const AGENT_SHELL_PRESERVED_QUERY_KEYS = ['embed', 'return_to'] as const
 
 function readLocation(): LocationSnapshot {
@@ -128,6 +130,10 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'integrations' }
   }
 
+  if (parts[0] === 'api-keys') {
+    return { kind: 'api-keys' }
+  }
+
   return { kind: 'not-found' }
 }
 
@@ -152,6 +158,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   }
   if (route.kind === 'integrations') {
     return 'integrations'
+  }
+  if (route.kind === 'api-keys') {
+    return 'api_keys'
   }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'agent_chat' : 'agent_new'
@@ -181,6 +190,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'integrations') {
     return '/app/integrations'
   }
+  if (route.kind === 'api-keys') {
+    return '/app/api-keys'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? '/app/agents/:id' : '/app/agents/new'
   }
@@ -209,6 +221,9 @@ function getAnalyticsTitle(route: AppRoute): string {
   if (route.kind === 'integrations') {
     return 'Integrations · Gobii'
   }
+  if (route.kind === 'api-keys') {
+    return 'API Keys · Gobii'
+  }
   if (route.kind === 'agent-chat') {
     return route.agentId ? 'Agent · Gobii' : 'New Agent · Gobii'
   }
@@ -225,7 +240,7 @@ function cleanQueryForTracking(search: string): string {
 
 function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
   const page = new URLSearchParams(search).get('shell')
-  return page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' ? page : 'agents'
+  return page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys' ? page : 'agents'
 }
 
 function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentSearch = ''): string {
@@ -238,7 +253,7 @@ function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentS
       nextParams.set(key, value)
     }
   }
-  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations') {
+  if (page === 'billing' || page === 'profile' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys') {
     nextParams.set('shell', page)
   }
   const query = nextParams.toString()
@@ -655,6 +670,10 @@ export function ImmersiveApp({
       navigateTo('/app/integrations')
       return
     }
+    if (route.kind === 'api-keys') {
+      navigateTo('/app/api-keys')
+      return
+    }
     navigateTo('/app/agents')
   }, [location.search, route])
 
@@ -681,6 +700,10 @@ export function ImmersiveApp({
     }
     if (page === 'integrations') {
       navigateTo('/app/integrations')
+      return
+    }
+    if (page === 'api-keys') {
+      navigateTo('/app/api-keys')
       return
     }
     navigateTo('/app/agents')
@@ -724,6 +747,14 @@ export function ImmersiveApp({
       return
     }
     navigateTo('/app/integrations')
+  }, [location.search, route])
+
+  const handleOpenApiKeys = useCallback(() => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, 'api-keys', location.search))
+      return
+    }
+    navigateTo('/app/api-keys')
   }, [location.search, route])
 
   const handleUpgradeModalDismiss = useCallback(() => {
@@ -793,6 +824,8 @@ export function ImmersiveApp({
                   pipedreamAppsUrl={pipedreamAppsSettingsUrl}
                   pipedreamAppSearchUrl={pipedreamAppSearchUrl}
                 />
+              ) : activeAgentShellPage === 'api-keys' ? (
+                <ImmersiveApiKeysPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
               ) : null
             }
             onSelectionPageChange={handleSelectionPageChange}
@@ -801,6 +834,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'agent-select' ? (
@@ -823,6 +857,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'billing' ? (
@@ -847,6 +882,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'profile' ? (
@@ -871,6 +907,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'secrets' ? (
@@ -895,6 +932,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'usage' ? (
@@ -919,6 +957,7 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'integrations' ? (
@@ -957,6 +996,32 @@ export function ImmersiveApp({
             onOpenProfile={handleOpenProfile}
             onOpenSecrets={handleOpenSecrets}
             onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
+          />
+        ) : null}
+        {route.kind === 'api-keys' ? (
+          <AgentChatPage
+            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
+            viewerUserId={viewerUserId}
+            viewerEmail={viewerEmail}
+            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
+            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+            onClose={embed ? handleEmbeddedClose : handleClose}
+            onCreateAgent={handleNavigateToNewAgent}
+            onAgentCreated={handleAgentCreated}
+            showContextSwitcher
+            persistContextSession={false}
+            onContextSwitch={handleContextSwitch}
+            selectionPage="api-keys"
+            selectionShellPanel={<ImmersiveApiKeysPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
+            selectionMainPanel={<ImmersiveApiKeysPage layout="main" refreshKey={selectionRefreshKey} />}
+            onSelectionPageChange={handleSelectionPageChange}
+            onOpenBilling={handleOpenBilling}
+            onOpenUsage={handleOpenUsage}
+            onOpenProfile={handleOpenProfile}
+            onOpenSecrets={handleOpenSecrets}
+            onOpenIntegrations={handleOpenIntegrations}
+            onOpenApiKeys={handleOpenApiKeys}
           />
         ) : null}
         {route.kind === 'command-center' ? (

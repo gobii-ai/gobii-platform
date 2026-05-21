@@ -920,6 +920,7 @@ export type AgentChatPageProps = {
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
   onOpenUsage?: () => void
+  onOpenApiKeys?: () => void
   onOpenProfile?: () => void
   onOpenSecrets?: () => void
   onOpenIntegrations?: () => void
@@ -971,6 +972,7 @@ export function AgentChatPage({
   onSelectionPageChange,
   onOpenBilling,
   onOpenUsage,
+  onOpenApiKeys,
   onOpenProfile,
   onOpenSecrets,
   onOpenIntegrations,
@@ -3284,7 +3286,7 @@ export function AgentChatPage({
     let returnToPath: string | undefined
     if (requiresTrialPlanSelection) {
       returnToPath = onboardingTarget === 'api_keys'
-        ? '/console/api-keys/'
+        ? '/app/api-keys'
         : '/console/agents/create/quick/'
     }
     const checkoutUrl = appendReturnTo(checkoutPath, returnToPath)
@@ -3792,6 +3794,16 @@ export function AgentChatPage({
       window.location.assign(usageUrl)
     }
   }, [onOpenUsage, usageUrl])
+  const apiKeysUrl = isImmersiveShellPath ? '/app/api-keys' : '/console/api-keys/'
+  const handleOpenApiKeys = useCallback(() => {
+    if (onOpenApiKeys) {
+      onOpenApiKeys()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(apiKeysUrl)
+    }
+  }, [apiKeysUrl, onOpenApiKeys])
   const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
   const handleOpenProfile = useCallback(() => {
     if (onOpenProfile) {
@@ -3871,11 +3883,13 @@ export function AgentChatPage({
     isProprietaryMode,
     billingUrl,
     usageUrl,
+    apiKeysUrl,
     profileUrl,
     secretsUrl,
     integrationsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
     onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
+    onOpenApiKeys: isImmersiveShellPath ? handleOpenApiKeys : null,
     onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
     onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
     onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
@@ -3898,7 +3912,9 @@ export function AgentChatPage({
     isProprietaryMode,
     isImmersiveShellPath,
     onOpenBilling,
+    handleOpenApiKeys,
     usageUrl,
+    apiKeysUrl,
     profileUrl,
     secretsUrl,
     integrationsUrl,
@@ -4299,7 +4315,7 @@ export function AgentChatPage({
     if (spawnIntent.onboarding_target !== 'api_keys') {
       return
     }
-    window.location.assign('/console/api-keys/')
+    window.location.assign('/app/api-keys')
   }, [isNewAgent, spawnFlow, spawnIntent, spawnIntentStatus])
 
   useEffect(() => {
@@ -4575,6 +4591,8 @@ export function AgentChatPage({
         onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
         sidebarUsageUrl={usageUrl}
         onOpenUsage={isImmersiveShellPath ? handleOpenUsage : undefined}
+        sidebarApiKeysUrl={apiKeysUrl}
+        onOpenApiKeys={isImmersiveShellPath ? handleOpenApiKeys : undefined}
         sidebarProfileUrl={profileUrl}
         onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
         sidebarSecretsUrl={secretsUrl}

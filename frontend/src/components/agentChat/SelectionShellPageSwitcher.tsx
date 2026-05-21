@@ -11,7 +11,7 @@ import {
   type Selection,
 } from 'react-aria-components'
 
-export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations'
+export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations' | 'api-keys'
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
@@ -20,6 +20,7 @@ export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   secrets: 'Secrets',
   usage: 'Usage',
   integrations: 'Integrations',
+  'api-keys': 'API Keys',
 }
 
 type SelectionPageOption = {
@@ -35,6 +36,7 @@ const PAGE_OPTIONS: SelectionPageOption[] = [
   { key: 'secrets', label: SELECTION_SHELL_PAGE_LABELS.secrets, icon: KeyRound },
   { key: 'usage', label: SELECTION_SHELL_PAGE_LABELS.usage, icon: BarChart3 },
   { key: 'integrations', label: SELECTION_SHELL_PAGE_LABELS.integrations, icon: ServerCog },
+  { key: 'api-keys', label: SELECTION_SHELL_PAGE_LABELS['api-keys'], icon: KeyRound },
 ]
 
 type SelectionShellPageSwitcherProps = {

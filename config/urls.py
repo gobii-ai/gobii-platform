@@ -180,6 +180,10 @@ from console.pipedream_apps_api import (
     PipedreamAppsAPIView,
     PipedreamAppSearchAPIView,
 )
+from console.api_keys_api_views import (
+    ApiKeyDetailAPIView,
+    ApiKeyListAPIView,
+)
 from console.secrets_api_views import (
     GlobalSecretListAPIView,
     GlobalSecretDetailAPIView,
@@ -621,6 +625,8 @@ urlpatterns = [
     # Global + agent secrets API
     path("console/api/secrets/", GlobalSecretListAPIView.as_view(), name="console-global-secret-list"),
     path("console/api/secrets/<uuid:secret_id>/", GlobalSecretDetailAPIView.as_view(), name="console-global-secret-detail"),
+    path("console/api/api-keys/", ApiKeyListAPIView.as_view(), name="console-api-key-list"),
+    path("console/api/api-keys/<uuid:api_key_id>/", ApiKeyDetailAPIView.as_view(), name="console-api-key-detail"),
     path(
         "console/api/system-skills/<slug:skill_key>/profiles/",
         SystemSkillProfileListAPIView.as_view(),

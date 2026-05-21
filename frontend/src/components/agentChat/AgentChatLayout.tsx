@@ -148,6 +148,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenBilling?: () => void
   sidebarUsageUrl?: string | null
   onOpenUsage?: () => void
+  sidebarApiKeysUrl?: string | null
+  onOpenApiKeys?: () => void
   sidebarProfileUrl?: string | null
   onOpenProfile?: () => void
   sidebarSecretsUrl?: string | null
@@ -327,6 +329,8 @@ export function AgentChatLayout({
   onOpenBilling,
   sidebarUsageUrl = '/console/usage/',
   onOpenUsage,
+  sidebarApiKeysUrl = '/console/api-keys/',
+  onOpenApiKeys,
   sidebarProfileUrl = '/console/profile/',
   onOpenProfile,
   sidebarSecretsUrl = '/console/secrets/',
@@ -1211,6 +1215,7 @@ export function AgentChatLayout({
     isProprietaryMode,
     billingUrl: sidebarBillingUrl,
     usageUrl: sidebarUsageUrl,
+    apiKeysUrl: sidebarApiKeysUrl,
     profileUrl: sidebarProfileUrl,
     secretsUrl: sidebarSecretsUrl,
     integrationsUrl: sidebarIntegrationsUrl,
@@ -1219,6 +1224,7 @@ export function AgentChatLayout({
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
     onOpenBilling,
     onOpenUsage,
+    onOpenApiKeys,
     onOpenProfile,
     onOpenSecrets,
     onOpenIntegrations,
@@ -1236,11 +1242,13 @@ export function AgentChatLayout({
     onSidebarNotificationsEnabledChange,
     onOpenBilling,
     onOpenUsage,
+    onOpenApiKeys,
     onOpenProfile,
     onOpenSecrets,
     onOpenIntegrations,
     sidebarBillingUrl,
     sidebarUsageUrl,
+    sidebarApiKeysUrl,
     sidebarProfileUrl,
     sidebarSecretsUrl,
     sidebarIntegrationsUrl,

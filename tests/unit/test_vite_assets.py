@@ -134,6 +134,7 @@ class AppShellAuthenticationTests(TestCase):
             "/app/agents/",
             "/app/agents/new",
             "/app/billing",
+            "/app/api-keys",
             f"/app/agents/{uuid.uuid4()}/settings",
             f"/app/agents/{uuid.uuid4()}/secrets",
             f"/app/agents/{uuid.uuid4()}/email",
@@ -227,6 +228,21 @@ class AppShellAuthenticationTests(TestCase):
         self.client.force_login(user)
 
         response = self.client.get("/app/billing")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
+        self.assertContains(response, 'id="gobii-frontend-root"')
+
+    def test_authenticated_api_keys_serves_shell(self):
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="appshell-api-keys@example.com",
+            email="appshell-api-keys@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+
+        response = self.client.get("/app/api-keys")
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response["Cache-Control"], "no-cache, must-revalidate")
