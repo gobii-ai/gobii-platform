@@ -156,7 +156,7 @@ const config = {
             label: 'Documentation',
           },
           {
-            to: '/api-reference/list-persistent-agents',
+            to: '/api-reference/gobii-api',
             label: 'API Reference',
             position: 'left',
           },
@@ -190,7 +190,7 @@ const config = {
               { label: 'Using Gobii', to: '/using-gobii' },
               { label: 'Admin and teams', to: '/admin-and-teams' },
               { label: 'Developer basics', to: '/developers/developer-basics' },
-              { label: 'API reference', to: '/api-reference/list-persistent-agents' },
+              { label: 'API reference', to: '/api-reference/gobii-api' },
               { label: 'Self-hosting', to: '/self-hosted' },
             ],
           },
