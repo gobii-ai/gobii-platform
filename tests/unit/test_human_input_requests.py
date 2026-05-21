@@ -994,6 +994,77 @@ class HumanInputRequestTests(TestCase):
         resolved.refresh_from_db()
         self.assertEqual(resolved.free_text, "Mention the risks and the launch date.")
 
+    def test_same_conversation_request_for_other_agent_stays_pending(self):
+        UserPhoneNumber.objects.create(
+            user=self.user,
+            phone_number="+15555550199",
+            is_verified=True,
+        )
+        other_browser_agent = BrowserUseAgent.objects.create(
+            user=self.user,
+            name="Other Browser Agent",
+        )
+        other_agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Other Human Input Agent",
+            charter="Collect unrelated human input.",
+            browser_use_agent=other_browser_agent,
+        )
+        shared_conversation = PersistentAgentConversation.objects.create(
+            owner_agent=other_agent,
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        other_agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=other_agent,
+            channel=CommsChannel.SMS,
+            address="+15555550100",
+            is_primary=True,
+        )
+        user_sms_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.SMS,
+            address="+15555550199",
+        )
+        prompt_message = PersistentAgentMessage.objects.create(
+            is_outbound=True,
+            from_endpoint=other_agent_endpoint,
+            to_endpoint=user_sms_endpoint,
+            owner_agent=other_agent,
+            body="Can you authorize access?",
+            raw_payload={"source": "test"},
+        )
+        other_request = PersistentAgentHumanInputRequest.objects.create(
+            agent=other_agent,
+            conversation=shared_conversation,
+            question="Can you authorize access?",
+            options_json=[],
+            input_mode=PersistentAgentHumanInputRequest.InputMode.FREE_TEXT_ONLY,
+            requested_via_channel=CommsChannel.SMS,
+            requested_message=prompt_message,
+        )
+        PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.SMS,
+            address="+15555550200",
+            is_primary=True,
+        )
+        reply = PersistentAgentMessage.objects.create(
+            is_outbound=False,
+            from_endpoint=user_sms_endpoint,
+            owner_agent=self.agent,
+            conversation=shared_conversation,
+            body="Are there any changes to the menu?",
+            raw_payload={"source": "test"},
+        )
+
+        resolved = resolve_human_input_request_for_message(reply)
+
+        self.assertIsNone(resolved)
+        other_request.refresh_from_db()
+        self.assertEqual(other_request.status, PersistentAgentHumanInputRequest.Status.PENDING)
+        self.assertEqual(other_request.free_text, "")
+        self.assertIsNone(other_request.raw_reply_message_id)
+
     @patch("api.agent.comms.human_input_requests.get_summarization_llm_config")
     @patch("api.agent.comms.human_input_requests.run_completion")
     def test_ambiguous_requests_stay_pending_when_llm_returns_no_match(
