@@ -964,6 +964,7 @@ class HomePage(TemplateView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
+        context["suppress_htmx"] = True
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 

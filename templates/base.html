@@ -67,9 +67,6 @@
   {% block early_head_styles %}{% endblock %}
 
   <script defer src="https://unpkg.com/lucide@0.546.0"></script>
-  {% if settings.GOBII_PROPRIETARY_MODE %}
-  <script async src="https://js.stripe.com/dahlia/stripe.js"></script>
-  {% endif %}
   <script>
     document.addEventListener('DOMContentLoaded', function () {
       if (window.lucide && typeof window.lucide.createIcons === 'function') {
@@ -248,87 +245,6 @@
     })();
   </script>
 
-{% if not debug and settings.MIXPANEL_PROJECT_TOKEN %}
-  <!-- Mixpanel Replay -->
-  <script type="text/javascript">
-    (function (f, b) { if (!b.__SV) { var e, g, i, h; window.mixpanel = b; b._i = []; b.init = function (e, f, c) { function g(a, d) { var b = d.split("."); 2 == b.length && ((a = a[b[0]]), (d = b[1])); a[d] = function () { a.push([d].concat(Array.prototype.slice.call(arguments, 0))); }; } var a = b; "undefined" !== typeof c ? (a = b[c] = []) : (c = "mixpanel"); a.people = a.people || []; a.toString = function (a) { var d = "mixpanel"; "mixpanel" !== c && (d += "." + c); a || (d += " (stub)"); return d; }; a.people.toString = function () { return a.toString(1) + ".people (stub)"; }; i = "disable time_event track track_pageview track links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove".split(" "); for (h = 0; h < i.length; h++) g(a, i[h]); var j = "set set_once union unset remove delete".split(" "); a.get_group = function () { function b(c) { d[c] = function () { call2_args = arguments; call2 = [c].concat(Array.prototype.slice.call(call2_args, 0)); a.push([e, call2]); }; } for ( var d = {}, e = ["get_group"].concat( Array.prototype.slice.call(arguments, 0)), c = 0; c < j.length; c++) b(j[c]); return d; }; b._i.push([e, f, c]); }; b.__SV = 1.2; e = f.createElement("script"); e.type = "text/javascript"; e.async = !0; e.src = "undefined" !== typeof MIXPANEL_CUSTOM_LIB_URL ? MIXPANEL_CUSTOM_LIB_URL : "file:" === f.location.protocol && "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js".match(/^\/\//) ? "https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js" : "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"; g = f.getElementsByTagName("script")[0]; g.parentNode.insertBefore(e, g); } })(document, window.mixpanel || []);
-
-    mixpanel.init("{{ analytics.tokens.mixpanel_project_token }}", {
-      record_sessions_percent: 1,  //records 1% of all sessions
-      record_heatmap_data: true,
-      loaded: function (mixpanel) {
-        const pollInterval = 500; // How frequently to check
-        const maxAttempts = 10; // Max times to check
-        let anonymousCheckAttempts = 0;
-        let authCheckAttempts = 0;
-
-       {% if user.is_authenticated %}
-        // If user is authenticated, identify them immediately
-        mixpanel.identify("{{ user.id }}"); //use django's user id
-       {% else %}
-          try {
-            const authCheck = setInterval(() => {
-                const segmentUser =
-                  window.analytics && typeof window.analytics.user === 'function'
-                    ? window.analytics.user()
-                    : null;
-                const segment_user_id =
-                  segmentUser && typeof segmentUser.id === 'function'
-                    ? segmentUser.id()
-                    : null;
-
-                if (segment_user_id) {
-                    mixpanel.identify(segment_user_id); //use segment's user id
-                    clearInterval(authCheck);
-                } else {
-                    authCheckAttempts++;
-                    if (authCheckAttempts >= maxAttempts) {
-                        clearInterval(authCheck);
-                        console.log('mixpanel: Max attempts reached for segment user_id');
-                    }
-                }
-            }, pollInterval);
-          } catch (e) {
-              console.error(`mixpanel: error checking for segment user_id: ${e}`);
-          }
-       {% endif %}
-
-
-        // Checking for segment device_id
-       try {
-         const anonymousCheck = setInterval(() => {
-           const segmentUser =
-             window.analytics && typeof window.analytics.user === 'function'
-               ? window.analytics.user()
-               : null;
-           const segment_device_id =
-             segmentUser && typeof segmentUser.anonymousId === 'function'
-               ? segmentUser.anonymousId()
-               : null;
-
-           if (segment_device_id) {
-             mixpanel.register({$device_id: segment_device_id}); //use segment's device_id
-             clearInterval(anonymousCheck);
-           } else {
-             anonymousCheckAttempts++;
-             if (anonymousCheckAttempts >= maxAttempts) {
-               clearInterval(anonymousCheck);
-               console.log('mixpanel: Max attempts reached for segment device_id');
-             }
-           }
-         }, pollInterval);
-       } catch (e) {
-         console.error(`mixpanel: error checking for segment device_id: ${e}`);
-       }
-
-        // Checking for segment user_id
-
-      }
-    });
-  </script>
-  <!-- End Mixpanel Replay -->
-{% endif %}
-
   {% if environment.is_production and settings.META_PIXEL_ID %}
   <!-- Meta Pixel Code -->
   <script>
@@ -404,10 +320,10 @@
   <!-- Preline -->
   <script defer src="https://cdn.jsdelivr.net/npm/preline@latest/dist/preline.min.js"></script>
 
+  {% if not suppress_htmx %}
   <script defer>
     // This script block handles the re-initialization of Preline components
     // after HTMX swaps content into the DOM.
-
     document.addEventListener('DOMContentLoaded', () => {
       if (typeof htmx !== 'undefined') {
         // Use a direct event listener for 'htmx:load' on document.body,
@@ -426,6 +342,7 @@
       }
     });
   </script>
+  {% endif %}
 
   <!-- Global event to close all mobile navs before navigation or caching -->
   <script>
@@ -465,11 +382,7 @@
   <script src="{% static 'js/cta_signup_modal.js' %}" defer></script>
   <script src="{% static 'js/cta_tracking.js' %}" defer></script>
   <script src="{% static 'js/signup_tracking.js' %}" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js" defer></script>
-  <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
-
   <style type="text/css">
-
     .htmx-indicator {
       width: 0;           /* matches spinner dimensions */
       height: 0;
@@ -519,9 +432,89 @@
   <!-- block for head_extras -->
   {% block head_extras %}{% endblock %}
 
+  {% if not suppress_htmx %}
   {% htmx_script %}
+  {% endif %}
+  {% if not debug and settings.MIXPANEL_PROJECT_TOKEN %}
+  <!-- Mixpanel Replay -->
+  <script type="text/javascript">
+    (function (f, b) { if (!b.__SV) { var e, g, i, h; window.mixpanel = b; b._i = []; b.init = function (e, f, c) { function g(a, d) { var b = d.split("."); 2 == b.length && ((a = a[b[0]]), (d = b[1])); a[d] = function () { a.push([d].concat(Array.prototype.slice.call(arguments, 0))); }; } var a = b; "undefined" !== typeof c ? (a = b[c] = []) : (c = "mixpanel"); a.people = a.people || []; a.toString = function (a) { var d = "mixpanel"; "mixpanel" !== c && (d += "." + c); a || (d += " (stub)"); return d; }; a.people.toString = function () { return a.toString(1) + ".people (stub)"; }; i = "disable time_event track track_pageview track links track_forms track_with_groups add_group set_group remove_group register register_once alias unregister identify name_tag set_config reset opt_in_tracking opt_out_tracking has_opted_in_tracking has_opted_out_tracking clear_opt_in_out_tracking start_batch_senders people.set people.set_once people.unset people.increment people.append people.union people.track_charge people.clear_charges people.delete_user people.remove".split(" "); for (h = 0; h < i.length; h++) g(a, i[h]); var j = "set set_once union unset remove delete".split(" "); a.get_group = function () { function b(c) { d[c] = function () { call2_args = arguments; call2 = [c].concat(Array.prototype.slice.call(call2_args, 0)); a.push([e, call2]); }; } for ( var d = {}, e = ["get_group"].concat( Array.prototype.slice.call(arguments, 0)), c = 0; c < j.length; c++) b(j[c]); return d; }; b._i.push([e, f, c]); }; b.__SV = 1.2; e = f.createElement("script"); e.type = "text/javascript"; e.async = !0; e.src = "undefined" !== typeof MIXPANEL_CUSTOM_LIB_URL ? MIXPANEL_CUSTOM_LIB_URL : "file:" === f.location.protocol && "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js".match(/^\/\//) ? "https://cdn.mxpnl.com/libs/mixpanel-2-latest.min.js" : "//cdn.mxpnl.com/libs/mixpanel-2-latest.min.js"; g = f.getElementsByTagName("script")[0]; g.parentNode.insertBefore(e, g); } })(document, window.mixpanel || []);
+
+    mixpanel.init("{{ analytics.tokens.mixpanel_project_token }}", {
+      record_sessions_percent: 1,  //records 1% of all sessions
+      record_heatmap_data: true,
+      loaded: function (mixpanel) {
+        const pollInterval = 500; // How frequently to check
+        const maxAttempts = 10; // Max times to check
+        let anonymousCheckAttempts = 0;
+        let authCheckAttempts = 0;
+
+       {% if user.is_authenticated %}
+        // If user is authenticated, identify them immediately
+        mixpanel.identify("{{ user.id }}"); //use django's user id
+       {% else %}
+          try {
+            const authCheck = setInterval(() => {
+                const segmentUser =
+                  window.analytics && typeof window.analytics.user === 'function'
+                    ? window.analytics.user()
+                    : null;
+                const segment_user_id =
+                  segmentUser && typeof segmentUser.id === 'function'
+                    ? segmentUser.id()
+                    : null;
+
+                if (segment_user_id) {
+                    mixpanel.identify(segment_user_id); //use segment's user id
+                    clearInterval(authCheck);
+                } else {
+                    authCheckAttempts++;
+                    if (authCheckAttempts >= maxAttempts) {
+                        clearInterval(authCheck);
+                        console.log('mixpanel: Max attempts reached for segment user_id');
+                    }
+                }
+            }, pollInterval);
+          } catch (e) {
+              console.error(`mixpanel: error checking for segment user_id: ${e}`);
+          }
+       {% endif %}
+
+        // Checking for segment device_id
+       try {
+         const anonymousCheck = setInterval(() => {
+           const segmentUser =
+             window.analytics && typeof window.analytics.user === 'function'
+               ? window.analytics.user()
+               : null;
+           const segment_device_id =
+             segmentUser && typeof segmentUser.anonymousId === 'function'
+               ? segmentUser.anonymousId()
+               : null;
+
+           if (segment_device_id) {
+             mixpanel.register({$device_id: segment_device_id}); //use segment's device_id
+             clearInterval(anonymousCheck);
+           } else {
+             anonymousCheckAttempts++;
+             if (anonymousCheckAttempts >= maxAttempts) {
+               clearInterval(anonymousCheck);
+               console.log('mixpanel: Max attempts reached for segment device_id');
+             }
+           }
+         }, pollInterval);
+       } catch (e) {
+         console.error(`mixpanel: error checking for segment device_id: ${e}`);
+       }
+
+        // Checking for segment user_id
+      }
+    });
+  </script>
+  <!-- End Mixpanel Replay -->
+  {% endif %}
 </head>
-<body class="antialiased bg-white text-slate-800" hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}' data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' or request.path|slice:':10' == '/accounts/' or request.path == '/pricing/' %}true{% else %}false{% endif %}">
+<body class="antialiased bg-white text-slate-800"{% if not suppress_htmx %} hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'{% endif %} data-analytics-cta-event="{{ analytics.events.CTA_CLICKED }}" data-analytics-cta-tracking-enabled="{% if request.path == '/' or request.path|slice:':11' == '/solutions/' or request.path|slice:':10' == '/accounts/' or request.path == '/pricing/' %}true{% else %}false{% endif %}">
   {% if llm_bootstrap_required %}
     <div class="bg-amber-100 text-amber-900 border-b border-amber-300">
       <div class="max-w-7xl mx-auto px-4 py-3 text-sm">
@@ -605,7 +598,6 @@
 
   {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and settings.REWARDFUL_ID %}
   <script>
-
     rewardful('ready', function() {
       if(Rewardful.referral) {
         document.cookie = "rewardful-referral=" + Rewardful.referral + "; path=/; max-age=" + (60 * 60 * 24 * 30);
@@ -614,7 +606,11 @@
   </script>
   {% endif %}
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/libphonenumber-js/1.12.9/libphonenumber-js.min.js" defer></script>
+  <script type="text/javascript" src="{% static 'js/phone_format.js' %}" defer></script>
+
   {# Allow pages to inject additional scripts after the global includes. #}
   {% block extra_js %}{% endblock %}
+  {% if settings.GOBII_PROPRIETARY_MODE %}<script async src="https://js.stripe.com/dahlia/stripe.js"></script>{% endif %}
 </body>
 </html>
