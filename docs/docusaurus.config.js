@@ -3,6 +3,7 @@ const darkCodeTheme = require('prism-react-renderer').themes.dracula;
 
 const siteUrl = process.env.DOCS_SITE_URL || 'https://docs.gobii.ai';
 const socialImage = `${siteUrl}/images/gobii-fish-with-text-dark-purple.png`;
+const gtagTrackingId = process.env.DOCS_GTAG_TRACKING_ID;
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -63,6 +64,14 @@ const config = {
         theme: {
           customCss: require.resolve('./src/css/custom.css'),
         },
+        ...(gtagTrackingId
+          ? {
+              gtag: {
+                trackingID: gtagTrackingId,
+                anonymizeIP: true,
+              },
+            }
+          : {}),
         sitemap: {
           changefreq: 'weekly',
           priority: 0.7,

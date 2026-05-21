@@ -6,7 +6,9 @@ RUN npm ci
 
 COPY . .
 ARG DOCS_SITE_URL=https://docs.gobii.ai
+ARG DOCS_GTAG_TRACKING_ID
 ENV DOCS_SITE_URL=$DOCS_SITE_URL
+ENV DOCS_GTAG_TRACKING_ID=$DOCS_GTAG_TRACKING_ID
 RUN npm run build
 
 FROM nginxinc/nginx-unprivileged:1.27-alpine
