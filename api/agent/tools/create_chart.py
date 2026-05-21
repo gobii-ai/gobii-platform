@@ -318,7 +318,7 @@ def get_create_chart_tool() -> Dict[str, Any]:
                 "and results become chart data. Column names in your SELECT become the keys for x/y/values/labels. "
                 "Types: bar, horizontal_bar, stacked_bar, line, area, stacked_area, pie, donut, scatter. "
                 "For pie/donut: use 'values' and 'labels'. For others: use 'x' and 'y' (y can be a list for multi-series). "
-                "Returns `file`, `inline`, `inline_html`, and `attach` with variable placeholders—use them directly."
+                "Returns `file`, `inline`, `inline_html`, `attach`; for chat paste inline/HTML; do not read chart files."
             ),
             "parameters": {
                 "type": "object",

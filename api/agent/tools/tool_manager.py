@@ -1093,22 +1093,16 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
 
 
 def _normalize_mcp_tool_name(tool_name: str, catalog: Dict[str, "ToolCatalogEntry"]) -> Optional[str]:
-    """Try to find a matching MCP tool name using fuzzy matching.
-
-    Handles common LLM mistakes like:
-    - mcp_bright_data_... vs mcp_brightdata_...
-    - Extra underscores in server names
-    """
     if not tool_name.startswith("mcp_"):
         return None
 
-    # Try normalizing by removing underscores from the server name portion
-    # mcp_bright_data_tool -> mcp_brightdata_tool
     normalized = tool_name.replace("mcp_bright_data_", "mcp_brightdata_")
     if normalized in catalog:
         return normalized
+    legacy_brightdata = normalized.replace("mcp_brightdata_linkedin_", "mcp_brightdata_web_data_linkedin_", 1)
+    if legacy_brightdata != normalized and legacy_brightdata in catalog:
+        return legacy_brightdata
 
-    # Try finding a tool that matches when we normalize both names
     tool_name_collapsed = tool_name.replace("_", "").lower()
     for candidate in catalog:
         if candidate.replace("_", "").lower() == tool_name_collapsed:
@@ -1291,10 +1285,8 @@ def execute_enabled_tool(
     if not entry:
         return {"status": "error", "message": f"Tool '{tool_name}' is not available"}
 
-    # Use the resolved tool name (may differ from input if normalized)
     resolved_name = entry.full_name
 
-    # Coerce params to match expected types (handles LLM passing "true" instead of true, etc.)
     params = _coerce_params_to_schema(params, entry.parameters)
 
     # Block sqlite execution for ineligible agents (even if previously enabled)

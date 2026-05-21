@@ -460,6 +460,9 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. "
             "Make the tool reusable with runtime parameters for source inputs/tables, destination outputs/tables, "
             "dates/status/minimums/batch limits when relevant; when you run it, pass concrete representative values. "
+            "Candidate domains/URLs/tables must be explicit runtime inputs, and any batch/limit/cursor design must "
+            "return remaining_work or next_cursor. Side-effect simulations must make completed writes and read-only "
+            "verification unambiguous. "
             "Simulate any external side effects that would normally happen."
         )
 
@@ -521,20 +524,25 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         create_time = getattr(create_step, "created_at", None)
         candidates: list[tuple[str, Any]] = []
         for tool_call in tool_calls:
-            if tool_call.tool_name != "create_file":
+            if tool_call.tool_name not in {"create_custom_tool", "create_file"}:
                 continue
             step = getattr(tool_call, "step", None)
             call_time = getattr(step, "created_at", None)
             if create_time is not None and call_time is not None and call_time > create_time:
                 continue
             call_params = tool_call.tool_params or {}
-            decoded_result = cls._decoded_tool_result(tool_call.result)
-            call_result = decoded_result if isinstance(decoded_result, dict) else {}
-            file_path = call_params.get("file_path") or call_params.get("path")
-            result_ref = call_result.get("file") or call_result.get("attach")
-            if file_path != source_path and result_ref != f"$[{source_path}]":
-                continue
-            content = call_params.get("content")
+            if tool_call.tool_name == "create_custom_tool":
+                if tool_call == create_call or call_params.get("source_path") != source_path:
+                    continue
+                content = call_params.get("source_code")
+            else:
+                decoded_result = cls._decoded_tool_result(tool_call.result)
+                call_result = decoded_result if isinstance(decoded_result, dict) else {}
+                file_path = call_params.get("file_path") or call_params.get("path")
+                result_ref = call_result.get("file") or call_result.get("attach")
+                if file_path != source_path and result_ref != f"$[{source_path}]":
+                    continue
+                content = call_params.get("content")
             if isinstance(content, str) and content.strip():
                 candidates.append((content, call_time))
 

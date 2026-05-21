@@ -13,6 +13,10 @@ from api.evals.scenarios.custom_tool_result_contract import (
     CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
     CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
 )
+from api.evals.scenarios.sqlite_tool_results import (
+    SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
+    SQLITE_TOOL_RESULT_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -63,6 +67,11 @@ register_builtin_suites(
             slug=CUSTOM_TOOL_RESULT_CONTRACT_SUITE_SLUG,
             description="Small custom-tool result contract evals based on real agent trajectory failures.",
             scenario_slugs=CUSTOM_TOOL_RESULT_CONTRACT_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=SQLITE_TOOL_RESULT_SUITE_SLUG,
+            description="SQLite/tool-result synthesis evals for aggregate queries and working tables.",
+            scenario_slugs=SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
         ),
     ]
 )

@@ -10,6 +10,7 @@ from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.core.event_processing import (
+    _contact_permission_params_from_misrouted_human_input,
     _process_agent_events_locked,
     _is_warning_status,
     _looks_like_blocking_human_input_request,
@@ -26,7 +27,7 @@ from api.agent.peer_comm import PeerMessagingError
 from api.agent.tools.peer_dm import execute_send_agent_message
 from api.agent.tools.tool_manager import _normalize_tool_params_unicode_escapes
 from api.agent.tools.web_chat_sender import _looks_like_routine_progress_message
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep
+from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentSystemStep, SmsContactPurpose
 from util.urls import build_agent_detail_url, build_site_url
 
 
@@ -204,6 +205,21 @@ class ToolParamParsingTests(SimpleTestCase):
             )
         )
 
+    def test_misrouted_sms_approval_question_becomes_contact_permission(self):
+        agent = SimpleNamespace(
+            planning_state=PersistentAgent.PlanningState.COMPLETED,
+            is_recipient_whitelisted=lambda _channel, _address: False,
+        )
+        result = _contact_permission_params_from_misrouted_human_input(
+            agent,
+            {"question": "Do you want me to text +15555550123 that the build finished successfully?"},
+        )
+        contact = result["contacts"][0]
+        self.assertEqual(contact["channel"], "sms")
+        self.assertEqual(contact["address"], "+15555550123")
+        self.assertEqual(contact["purpose"], "Send requested message")
+        self.assertEqual(contact["sms_contact_purpose"], SmsContactPurpose.OTHER_OPERATIONAL)
+
 
 @tag("batch_event_processing")
 class WebChatProgressSuppressionTests(SimpleTestCase):
@@ -249,6 +265,31 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             _looks_like_routine_progress_message(
                 "The search result I got back looks fabricated - generic company names and fake job IDs. "
                 "Let me actually search real job boards for current listings."
+            )
+        )
+
+    def test_suppresses_acknowledged_search_result_status(self):
+        progress_only = (
+            "Good, I have the search results identifying YC Winter 2026 as the latest batch.",
+            "Great, I've got the data. Let me update the charter and schedule, then report back.",
+            "The last step was incomplete - the query results were fetched but never formatted. Let me fix that now",
+            "All four sources are fetched. Now I'll run the clean aggregate query.",
+            "The data is in. Let me run the final analysis query and deliver the recommendation",
+            "The `plan_candidates` table is populated with 8 rows. Now let me query it for the best plan.",
+        )
+        final_answers = (
+            "All four pages are scraped and the comparison query is done. Here's the analysis:\n\n## Support Automation Platform Comparison\n\n**Source pages:**",
+            "I have all four source texts. Let me analyze the claims.\n\n**Claims extracted:**\n| Source | Claim |",
+        )
+        for message in progress_only:
+            self.assertTrue(_looks_like_routine_progress_message(message))
+        for message in final_answers:
+            self.assertFalse(_looks_like_routine_progress_message(message))
+
+    def test_suppresses_first_check_progress(self):
+        self.assertTrue(
+            _looks_like_routine_progress_message(
+                "I need to read the current file, then update it to make `input_urls` and `output_table` required params."
             )
         )
 

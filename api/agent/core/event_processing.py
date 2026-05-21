@@ -143,6 +143,7 @@ from ..tools.tool_manager import (
     execute_enabled_tool,
     auto_enable_heuristic_tools,
     get_parallel_safe_tool_rejection_reason,
+    resolve_tool_entry,
     should_skip_auto_substitution,
 )
 from ...services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blacklist_error
@@ -161,6 +162,7 @@ from ..comms.human_input_requests import (
     attach_originating_step_from_result,
 )
 from ...models import (
+    CommsChannel,
     PersistentAgent,
     PersistentAgentMessage,
     PersistentAgentStep,
@@ -169,6 +171,7 @@ from ...models import (
     PersistentAgentSystemStep,
     PersistentAgentToolCall,
     PersistentAgentPromptArchive,
+    SmsContactPurpose,
 )
 from api.services.tool_settings import get_tool_settings_for_owner
 from api.services.system_settings import get_max_parallel_tool_calls
@@ -217,6 +220,10 @@ RESULT_LOG_MAX_CHARS = 500
 AUTO_SLEEP_FLAG = "auto_sleep_ok"
 TOOL_ERROR_MESSAGE_MAX_BYTES = 800
 TOOL_ERROR_DETAIL_MAX_BYTES = 1500
+_EMAIL_ADDRESS_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.I)
+_E164_PHONE_CANDIDATE_RE = re.compile(r"\+\d[\d\s().-]{6,}\d")
+_CONTACT_APPROVAL_TERMS = ("do you want", "want me", "should i", "may i", "can i", "ok to", "okay to", "permission", "approve", "confirm", "authorize")
+_CONTACT_SEND_TERMS = ("text", "sms", "email", "e-mail", "message", "contact")
 TOOL_ERROR_TYPE_MAX_BYTES = 120
 PREFERRED_PROVIDER_MAX_AGE = timedelta(hours=1)
 MESSAGE_TOOL_NAMES = set(DAILY_LIMIT_MESSAGE_TOOL_NAMES)
@@ -733,16 +740,12 @@ def _has_stop_hint_signal(text: str) -> bool:
 
 
 def _should_infer_message_tool_continuation(message_text: str) -> bool:
-    """Infer continuation for explicit message tools when flag is omitted.
-
-    This is intentionally conservative:
-    - Continue only on strong continuation language.
-    - Never continue on completion/defer hints.
-    - Never continue when asking the user a question (usually waiting on input).
-    """
-    if not message_text:
+    if not message_text or "?" in message_text:
         return False
-    if "?" in message_text:
+    lower_text = message_text.lower()
+    if "$[/" in message_text or "<img" in lower_text or "![](" in message_text:
+        return False
+    if len(message_text) > 500 and any(marker in lower_text for marker in ("http://", "https://", "**", "###", "source ")):
         return False
     if _has_completion_signal(message_text):
         return False
@@ -1917,6 +1920,45 @@ def _strip_linkified_url_artifact(value: str) -> str:
     return text
 
 
+def _contact_permission_params_from_misrouted_human_input(
+    agent: PersistentAgent,
+    tool_params: Dict[str, Any],
+) -> Dict[str, Any] | None:
+    text = str(tool_params.get("question") or "").strip()
+    lowered = text.lower()
+    if (
+        agent.planning_state == PersistentAgent.PlanningState.PLANNING
+        or tool_params.get("requests")
+        or tool_params.get("options")
+        or not any(term in lowered for term in _CONTACT_APPROVAL_TERMS)
+        or not any(term in lowered for term in _CONTACT_SEND_TERMS)
+    ):
+        return None
+
+    email_match = _EMAIL_ADDRESS_RE.search(text)
+    phone_match = next((phone for match in _E164_PHONE_CANDIDATE_RE.finditer(text) if 8 <= len(phone := re.sub(r"\D", "", match.group(0))) <= 15), None)
+    if email_match:
+        channel, address = CommsChannel.EMAIL, email_match.group(0).lower()
+    elif phone_match:
+        channel, address = CommsChannel.SMS, f"+{phone_match}"
+    else:
+        return None
+
+    if agent.is_recipient_whitelisted(channel, address):
+        return None
+
+    contact = {
+        "channel": channel,
+        "address": address,
+        "purpose": "Send requested message",
+        "reason": "The user asked the agent to contact this recipient; approval is needed before the outbound message can be sent.",
+    }
+    if channel == CommsChannel.SMS:
+        contact["sms_contact_purpose"] = SmsContactPurpose.OTHER_OPERATIONAL
+        contact["sms_contact_purpose_details"] = "Operational message requested by the user."
+    return {"contacts": [contact]}
+
+
 def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name == "mcp_brightdata_scrape_as_markdown" and isinstance(tool_params.get("url"), str):
         normalized_params = dict(tool_params)
@@ -1933,6 +1975,11 @@ def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[
     normalized_params = dict(tool_params)
     normalized_params["url"] = normalized_url
     return normalized_params
+
+
+def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -> str:
+    entry = resolve_tool_entry(agent, tool_name) if isinstance(tool_name, str) and tool_name.startswith("mcp_") else None
+    return entry.full_name if entry else tool_name
 
 
 def _http_request_dedupe_signature(tool_params: Dict[str, Any]) -> Optional[str]:
@@ -2424,6 +2471,17 @@ def _prepare_tool_batch(
                     )
                     followup_required = True
                     break
+                contact_permission_params = _contact_permission_params_from_misrouted_human_input(
+                    agent,
+                    tool_params,
+                )
+                if contact_permission_params is not None:
+                    logger.info(
+                        "Agent %s: routing contact approval question to request_contact_permission.",
+                        agent.id,
+                    )
+                    tool_name = "request_contact_permission"
+                    tool_params = contact_permission_params
 
             if tool_name == "update_plan":
                 skipped_plan_result = build_redundant_research_plan_skip_result(agent, tool_params)
@@ -2450,6 +2508,9 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
+            if (normalized_tool_name := _normalize_tool_name_for_execution(agent, tool_name)) != tool_name:
+                logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
+                tool_name = normalized_tool_name
             tool_params = _normalize_tool_params(tool_name, tool_params)
             explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
             inferred_continue = False

@@ -64,18 +64,11 @@ def get_secure_credentials_request_tool() -> dict:
         "function": {
             "name": "secure_credentials_request",
             "description": (
-                "Request secure credentials from the user ONLY when you will IMMEDIATELY use them with `http_request` (API keys/tokens) "
-                "or `spawn_web_task` (classic username/password website login). Do NOT use this tool for MCP tools (e.g., Google Sheets, Slack); "
-                "for MCP tools, call the tool first—if it returns 'action_required' with a connect/auth link, surface that link to the user and wait. "
-                "Use secret_type='credential' for domain-scoped placeholders, or secret_type='env_var' for sandbox environment variables. "
-                "env_var secrets are appropriate when a custom tool script, python_exec snippet, run_command, or MCP server needs an API key/token, "
-                "and scripts can read them from os.environ. If a custom tool, python_exec snippet, run_command, or MCP server will read the secret "
-                "from os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
-                "You typically will want the domain to be broad enough to support multiple login domains, e.g. *.google.com, or *.reddit.com instead of ads.reddit.com. "
-                "IT WILL RETURN URL(S). ALWAYS MESSAGE THE USER WITH THE CORRECT ONE: "
-                "- For new/pending requests, send the credentials-request URL so they can enter the requested secret(s). "
-                "- For re-requests of existing credentials, use the update/secrets URL so they can update the existing secret value. "
-                "Be explicit about which action you need (enter new vs update existing)."
+                "Request credentials only when you will immediately use them with http_request/API, spawn_web_task login, "
+                "or sandbox code. Do not use for MCP OAuth tools; call the MCP tool and surface its auth link. "
+                "Use secret_type='credential' with domain_pattern for website placeholders. "
+                "If a custom tool script, python_exec, run_command, or MCP server reads os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
+                "Broad domains are usually better, e.g. *.google.com. It returns URL(s); message the user with the credential-entry URL for new requests or update/secrets URL for existing ones."
             ),
             "parameters": {
                 "type": "object",
@@ -85,21 +78,21 @@ def get_secure_credentials_request_tool() -> dict:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "name": {"type": "string", "description": "Human-readable name for the credential."},
-                                "description": {"type": "string", "description": "Description of what this credential is used for."},
-                                "key": {"type": "string", "description": "Unique key identifier for this credential (e.g., 'api_key', 'username')."},
-                                "domain_pattern": {"type": "string", "description": "Domain pattern for credential secrets. Required for credential; omit it for env_var."},
+                                "name": {"type": "string", "description": "Human-readable credential name."},
+                                "description": {"type": "string", "description": "What this credential is used for."},
+                                "key": {"type": "string", "description": "Unique key, e.g. api_key or username."},
+                                "domain_pattern": {"type": "string", "description": "Required for credential; omit it for env_var."},
                                 "secret_type": {
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
-                                    "description": "Optional. credential (default) for domain-scoped secrets, env_var for global sandbox env vars. "
-                                                   "If a custom tool, python_exec, run_command, or MCP server will read os.environ, this MUST be env_var. "
+                                    "description": "credential for domain-scoped secrets; env_var for os.environ. "
+                                                   "If sandbox code reads it, this MUST be env_var. "
                                                    "env_var secrets are used for MCP servers, run_command, python_exec, and custom tool scripts via os.environ.",
                                 },
                             },
                             "required": ["name", "description", "key"]
                         },
-                        "description": "List of credentials to request from the user."
+                        "description": "Credentials to request."
                     }
                 },
                 "required": ["credentials"],

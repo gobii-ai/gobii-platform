@@ -2178,6 +2178,13 @@ class MessageContinuationInferenceTests(TestCase):
             )
         )
 
+    def test_infer_continuation_false_for_inline_chart_delivery(self):
+        self.assertFalse(
+            ep._should_infer_message_tool_continuation(
+                "Let me send it here.\n\n<img src='$[/charts/signups_line.svg]'>"
+            )
+        )
+
     def test_infer_continuation_false_for_waiting_acknowledgement(self):
         self.assertFalse(
             ep._should_infer_message_tool_continuation(

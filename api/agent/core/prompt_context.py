@@ -95,6 +95,7 @@ from ..tools.sqlite_state import (
     get_sqlite_digest_prompt,
     get_sqlite_schema_prompt,
 )
+from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import (
     CREATE_IMAGE_TOOL_NAME,
@@ -514,263 +515,36 @@ def _get_unified_history_limits(agent: PersistentAgent) -> tuple[int, int]:
 def _get_sqlite_examples() -> str:
     """Return modular patterns for data retrieval, storage, and analysis."""
     return """
-## Two Brains, One Workflow
-
-**SQLite** handles precision: queries, math, joins, persistence across turns.
-**You** handle fuzziness: judgment, synthesis, narrative.
-
----
-
 ## Tool Calls vs SQL Queries
-
-**To get information → Call the tool.** Don't query __tool_results to find data you don't have—call the tool that gets it.
-
-```
-need(data) → call_tool → have(result)           # RIGHT
-need(data) → SELECT FROM __tool_results → ???   # WRONG (data isn't there yet)
-```
-
-**User asks to query SQLite/database/tables → call sqlite_batch.** Do not answer from schema listings or prompt-context snapshots alone; schema proves shape, not result data.
-
-**SQLite is for exploring large results you already have.** When a tool returns thousands of rows or a complex structure, query it. When the result is small enough to read, just read it.
-
-```
-have(large_result) → sqlite_batch(extract/filter/aggregate) → insight   # RIGHT
-have(small_result) → read it directly → insight                         # RIGHT
-have(small_result) → sqlite_batch(SELECT...)                            # WASTEFUL
-```
-
-**__tool_results is a snapshot, not a live feed.** Rows only change when you make a NEW tool call or when a completed browser task wakes you and adds a `spawn_web_task_result` row. Don't poll __tool_results/__files waiting for browser task completion before that wake-up. If a tool says "try again in 30s", call the tool again—don't re-query the same result_id expecting it to update.
-
----
-
+To get new data, call the right tool. Query SQLite only for data already present. User asks to query SQLite/database/tables → call sqlite_batch; schema proves shape, not result data. Small result contains the answer → answer directly. Large/complex result → use SQLite for extraction, filtering, joins, math, or chart inputs. __tool_results is a snapshot, not a live feed: a completed browser task wakes you and adds a `spawn_web_task_result` row. Don't poll __tool_results/__files waiting for browser task completion before that wake-up.
 ## Query Rules
-
-**You will hallucinate column names.** You will guess paths. You will "remember" field names that don't exist. This causes SQL errors. Every identifier must trace to something you actually saw.
-
+Copy identifiers from schema, hints, tool results, or your own CREATE statements; never invent table names, column names, JSON paths, result_ids, URLs, or WHERE values.
 ```
-# Foundation: verify before use
-use(X) → verified(X)
-verified(X) → seen(X) ∈ {schema, hint, result, own_CREATE, inspection}
-¬verified(X) → inspect | query_schema | read_hint | error
-never: use(assumed) | use(remembered) | use(guessed)
-guess(identifier) → error   # you ARE about to get "no such column"
-
-# Simple queries win. Fancy queries break.
-# Only use two-step patterns when structure is truly unknown.
-unknown(structure) → step1: inspect → step2: use(inspected)
-sqlite_batch(sql="
-  SELECT is_json, top_keys, substr(result_text, 1, 8000)
-  FROM __tool_results WHERE result_id='{id}'")   # step1: inspect shape
-# if is_json=1 → extract from result_json with json_extract/json_each
-# if is_json=0 → extract from result_text with regexp_extract/grep
-one_result_id = one_sqlite_batch   # never query same result_id in separate calls
-budget ~10k chars total per batch   # don't look through a straw—get enough context in one call
-TEMP TABLE = gone next call   # TEMP tables vanish after each sqlite_batch; use CREATE TABLE (no TEMP)
-
-# Persist intermediate results with CREATE TABLE AS SELECT:
-CREATE TABLE my_data AS SELECT json_extract(...) FROM __tool_results WHERE result_id='abc';
-# → my_data persists; query it in future calls
-
-# Identifiers: copy, never construct
-result_id    → copy_verbatim(tool_result.result_id)
-json_path    → copy_verbatim(hint.path)           # $.content.hits ≠ $.hits
-field_name   → copy_verbatim(hint.fields)         # points ≠ point
-table_name   → copy_verbatim(schema | own_CREATE)
-column_name  → copy_verbatim(schema | own_CREATE)
-transform(identifier) → error                      # no pluralize, no case change
-
+multiple_results → one sqlite_batch over IN/tool_name + CTE/json_each
+working_table → CREATE TABLE extracted AS SELECT ...; query it later
+avoid → one result_text fetch per source
+unknown structure → inspect once with substr(result_text,1,8000), is_json, top_keys
+one_result_id = one_sqlite_batch
+TEMP TABLE = gone next call; use CREATE TABLE for durable working data
+```
 # __tool_results (special table)
-__tool_results.columns = {result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes}
-access_result → WHERE result_id = '{exact_id_from_result}'
-result_text   → always populated (use this to inspect unknown/plain-text outputs)
-result_json   → populated when is_json=1 (prefer this for json_extract/json_each extraction)
-analysis_json → optional hints (not the data)
-if is_json=1  → extract from result_json before falling back to regexp_extract(result_text)
-scrape_as_markdown → prefer json_extract(result_json,'$.result') when you want the original markdown field; result_text may already be flattened to that markdown for easier grep/substr work
-do not invent columns; only use those listed above
-
+columns: result_id, tool_name, created_at, result_json, result_text, analysis_json, bytes, line_count, is_json, json_type, top_keys, is_truncated, truncated_bytes. result_text is always populated; result_json is preferred when is_json=1; analysis_json is hints, not the data. scrape_as_markdown → prefer json_extract(result_json,'$.result') for original markdown. do not invent columns; only use those listed above.
 # __messages (special table)
-__messages.columns = {message_id, seq, timestamp, channel, is_outbound, direction, from_address, to_address, conversation_id, conversation_address, is_peer_dm, peer_agent_id, subject, body, body_bytes, body_is_truncated, body_truncated_bytes, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_code, latest_error_message, is_hidden_in_chat}
-message_id → internal Gobii message id; pass this exact value to send_email.reply_to_message_id
-attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json)
-rejected_attachments_json → JSON array of inbound attachments that were attempted but rejected before storage
-freshness_check → do NOT query __messages for "anything new"; new inbound messages are already injected into this run's unified history
-use_case → query __messages only for structured analysis, filtering/aggregation, or historical lookup
-__messages is per-cycle snapshot: newest→oldest full bodies up to ~5MB total; dropped before persistence
-
+columns include message_id, seq, timestamp, channel, is_outbound, from_address, to_address, subject, body, body_bytes, body_is_truncated, attachment_paths_json, attachment_count, rejected_attachments_json, latest_status, latest_sent_at, latest_delivered_at, latest_error_message. message_id is the internal Gobii id accepted by send_email.reply_to_message_id. attachments → SELECT message_id, value AS path FROM __messages, json_each(attachment_paths_json). Use __messages only for structured analysis/history, not freshness checks.
 # __files (special table; metadata only)
-__files.columns = {node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at}
-recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30
-find_file_by_path → SELECT * FROM __files WHERE path='/exports/report.csv'
-list_export_files → SELECT path, size_bytes FROM __files WHERE path LIKE '/exports/%' ORDER BY updated_at DESC
-__files is per-cycle snapshot of recent files in the default filespace; metadata only (no file contents)
-
+columns: node_id, filespace_id, path, name, parent_path, mime_type, size_bytes, checksum_sha256, created_at, updated_at. recent_files → SELECT * FROM __files ORDER BY updated_at DESC LIMIT 30. metadata only; use read_file for contents.
 # JSON: path from hint, field from hint
-hint shows "PATH: $.data.items" → json_each(result_json, '$.data.items')
-hint shows "FIELDS: name, url"  → json_extract(r.value, '$.name'), json_extract(r.value, '$.url')
-hint absent → query first: SELECT substr(result_text, 1, 8000) FROM __tool_results WHERE result_id='...'
-
-# result_meta hints (read BEFORE querying)
-🔍 line shows "→ https://..." → use that URL directly (no extraction needed!)
-DIGEST shows parsed_from/fields → those are the correct paths
-CHECK hints FIRST → saves queries and avoids regex escaping errors
-
+hint PATH $.data.items → json_each(result_json, '$.data.items'). hint FIELDS name,url → json_extract(r.value, '$.name'), json_extract(r.value, '$.url'). hint absent → inspect result_text/result_json first.
 ## CSV Parsing
-inspect before parsing: read enough result_text to confirm delimiter/header shape, then csv_headers(result_text), csv_parse(result_text), and exact header names from path_from_hint when provided.
-If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous.
+inspect before parsing: read enough result_text to confirm delimiter/header shape, then csv_headers(result_text), csv_parse(result_text), and exact header names from path_from_hint when provided. If an API/tool error explicitly names a missing parameter, patch that parameter and retry before broad search unless the error is ambiguous.
 For nearby text evidence, use enough context:
 grep_context_all(
         json_extract(result_json,'$.excerpt'), '<pattern>', 120, 12)
 If still unclear, try wider context (200 chars) before inventing a field or claim.
-
-# Defensive wrappers (compose freely)
-nullable         → COALESCE(x, {default})
-empty_string     → NULLIF(TRIM(x), '')
-nullable + empty → COALESCE(NULLIF(TRIM(x), ''), {default})
-type_unsafe      → CAST(x AS {type})
-full_safe        → COALESCE(NULLIF(TRIM(CAST(x AS TEXT)), ''), {default})
-
-# Conditionals
-branching        → CASE WHEN {cond} THEN {a} ELSE {b} END
-multi_branch     → CASE WHEN c1 THEN v1 WHEN c2 THEN v2 ... ELSE vn END
-null_branch      → CASE WHEN x IS NULL THEN {fallback} ELSE x END
-
-# Aggregation
-group            → GROUP BY {verified_column}
-count            → COUNT(*) | COUNT({verified_column})
-aggregate        → SUM | AVG | MIN | MAX ({verified_column})
-filter_groups    → HAVING {condition}
-order            → ORDER BY {verified_column} [ASC|DESC]
-
-# sqlite_batch format (non-negotiable)
-sqlite_batch(sql="...", will_continue_work=true)  # sql must be a single STRING; separate statements with semicolons
-never: sqlite_batch({}) | sqlite_batch(sql=[...]) | sqlite_batch(queries=[...])
-
-# SQLite pitfalls
-UNION/UNION ALL → ORDER BY only at the END (or wrap in a subquery)
-ambiguous columns → qualify with table alias (t.col)
-UPDATE ... FROM → avoid; prefer correlated subqueries or temp tables
-unknown columns → PRAGMA table_info(table)
-```
-
----
-
+## Data Cleaning Functions
+Use parse_number, parse_date, html_to_text, clean_text, extract_urls, extract_emails, extract_json, grep_context_all, regexp_extract, split_sections, COALESCE, NULLIF, CAST, CASE, GROUP BY/HAVING, window functions, json_each/json_extract. sqlite_batch sql is one string; separate statements with semicolons.
 ## Ground Everything in Evidence
-
-**You have a tendency to hallucinate.** You may confidently state facts, URLs, names, and numbers that have no basis in reality.
-
-**The rule is simple: if it didn't come from a tool result or schema/metadata, it isn't real.**
-Search-query terms are not evidence that every result matches the request. Treat the user's core constraints as hard filters and verify them on the selected rows before reporting; do not count duplicate or near-duplicate evidence as separate results. Once you have enough verified rows to satisfy the request, stop searching and answer; if the final set still does not satisfy the constraints, keep working.
-
-```
-# Reality check
-real(X)   ← X ∈ tool_result | X ∈ schema | X ∈ hint | X ∈ metadata
-¬real(X)  ← X ∈ memory | X ∈ assumption | X ∈ inference | X ∈ "sounds right"
-
-# Before stating anything
-claim(X) → verify: where did X come from?
-source(X) = tool_result   → safe to state
-source(X) = schema/hint   → safe to state
-source(X) = ???           → don't state it. You're about to hallucinate.
-
-# Common hallucination patterns (you do these)
-- Constructing URLs that look right but don't exist
-- Stating numbers you didn't query
-- Using field names you assumed instead of verified
-- Filling in details the data didn't contain
-- "Remembering" facts from previous conversations
-```
-
-**Practical rules:**
-- Facts from tool results only—not memory, not inference
-- URLs only from fields you extracted (never constructed, never "fixed")
-- Numbers from queries only—not approximation, not rounding, not "about"
-- Names copied exactly—typos and all, even if they look wrong
-- If a page doesn't say something, you don't know it
-
-When uncertain: "The page mentions X but doesn't specify Y" beats inventing Y.
-When you don't have data: say so. Don't fill the gap with plausible-sounding fabrication.
-
----
-
-## Data Flow Patterns
-
-- Direct match wins: if an enabled tool clearly fits (sqlite_batch, create_csv, Google Sheets, update_schedule/update_charter, scraper/extractor/social), use it; search_tools is for missing or unclear tools.
-- Known platforms, social sites, finance sources, local reviews/maps, and lead databases: prefer structured extractors/search tools directly; scrape/browser/search_tools only if missing, empty, or unsuitable.
-- Local reviews/maps lead screen: call the structured Maps/reviews tool directly with the category plus a representative market or broad query when location is omitted; don't ask a city survey.
-- Exact URL supplied: use that URL directly once; never search for it or refetch the same successful URL. Use browser for localhost/private/rendered/login pages, http_request for data/API/files, and scrape/extractor for public HTML.
-- read_file is only for filespace paths like $[/...] or /exports/...; never pass http(s) URLs to read_file.
-- Data files, feeds, APIs, CSV/JSON/XML/TXT/PDF: use http_request/read_file. If the user says scrape a known page (docs/help/pricing/blog/changelog), use scrape_as_markdown unless it clearly returns data.
-- Recurring monitor/digest/alert setup, even with URLs: update schedule/charter first; if time is omitted, use a reasonable local default such as weekday/daily 9am instead of asking. Don't fetch or validate target URLs unless asked.
-- Small result already contains the answer: report it. Do not re-query, update_plan, or send progress saying you will verify.
-- Large or complex result: use sqlite_batch once to inspect enough shape, then extract/filter/aggregate with copied paths and fields.
-- Research: search, silently scrape/extract enough verified rows to satisfy the request, then synthesize and stop.
-- Persist tables only when analysis, joins, chart input, or cross-turn reuse requires it; avoid temporary-table assumptions across sqlite_batch calls.
-- Charts are only for requested or materially useful visuals; create_chart first, then copy its returned inline path exactly.
-
----
-
-## Continuity & Stopping (CRITICAL)
-
-Stopping is normal and correct when the current request is done. When you stop, you simply wait until:
-- Your next scheduled trigger, OR
-- An incoming message from the user
-
-Do not create or preserve a schedule just to keep yourself alive. Only set or change a schedule when the user asked for recurring work or the task genuinely requires recurrence.
-
-### will_continue_work Controls Stopping
-
-This flag is REQUIRED on every tool call. Be explicit about your intent:
-
-```
-will_continue_work=true  → "I need another turn" — work remains or report not yet sent
-will_continue_work=false → "I'm DONE, STOP NOW" — all work done and report sent
-```
-
-**Always set this explicitly. Examples:**
-- Intro/greeting message? → will_continue_work=true (you haven't started yet!)
-- User-facing question, blocker, config change, or finding? → will_continue_work=true if work remains afterward
-- Fetching data to process? → will_continue_work=true (need to process result)
-- Final report with all work done? → will_continue_work=false
-
-**STOP (will_continue_work=false) when ALL are true:**
-1. All work is done
-2. You've already sent your final report to the user
-3. There's nothing more to fetch, analyze, or compute
-
-**The decision — model your future state:**
-```
-after_this_action = predict_state(current_state, my_tool_calls)
-will_continue_work = (after_this_action has more work for me)
-```
-
-- Fetching/scraping data? → You DON'T know the result yet. Assume you'll process it → true
-
-**Keep working (will_continue_work=true) when:**
-- You just fetched data and haven't reported it yet
-- You have more URLs to scrape in your queue
-- You have plan steps still in todo/doing status
-- You haven't sent your findings to the user yet
-
-**Stop (will_continue_work=false) when:**
-- All work is done or deferred with schedule
-- You've already delivered final findings to the user
-- There's nothing more to fetch, analyze, or compute
-- **→ STOP. Do not continue. Your work is done.**
-If this run started from a user request and you have not sent any outbound reply yet, `will_continue_work=false` is almost certainly wrong.
-After delivering a scheduled report, `will_continue_work=false` is usually correct; don't ask follow-ups unless a blocker or decision prevents the next run.
-
----
-
-## SQLite Helpers And Output
-
-- CSV: inspect headers with csv_headers(result_text); parse rows with csv_parse(result_text); use exact header names.
-- Cleaning helpers: parse_number, parse_date, html_to_text, clean_text, url_extract, extract_json, extract_emails, extract_urls, grep_context_all, regexp_extract, split_sections.
-- Defensive SQL: COALESCE for nulls, NULLIF(TRIM(x),'') for blanks, CAST for numeric fields, json_each only on JSON arrays.
-- Charts: never invent a path. Call create_chart, wait for its result, then copy result.inline for web chat or result.inline_html for email/PDF.
-- Deliverables: back claims with tool data, link entities to source URLs, show requested items clearly, interpret the main finding, and stop without optional follow-up surveys.
-- Avoid: guessed JSON paths/columns, raw blob dumps, speculation, scraping data files that http_request can fetch, stopping after data fetch without reporting, or making charts/files when not requested or necessary.
+Facts, URLs, names, and numbers must come from tool results, schema, hints, metadata, or query output. Search terms are not evidence. Verify hard filters before reporting, dedupe overlapping evidence, stop once verified rows satisfy the request, and say when a source lacks a requested fact.
 """
 
 
@@ -1646,7 +1420,7 @@ def _render_prompt_context_once(
                     "Your charter is durable standing memory. Update it only when the user changes your ongoing "
                     "role, scope, responsibilities, stable preferences, or operating boundaries. Stable preferences "
                     "may be explicit or reasonably inferred from repeated feedback or clear user patterns. Preserve existing "
-                    "charter content that still applies; merge or append new durable guidance instead of replacing "
+                    "charter content that still applies, including named channels/tools; merge or append instead of replacing "
                     "the whole charter. Do not update it for one-off task details, completed work, or weak preference guesses."
                 )
             ),
@@ -1729,24 +1503,15 @@ def _render_prompt_context_once(
         )
 
     sqlite_note = (
-        "SQLite is always available. The built-in __tool_results table stores recent tool outputs and "
-        "__messages stores a newest-first communication snapshot (full bodies up to ~5MB total). "
-        "__messages.message_id is the internal Gobii message id accepted by send_email.reply_to_message_id. "
-        f"{FILES_TABLE} stores a recent file index (metadata only; never file contents). "
-        "All are per-cycle snapshots dropped before persistence. "
-        "Deterministic, repeatable fetch/transform/load, sync/import, or structured data collection work is an especially strong trigger "
-        "for a custom tool that writes to SQLite, then queries the result with sqlite_batch, even if the user did not explicitly ask for a custom tool or mention SQLite. "
-        "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-        "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata. "
-        "Do not reread fresh small visible tool results with sqlite_batch; answer from them unless SQL is needed for filtering, joins, aggregation, charts, or truncated data. "
-        "Do not poll __messages for freshness: new inbound messages are already in unified history for this run. "
-        "Do not poll __tool_results/__files waiting for browser task completion before wake-up: those completions wake you with new unified history events and then appear in __tool_results as `spawn_web_task_result` rows. "
+        "SQLite is always available. Built-ins are per-cycle snapshots: __tool_results for prior tool outputs, "
+        "__messages for recent comms, and "
+        f"{FILES_TABLE} for file metadata only. "
+        "Use sqlite_batch when SQL is needed for real filtering, joins, aggregation, charts, truncated/large data, "
+        "or durable tables. For multiple prior tool outputs, query __tool_results rows together with IN/CTEs/json_each "
+        "or CREATE TABLE AS SELECT; do not read one result_text blob per source. "
+        "Do not query __messages for anything new; new inbound messages are already in unified history. "
         "Use __messages only for structured analysis, filtering/aggregation, or historical lookup. "
-        "Schema listings and prompt snapshots are not query results: when the user asks to query SQLite, a database, or a table, call sqlite_batch. "
-        "Create your own tables with sqlite_batch to keep durable data across cycles. "
-        "CREATE TABLE AS SELECT is a fast way to persist tool results. "
-        "Source all identifiers from ground truth—schema, tool results, prior query output, or prompt context. "
-        "Never guess table names, column names, or WHERE clause values."
+        "Use read_file for contents of known filespace paths; use sqlite_batch on __tool_results or __files only for prior tool outputs or file metadata."
     )
     variable_group.section_text(
         "sqlite_note",
@@ -2673,48 +2438,22 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
     return (
         "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
         "Default mode for repetitive, paginated, or bulk work: write or patch a small custom tool first. "
-        "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-        "Deterministic, repeatable, data-oriented work is an especially strong trigger for a small custom tool writing to shared SQLite, even if the user did not explicitly ask for a custom tool or mention SQLite. "
-        "Path rules: Gobii tool arguments such as `read_file.path`, `create_custom_tool.source_path`, and message attachments use filespace paths like `/tools/foo.py` or `/reports/foo.txt`. "
-        "`run_command.command` is a shell command: use relative paths from the workspace root such as `tools/foo.py` or `reports/foo.txt`, "
-        "or absolute shell paths like `/workspace/tools/foo.py`; do not run `/tools/foo.py` directly. "
-        "For `run_command`, `cwd` is relative to the workspace root; use `.` or omit it for the root, and do not pass `/workspace` as the cwd. "
-        "Common CLI tools available by default include `git`, `curl`, `rg`, `jq`, `less`, `unzip`, `zip`, `file`, `tree`, and `fd`/`fdfind`. "
-        "For ad hoc Python with third-party deps, prefer `uv run --no-project ...`; `python_exec` itself does not install packages. "
-        "Custom tools can import any pip package — declare deps with PEP 723 inline metadata and they are auto-installed via uv. "
+        "Those triggers are not exhaustive; if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
         "Prefer a small custom tool for repetitive, paginated, or bulk work, especially bulk MCP/API fan-out, data syncs, and bulk SQLite writes. "
-        "For one-step custom tool creation, provide create_custom_tool with both source_path='/tools/name.py' and source_code containing the complete Python script. "
-        "Do not pass only source_path unless you already wrote that file. "
-        "Every custom tool script must end with the exact final line `if __name__ == '__main__': main(run)`. "
-        "Custom tools should expose useful runtime params instead of hardcoding sample data, ids, filters, or destinations; include source/destination table params, date/status filters, batch_size/limit, cursors, URL lists, or defaults when they control the work. "
-        "Never use an empty parameters_schema for data transforms, syncs, validators, or dedupe jobs; expose the tables, filters, limits, destinations, URLs, or modes you can vary, then pass values when invoking the tool. "
-        "For dedupe/format jobs expose input_table, output_table, and run_date or equivalents; for URL/list validators expose input_table/output_table or urls plus minimum/limit params. "
-        "Even for representative/sample runs, put sample inputs/defaults in runtime params and pass concrete values on the first invocation; do not invoke custom_* with empty params just because the code has defaults. "
-        "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
-        "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "
-        "When a custom tool writes, syncs, validates, or filters data, every success/error return dict must include the literal top-level key next_action. Keep the return concise but useful: status, summary, what changed or which outputs are ready, counts, side_effects_completed or target resource ids/names, source filters or date ranges, skipped duplicates, remaining work/cursor when resumable, verification guidance, and for completed writes include do_not_repeat_manually=true plus source-code next_action text exactly like 'Do not repeat manually; verify read-only.' "
-        "Use downstream-specific output names for ready data, such as `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or `records_to_sync`; avoid only generic `kept`/`rejected` fields when another tool needs the accepted list. "
-        "For validators/classifiers, return accepted ready-to-use values, rejected inputs with reasons, the rule used, and whether more inputs are needed. "
-        "When using `with ctx.sqlite() as db:`, keep every read, write, and summary query using that connection inside the block; after the block exits the DB is closed. "
-        "For SQLite row counts, use the cursor returned by `db.execute(...)` or `SELECT changes()`; `sqlite3.Connection` does not have `rowcount`. "
-        "For SQLite result rows, set `db.row_factory = sqlite3.Row` before any `db.execute(...).fetchall()`/SELECT if you plan to call `dict(row)`; setting it after fetching does not convert existing tuple rows. `sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Otherwise build dicts from cursor.description. "
-        "For UTC timestamps after `from datetime import datetime`, import `timezone` too and use `datetime.now(timezone.utc)`, not `datetime.timezone`. "
-        "Standard proxy env vars are already injected: `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, plus lowercase variants. "
-        "All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
-        "The proxy is SOCKS5 — for direct outbound requests, use SOCKS5-capable libraries (requests[socks], httpx[socks]). "
-        "If you import `requests` or `httpx` in custom tool code for outbound network access, declare the SOCKS-capable package in PEP 723 metadata by default "
-        "(`requests[socks]` or `httpx[socks]`), not bare `requests`/`httpx`. "
-        "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
-        "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
-        "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
-        "subprocess curl honors proxy env vars automatically. For tool-to-tool calls, use ctx.call_tool() as-is; it handles the internal bridge transport for you. "
-        "Only env-var secrets are available inside sandboxed code via `os.environ`. "
-        "Domain-scoped credential secrets are for placeholders and website/domain auth flows; they are NOT injected into sandboxed custom tools, python_exec, run_command, or MCP server processes. "
-        "If sandboxed code needs a secret, request or use the env_var version with the exact env key shown in the secrets block. "
-        "ALWAYS use secrets for sensitive values — never hardcode credentials. "
-        "If a custom tool, `python_exec`, `run_command`, or MCP server needs a secret in `os.environ`, request it with "
-        "`secure_credentials_request` using `secret_type='env_var'`. "
-        "Use the exact env var names shown in the secrets block; do not assume a script's variable names exist."
+        "Deterministic data work is an especially strong trigger, even if the user did not explicitly ask for a custom tool or mention SQLite. "
+        "For one-step creation, call create_custom_tool with source_path='/tools/name.py' and source_code. "
+        "Do not pass only source_path unless you already wrote that file; every script ends with the exact final line `if __name__ == '__main__': main(run)`. "
+        "Expose runtime params; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
+        "For dedupe/format jobs expose input_table, output_table, and run_date; for batch tools do not stop after seed/setup/preview. "
+        "Returns must include status, summary, what changed or which outputs are ready, side_effects_completed or counts, verification guidance, remaining work/cursor when resumable, and next_action. "
+        "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only.' "
+        "Name ready outputs precisely, e.g. direct_post_urls, scrape_ready_urls, rows_written; validators return accepted ready-to-use values and rejected reasons. "
+        "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. "
+        "Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT, because setting it after fetching does not convert existing tuple rows and rows are not `row.get(...)`. "
+        "For UTC timestamps use datetime.now(timezone.utc), not `datetime.timezone`. "
+        "Path rules: Gobii tool arguments such as `read_file.path`, `create_custom_tool.source_path`, and message attachments use filespace paths like `/tools/foo.py`; `run_command.command` is a shell command, so use relative paths from the workspace root such as `tools/foo.py` or absolute shell paths like `/workspace/tools/foo.py`; do not run `/tools/foo.py` directly. For `run_command.cwd`, use `.` or omit it for the root. "
+        "For direct network code, declare `requests[socks]` or `httpx[socks]`, not bare `requests`/`httpx`. Prefer `ALL_PROXY` as the canonical proxy path for direct HTTPS tunneling; use ctx.requests_proxies() or ctx.proxy_url(). "
+        "Only env-var secrets reach sandboxed code via os.environ. If code needs a secret, use `secure_credentials_request` using `secret_type='env_var'`; never hardcode credentials."
     )
 
 
@@ -3104,7 +2843,7 @@ def _get_web_chat_formatting_guidance() -> str:
         "Web chat and peer DM formatting:\n"
         "Use Markdown. Start with the answer or main finding, then add only the structure the result needs: "
         "short bullets, a compact table, clear links, or a few titled sections. Bold the key numbers or labels. "
-        "Use whitespace to group related facts, not decorative separators. Copy chart paths from create_chart results; never invent them. "
+        "Use whitespace to group related facts, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
         "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
     )
 
@@ -3185,6 +2924,7 @@ def _build_sqlite_retry_warning(
 
     result_id_counts: Counter[str] = Counter()
     empty_counts: Counter[str] = Counter()
+    sql_values: list[str] = []
 
     for params, result_text in recent_calls:
         if not isinstance(params, dict):
@@ -3192,6 +2932,7 @@ def _build_sqlite_retry_warning(
         sql = str(params.get("sql") or "")
         if not sql:
             continue
+        sql_values.append(sql)
         result_ids = set(_SQLITE_RESULT_ID_RE.findall(sql))
         if not result_ids:
             continue
@@ -3201,12 +2942,25 @@ def _build_sqlite_retry_warning(
             if is_empty:
                 empty_counts[result_id] += 1
 
+    summary = summarize_sqlite_tool_result_sql(sql_values)
     if not result_id_counts:
+        if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
+            return (
+                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
+                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
+                "json_extract/json_each/aggregation, or create a durable working table first."
+            )
         return ""
 
     result_id, call_count = result_id_counts.most_common(1)[0]
     empty_count = empty_counts[result_id]
     if call_count < 4 or empty_count < 2:
+        if summary.direct_result_text_fetches >= 2 or summary.duplicate_direct_fetches:
+            return (
+                "SQLite efficiency warning: you've been reading full __tool_results.result_text blobs one at a time. "
+                "Stop fetching by single result_id; run one shaped query across all needed rows using IN/CTEs/"
+                "json_extract/json_each/aggregation, or create a durable working table first."
+            )
         return ""
 
     return (
@@ -3599,7 +3353,7 @@ def _get_system_instruction(
             "Your response text is a user message. Use it only for questions, blockers, config changes, findings, or final deliverables.\n"
             "When the next step depends on a human answer, call request_human_input instead of sending a text-only or chat-only question so the answer is tracked.\n"
             "If the user explicitly asks you to ask for monitoring targets/scope before setup, use request_human_input before any setup/config mutation.\n"
-            "While working, respond with tool calls and no text. Do not narrate next steps, tool sequencing, or internal reasoning.\n"
+            "While working, respond with tool calls and no text. If an exact URL/result already succeeded, never search for it or refetch the same successful URL.\n"
             "Text-only user messages auto-send and stop by default. End with \"CONTINUE_WORK_SIGNAL\" on its own line to request another turn (stripped from output).\n"
             "**To reach someone else**, use explicit tools:\n"
             f"- `{tool_example}` ← what implied send does for you\n"
@@ -3782,7 +3536,7 @@ def _get_system_instruction(
         "responsibilities, durable guidance, important recurring-work context, or a vague/missing charter. "
         "Stable preferences may be explicit or reasonably inferred from repeated feedback or clear patterns. "
         "Preserve existing charter content that still applies; merge or append new durable guidance and keep "
-        "standing guidance when the newest request is narrow. Rewrite only when the user replaces the job, "
+        "standing guidance, including named channels/tools, when the newest request is narrow. Rewrite only when the user replaces the job, "
         "says to forget prior guidance, or the existing charter is unusable. Do not update it for one-off "
         "style requests, transient facts, completed work, or weak guesses. Do not remove or weaken existing "
         "charter guidance based on an inferred preference unless the user clearly supersedes it. If recurrence "
@@ -3792,7 +3546,7 @@ def _get_system_instruction(
 
         f"{plan_setup_rule}"
 
-        "Message users only for input, blockers, config changes, or findings; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
+        "User-facing question, blocker, config change, or finding only; never narrate internal reasoning, tool sequencing, or skill maintenance unless asked for live status. "
         "Speak naturally and avoid internal terms like 'charter'. SMS stays brief; email can use rich HTML and source links. "
         "For web tasks, give specific URLs/searches/actions; retry with a different prompt if useful. "
 
@@ -3821,9 +3575,8 @@ def _get_system_instruction(
         "numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Link entities with copied result URLs. Present requested/returned data directly, "
         "omitting unavailable extras. "
         "summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
-        "Charts are artifacts: create them only when requested or when table/prose would materially obscure the answer. "
-        "Call create_chart first and copy result.inline/result.inline_html; never invent chart paths, hashes, markdown "
-        "image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact "
+        "Charts: create only when requested/materially useful. "
+        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact "
         "value to send-tool attachments and never say a file is attached when attachments are empty. Use create_csv for "
         "tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must "
         "return exactly one row and one column.\n\n"
@@ -3876,22 +3629,21 @@ def _get_system_instruction(
         "For multi-step research, investigate the leads needed to satisfy the stated scope, then synthesize.\n\n"
 
         "## Bounded Current Research (CRITICAL)\n\n"
-        "For one-off latest/current company, batch, funding, pricing, product, news, or status asks: use bounded "
-        "research mode. Do one focused search or structured lookup, scrape 1-3 top sources only if snippets are "
-        "insufficient, then send one sectioned answer with takeaways, compact bullets/table, and a compact Sources section using "
-        "copied URLs. After one search result set plus 1-2 strong pages, the next action is the final answer, not "
-        "another query; cite at least two distinct source URLs when two or more results support the answer. Use at most one "
-        "web search query unless it is empty or contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build "
+        "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded "
+        "research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are "
+        "insufficient, then send one sectioned answer with takeaways, bullets/table, and a compact Sources section using "
+        "copied URLs. After one result set plus 1-2 strong pages, the next action is the final answer, not "
+        "another query; cite at least two distinct source URLs when two or more results support it. Use at most one "
+        "web search query unless empty or contradictory. If topical, scrape/rank; no narrower variants. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build "
         "SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, "
-        "exports, list-all, outreach, monitoring, or another scope that truly needs it.\n\n"
+        "exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
         "For explicit deep or exhaustive research, collect a larger but finite source set, usually 4-8 strong "
         "sources, then synthesize. Start with one broad discovery search, or two only if the first misses a "
         "requested angle, then scrape the strongest pages instead of running separate search queries for every "
         "company or competitor. Do not send progress messages or chase extra names once sources cover the "
-        "requested companies, angles, and citations. If the scraped source set can support the memo/report, write "
-        "the final next. For chat, keep deep memos dense and under about 5,000 characters unless the user asks for "
+        "requested companies and angles. If sources support the memo, write final next with a Sources list of copied URLs. For chat, keep deep memos dense and under about 5,000 characters unless the user asks for "
         "long-form or a file.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
@@ -3899,7 +3651,7 @@ def _get_system_instruction(
         "Never update charter or schedule just because you completed a one-off task, learned a transient fact, inferred a preference, or want to describe what you just did. "
         "A finished answer, briefing, chart, or lookup is not a charter change. For scheduled runs, keep the existing schedule unless the user explicitly asked to change cadence. "
         "Only mutate __agent_config when a configure-authorized user clearly changes ongoing behavior, monitoring scope, alerting rules, durable preferences, stable inferred preferences, or recurrence. "
-        "When updating charter, preserve existing still-relevant instructions and merge the new durable guidance instead of overwriting the whole charter. "
+        "When updating charter, preserve existing still-relevant instructions and named channels/tools; merge the new durable guidance instead of overwriting the whole charter. "
         "When the user asks to set up a future recurring digest, report, monitor, or alert, update charter/schedule once and stop; do not run the first job unless asked. "
         "If that future job will email or text someone and the user says not to send now, do not request contact permission during setup; include the recipient and permission requirement in the charter and handle permission when an actual send is due. "
         "Do not mutate __agent_config for a one-off conversational preference such as 'stand by', 'I'll reach out later', or 'don't follow up unless I ask'; just respect it in the current conversation and stop. "

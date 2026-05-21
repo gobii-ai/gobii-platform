@@ -254,12 +254,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
         self.assertIn("company Vanta", by_slug["common_use_case_060_sheets_append_rows"].prompt)
-        sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success(
-            "google_sheets-get-spreadsheet-by-id"
-        )
+        sheets_mock = CommonUseCaseToolChoiceScenario._google_sheets_mock_success("google_sheets-list-worksheets")
         self.assertIn("use the requested Google Sheets tool next", sheets_mock["message"])
         self.assertNotIn("mutation tool", sheets_mock["message"])
         self.assertIn("Tasks", sheets_mock["content"]["worksheets"])
+        self.assertNotIn("worksheets", CommonUseCaseToolChoiceScenario._google_sheets_mock_success("google_sheets-get-spreadsheet-by-id")["content"])
         self.assertIn(
             "mcp_brightdata_search_engine",
             by_slug["common_use_case_096_schedule_price_alert"].allowed_preamble_tool_names(),
