@@ -2130,7 +2130,7 @@ class ConsoleViewsTest(TestCase):
         payload = response.json()
         self.assertEqual(payload['agent']['id'], str(agent.id))
         self.assertEqual(payload['agent']['name'], agent.name)
-        self.assertEqual(payload['urls']['detail'], reverse('agent_detail', kwargs={'pk': agent.id}))
+        self.assertEqual(payload['urls']['detail'], reverse('console_agent_settings', kwargs={'agent_id': agent.id}))
         self.assertIn('allowlist', payload)
         self.assertIn('collaborators', payload)
         self.assertIn('mcpServers', payload)

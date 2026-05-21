@@ -215,7 +215,11 @@ from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone,
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
-from console.views import build_agent_detail_props_for_request, build_llm_intelligence_props
+from console.views import (
+    build_agent_detail_props_for_request,
+    build_llm_intelligence_props,
+    handle_agent_settings_post_for_request,
+)
 from console.agent_addons import (
     _build_billing_status_payload,
     build_account_pause_payload,
@@ -7484,7 +7488,7 @@ class AgentDailyCreditsAPIView(ApiLoginRequiredMixin, View):
 
 
 class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["get"]
+    http_method_names = ["get", "post"]
 
     def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_manageable_agent_for_request(
@@ -7494,6 +7498,14 @@ class AgentSettingsAPIView(ApiLoginRequiredMixin, View):
         )
         payload = build_agent_detail_props_for_request(request, agent)
         return JsonResponse(payload)
+
+    def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_manageable_agent_for_request(
+            request,
+            agent_id,
+            allow_delinquent_personal_chat=True,
+        )
+        return handle_agent_settings_post_for_request(request, agent)
 
 
 class BillingInitialDataAPIView(ApiLoginRequiredMixin, View):
@@ -8932,7 +8944,7 @@ class GlobalSkillEvalLauncherAPIView(SystemAdminAPIView):
             {
                 "global_skills": global_skills,
                 "rubric_version": GLOBAL_SKILL_EVAL_RUBRIC_VERSION,
-                "global_secrets_url": reverse("console-secrets"),
+                "global_secrets_url": f"{IMMERSIVE_APP_BASE_PATH}/secrets",
             }
         )
 

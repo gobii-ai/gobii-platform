@@ -1,12 +1,11 @@
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.urls import reverse
-
 from api.models import (
     MCPServerConfig,
     OrganizationMembership,
     PersistentAgentEnabledTool,
     PersistentAgentMCPServer,
 )
+from util.urls import IMMERSIVE_APP_BASE_PATH
 
 
 def reassign_agent_organization(request, agent, target_org_id: str | None) -> dict:
@@ -96,7 +95,7 @@ def reassign_agent_organization(request, agent, target_org_id: str | None) -> di
         switch = {"type": "personal", "id": str(request.user.id)}
         organization = None
 
-    redirect_url = request.build_absolute_uri(reverse("agent_detail", args=[agent.id]))
+    redirect_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent.id}/settings")
 
     return {
         "context": context,

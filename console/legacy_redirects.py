@@ -1,6 +1,8 @@
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.contrib import messages
+from django.http import Http404, HttpResponseRedirect
+from django.views import View
 
 from api.models import OrganizationMembership
 
@@ -122,3 +124,13 @@ def _billing_target_path(request, target_path: str) -> str:
             {"context_type": "organization", "context_id": org_id},
         )
     return target_path
+
+
+class LegacyConsoleRedirectView(View):
+    http_method_names = ["get", "head"]
+
+    def get(self, request, *args, **kwargs):
+        target_path = get_legacy_console_redirect_path(request)
+        if target_path is None:
+            raise Http404()
+        return HttpResponseRedirect(target_path)

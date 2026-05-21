@@ -54,7 +54,7 @@
            class="absolute left-0 right-0 top-full max-h-[60vh] overflow-y-auto bg-white border-b border-gray-200 shadow-lg z-20"
            x-cloak>
         <nav class="py-2">
-          <a href="{% url 'agents' %}"
+          <a href="/app/agents"
             class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'agents' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <i data-lucide="zap" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'agents' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             Agents
@@ -69,20 +69,20 @@
             <i data-lucide="clipboard" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'tasks' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
               Tasks
           </a>
-          <a href="{% url 'api_keys' %}"
+          <a href="/app/api-keys"
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <i data-lucide="key-round" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'api_keys' or request.resolver_match.url_name == 'api_key_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             API Keys
           </a>
           {% if stripe_enabled %}
-          <a href="{% url 'billing' %}"
+          <a href="/app/billing"
               x-show="showBilling"
               class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'billing' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
               <i data-lucide="credit-card" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'billing' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
               Billing
           </a>
           {% endif %}
-          <a href="{% url 'usage' %}"
+          <a href="/app/usage"
              class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'usage' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
             <i data-lucide="chart-bar" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'usage' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
             Usage
@@ -97,7 +97,7 @@
             Advanced
           </a>
           {% if current_context.type == 'organization' and current_context.id %}
-            <a href="{% url 'organization_detail' org_id=current_context.id %}"
+            <a href="/app/organization?context_type=organization&context_id={{ current_context.id }}"
                class="flex items-center px-4 py-2.5 text-sm font-medium transition-colors {% if request.resolver_match.url_name == 'organization_detail' %}bg-blue-50 text-blue-600 border-l-4 border-blue-600{% else %}text-gray-700 hover:bg-blue-50/50 hover:text-blue-600 border-l-4 border-transparent{% endif %}">
               <i aria-hidden="true" data-lucide="building-2" class="flex-shrink-0 w-5 h-5 mr-3 {% if request.resolver_match.url_name == 'organization_detail' %}text-blue-600{% else %}text-gray-500{% endif %}"></i>
               Organization

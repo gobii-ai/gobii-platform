@@ -22,7 +22,7 @@ from api.models import (
     ProxyServer,
 )
 from api.webhooks import _parse_inbound_agent_webhook_request
-from console.views import AgentDetailView
+from console.views import AgentSettingsController
 from util.analytics import AnalyticsEvent
 
 
@@ -354,7 +354,7 @@ class AgentWebhookConsoleViewTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch("console.views.Analytics.track_event")
     def test_inbound_webhook_actions_emit_analytics(self, mock_track_event):
-        view = AgentDetailView()
+        view = AgentSettingsController()
 
         create_request = self.factory.post(
             "/console/agents/test/",

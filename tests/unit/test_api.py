@@ -66,41 +66,6 @@ class ApiKeyFormTests(TestCase):
 
 
 @tag("batch_console_api_keys")
-class ApiKeyListViewTrialEnforcementTests(TestCase):
-    def setUp(self):
-        self.user = User.objects.create_user(
-            username="api-keys-enforcement@example.com",
-            email="api-keys-enforcement@example.com",
-            password="password123",
-        )
-        self.client.force_login(self.user)
-
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @patch("console.views.has_verified_email", return_value=True)
-    def test_blocks_personal_api_key_creation_without_trial(self, _mock_verified):
-        response = self.client.post(reverse("api_keys"), data={"name": "Blocked Key"})
-
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        form = response.context.get("form")
-        self.assertIsNotNone(form)
-        self.assertTrue(
-            any("Start a free trial" in error for error in form.non_field_errors()),
-            form.non_field_errors(),
-        )
-        self.assertFalse(ApiKey.objects.filter(user=self.user, name="Blocked Key").exists())
-
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @patch("console.views.has_verified_email", return_value=True)
-    def test_allows_personal_api_key_creation_for_grandfathered_user(self, _mock_verified):
-        UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
-
-        response = self.client.post(reverse("api_keys"), data={"name": "Grandfathered Key"})
-
-        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
-        self.assertTrue(ApiKey.objects.filter(user=self.user, name="Grandfathered Key").exists())
-
-
-@tag("batch_console_api_keys")
 @override_settings(
     SEGMENT_WRITE_KEY="",
     SEGMENT_WEB_WRITE_KEY="",
