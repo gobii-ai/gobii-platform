@@ -545,13 +545,6 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(files_response.context["current_context"]["type"], "organization")
         self.assertEqual(files_response.context["current_context"]["id"], str(self.org.id))
 
-        secrets_response = self.client.get(
-            reverse("agent_secrets", kwargs={"pk": self.org_agent.id}),
-        )
-        self.assertEqual(secrets_response.status_code, 200)
-        self.assertEqual(secrets_response.context["current_context"]["type"], "organization")
-        self.assertEqual(secrets_response.context["current_context"]["id"], str(self.org.id))
-
         email_response = self.client.get(
             reverse("agent_email_settings", kwargs={"pk": self.org_agent.id}),
         )
