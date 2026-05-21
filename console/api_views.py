@@ -117,6 +117,7 @@ from api.models import (
     PersistentAgentPromptArchive,
     AgentFileSpaceAccess,
     AgentFsNode,
+    ApiKey,
     Organization,
     OrganizationMembership,
     AgentCollaborator,
@@ -176,7 +177,9 @@ from util.personal_signup_preview import (
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
+    can_user_use_personal_agents_and_api,
 )
+from api.services.email_verification import has_verified_email
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -209,12 +212,12 @@ from console.context_helpers import build_console_context, resolve_console_conte
 from console.context_overrides import get_context_override
 from console.agent_context import resolve_context_override_for_agent
 from console.billing_initial_data import build_billing_initial_data
-from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, UserProfileForm
+from console.forms import ApiKeyForm, MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, UserProfileForm
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
-from console.views import build_agent_detail_props_for_request, build_llm_intelligence_props
+from console.views import ApiKeyOwnerMixin, _org_event_properties, build_agent_detail_props_for_request, build_llm_intelligence_props
 from console.agent_addons import (
     _build_billing_status_payload,
     build_account_pause_payload,
@@ -7500,6 +7503,223 @@ class BillingInitialDataAPIView(ApiLoginRequiredMixin, View):
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
         return JsonResponse(build_billing_initial_data(request))
+
+
+def _serialize_api_key(api_key: ApiKey, *, include_created_by: bool) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "id": str(api_key.id),
+        "name": api_key.name,
+        "prefix": api_key.prefix,
+        "createdAt": api_key.created_at.isoformat() if api_key.created_at else None,
+        "lastUsedAt": api_key.last_used_at.isoformat() if api_key.last_used_at else None,
+        "isActive": api_key.is_active,
+    }
+    if include_created_by:
+        created_by = api_key.created_by
+        payload["createdBy"] = (
+            {
+                "id": str(created_by.id),
+                "label": created_by.get_full_name() or created_by.email or created_by.username,
+            }
+            if created_by
+            else None
+        )
+    return payload
+
+
+class ApiKeyListCreateAPIView(ApiLoginRequiredMixin, ApiKeyOwnerMixin, View):
+    http_method_names = ["get", "post"]
+
+    def _queryset(self):
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            return (
+                ApiKey.objects.select_related("created_by")
+                .filter(organization=ctx["organization"])
+                .order_by("-created_at")
+            )
+        return (
+            ApiKey.objects.select_related("created_by")
+            .filter(user=self.request.user)
+            .order_by("-created_at")
+        )
+
+    def _context_payload(self) -> dict[str, Any]:
+        ctx = self.api_key_context
+        if ctx["type"] == "organization":
+            organization = ctx["organization"]
+            return {
+                "type": "organization",
+                "id": str(organization.id),
+                "name": organization.name,
+            }
+        user = self.request.user
+        return {
+            "type": "personal",
+            "id": str(user.id),
+            "name": user.get_full_name() or user.email or user.username,
+        }
+
+    def _list_payload(self) -> dict[str, Any]:
+        ctx = self.api_key_context
+        include_created_by = ctx["type"] == "organization"
+        return {
+            "context": self._context_payload(),
+            "canManage": ctx.get("can_manage", False),
+            "emailVerified": has_verified_email(self.request.user),
+            "apiKeys": [
+                _serialize_api_key(api_key, include_created_by=include_created_by)
+                for api_key in self._queryset()
+            ],
+        }
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        return JsonResponse(self._list_payload())
+
+    def _form_for_payload(self, payload: dict[str, Any]) -> ApiKeyForm:
+        ctx = self.api_key_context
+        data = {"name": payload.get("name")}
+        if ctx["type"] == "organization":
+            return ApiKeyForm(data=data, organization=ctx["organization"])
+        return ApiKeyForm(data=data, user=self.request.user)
+
+    @transaction.atomic
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        self._ensure_can_manage_api_keys()
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return JsonResponse({"errors": {"__all__": [str(exc)]}}, status=400)
+
+        form = self._form_for_payload(payload)
+        if not form.is_valid():
+            return JsonResponse({"errors": _form_errors(form)}, status=400)
+
+        if not has_verified_email(request.user):
+            return JsonResponse(
+                {
+                    "errors": {
+                        "__all__": [
+                            "Email verification required to create API keys. Please verify your email address in your account settings."
+                        ]
+                    }
+                },
+                status=400,
+            )
+
+        name = form.cleaned_data["name"]
+        ctx = self.api_key_context
+        try:
+            if ctx["type"] == "organization":
+                raw_key, api_key = ApiKey.create_for_org(
+                    ctx["organization"],
+                    created_by=request.user,
+                    name=name,
+                )
+            else:
+                if not can_user_use_personal_agents_and_api(request.user):
+                    return JsonResponse({"errors": {"__all__": [PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE]}}, status=400)
+                raw_key, api_key = ApiKey.create_for_user(
+                    request.user,
+                    name=name,
+                    created_by=request.user,
+                )
+        except ValidationError as exc:
+            return JsonResponse({"errors": {"__all__": [_format_validation_error(exc)]}}, status=400)
+
+        props = _org_event_properties(
+            request,
+            {
+                "key_id": str(api_key.id),
+                "key_name": name,
+            },
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.API_KEY_CREATED,
+            source=AnalyticsSource.WEB,
+            properties=props.copy(),
+        ))
+        if props.get("organization"):
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_API_KEY_CREATED,
+                source=AnalyticsSource.WEB,
+                properties=props.copy(),
+            ))
+
+        return JsonResponse(
+            {
+                "rawKey": raw_key,
+                "apiKey": _serialize_api_key(api_key, include_created_by=ctx["type"] == "organization"),
+                "state": self._list_payload(),
+            },
+            status=201,
+        )
+
+
+class ApiKeyDetailAPIView(ApiLoginRequiredMixin, ApiKeyOwnerMixin, View):
+    http_method_names = ["patch", "delete"]
+
+    def get_object(self):
+        ctx = self.api_key_context
+        base_qs = ApiKey.objects.select_related("created_by")
+        if ctx["type"] == "organization":
+            return get_object_or_404(base_qs, id=self.kwargs["key_id"], organization=ctx["organization"])
+        return get_object_or_404(base_qs, id=self.kwargs["key_id"], user=self.request.user)
+
+    @transaction.atomic
+    def patch(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        self._ensure_can_manage_api_keys()
+        api_key = self.get_object()
+        api_key.revoke()
+
+        props = _org_event_properties(
+            request,
+            {
+                "key_id": str(api_key.id),
+                "key_name": api_key.name,
+            },
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_API_KEY_REVOKED if props.get("organization") else AnalyticsEvent.API_KEY_REVOKED,
+            source=AnalyticsSource.WEB,
+            properties=props.copy(),
+        ))
+        return JsonResponse({
+            "apiKey": _serialize_api_key(api_key, include_created_by=self.api_key_context["type"] == "organization")
+        })
+
+    @transaction.atomic
+    def delete(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        self._ensure_can_manage_api_keys()
+        api_key = self.get_object()
+        key_id = api_key.id
+        key_name = api_key.name
+        api_key.delete()
+
+        props = _org_event_properties(
+            request,
+            {
+                "key_id": str(key_id),
+                "key_name": key_name,
+            },
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.API_KEY_DELETED,
+            source=AnalyticsSource.WEB,
+            properties=props.copy(),
+        ))
+        if props.get("organization"):
+            transaction.on_commit(lambda: Analytics.track_event(
+                user_id=request.user.id,
+                event=AnalyticsEvent.ORGANIZATION_API_KEY_DELETED,
+                source=AnalyticsSource.WEB,
+                properties=props.copy(),
+            ))
+        return JsonResponse({"deleted": True, "id": str(key_id), "name": key_name})
 
 
 class AgentQuickSettingsAPIView(ApiLoginRequiredMixin, View):
