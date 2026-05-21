@@ -3,6 +3,7 @@ const darkCodeTheme = require('prism-react-renderer').themes.dracula;
 
 const siteUrl = process.env.DOCS_SITE_URL || 'https://docs.gobii.ai';
 const socialImage = `${siteUrl}/images/gobii-fish-with-text-dark-purple.png`;
+const gtagTrackingId = process.env.DOCS_GTAG_TRACKING_ID;
 
 /** @type {import('@docusaurus/types').Config} */
 const config = {
@@ -63,6 +64,14 @@ const config = {
         theme: {
           customCss: require.resolve('./src/css/custom.css'),
         },
+        ...(gtagTrackingId
+          ? {
+              gtag: {
+                trackingID: gtagTrackingId,
+                anonymizeIP: true,
+              },
+            }
+          : {}),
         sitemap: {
           changefreq: 'weekly',
           priority: 0.7,
@@ -147,7 +156,7 @@ const config = {
             label: 'Documentation',
           },
           {
-            to: '/api-reference/list-persistent-agents',
+            to: '/api-reference/gobii-api',
             label: 'API Reference',
             position: 'left',
           },
@@ -181,7 +190,7 @@ const config = {
               { label: 'Using Gobii', to: '/using-gobii' },
               { label: 'Admin and teams', to: '/admin-and-teams' },
               { label: 'Developer basics', to: '/developers/developer-basics' },
-              { label: 'API reference', to: '/api-reference/list-persistent-agents' },
+              { label: 'API reference', to: '/api-reference/gobii-api' },
               { label: 'Self-hosting', to: '/self-hosted' },
             ],
           },

@@ -22,6 +22,7 @@ permissions:
 
 env:
   DOCS_SITE_URL: https://docs.gobii.ai
+  DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
   DOCS_IMAGE: ghcr.io/gobii-ai/gobii-docs
 
 jobs:
@@ -59,6 +60,7 @@ jobs:
             build/api-reference/agents-api/get-agents.html
             build/api-reference/agents-api/get-agents.md
             build/GobiiAPI.yaml
+            build/openapi/GobiiAPI.yaml
             build/legacy-redirects.conf
             build/api-reference/openapi.json
             build/llms.txt
@@ -75,7 +77,10 @@ jobs:
           set -euo pipefail
           image="gobii-docs-ci:${GITHUB_SHA}"
           container="gobii-docs-ci-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          docker build --build-arg DOCS_SITE_URL="${DOCS_SITE_URL}" -t "$image" .
+          docker build \
+            --build-arg DOCS_SITE_URL="${DOCS_SITE_URL}" \
+            --build-arg DOCS_GTAG_TRACKING_ID="${DOCS_GTAG_TRACKING_ID}" \
+            -t "$image" .
           docker run -d --rm --name "$container" -p 8080:8080 "$image"
           trap 'docker rm -f "$container" >/dev/null 2>&1 || true' EXIT
 
@@ -136,6 +141,15 @@ jobs:
           test "$(header_for /pagefind/pagefind-ui.js Cache-Control)" = "public, max-age=300, must-revalidate"
           test "$(header_for "$pagefind_fragment" Cache-Control)" = "public, max-age=31536000, immutable"
           test "$(header_for /api-reference/openapi.json Cloudflare-CDN-Cache-Control)" = "public, max-age=300, stale-while-revalidate=86400"
+          test "$(header_for /api-reference/openapi.json X-Robots-Tag)" = "noindex"
+          test "$(header_for /developers.md Cache-Control)" = "public, max-age=300, must-revalidate"
+          test "$(header_for /developers.md X-Robots-Tag)" = "noindex"
+          test "$(header_for /llms.txt X-Robots-Tag)" = "noindex"
+          test "$(header_for /llms-full.txt X-Robots-Tag)" = "noindex"
+          test "$(header_for /GobiiAPI.yaml X-Robots-Tag)" = "noindex"
+          test "$(header_for /openapi/GobiiAPI.yaml X-Robots-Tag)" = "noindex"
+          test "$(header_for / X-Robots-Tag)" = ""
+          test "$(header_for /api-reference/list-persistent-agents X-Robots-Tag)" = ""
           test "$(header_for /api-reference/agents-api/get-agents Cache-Control)" = "public, max-age=300"
 
   publish:
@@ -179,6 +193,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             DOCS_SITE_URL=${{ env.DOCS_SITE_URL }}
+            DOCS_GTAG_TRACKING_ID=${{ env.DOCS_GTAG_TRACKING_ID }}
           cache-from: type=gha,scope=gobii-docs
           cache-to: type=gha,mode=max,scope=gobii-docs
           platforms: linux/amd64
