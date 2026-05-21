@@ -366,6 +366,7 @@ class DailyLimitPromptContextTests(TestCase):
         return user_message["content"]
 
     def test_prompt_collapses_equal_soft_and_hard_limits_with_80_percent_warning(self):
+        next_reset = timezone.now()
         content = self._render_prompt_content(
             {
                 "hard_limit": Decimal("100"),
@@ -374,15 +375,34 @@ class DailyLimitPromptContextTests(TestCase):
                 "soft_target_remaining": Decimal("20"),
                 "soft_target_exceeded": False,
                 "used": Decimal("80"),
-                "next_reset": timezone.now(),
+                "next_reset": next_reset,
             }
         )
 
         self.assertIn("Daily limit progress: 80/100", content)
         self.assertIn("Getting tired (80%+)", content)
+        self.assertIn(f"resume. Next reset at {next_reset.isoformat()}", content)
         self.assertNotIn("Soft target progress", content)
         self.assertNotIn("Hard limit progress", content)
         self.assertNotIn("you will not be stopped immediately", content)
+
+    def test_prompt_includes_reset_with_hard_limit_when_soft_target_unset(self):
+        next_reset = timezone.now()
+        content = self._render_prompt_content(
+            {
+                "hard_limit": Decimal("100"),
+                "hard_limit_remaining": Decimal("70"),
+                "soft_target": None,
+                "soft_target_remaining": None,
+                "soft_target_exceeded": False,
+                "used": Decimal("30"),
+                "next_reset": next_reset,
+            }
+        )
+
+        self.assertIn("Hard limit progress: 30/100", content)
+        self.assertIn(f"Next reset at {next_reset.isoformat()}", content)
+        self.assertNotIn("Soft target progress", content)
 
     @override_settings(PUBLIC_SITE_URL="https://example.com")
     def test_prompt_includes_daily_limit_message_only_links(self):

@@ -2578,21 +2578,6 @@ def add_budget_awareness_sections(
                     True,
                 ))
 
-            hard_limit_warning = ""
-            if hard_limit is not None and hard_limit > Decimal("0"):
-                try:
-                    ratio = used / hard_limit
-                except Exception:
-                    ratio = None
-                if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
-                    hard_limit_warning = (
-                        "😮‍💨 Almost out of energy—one tool call left. Save your place and rest."
-                    )
-                elif ratio is not None and ratio >= Decimal("0.8"):
-                    hard_limit_warning = (
-                        "😅 Getting tired (80%+). Finish current work or preserve enough context to resume."
-                    )
-
             if soft_target is not None and not limits_are_equal:
                 if used > soft_target:
                     soft_target_warning = (
@@ -2618,6 +2603,20 @@ def add_budget_awareness_sections(
                 ))
 
             if hard_limit is not None and hard_limit > Decimal("0"):
+                try:
+                    ratio = used / hard_limit
+                except (ArithmeticError, InvalidOperation, TypeError):
+                    ratio = None
+                if hard_limit_remaining is not None and hard_limit_remaining <= default_task_cost:
+                    hard_limit_warning = (
+                        "😮‍💨 Almost out of energy—one tool call left. Save your place and rest. "
+                    )
+                elif ratio is not None and ratio >= Decimal("0.8"):
+                    hard_limit_warning = (
+                        "😅 Getting tired (80%+). Finish current work or preserve enough context to resume. "
+                    )
+                else:
+                    hard_limit_warning = ""
                 remaining_hard = max(Decimal("0"), hard_limit - used)
                 section_name = "daily_limit_progress" if limits_are_equal else "hard_limit_progress"
                 limit_name = "daily limit" if limits_are_equal else "hard limit"
@@ -2645,7 +2644,7 @@ def add_budget_awareness_sections(
                         f"{limit_name.capitalize()} progress: {used}/{hard_limit} "
                         f"Remaining credits: {remaining_hard} "
                         f"{hard_limit_warning}"
-                        f"{reset_text if limits_are_equal else ''}"
+                        f"{reset_text if limits_are_equal or soft_target is None else ''}"
                     ),
                     3,
                     True,
