@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { Check, ChevronDown, UserRound, Users } from 'lucide-react'
+import { Check, ChevronDown, Plus, UserRound, Users } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -22,6 +22,7 @@ export type AgentChatContextSwitcherData = {
   onSwitch: (context: ConsoleContext) => void | Promise<void>
   isBusy?: boolean
   errorMessage?: string | null
+  onCreateOrganization?: () => void
 }
 
 type AgentChatContextSwitcherProps = AgentChatContextSwitcherData & {
@@ -36,6 +37,7 @@ export function AgentChatContextSwitcher({
   onSwitch,
   isBusy = false,
   errorMessage,
+  onCreateOrganization,
   variant = 'sidebar',
   collapsed = false,
 }: AgentChatContextSwitcherProps) {
@@ -50,6 +52,10 @@ export function AgentChatContextSwitcher({
       })),
     [organizations],
   )
+  const handleCreateOrganization = useCallback(() => {
+    setOpen(false)
+    onCreateOrganization?.()
+  }, [onCreateOrganization])
   const selectedKey = current.type === 'personal' ? personalKey : `org:${current.id}`
   const selectedKeys = useMemo(() => new Set<Key>([selectedKey]), [selectedKey])
   const contextByKey = useMemo(() => {
@@ -171,6 +177,16 @@ export function AgentChatContextSwitcher({
                 </ListBoxSection>
               ) : null}
             </ListBox>
+            {onCreateOrganization ? (
+              <button
+                type="button"
+                className="chat-context-switcher__create"
+                onClick={handleCreateOrganization}
+              >
+                <Plus className="chat-context-switcher__item-icon" aria-hidden="true" />
+                <span>Add Organization</span>
+              </button>
+            ) : null}
             {errorMessage ? <div className="chat-context-switcher__error">{errorMessage}</div> : null}
           </Dialog>
         </Popover>

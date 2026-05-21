@@ -302,7 +302,7 @@ from console.views import (
     AgentFilesView,
     console_billing_update,
 )
-from console.context_views import SwitchContextView
+from console.context_views import OrganizationCreateAPIView, SwitchContextView
 from pages.views import PaidPlanLanding
 from api.views import LinkShortenerRedirectView, PipedreamConnectRedirectView
 
@@ -376,6 +376,7 @@ urlpatterns = [
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
     path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
+    path("console/api/organizations/", OrganizationCreateAPIView.as_view(), name="console-organization-create"),
     path("console/api-keys/", ApiKeyListView.as_view(), name="api_keys"),
     path("console/api-keys/blank-form/", ApiKeyBlankFormView.as_view(), name="api_key_blank_form"),
     path("console/api-keys/table/", ApiKeyTableView.as_view(), name="api_keys_table"),

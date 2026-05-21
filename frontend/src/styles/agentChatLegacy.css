@@ -7142,6 +7142,33 @@
   color: #1d4ed8;
 }
 
+.chat-context-switcher__create {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.5rem;
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 0.6rem;
+  color: #1d4ed8;
+  cursor: pointer;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.chat-context-switcher__create:hover {
+  background: rgba(37, 99, 235, 0.14);
+  border-color: rgba(37, 99, 235, 0.35);
+}
+
+.chat-context-switcher__create:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.35);
+  outline-offset: 2px;
+}
+
 .chat-context-switcher__item[data-disabled='true'],
 .chat-context-switcher__item[aria-disabled='true'] {
   opacity: 0.6;

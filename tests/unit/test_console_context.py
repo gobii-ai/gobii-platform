@@ -1,4 +1,5 @@
 import uuid
+import json
 import tempfile
 from unittest.mock import patch
 
@@ -8,6 +9,7 @@ from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
 from waffle.models import Flag
+from waffle.testutils import override_flag
 
 from api.models import (
     Organization,
@@ -26,6 +28,58 @@ from constants.plans import PlanNamesChoices
 
 
 User = get_user_model()
+
+
+@tag("batch_console_context")
+@override_settings(
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
+)
+class OrganizationCreateAPITests(TestCase):
+    def setUp(self):
+        Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
+        self.user = User.objects.create_user(username="org-create", email="org-create@example.com", password="pw")
+        self.client.force_login(self.user)
+
+    def test_create_organization_api_creates_owner_membership_and_switches_context(self):
+        resp = self.client.post(
+            reverse("console-organization-create"),
+            data=json.dumps({"name": "New Ops Org"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        org = Organization.objects.get(name="New Ops Org")
+        self.assertEqual(payload["organization"]["id"], str(org.id))
+        self.assertEqual(payload["context"], {
+            "type": "organization",
+            "id": str(org.id),
+            "name": "New Ops Org",
+        })
+        self.assertTrue(
+            OrganizationMembership.objects.filter(
+                org=org,
+                user=self.user,
+                role=OrganizationMembership.OrgRole.OWNER,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        )
+        session = self.client.session
+        self.assertEqual(session["context_type"], "organization")
+        self.assertEqual(session["context_id"], str(org.id))
+        self.assertEqual(session["context_name"], "New Ops Org")
+
+    def test_create_organization_api_requires_feature_flag(self):
+        with override_flag("organizations", active=False):
+            resp = self.client.post(
+                reverse("console-organization-create"),
+                data=json.dumps({"name": "Disabled Org"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(Organization.objects.filter(name="Disabled Org").exists())
 
 
 @override_settings(

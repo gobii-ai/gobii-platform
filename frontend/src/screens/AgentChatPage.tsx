@@ -7,12 +7,13 @@ import {
   useState,
   type CSSProperties,
   type Dispatch,
+  type FormEvent,
   type MutableRefObject,
   type ReactNode,
   type SetStateAction,
 } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { AlertTriangle, Plus } from 'lucide-react'
+import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
@@ -52,6 +53,7 @@ import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgent
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
+import { Modal } from '../components/common/Modal'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -1056,6 +1058,7 @@ export function AgentChatPage({
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
+    createOrganizationContext,
   } = useConsoleContextSwitcher({
     enabled: true,
     forAgentId: contextLookupAgentId,
@@ -1064,6 +1067,10 @@ export function AgentChatPage({
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
+  const [createOrganizationName, setCreateOrganizationName] = useState('')
+  const [createOrganizationBusy, setCreateOrganizationBusy] = useState(false)
+  const [createOrganizationErrors, setCreateOrganizationErrors] = useState<string[]>([])
   const [selectionSidebarMode, setSelectionSidebarMode] = useState(() => (
     agentId === undefined
       ? (selectionPage === 'agents' ? (readSelectionSidebarModePreference() ?? 'gallery') : 'gallery')
@@ -2640,7 +2647,7 @@ export function AgentChatPage({
     if (!showContextSwitcher) {
       return null
     }
-    if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
+    if (!contextData) {
       return null
     }
     return {
@@ -2648,10 +2655,49 @@ export function AgentChatPage({
       personal: contextData.personal,
       organizations: contextData.organizations,
       onSwitch: switchContext,
+      onCreateOrganization: () => {
+        setCreateOrganizationName('')
+        setCreateOrganizationErrors([])
+        setCreateOrganizationOpen(true)
+      },
       isBusy: contextSwitching,
       errorMessage: contextError,
     }
   }, [contextData, contextError, contextSwitching, showContextSwitcher, switchContext])
+
+  const handleCreateOrganizationSubmit = useCallback(async (event: FormEvent) => {
+    event.preventDefault()
+    const name = createOrganizationName.trim()
+    if (!name) {
+      setCreateOrganizationErrors(['Organization name is required.'])
+      return
+    }
+    setCreateOrganizationBusy(true)
+    setCreateOrganizationErrors([])
+    try {
+      await createOrganizationContext(name)
+      setCreateOrganizationOpen(false)
+      setCreateOrganizationName('')
+    } catch (error) {
+      if (error instanceof HttpError && typeof error.body === 'object' && error.body) {
+        const body = error.body as Record<string, unknown>
+        if (body.errors && typeof body.errors === 'object') {
+          const messages = Object.values(body.errors as Record<string, unknown>).flatMap((value) => (
+            Array.isArray(value) ? value.map(String) : [String(value)]
+          ))
+          setCreateOrganizationErrors(messages)
+        } else if (body.error) {
+          setCreateOrganizationErrors([String(body.error)])
+        } else {
+          setCreateOrganizationErrors([error.statusText])
+        }
+      } else {
+        setCreateOrganizationErrors([safeErrorMessage(error) || 'Unable to create organization.'])
+      }
+    } finally {
+      setCreateOrganizationBusy(false)
+    }
+  }, [createOrganizationContext, createOrganizationName])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
@@ -4550,6 +4596,63 @@ export function AgentChatPage({
         agentName={resolvedAgentName || agentName}
         onClose={handleClosePublicShare}
       />
+      {createOrganizationOpen ? (
+        <Modal
+          title="Add Organization"
+          onClose={() => {
+            if (!createOrganizationBusy) {
+              setCreateOrganizationOpen(false)
+            }
+          }}
+          widthClass="sm:max-w-lg"
+          icon={Building2}
+          iconBgClass="bg-blue-100"
+          iconColorClass="text-blue-600"
+          dismissible={!createOrganizationBusy}
+        >
+          <form id="create-organization-form" onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
+            {createOrganizationErrors.length > 0 ? (
+              <div className="rounded-md border border-red-200 bg-red-50 p-3">
+                {createOrganizationErrors.map((message) => (
+                  <p key={message} className="text-sm text-red-700">{message}</p>
+                ))}
+              </div>
+            ) : null}
+            <div>
+              <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
+                Organization Name
+              </label>
+              <input
+                id="organization-name"
+                type="text"
+                required
+                value={createOrganizationName}
+                onChange={(event) => setCreateOrganizationName(event.target.value)}
+                className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                placeholder="Acme Operations"
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-col gap-3 pt-2 sm:flex-row-reverse">
+              <button
+                type="submit"
+                className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+                disabled={createOrganizationBusy}
+              >
+                {createOrganizationBusy ? 'Creating...' : 'Create Organization'}
+              </button>
+              <button
+                type="button"
+                className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+                onClick={() => setCreateOrganizationOpen(false)}
+                disabled={createOrganizationBusy}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Modal>
+      ) : null}
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
