@@ -1,5 +1,5 @@
 {
-  "baseline_sha": "fb5583d40d41c21d70585c151f94e70050bb64e0",
+  "baseline_sha": "bfc3e9c29c990535787792ea38c2d89a6e189317",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
@@ -34,7 +34,25 @@
     "unit": "utf8_bytes"
   },
   "source_loc": {
-    "description": "Nonblank lines in tracked application/test/frontend source files.",
+    "description": "Nonblank lines in tracked core product source files, excluding tests and dedicated eval assets.",
+    "exclude_eval_files": [
+      "api/agent/eval_agents.py",
+      "api/agent/tools/eval_synthetic_tools.py",
+      "api/management/commands/run_evals.py",
+      "config/eval_local_settings.py",
+      "config/eval_postgres_settings.py",
+      "console/templates/console/evals.html",
+      "console/templates/console/evals_detail.html",
+      "frontend/src/api/evals.ts",
+      "frontend/src/screens/EvalsDetailScreen.tsx",
+      "frontend/src/screens/EvalsScreen.tsx"
+    ],
+    "exclude_eval_prefixes": [
+      "api/evals/",
+      "api/templates/evals/",
+      "console/evals/",
+      "frontend/src/components/evals/"
+    ],
     "exclude_filenames": [
       "package-lock.json",
       "uv.lock"
@@ -63,7 +81,26 @@
       "static/frontend/",
       "vendor/"
     ],
-    "file_count": 1360,
+    "exclude_test_file_suffixes": [
+      ".js",
+      ".jsx",
+      ".py",
+      ".ts",
+      ".tsx"
+    ],
+    "exclude_test_files": [
+      "config/minimal_test_settings.py",
+      "config/test_settings.py"
+    ],
+    "exclude_test_parts": [
+      "/__tests__/",
+      "/tests/"
+    ],
+    "exclude_test_prefixes": [
+      "frontend/src/test/",
+      "tests/"
+    ],
+    "file_count": 992,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -84,14 +121,12 @@
       "pages/",
       "proprietary/",
       "sandbox_server/server/",
-      "sandbox_server/tests/",
       "setup/",
       "static/css/",
       "static/js/",
       "tasks/",
       "templates/",
       "templatetags/",
-      "tests/",
       "util/"
     ],
     "include_suffixes": [
@@ -112,6 +147,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 405737
+    "limit": 274460
   }
 }
