@@ -16,10 +16,8 @@ function makeInsight(insightId: string, title: string) {
     body: `${title} body`,
     metadata: {
       agentName: 'Agent',
-      agentCreditsPerHour: 1,
-      allAgentsCreditsPerDay: 2,
-      dailyLimit: 3,
-      percentUsed: 4,
+      todayUsage: { used: 1, limit: 3, percentUsed: 33, unlimited: false },
+      monthUsage: { used: 2, limit: 10, percentUsed: 20, unlimited: false },
     },
     dismissible: true,
   }

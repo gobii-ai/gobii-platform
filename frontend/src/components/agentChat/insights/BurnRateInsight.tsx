@@ -1,114 +1,145 @@
 import { motion } from 'framer-motion'
-import { Zap, Activity } from 'lucide-react'
-import type { InsightEvent, BurnRateMetadata } from '../../../types/insight'
+import { CalendarDays, Gauge } from 'lucide-react'
+import type { BurnRateMetadata, InsightEvent, UsageGaugeMetadata } from '../../../types/insight'
 import { InsightGauge } from './InsightGauge'
 
 type BurnRateInsightProps = {
   insight: InsightEvent
   onDismiss?: (insightId: string) => void
+  onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
+  usageUrl?: string | null
 }
 
-export function BurnRateInsight({ insight, onDismiss }: BurnRateInsightProps) {
-  const metadata = insight.metadata as BurnRateMetadata
+function clampPercent(value: number | null | undefined): number {
+  return Math.min(100, Math.max(0, value ?? 0))
+}
 
-  const progressPercent = Math.min(100, Math.max(0, metadata.percentUsed))
+function formatCredits(value: number): string {
+  if (value >= 100) return Math.round(value).toString()
+  if (value >= 10) return value.toFixed(1).replace(/\.0$/, '')
+  return value.toFixed(2).replace(/\.?0+$/, '')
+}
 
-  const getGaugeColors = (): [string, string] => {
-    if (progressPercent >= 90) return ['#f87171', '#dc2626']
-    if (progressPercent >= 70) return ['#fbbf24', '#d97706']
-    return ['#a78bfa', '#7c3aed']
-  }
+function UsageGauge({
+  title,
+  usage,
+  icon,
+  onAdjust,
+  onDetails,
+  detailsUrl,
+}: {
+  title: string
+  usage: UsageGaugeMetadata
+  icon: 'today' | 'month'
+  onAdjust?: () => void
+  onDetails?: () => void
+  detailsUrl?: string
+}) {
+  const displayValue = clampPercent(usage.percentUsed)
+  const centerValue = Math.round(displayValue).toString()
+  const label = usage.unlimited
+    ? `${formatCredits(usage.used)} credits used`
+    : `${formatCredits(usage.used)} / ${formatCredits(usage.limit ?? 0)} credits`
+  const iconNode = icon === 'today'
+    ? <Gauge size={13} strokeWidth={2.2} />
+    : <CalendarDays size={13} strokeWidth={2.2} />
+  const action = onAdjust ? (
+    <button type="button" className="usage-gauge-card__action" onClick={onAdjust}>
+      Adjust
+    </button>
+  ) : onDetails ? (
+    <button type="button" className="usage-gauge-card__action usage-gauge-card__action--details" onClick={onDetails}>
+      Details
+    </button>
+  ) : detailsUrl ? (
+    <a className="usage-gauge-card__action usage-gauge-card__action--details" href={detailsUrl}>
+      Details
+    </a>
+  ) : null
 
-  const getStatusLabel = () => {
-    if (progressPercent >= 90) return 'High usage'
-    if (progressPercent >= 70) return 'Moderate'
-    return 'On track'
-  }
-
-  const getStatusClass = () => {
-    if (progressPercent >= 90) return 'insight-status--critical'
-    if (progressPercent >= 70) return 'insight-status--warning'
-    return 'insight-status--normal'
-  }
-
-  const getCardClass = () => {
-    if (progressPercent >= 90) return 'insight-card-v2--burn-rate-critical'
-    if (progressPercent >= 70) return 'insight-card-v2--burn-rate-warning'
-    return 'insight-card-v2--burn-rate'
+  if (usage.unlimited) {
+    return (
+      <div className="usage-gauge-card usage-gauge-card--unlimited">
+        <div className="usage-gauge-card__unlimited-stat">
+          <span className="usage-gauge-card__value">{formatCredits(usage.used)}</span>
+          <span className="usage-gauge-card__unit">credits</span>
+        </div>
+        <div className="usage-gauge-card__copy">
+          <span className="usage-gauge-card__icon" aria-hidden="true">
+            {iconNode}
+          </span>
+          <span className="usage-gauge-card__title">{title}</span>
+          <span className="usage-gauge-card__label">{label}</span>
+          <span className="usage-gauge-card__status">Unlimited</span>
+          {action}
+        </div>
+      </div>
+    )
   }
 
   return (
+    <div className="usage-gauge-card">
+      <div className="usage-gauge-card__chart">
+        <InsightGauge
+          value={displayValue}
+          max={100}
+          size={84}
+          gradientColors={['#AA74CE', '#7C4CA0']}
+          thickness={8}
+          radius="94%"
+          showGlow={false}
+          trackColor="rgba(170, 116, 206, 0.14)"
+        />
+        <div className="insight-gauge-center">
+          <span className="usage-gauge-card__value">{centerValue}</span>
+          <span className="usage-gauge-card__unit">%</span>
+        </div>
+      </div>
+      <div className="usage-gauge-card__copy">
+        <span className="usage-gauge-card__icon" aria-hidden="true">
+          {iconNode}
+        </span>
+        <span className="usage-gauge-card__title">{title}</span>
+        <span className="usage-gauge-card__label">{label}</span>
+        {action}
+      </div>
+    </div>
+  )
+}
+
+export function BurnRateInsight({
+  insight,
+  onDismiss,
+  onOpenUsage,
+  onOpenQuickSettings,
+  usageUrl,
+}: BurnRateInsightProps) {
+  const metadata = insight.metadata as BurnRateMetadata
+  const detailsUrl = metadata.usageUrl || usageUrl || '/console/usage/'
+
+  return (
     <motion.div
-      className={`insight-card-v2 ${getCardClass()}`}
+      className="insight-card-v2 insight-card-v2--burn-rate usage-insight-card"
       style={{ background: 'transparent', borderRadius: 0 }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.35 }}
     >
-      {/* Main gauge */}
       <motion.div
-        className="insight-gauge-wrapper"
-        initial={{ scale: 0.8, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
-      >
-        <InsightGauge
-          value={progressPercent}
-          max={100}
-          size={120}
-          gradientColors={getGaugeColors()}
-          thickness={14}
-          showGlow={true}
-        />
-        <div className="insight-gauge-center">
-          <motion.span
-            className="insight-gauge-number"
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ duration: 0.4, delay: 0.3 }}
-          >
-            {Math.round(progressPercent)}
-          </motion.span>
-          <span className="insight-gauge-unit">%</span>
-        </div>
-      </motion.div>
-
-      {/* Center content */}
-      <motion.div
-        className="insight-center-content"
+        className="usage-insight-card__gauges"
         initial={{ opacity: 0, y: 4 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, delay: 0.15 }}
+        transition={{ duration: 0.35, delay: 0.08 }}
       >
-        <span className="insight-main-title">Credit usage</span>
-        <span className={`insight-status-badge ${getStatusClass()}`}>{getStatusLabel()}</span>
-      </motion.div>
-
-      {/* Right stats - colorful cards */}
-      <motion.div
-        className="insight-metric-cards"
-        initial={{ opacity: 0, x: 10 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ duration: 0.4, delay: 0.2 }}
-      >
-        <div className="insight-metric-card insight-metric-card--purple">
-          <div className="insight-metric-card-icon">
-            <Zap size={16} strokeWidth={2} />
-          </div>
-          <div className="insight-metric-card-content">
-            <span className="insight-metric-card-value">{metadata.agentCreditsPerHour.toFixed(1)}</span>
-            <span className="insight-metric-card-label">cr/hr</span>
-          </div>
-        </div>
-        <div className="insight-metric-card insight-metric-card--blue">
-          <div className="insight-metric-card-icon">
-            <Activity size={16} strokeWidth={2} />
-          </div>
-          <div className="insight-metric-card-content">
-            <span className="insight-metric-card-value">{metadata.allAgentsCreditsPerDay.toFixed(0)}</span>
-            <span className="insight-metric-card-label">/ {metadata.dailyLimit}</span>
-          </div>
-        </div>
+        <UsageGauge title="Today" usage={metadata.todayUsage} icon="today" onAdjust={onOpenQuickSettings} />
+        <UsageGauge
+          title="This month"
+          usage={metadata.monthUsage}
+          icon="month"
+          onDetails={onOpenUsage}
+          detailsUrl={onOpenUsage ? undefined : detailsUrl}
+        />
       </motion.div>
 
       {onDismiss && insight.dismissible && (

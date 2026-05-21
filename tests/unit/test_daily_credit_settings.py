@@ -15,6 +15,7 @@ from api.services.daily_credit_settings import (
     get_daily_credit_settings_for_plan_version,
     invalidate_daily_credit_settings_cache,
 )
+from console.daily_credit import build_agent_daily_credit_context, serialize_daily_credit_payload
 from constants.plans import PlanNames
 from tests.utils.llm_seed import get_intelligence_tier
 
@@ -168,6 +169,29 @@ class DailyCreditSettingsTests(TestCase):
                 preferred_llm_tier=premium_tier,
             )
             self.assertEqual(result.agent.daily_credit_limit, 20)
+
+    def test_quick_settings_slider_max_uses_daily_credit_config(self):
+        self.upsert_daily_credit_config(
+            PlanNames.FREE,
+            slider_max=Decimal("12"),
+        )
+        invalidate_daily_credit_settings_cache()
+        premium_tier = get_intelligence_tier("premium")
+        agent = PersistentAgent.objects.create(
+            user=self.user,
+            name="Configured Max Agent",
+            charter="Test configured slider max",
+            browser_use_agent=self.browser_agent,
+            preferred_llm_tier=premium_tier,
+            daily_credit_limit=10,
+        )
+
+        payload = serialize_daily_credit_payload(build_agent_daily_credit_context(agent))
+
+        self.assertEqual(payload["standardSliderLimit"], 12)
+        self.assertEqual(payload["sliderLimitMax"], 24)
+        self.assertEqual(payload["sliderMax"], 25)
+        self.assertEqual(payload["sliderEmptyValue"], 25)
 
     def test_default_daily_credit_target_is_db_backed(self):
         self.upsert_daily_credit_config(

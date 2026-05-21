@@ -19,6 +19,7 @@ type InsightGaugeProps = {
   showGlow?: boolean
   label?: string
   sublabel?: string
+  radius?: string
 }
 
 export function InsightGauge({
@@ -33,6 +34,7 @@ export function InsightGauge({
   showGlow = true,
   label,
   sublabel,
+  radius,
 }: InsightGaugeProps) {
   const chartRef = useRef<ReactEChartsCore>(null)
   const [displayValue, setDisplayValue] = useState(animate ? 0 : value)
@@ -64,6 +66,7 @@ export function InsightGauge({
         type: 'gauge',
         startAngle: 220,
         endAngle: -40,
+        ...(radius ? { radius } : {}),
         min: 0,
         max: 100,
         splitNumber: 0,

@@ -1,11 +1,22 @@
 import { jsonRequest } from './http'
 
-export type TemplateCloneResponse = {
+export type TemplateShareInfoResponse = {
+  agentId: string
+  agentName: string
+  canShare: boolean
+  disabledReason?: string | null
+  publicProfileHandle?: string | null
+  suggestedHandle?: string | null
+  templateUrl?: string | null
+  templateSlug?: string | null
+  displayName?: string | null
+}
+
+export type TemplateCloneResponse = TemplateShareInfoResponse & {
   created: boolean
   templateUrl: string
   templateSlug: string
   publicProfileHandle: string
-  displayName?: string | null
 }
 
 export function cloneAgentTemplate(agentId: string, handle?: string | null): Promise<TemplateCloneResponse> {
@@ -14,4 +25,8 @@ export function cloneAgentTemplate(agentId: string, handle?: string | null): Pro
     json: handle ? { handle } : {},
     includeCsrf: true,
   })
+}
+
+export function fetchAgentTemplateShareInfo(agentId: string): Promise<TemplateShareInfoResponse> {
+  return jsonRequest<TemplateShareInfoResponse>(`/console/api/agents/${agentId}/templates/clone/`)
 }

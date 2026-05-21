@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Loader2, MessageSquareQuote, Paperclip, Plus, Sparkles, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -19,8 +19,6 @@ import { appendReturnTo } from '../../util/returnTo'
 import type { LlmIntelligenceConfig } from '../../types/llmIntelligence'
 import type { PlanningState } from '../../types/agentRoster'
 
-const DEFAULT_INSIGHT_BACKGROUND = 'linear-gradient(135deg, #e0f2fe 0%, #eef2ff 45%, #ffffff 100%)'
-
 // Detect if user is on macOS
 function isMacOS(): boolean {
   if (typeof navigator === 'undefined') return false
@@ -32,29 +30,36 @@ function shouldShowSubmitShortcutHint(): boolean {
   return window.innerWidth >= 768
 }
 
-// Get the color for an insight tab based on its type
+function getBurnRateUsagePercent(metadata: BurnRateMetadata): number {
+  return Math.max(
+    metadata.todayUsage.percentUsed ?? -1,
+    metadata.monthUsage.percentUsed ?? -1,
+    0,
+  )
+}
+
+function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning' | 'critical' {
+  const percent = getBurnRateUsagePercent(metadata)
+  if (percent >= 100) return 'critical'
+  if (percent >= 90) return 'warning'
+  return 'normal'
+}
+
 function getInsightTabColor(insight: InsightEvent): string {
-  if (insight.insightType === 'time_saved') {
-    return '#10b981' // emerald-500
-  }
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
-    const percent = meta.percentUsed
-    if (percent >= 90) return '#ef4444' // red-500
-    if (percent >= 70) return '#f59e0b' // amber-500
-    return '#8b5cf6' // violet-500
+    const level = getBurnRateUsageLevel(meta)
+    if (level === 'critical') return '#dc2626'
+    if (level === 'warning') return '#d97706'
+    return '#AA74CE'
   }
   if (insight.insightType === 'agent_setup') {
-    return '#0ea5e9' // sky-500
+    return '#AA74CE'
   }
   return '#6b7280' // gray-500 fallback
 }
 
-// Get a short label for the insight tab
 function getInsightTabLabel(insight: InsightEvent): string {
-  if (insight.insightType === 'time_saved') {
-    return 'Time'
-  }
   if (insight.insightType === 'burn_rate') {
     return 'Usage'
   }
@@ -65,10 +70,6 @@ function getInsightTabLabel(insight: InsightEvent): string {
         return '24/7'
       case 'sms':
         return 'SMS'
-      case 'org_transfer':
-        return 'Org'
-      case 'template':
-        return 'Share'
       case 'upsell_pro':
         return 'Go Pro'
       case 'upsell_scale':
@@ -80,22 +81,29 @@ function getInsightTabLabel(insight: InsightEvent): string {
   return 'Insight'
 }
 
-// Get background gradient for insight wrapper
-function getInsightBackground(insight: InsightEvent): string {
-  if (insight.insightType === 'time_saved') {
-    return 'linear-gradient(135deg, #ecfdf5 0%, #d1fae5 50%, #a7f3d0 100%)'
-  }
+function getInsightTabIcon(insight: InsightEvent) {
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
-    const percent = meta.percentUsed
-    if (percent >= 90) return 'linear-gradient(135deg, #fef2f2 0%, #fee2e2 50%, #fecaca 100%)'
-    if (percent >= 70) return 'linear-gradient(135deg, #fffbeb 0%, #fef3c7 50%, #fde68a 100%)'
-    return 'linear-gradient(135deg, #f5f3ff 0%, #ede9fe 50%, #ddd6fe 100%)'
+    const level = getBurnRateUsageLevel(meta)
+    if (level === 'critical') {
+      return <OctagonAlert size={11} strokeWidth={2.2} />
+    }
+    if (level === 'warning') {
+      return <TriangleAlert size={11} strokeWidth={2.2} />
+    }
+    return <Gauge size={11} strokeWidth={2.2} />
   }
   if (insight.insightType === 'agent_setup') {
-    return DEFAULT_INSIGHT_BACKGROUND
+    const meta = insight.metadata as AgentSetupMetadata
+    if (meta.panel === 'sms') {
+      return <MessageSquare size={11} strokeWidth={2.2} />
+    }
+    if (meta.panel === 'upsell_pro' || meta.panel === 'upsell_scale') {
+      return <Zap size={11} strokeWidth={2.2} />
+    }
+    return <Rocket size={11} strokeWidth={2.2} />
   }
-  return 'transparent'
+  return <Sparkles size={11} strokeWidth={2.2} />
 }
 
 function getPendingActionRequestCount(action: PendingActionRequest): number {
@@ -321,10 +329,9 @@ type AgentComposerProps = {
   onInsightIndexChange?: (index: number) => void
   onPauseChange?: (paused: boolean) => void
   isInsightsPaused?: boolean
-  onCollaborate?: () => void
-  collaborateDisabled?: boolean
-  collaborateDisabledReason?: string | null
-  onBlockedCollaborate?: (location: 'insight_card') => void
+  onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
+  usageUrl?: string | null
   hideInsightsPanel?: boolean
   intelligenceConfig?: LlmIntelligenceConfig | null
   intelligenceTier?: string | null
@@ -376,10 +383,9 @@ export const AgentComposer = memo(function AgentComposer({
   onInsightIndexChange,
   onPauseChange,
   isInsightsPaused = false,
-  onCollaborate,
-  collaborateDisabled = false,
-  collaborateDisabledReason = null,
-  onBlockedCollaborate,
+  onOpenUsage,
+  onOpenQuickSettings,
+  usageUrl = '/console/usage/',
   hideInsightsPanel = false,
   intelligenceConfig = null,
   intelligenceTier = null,
@@ -1474,11 +1480,6 @@ export const AgentComposer = memo(function AgentComposer({
             className="composer-working-panel"
             data-expanded={resolvedWorkingExpanded ? 'true' : 'false'}
             data-has-pending-actions={hasPendingActions ? 'true' : 'false'}
-            style={
-              !hasPendingActions && (currentInsight || insightsLoading)
-                ? { background: currentInsight ? getInsightBackground(currentInsight) : DEFAULT_INSIGHT_BACKGROUND }
-                : undefined
-            }
           >
             {/* Header row - clickable to toggle, with tabs and chevron */}
             <div
@@ -1602,6 +1603,9 @@ export const AgentComposer = memo(function AgentComposer({
                           } as React.CSSProperties}
                         >
                           <span className="composer-insight-tab-inner" />
+                          <span className="composer-insight-tab-icon" aria-hidden="true">
+                            {getInsightTabIcon(insight)}
+                          </span>
                           <span className="composer-insight-tab-label">{label}</span>
                           {isActive && !isInsightsPaused && isProcessing && (
                             <span className="composer-insight-tab-progress" />
@@ -1668,10 +1672,9 @@ export const AgentComposer = memo(function AgentComposer({
                       <InsightEventCard
                         insight={currentInsight}
                         onDismiss={handleDismissInsight}
-                        onCollaborate={onCollaborate}
-                        collaborateDisabled={collaborateDisabled}
-                        collaborateDisabledReason={collaborateDisabledReason}
-                        onBlockedCollaborate={onBlockedCollaborate}
+                        onOpenUsage={onOpenUsage}
+                        onOpenQuickSettings={onOpenQuickSettings}
+                        usageUrl={usageUrl}
                       />
                     ) : (
                       <div className="composer-working-insight-skeleton" aria-hidden="true">

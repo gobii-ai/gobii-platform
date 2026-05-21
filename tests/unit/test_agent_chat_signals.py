@@ -280,6 +280,23 @@ class AgentChatSignalTests(TestCase):
         self.assertEqual(payload.get("completionId"), str(completion.id))
 
     @tag("batch_agent_chat")
+    def test_completion_usage_update_waits_for_commit(self):
+        with patch("console.agent_chat.signals.emit_agent_usage_update") as mock_emit:
+            with self.captureOnCommitCallbacks(execute=False) as callbacks:
+                PersistentAgentCompletion.objects.create(
+                    agent=self.agent,
+                    completion_type=PersistentAgentCompletion.CompletionType.ORCHESTRATOR,
+                    thinking_content="Thinking output",
+                )
+
+            mock_emit.assert_not_called()
+            self.assertEqual(len(callbacks), 1)
+            callbacks[0]()
+
+        mock_emit.assert_called_once()
+        self.assertEqual(mock_emit.call_args.args[0].id, self.agent.id)
+
+    @tag("batch_agent_chat")
     def test_create_video_tool_call_emits_preview_url(self):
         step = PersistentAgentStep.objects.create(agent=self.agent, description="Create video")
 

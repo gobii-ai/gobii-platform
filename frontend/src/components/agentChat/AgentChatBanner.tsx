@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { Check, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -43,6 +43,9 @@ type AgentChatBannerProps = {
   shareDisabled?: boolean
   shareDisabledReason?: string | null
   onBlockedShareClick?: (location: 'banner_desktop' | 'banner_mobile') => void
+  onPublicShare?: () => void
+  publicShareDisabled?: boolean
+  publicShareDisabledReason?: string | null
   sidebarMode?: AgentChatSidebarMode
   signupPreviewState?: SignupPreviewState
   children?: ReactNode
@@ -89,6 +92,9 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   shareDisabled = false,
   shareDisabledReason = null,
   onBlockedShareClick,
+  onPublicShare,
+  publicShareDisabled = false,
+  publicShareDisabledReason = null,
   sidebarMode = 'list',
   signupPreviewState = 'none',
   children,
@@ -168,14 +174,16 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   const softTargetExceeded = Boolean(dailyCreditsStatus?.softTargetExceeded)
   const showSettingsButton = canShowBannerActions && Boolean(onSettingsOpen)
   const showShareButton = canShowBannerActions && Boolean(onShare)
+  const showPublicShareButton = canShowBannerActions && Boolean(onPublicShare)
   const showAuditButton = Boolean(auditUrl)
   const showAttentionDot = softTargetExceeded || hardLimitReached
   const settingsLabel = hardLimitReached
     ? 'Daily task limit reached. Open agent settings'
     : 'Open agent settings'
   const [overflowMenuOpen, setOverflowMenuOpen] = useState(false)
-  const showMobileOverflow = showShareButton || showAuditButton || showSettingsButton
+  const showMobileOverflow = showShareButton || showPublicShareButton || showAuditButton || showSettingsButton
   const shareLabel = shareDisabledReason || 'Invite collaborators'
+  const publicShareLabel = publicShareDisabledReason || 'Share this agent'
   const resolvedSettingsLabel = settingsDisabledReason || settingsLabel
   const planButtonLabel = planPanelMode === 'hidden' ? 'Show plan' : 'Hide plan'
   const trackableShareDisabled = shareDisabled && Boolean(onBlockedShareClick)
@@ -189,6 +197,13 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     }
     onShare?.()
   }, [onBlockedShareClick, onShare, shareDisabled])
+
+  const handlePublicShareClick = useCallback(() => {
+    if (publicShareDisabled) {
+      return
+    }
+    onPublicShare?.()
+  }, [onPublicShare, publicShareDisabled])
 
   const handleSettingsClick = useCallback((location: 'banner_desktop' | 'banner_mobile') => {
     if (settingsDisabled && onBlockedSettingsClick) {
@@ -326,6 +341,20 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               <span className="banner-share-label">Collaborate</span>
             </button>
           ) : null}
+          {showPublicShareButton ? (
+            <button
+              type="button"
+              className="banner-share banner-desktop-only"
+              onClick={handlePublicShareClick}
+              aria-label={publicShareLabel}
+              title={publicShareLabel}
+              disabled={publicShareDisabled}
+              aria-disabled={publicShareDisabled ? 'true' : undefined}
+            >
+              <Share2 size={14} strokeWidth={2} />
+              <span className="banner-share-label">Share</span>
+            </button>
+          ) : null}
           {showAuditButton ? (
             <a
               className="banner-settings banner-desktop-only"
@@ -348,7 +377,7 @@ export const AgentChatBanner = memo(function AgentChatBanner({
               </Button>
               <Popover className="banner-overflow-popover">
                 <Dialog className="banner-overflow-menu">
-                  {showShareButton || showAuditButton || showSettingsButton ? (
+                  {showShareButton || showPublicShareButton || showAuditButton || showSettingsButton ? (
                     <div className="banner-overflow-section">
                       <div className="banner-overflow-heading">Actions</div>
                       <div className="banner-overflow-items">
@@ -371,6 +400,28 @@ export const AgentChatBanner = memo(function AgentChatBanner({
                             </span>
                             <span className="banner-overflow-item-copy">
                               <span className="banner-overflow-item-label">Collaborate</span>
+                            </span>
+                          </button>
+                        ) : null}
+                        {showPublicShareButton ? (
+                          <button
+                            type="button"
+                            className="banner-overflow-item"
+                            onClick={() => {
+                              handlePublicShareClick()
+                              if (!publicShareDisabled) {
+                                setOverflowMenuOpen(false)
+                              }
+                            }}
+                            disabled={publicShareDisabled}
+                            aria-disabled={publicShareDisabled ? 'true' : undefined}
+                            title={publicShareLabel}
+                          >
+                            <span className="banner-overflow-item-icon" aria-hidden="true">
+                              <Share2 size={14} />
+                            </span>
+                            <span className="banner-overflow-item-copy">
+                              <span className="banner-overflow-item-label">Share</span>
                             </span>
                           </button>
                         ) : null}

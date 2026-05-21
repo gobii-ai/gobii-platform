@@ -10,7 +10,7 @@ import type {
   ThinkingEvent,
   TimelineEvent,
 } from '../types/agentChat'
-import type { InsightEvent } from '../types/insight'
+import type { BurnRateMetadata, InsightEvent } from '../types/insight'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
 import { INSIGHT_TIMING } from '../types/insight'
 import { sendAgentMessage, fetchProcessingStatus } from '../api/agentChat'
@@ -342,6 +342,7 @@ export type AgentChatState = {
   persistPendingEventsToCache: () => void
   // Insight actions
   setInsightsForAgent: (agentId: string, insights: InsightEvent[]) => void
+  updateUsageInsight: (agentId: string, metadata: BurnRateMetadata) => void
   startInsightRotation: () => void
   stopInsightRotation: () => void
   dismissInsight: (insightId: string) => void
@@ -857,6 +858,45 @@ export const useAgentChatStore = create<AgentChatState>((set, get) => ({
     set({
       insights,
       currentInsightIndex: 0,
+    })
+  },
+
+  updateUsageInsight(agentId, metadata) {
+    if (get().agentId !== agentId) {
+      return
+    }
+    set((state) => {
+      const existingIndex = state.insights.findIndex((insight) => insight.insightType === 'burn_rate')
+      if (existingIndex >= 0) {
+        const nextInsights = [...state.insights]
+        const existing = nextInsights[existingIndex]
+        nextInsights[existingIndex] = {
+          ...existing,
+          metadata: {
+            ...(existing.metadata as BurnRateMetadata),
+            ...metadata,
+          },
+        }
+        return { insights: nextInsights }
+      }
+
+      const nextInsights = [
+        ...state.insights,
+        {
+          insightId: 'burn_rate_live',
+          insightType: 'burn_rate' as const,
+          priority: 98,
+          title: 'Credit usage',
+          body: "Track today's agent usage and this month's account usage.",
+          metadata,
+          dismissible: true,
+        },
+      ].sort((left, right) => right.priority - left.priority)
+
+      return {
+        insights: nextInsights,
+        currentInsightIndex: Math.min(state.currentInsightIndex, Math.max(0, nextInsights.length - 1)),
+      }
     })
   },
 

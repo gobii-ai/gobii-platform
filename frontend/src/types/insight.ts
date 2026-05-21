@@ -3,7 +3,7 @@
  * Insights are contextual, helpful information shown inline during processing.
  */
 
-export type InsightType = 'time_saved' | 'burn_rate' | 'agent_setup'
+export type InsightType = 'burn_rate' | 'agent_setup'
 
 // Timing constants for insight display
 export const INSIGHT_TIMING = {
@@ -14,24 +14,28 @@ export const INSIGHT_TIMING = {
   minProcessingMs: 3000, // Don't show insights if processing < 3s
 } as const
 
-// Type-specific metadata shapes
-
-export type TimeSavedMetadata = {
-  hoursSaved: number
-  tasksCompleted: number
-  comparisonPeriod: 'week' | 'month' | 'all_time'
-  methodology: string
-}
-
 export type BurnRateMetadata = {
   agentName: string
-  agentCreditsPerHour: number
-  allAgentsCreditsPerDay: number
-  dailyLimit: number
-  percentUsed: number
+  todayUsage: UsageGaugeMetadata
+  monthUsage: UsageGaugeMetadata
+  usageUrl?: string
 }
 
-export type AgentSetupPanel = 'always_on' | 'sms' | 'org_transfer' | 'upsell_pro' | 'upsell_scale' | 'template'
+export type UsageInsightUpdatePayload = {
+  agent_id?: string
+  insight_type?: 'burn_rate'
+  metadata: BurnRateMetadata
+  timestamp?: string
+}
+
+export type UsageGaugeMetadata = {
+  used: number
+  limit: number | null
+  percentUsed: number | null
+  unlimited: boolean
+}
+
+export type AgentSetupPanel = 'always_on' | 'sms' | 'upsell_pro' | 'upsell_scale'
 
 export type AgentSetupPhone = {
   number: string
@@ -69,7 +73,6 @@ export type AgentSetupMetadata = {
   }
   organization: {
     currentOrg?: { id: string; name: string } | null
-    options: { id: string; name: string }[]
   }
   upsell?: {
     items: AgentSetupUpsellItem[]
@@ -80,18 +83,9 @@ export type AgentSetupMetadata = {
     scaleUrl?: string
   }
   utmQuerystring?: string
-  publicProfile?: {
-    handle?: string | null
-    suggestedHandle?: string | null
-  }
-  template?: {
-    slug?: string | null
-    displayName?: string | null
-    url?: string | null
-  }
 }
 
-export type InsightMetadata = TimeSavedMetadata | BurnRateMetadata | AgentSetupMetadata
+export type InsightMetadata = BurnRateMetadata | AgentSetupMetadata
 
 export type InsightEvent = {
   insightId: string

@@ -1,40 +1,35 @@
 import type { InsightEvent } from '../../../types/insight'
-import { TimeSavedInsight } from './TimeSavedInsight'
 import { BurnRateInsight } from './BurnRateInsight'
 import { AgentSetupInsight } from './AgentSetupInsight'
 
 type InsightEventCardProps = {
   insight: InsightEvent
   onDismiss?: (insightId: string) => void
-  onCollaborate?: () => void
-  collaborateDisabled?: boolean
-  collaborateDisabledReason?: string | null
-  onBlockedCollaborate?: (location: 'insight_card') => void
+  onOpenUsage?: () => void
+  onOpenQuickSettings?: () => void
+  usageUrl?: string | null
 }
 
 export function InsightEventCard({
   insight,
   onDismiss,
-  onCollaborate,
-  collaborateDisabled = false,
-  collaborateDisabledReason = null,
-  onBlockedCollaborate,
+  onOpenUsage,
+  onOpenQuickSettings,
+  usageUrl,
 }: InsightEventCardProps) {
   switch (insight.insightType) {
-    case 'time_saved':
-      return <TimeSavedInsight insight={insight} onDismiss={onDismiss} />
     case 'burn_rate':
-      return <BurnRateInsight insight={insight} onDismiss={onDismiss} />
-    case 'agent_setup':
       return (
-        <AgentSetupInsight
+        <BurnRateInsight
           insight={insight}
-          onCollaborate={onCollaborate}
-          collaborateDisabled={collaborateDisabled}
-          collaborateDisabledReason={collaborateDisabledReason}
-          onBlockedCollaborate={onBlockedCollaborate}
+          onDismiss={onDismiss}
+          onOpenUsage={onOpenUsage}
+          onOpenQuickSettings={onOpenQuickSettings}
+          usageUrl={usageUrl}
         />
       )
+    case 'agent_setup':
+      return <AgentSetupInsight insight={insight} />
     default:
       // Fallback for unknown types - shouldn't happen but TypeScript safety
       return null

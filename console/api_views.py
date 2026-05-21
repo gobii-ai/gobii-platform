@@ -103,10 +103,12 @@ from api.models import (
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentStep,
+    PersistentAgentTemplate,
     PersistentLLMTier,
     PersistentModelEndpoint,
     PersistentTierEndpoint,
     PersistentTokenRange,
+    PublicProfile,
     ProfileBrowserTierEndpoint,
     ProfilePersistentTierEndpoint,
     EvalSuiteRun,
@@ -125,6 +127,7 @@ from api.models import (
     build_web_agent_address,
     build_web_user_address,
 )
+from api.public_profiles import generate_handle_suggestion
 from django.core.files.storage import default_storage
 from agents.services import PretrainedWorkerTemplateService
 from config.socialaccount_adapter import OAUTH_CHARTER_COOKIE, restore_oauth_session_state
@@ -3616,8 +3619,41 @@ class AgentReassignAPIView(ApiLoginRequiredMixin, View):
         })
 
 
+def _serialize_agent_template_share_state(request: HttpRequest, agent: PersistentAgent) -> dict[str, Any]:
+    can_share = agent.organization_id is None
+    public_profile = PublicProfile.objects.filter(user=request.user).first()
+    suggested_handle = None if public_profile or not can_share else generate_handle_suggestion()
+    template = None
+    template_url = None
+    if public_profile:
+        template = (
+            PersistentAgentTemplate.objects
+            .filter(public_profile=public_profile, source_agent=agent)
+            .order_by("-created_at")
+            .first()
+        )
+        if template and template.slug:
+            template_url = request.build_absolute_uri(public_template_detail_path(template))
+
+    return {
+        "agentId": str(agent.id),
+        "agentName": agent.name or "",
+        "canShare": can_share,
+        "disabledReason": None if can_share else "Organization agents cannot be shared as public templates.",
+        "publicProfileHandle": public_profile.handle if public_profile else None,
+        "suggestedHandle": suggested_handle,
+        "templateUrl": template_url,
+        "templateSlug": template.slug if template else None,
+        "displayName": template.display_name if template else None,
+    }
+
+
 class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
-    http_method_names = ["post"]
+    http_method_names = ["get", "post"]
+
+    def get(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(request, agent_id)
+        return JsonResponse(_serialize_agent_template_share_state(request, agent))
 
     def post(self, request: HttpRequest, agent_id: str, *args: Any, **kwargs: Any):
         agent = resolve_agent_for_request(request, agent_id)
@@ -3648,7 +3684,6 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
         if not template.slug or not result.public_profile.handle:
             return JsonResponse({"error": "Template URL could not be generated."}, status=500)
 
-        template_url = request.build_absolute_uri(public_template_detail_path(template))
         if result.created:
             transaction.on_commit(
                 lambda: emit_configured_custom_capi_event(
@@ -3665,10 +3700,7 @@ class AgentTemplateCloneAPIView(ApiLoginRequiredMixin, View):
             )
         return JsonResponse({
             "created": result.created,
-            "templateUrl": template_url,
-            "templateSlug": template.slug,
-            "publicProfileHandle": result.public_profile.handle,
-            "displayName": template.display_name,
+            **_serialize_agent_template_share_state(request, agent),
         })
 
 

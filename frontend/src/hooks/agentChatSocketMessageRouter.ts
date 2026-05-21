@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import { normalizePendingActionRequests, normalizePendingHumanInputRequests } from '../api/agentChat'
 import type { AgentMessageNotification, ProcessingSnapshot, StreamEventPayload, TimelineEvent } from '../types/agentChat'
 import type { PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { BurnRateMetadata, UsageInsightUpdatePayload } from '../types/insight'
 import {
   injectRealtimeEventIntoCache,
   replacePendingActionRequestsInCache,
@@ -75,6 +76,7 @@ export function routeAgentChatSocketMessage({
   receiveRealtimeEvent,
   updateProcessing,
   updateAgentIdentity,
+  updateUsageInsight,
   receiveStreamEvent,
   onCreditEvent,
   onAgentProfileEvent,
@@ -86,6 +88,7 @@ export function routeAgentChatSocketMessage({
   receiveRealtimeEvent: (event: TimelineEvent) => void
   updateProcessing: (snapshot: ProcessingSnapshot) => void
   updateAgentIdentity: (update: AgentIdentityUpdate) => void
+  updateUsageInsight: (agentId: string, metadata: BurnRateMetadata) => void
   receiveStreamEvent: (payload: StreamEventPayload) => void
   onCreditEvent?: ((payload: Record<string, unknown>) => void) | null
   onAgentProfileEvent?: ((payload: Record<string, unknown>) => void) | null
@@ -192,6 +195,15 @@ export function routeAgentChatSocketMessage({
 
   if (messageType === 'credit.event' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
     onCreditEvent?.(message.payload as Record<string, unknown>)
+    return { type: 'handled' }
+  }
+
+  if (messageType === 'usage.updated' && message.payload && typeof message.payload === 'object' && !Array.isArray(message.payload)) {
+    const payloadAgentId = extractAgentChatSocketEnvelopeAgentId(message)
+    const usagePayload = message.payload as UsageInsightUpdatePayload
+    if (payloadAgentId && payloadAgentId === activeAgentId && usagePayload.metadata) {
+      updateUsageInsight(payloadAgentId, usagePayload.metadata)
+    }
     return { type: 'handled' }
   }
 

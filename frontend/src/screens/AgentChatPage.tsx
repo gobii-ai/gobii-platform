@@ -51,6 +51,7 @@ import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgen
 import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgentSecretsPanel'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
+import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -1439,6 +1440,7 @@ export function AgentChatPage({
   ])
 
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
+  const [publicShareOpen, setPublicShareOpen] = useState(false)
   const [pendingAvatarTracking, setPendingAvatarTracking] = useState<PendingAvatarTracking>({})
   const trackPendingAvatarRefresh = useCallback((agentId: string) => {
     const expiresAt = Date.now() + ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS
@@ -2056,16 +2058,11 @@ export function AgentChatPage({
   // (send message, click jump button, composer focus, initial scroll).
   const jumpToBottom = useCallback(() => {
     const container = document.getElementById('timeline-shell')
-    const sentinel = document.getElementById('timeline-bottom-sentinel')
     if (!container) return
     lastProgrammaticScrollAtRef.current = Date.now()
     // Kill iOS momentum scrolling — toggling overflow forces the scroll to stop immediately
     container.style.overflowY = 'hidden'
-    if (sentinel) {
-      sentinel.scrollIntoView({ block: 'end', behavior: 'auto' })
-    } else {
-      container.scrollTop = container.scrollHeight + 10000
-    }
+    container.scrollTop = container.scrollHeight + 10000
     requestAnimationFrame(() => { container.style.overflowY = '' })
     isNearBottomRef.current = true
     setIsNearBottom(true)
@@ -2996,6 +2993,14 @@ export function AgentChatPage({
       && activeCanManageCollaborators
       && !isCollaboratorOnly,
   )
+  const canSharePublicTemplate = Boolean(
+    activeAgentId
+      && !isSelectionView
+      && !isNewAgent
+      && !resolvedIsOrgOwned
+      && activeCanManageAgent
+      && !isCollaboratorOnly,
+  )
 
   const handleOpenCollaboratorInvite = useCallback(() => {
     setCollaboratorInviteOpen(true)
@@ -3003,6 +3008,14 @@ export function AgentChatPage({
 
   const handleCloseCollaboratorInvite = useCallback(() => {
     setCollaboratorInviteOpen(false)
+  }, [])
+
+  const handleOpenPublicShare = useCallback(() => {
+    setPublicShareOpen(true)
+  }, [])
+
+  const handleClosePublicShare = useCallback(() => {
+    setPublicShareOpen(false)
   }, [])
 
   // Detect if the requested agent doesn't exist (deleted or never existed)
@@ -4515,6 +4528,12 @@ export function AgentChatPage({
         canManage={activeCanManageCollaborators}
         onClose={handleCloseCollaboratorInvite}
       />
+      <PublicAgentShareDialog
+        open={publicShareOpen}
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || agentName}
+        onClose={handleClosePublicShare}
+      />
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
@@ -4607,6 +4626,7 @@ export function AgentChatPage({
         onRefreshAddons={refetchAddons}
         contactPackManageUrl={contactPackManageUrl}
         onShare={canShareCollaborators ? handleOpenCollaboratorInvite : undefined}
+        onPublicShare={canSharePublicTemplate ? handleOpenPublicShare : undefined}
         onBlockedSettingsClick={handleBlockedSettingsClick}
         onBlockedCollaborate={handleBlockedCollaborateClick}
         onUpgrade={handleUpgrade}
