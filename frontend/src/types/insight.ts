@@ -34,6 +34,13 @@ export type BurnRateMetadata = {
   usageUrl?: string
 }
 
+export type UsageInsightUpdatePayload = {
+  agent_id?: string
+  insight_type?: 'burn_rate'
+  metadata: BurnRateMetadata
+  timestamp?: string
+}
+
 export type UsageGaugeMetadata = {
   used: number
   limit: number | null

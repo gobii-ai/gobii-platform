@@ -37,6 +37,7 @@ from console.agent_audit.serializers import (
     serialize_tool_call,
 )
 from console.agent_chat.realtime import send_user_group_event, user_profile_group_name
+from console.insight_views import build_usage_metadata_for_agent
 from util.text_sanitizer import sanitize_notification_preview_text
 from api.agent.comms.message_reads import (
     build_agent_message_read_state_for_users,
@@ -242,6 +243,27 @@ def _broadcast_tool_cluster(step: PersistentAgentStep) -> None:
     _broadcast_processing(step.agent)
 
 
+def emit_agent_usage_update(agent: PersistentAgent) -> None:
+    if not agent or not getattr(agent, "id", None):
+        return
+    try:
+        metadata = build_usage_metadata_for_agent(agent)
+    except Exception:
+        logger.debug("Failed to build usage update for agent %s", getattr(agent, "id", None), exc_info=True)
+        return
+    payload = {
+        "agent_id": str(agent.id),
+        "insight_type": "burn_rate",
+        "metadata": metadata,
+        "timestamp": timezone.now().isoformat(),
+    }
+    user_model = get_user_model()
+    viewers_by_id = user_model.objects.in_bulk(sorted(_resolve_profile_listener_user_ids(agent)))
+    for user_id, viewer in viewers_by_id.items():
+        if user_can_manage_agent_settings(viewer, agent, allow_delinquent_personal_chat=True):
+            send_user_group_event(str(agent.id), user_id, "usage_update_event", payload)
+
+
 def _broadcast_audit_event(agent_id: str | None, payload: dict) -> None:
     if not agent_id:
         return
@@ -354,6 +376,7 @@ def broadcast_new_message(sender, instance: PersistentAgentMessage, created: boo
             logger.exception("Failed to serialize agent message %s: %s", message_id, exc)
             return
         _send(_group_name(owner_agent_id), "timeline_event", payload, agent_id=str(owner_agent_id))
+        emit_agent_usage_update(msg.owner_agent)
         if msg.is_outbound and not is_peer_dm_message(msg):
             try:
                 emit_message_notification(msg)
@@ -504,6 +527,7 @@ def broadcast_new_completion(sender, instance: PersistentAgentCompletion, create
             thinking_payload = serialize_thinking_event(instance)
             if thinking_payload:
                 _send(_group_name(instance.agent_id), "timeline_event", thinking_payload, agent_id=str(instance.agent_id))
+                emit_agent_usage_update(instance.agent)
         except Exception:
             logger.debug("Failed to broadcast thinking event for %s", instance.id, exc_info=True)
     try:
@@ -638,6 +662,7 @@ def _broadcast_processing(agent):
     snapshot = build_processing_snapshot(agent)
     payload = serialize_processing_snapshot(snapshot)
     _send(_group_name(agent.id), "processing_event", payload, agent_id=str(agent.id))
+    emit_agent_usage_update(agent)
     _emit_processing_profile_update_if_changed(agent, snapshot.active)
     try:
         send_audit_event(

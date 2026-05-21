@@ -1,7 +1,7 @@
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from 'react'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
-import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Gauge, Loader2, MessageSquare, MessageSquareQuote, Paperclip, Plus, Rocket, Sparkles, Zap, X } from 'lucide-react'
+import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Clock3, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
@@ -30,6 +30,22 @@ function shouldShowSubmitShortcutHint(): boolean {
   return window.innerWidth >= 768
 }
 
+function getBurnRateUsagePercent(metadata: BurnRateMetadata): number {
+  return Math.max(
+    metadata.todayUsage?.percentUsed ?? -1,
+    metadata.monthUsage?.percentUsed ?? -1,
+    metadata.percentUsed ?? -1,
+    0,
+  )
+}
+
+function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning' | 'critical' {
+  const percent = getBurnRateUsagePercent(metadata)
+  if (percent >= 100) return 'critical'
+  if (percent >= 90) return 'warning'
+  return 'normal'
+}
+
 // Get the color for an insight tab based on its type
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'time_saved') {
@@ -37,9 +53,9 @@ function getInsightTabColor(insight: InsightEvent): string {
   }
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
-    const percent = meta.percentUsed ?? meta.todayUsage?.percentUsed ?? meta.monthUsage?.percentUsed ?? 0
-    if (percent >= 90) return '#ef4444' // red-500
-    if (percent >= 70) return '#f59e0b' // amber-500
+    const level = getBurnRateUsageLevel(meta)
+    if (level === 'critical') return '#dc2626'
+    if (level === 'warning') return '#d97706'
     return '#AA74CE'
   }
   if (insight.insightType === 'agent_setup') {
@@ -79,6 +95,14 @@ function getInsightTabIcon(insight: InsightEvent) {
     return <Clock3 size={11} strokeWidth={2.2} />
   }
   if (insight.insightType === 'burn_rate') {
+    const meta = insight.metadata as BurnRateMetadata
+    const level = getBurnRateUsageLevel(meta)
+    if (level === 'critical') {
+      return <OctagonAlert size={11} strokeWidth={2.2} />
+    }
+    if (level === 'warning') {
+      return <TriangleAlert size={11} strokeWidth={2.2} />
+    }
     return <Gauge size={11} strokeWidth={2.2} />
   }
   if (insight.insightType === 'agent_setup') {

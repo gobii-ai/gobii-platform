@@ -84,6 +84,7 @@ export function useAgentChatSocket(
   const receiveEventRef = useRef(useAgentChatStore.getState().receiveRealtimeEvent)
   const updateProcessingRef = useRef(useAgentChatStore.getState().updateProcessing)
   const updateAgentIdentityRef = useRef(useAgentChatStore.getState().updateAgentIdentity)
+  const updateUsageInsightRef = useRef(useAgentChatStore.getState().updateUsageInsight)
   const receiveStreamRef = useRef(useAgentChatStore.getState().receiveStreamEvent)
   const creditEventRef = useRef<typeof options.onCreditEvent | null>(options.onCreditEvent ?? null)
   const profileEventRef = useRef<typeof options.onAgentProfileEvent | null>(options.onAgentProfileEvent ?? null)
@@ -96,6 +97,7 @@ export function useAgentChatSocket(
       receiveEventRef.current = state.receiveRealtimeEvent
       updateProcessingRef.current = state.updateProcessing
       updateAgentIdentityRef.current = state.updateAgentIdentity
+      updateUsageInsightRef.current = state.updateUsageInsight
       receiveStreamRef.current = state.receiveStreamEvent
     }),
   [])
@@ -403,6 +405,7 @@ export function useAgentChatSocket(
             receiveRealtimeEvent: receiveEventRef.current,
             updateProcessing: updateProcessingRef.current,
             updateAgentIdentity: updateAgentIdentityRef.current,
+            updateUsageInsight: updateUsageInsightRef.current,
             receiveStreamEvent: receiveStreamRef.current,
             onCreditEvent: creditEventRef.current,
             onAgentProfileEvent: profileEventRef.current,

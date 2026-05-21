@@ -438,8 +438,7 @@ def _get_month_usage_payload(ctx: InsightContext) -> dict:
     }
 
 
-def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
-    """Generate usage insight for current agent."""
+def _get_burn_rate_metadata(ctx: InsightContext) -> dict:
     try:
         daily_state = get_agent_daily_credit_state(ctx.agent)
     except Exception as e:
@@ -476,21 +475,57 @@ def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
     month_usage = _get_month_usage_payload(ctx)
 
     return {
+        "agentName": ctx.agent.name,
+        "agentCreditsPerHour": round(float(burn_rate or 0), 2),
+        "allAgentsCreditsPerDay": round(month_usage["used"], 2),
+        "dailyLimit": today_usage["limit"],
+        "percentUsed": today_usage["percentUsed"],
+        "todayUsage": today_usage,
+        "monthUsage": month_usage,
+        "usageUrl": reverse("usage"),
+    }
+
+
+def build_usage_metadata_for_agent(
+    agent: PersistentAgent,
+    user: Any | None = None,
+    organization: Optional[Any] = None,
+) -> dict:
+    """Return the live usage metadata shape consumed by the usage insight."""
+    resolved_user = user or agent.user
+    resolved_organization = organization if organization is not None else agent.organization
+    try:
+        owner = resolved_organization or resolved_user
+        period_start_date, period_end_date = BillingService.get_current_billing_period_for_owner(owner)
+        period_start = timezone.make_aware(datetime.combine(period_start_date, time.min))
+        period_end = timezone.make_aware(datetime.combine(period_end_date, time.max))
+    except Exception:
+        logger.exception("Failed to resolve billing period for usage metadata")
+        period_end = timezone.now()
+        period_start = period_end - timedelta(days=30)
+
+    return _get_burn_rate_metadata(
+        InsightContext(
+            agent=agent,
+            user=resolved_user,
+            organization=resolved_organization,
+            period_start=period_start,
+            period_end=period_end,
+        )
+    )
+
+
+def _get_burn_rate_insight(ctx: InsightContext) -> Optional[dict]:
+    """Generate usage insight for current agent."""
+    metadata = _get_burn_rate_metadata(ctx)
+
+    return {
         "insightId": f"burn_rate_{uuid.uuid4().hex[:8]}",
         "insightType": "burn_rate",
         "priority": 98,
         "title": "Credit usage",
         "body": "Track today's agent usage and this month's account usage.",
-        "metadata": {
-            "agentName": ctx.agent.name,
-            "agentCreditsPerHour": round(float(burn_rate or 0), 2),
-            "allAgentsCreditsPerDay": round(month_usage["used"], 2),
-            "dailyLimit": today_usage["limit"],
-            "percentUsed": today_usage["percentUsed"],
-            "todayUsage": today_usage,
-            "monthUsage": month_usage,
-            "usageUrl": reverse("usage"),
-        },
+        "metadata": metadata,
         "dismissible": True,
     }
 

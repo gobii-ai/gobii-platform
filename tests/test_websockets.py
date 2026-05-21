@@ -172,6 +172,64 @@ class AgentChatSessionConsumerTests(SimpleTestCase):
         ):
             async_to_sync(_run)()
 
+    def test_session_consumer_forwards_usage_updates_to_subscribed_agents(self) -> None:
+        async def _allow_subscription(*args, **kwargs):
+            return None
+
+        async def _run():
+            communicator = self._build_communicator()
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            channel_layer = get_channel_layer()
+            self.assertIsNotNone(channel_layer)
+
+            try:
+                await communicator.send_json_to(
+                    {"type": "subscribe", "agent_id": "agent-a", "mode": "active"}
+                )
+                await asyncio.sleep(0.01)
+
+                await channel_layer.group_send(
+                    "agent-chat-agent-a",
+                    {
+                        "type": "usage_update_event",
+                        "agent_id": "agent-a",
+                        "payload": {
+                            "agent_id": "agent-a",
+                            "insight_type": "burn_rate",
+                            "metadata": {
+                                "agentName": "Agent A",
+                                "todayUsage": {
+                                    "used": 2,
+                                    "limit": 10,
+                                    "percentUsed": 20,
+                                    "unlimited": False,
+                                },
+                                "monthUsage": {
+                                    "used": 20,
+                                    "limit": 100,
+                                    "percentUsed": 20,
+                                    "unlimited": False,
+                                },
+                            },
+                        },
+                    },
+                )
+
+                event = await communicator.receive_json_from()
+                self.assertEqual(event["type"], "usage.updated")
+                self.assertEqual(event["agent_id"], "agent-a")
+                self.assertEqual(event["payload"]["metadata"]["todayUsage"]["used"], 2)
+            finally:
+                await communicator.disconnect()
+
+        with patch(
+            "console.agent_chat.consumers.AgentChatSessionConsumer._resolve_agent",
+            new=_allow_subscription,
+        ):
+            async_to_sync(_run)()
+
     def test_session_consumer_forwards_message_notifications_from_profile_group(self) -> None:
         async def _run():
             communicator = self._build_communicator()

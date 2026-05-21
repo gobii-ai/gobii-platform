@@ -2840,7 +2840,7 @@
   font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: #7c4ca0;
+  color: var(--tab-color, #7c4ca0);
   line-height: 1;
   transition: color 150ms ease;
 }
@@ -2850,7 +2850,7 @@
   z-index: 1;
   display: inline-flex;
   align-items: center;
-  color: #7c4ca0;
+  color: var(--tab-color, #7c4ca0);
   transition: color 150ms ease;
 }
 
