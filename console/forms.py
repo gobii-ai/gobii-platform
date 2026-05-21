@@ -13,22 +13,15 @@ from api.models import (
     UserPreference,
 )
 from api.models import UserPhoneNumber
-from django.core.validators import RegexValidator
 from django.utils import timezone
 from django.utils.text import slugify
 from django.core.exceptions import ValidationError
 
-from constants.regex import E164_PHONE_REGEX
 from constants.phone_countries import SUPPORTED_REGION_CODES
-from util.phone import validate_and_format_e164
 from api.services.user_timezone import normalize_timezone_value, resolve_user_timezone
 from api.services.mcp_config_validation import (
     validate_environment_mapping,
     validate_mcp_metadata_environment_references,
-)
-from api.models import CommsChannel
-from api.services.sms_contact_purpose import (
-    SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
 )
 from util import sms
 import logging
@@ -206,46 +199,6 @@ class UserProfileForm(forms.ModelForm):
                 {UserPreference.KEY_USER_TIMEZONE: timezone_value},
             )
         return user
-
-class UserPhoneNumberForm(forms.Form):
-    def __init__(self, *args, **kwargs):
-        self.user = kwargs.pop("user", None)
-        super().__init__(*args, **kwargs)
-
-    phone_number = forms.CharField(
-        max_length=32,
-        validators=[RegexValidator(E164_PHONE_REGEX, "Enter a valid E.164 phone number")],
-        widget=forms.TextInput(
-            attrs={
-                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
-                "placeholder": "+1234567890",
-            }
-        ),
-        label="SMS Number",
-    )
-    verification_code = forms.CharField(
-        max_length=10,
-        required=False,
-        widget=forms.TextInput(
-            attrs={
-                "class": "block w-full px-4 py-3 text-sm border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500",
-                "placeholder": "Verification code",
-            }
-        ),
-        label="Verification Code",
-    )
-
-    def clean_phone_number(self):
-        phone_number = self.cleaned_data.get("phone_number")
-        if not phone_number:
-            return phone_number
-
-        # Use shared validator to ensure consistent behavior and codes
-        e164 = validate_and_format_e164(phone_number)
-
-        if self.user and UserPhoneNumber.objects.filter(phone_number=e164).exclude(user=self.user).exists():
-            raise forms.ValidationError("This phone number is already in use by another account.")
-        return e164
 
 class StyledRadioSelect(forms.RadioSelect):
     """Custom RadioSelect widget with Preline styling."""
@@ -491,39 +444,6 @@ class PersistentAgentCharterForm(forms.Form):
     )
 
 
-class PersistentAgentSecretsForm(forms.Form):
-    """Form for managing persistent agent secrets."""
-    
-    def __init__(self, *args, agent=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.agent = agent
-    
-    def clean_secret_key(self, key):
-        """Validate a single secret key."""
-        if not key:
-            raise forms.ValidationError("Secret key cannot be empty.")
-        
-        # Ensure key is alphanumeric with underscores only
-        if not key.replace('_', '').isalnum():
-            raise forms.ValidationError(f"Secret key '{key}' must be alphanumeric with underscores only.")
-        
-        # Ensure key doesn't start with a number
-        if key[0].isdigit():
-            raise forms.ValidationError(f"Secret key '{key}' cannot start with a number.")
-        
-        return key
-    
-    def clean_secret_value(self, value):
-        """Validate a single secret value."""
-        if not value:
-            raise forms.ValidationError("Secret value cannot be empty.")
-        
-        if not isinstance(value, str):
-            raise forms.ValidationError("Secret value must be a string.")
-        
-        return value
-
-
 class AgentEmailAccountConsoleForm(forms.Form):
     """Lightweight console form to edit BYO email settings.
 
@@ -581,74 +501,6 @@ class AgentEmailAccountConsoleForm(forms.Form):
                 if not cleaned.get(f):
                     self.add_error(f, 'Required when inbound is enabled')
         return cleaned
-
-
-class ContactRequestApprovalForm(forms.Form):
-    """Form for approving/rejecting contact requests."""
-    
-    def __init__(self, *args, contact_requests=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.contact_requests = contact_requests or []
-        
-        # Create checkbox fields for each request
-        for request in self.contact_requests:
-            # Approval checkbox
-            field_name = f'approve_{request.id}'
-            display_name = request.name or request.address
-            self.fields[field_name] = forms.BooleanField(
-                required=False,
-                initial=True,  # Default to checked for convenience
-                label=f"{display_name} ({request.channel})",
-                help_text=f"Purpose: {request.purpose}",
-                widget=forms.CheckboxInput(attrs={
-                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
-                })
-            )
-            
-            # Inbound permission checkbox
-            inbound_field_name = f'inbound_{request.id}'
-            self.fields[inbound_field_name] = forms.BooleanField(
-                required=False,
-                initial=request.request_inbound,  # Use the request's setting
-                label="Allow receiving messages",
-                widget=forms.CheckboxInput(attrs={
-                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
-                })
-            )
-            
-            # Outbound permission checkbox
-            outbound_field_name = f'outbound_{request.id}'
-            self.fields[outbound_field_name] = forms.BooleanField(
-                required=False,
-                initial=request.request_outbound,  # Use the request's setting
-                label="Allow sending messages",
-                widget=forms.CheckboxInput(attrs={
-                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
-                })
-            )
-
-            # Configure permission checkbox
-            configure_field_name = f'configure_{request.id}'
-            self.fields[configure_field_name] = forms.BooleanField(
-                required=False,
-                initial=False,  # Default to no config authority
-                label="Allow configuration changes",
-                help_text="Can instruct agent to update charter/schedule",
-                widget=forms.CheckboxInput(attrs={
-                    'class': 'w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500'
-                })
-            )
-
-            if request.channel == CommsChannel.SMS:
-                attestation_field_name = f'sms_permission_attested_{request.id}'
-                self.fields[attestation_field_name] = forms.BooleanField(
-                    required=False,
-                    initial=False,
-                    label=SMS_CONTACT_PERMISSION_ATTESTATION_TEXT,
-                    widget=forms.CheckboxInput(attrs={
-                        'class': 'w-4 h-4 text-amber-600 bg-gray-100 border-gray-300 rounded focus:ring-amber-500'
-                    }),
-                )
 
 
 class PhoneAddForm(forms.Form):
