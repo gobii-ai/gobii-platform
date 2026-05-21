@@ -580,7 +580,7 @@ class OrganizationInvitesTest(TestCase):
         }
         session.save()
 
-        resp = self.client.get(reverse("billing") + "?seats_success=1")
+        resp = self.client.get("/app/billing?seats_success=1")
 
         self.assertEqual(resp.status_code, 200)
         mock_get_key.assert_called_once()
@@ -613,7 +613,7 @@ class OrganizationInvitesTest(TestCase):
         }
         session.save()
 
-        resp = self.client.get(reverse("billing") + "?seats_cancelled=1")
+        resp = self.client.get("/app/billing?seats_cancelled=1")
 
         self.assertEqual(resp.status_code, 200)
         mock_get_key.assert_called_once()

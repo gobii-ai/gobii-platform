@@ -177,6 +177,7 @@ from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
 )
+from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 from console.agent_chat.access import (
     agent_queryset_for,
@@ -3130,9 +3131,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         )
         manage_billing_url = None
         if can_open_billing:
-            manage_billing_url = reverse("billing")
+            manage_billing_url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
             if organization is not None:
-                manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
+                manage_billing_url = append_context_query(manage_billing_url, str(organization.id))
         billing_status = _build_billing_status_payload(
             owner,
             owner_type,

@@ -1870,7 +1870,6 @@ class ConsoleViewsTest(TestCase):
         form = response.context.get("form")
         self.assertIsNotNone(form)
         non_field_errors = form.non_field_errors()
-        billing_url = f"{reverse('billing')}?org_id={org.id}"
         self.assertTrue(any("Add seats in Billing" in err for err in non_field_errors))
         context_data = response.context
         if hasattr(context_data, 'get'):
@@ -1885,7 +1884,9 @@ class ConsoleViewsTest(TestCase):
         django_messages = list(messages_iter)
         self.assertTrue(
             any(
-                "Add seats in Billing" in msg.message and billing_url in msg.message
+                "Add seats in Billing" in msg.message
+                and "/app/billing" in msg.message
+                and str(org.id) in msg.message
                 for msg in django_messages
             )
         )
@@ -3189,7 +3190,7 @@ class ConsoleViewsTest(TestCase):
         self.assertTrue(account_pause.get("paused"))
         self.assertEqual(account_pause.get("reason"), ExecutionPauseReasonChoices.CUSTOMER_ACCOUNT_PAUSE)
         self.assertEqual(account_pause.get("resumeAt"), resume_at.isoformat())
-        self.assertEqual(account_pause.get("manageBillingUrl"), reverse("billing"))
+        self.assertEqual(account_pause.get("manageBillingUrl"), "/app/billing")
 
     @tag("batch_console_agents_management")
     @patch('console.views.can_user_use_personal_agents_and_api', return_value=False)

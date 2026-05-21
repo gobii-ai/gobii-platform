@@ -112,6 +112,7 @@ from constants.feature_flags import (
 from util.urls import (
     IMMERSIVE_APP_BASE_PATH,
     IMMERSIVE_RETURN_TO_SESSION_KEY,
+    append_context_query,
     append_query_params,
     build_immersive_agents_url,
     build_immersive_chat_url,
@@ -760,7 +761,7 @@ def _build_checkout_success_url(request, *, event_id: str, price: float, plan: s
         separator = '&' if '?' in path_part else '?'
         redirect_with_params = f"{path_part}{separator}{urlencode(success_params)}{frag_sep}{fragment}"
         return request.build_absolute_uri(redirect_with_params), True
-    default_url = f'{request.build_absolute_uri(reverse("billing"))}?{urlencode(success_params)}'
+    default_url = f'{request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing")}?{urlencode(success_params)}'
     return default_url, False
 
 
@@ -1101,9 +1102,9 @@ class HomePage(TemplateView):
             intelligence_upgrade_url,
         )
         try:
-            billing_url = reverse('billing')
+            billing_url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
             if organization is not None:
-                billing_url = f"{billing_url}?org_id={organization.id}"
+                billing_url = append_context_query(billing_url, str(organization.id))
         except NoReverseMatch:
             billing_url = ""
         context['billing_url'] = billing_url
@@ -1980,7 +1981,7 @@ class EngineeringProSignupView(View):
         )
         if trial_onboarding_requested:
             if request.user.is_authenticated:
-                return redirect("api_keys")
+                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/api-keys")
             set_trial_onboarding_intent(
                 request,
                 target=trial_onboarding_target,
@@ -1997,7 +1998,7 @@ class EngineeringProSignupView(View):
             )
 
         next_url = reverse("proprietary:pro_checkout")
-        request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
+        request.session[POST_CHECKOUT_REDIRECT_SESSION_KEY] = f"{IMMERSIVE_APP_BASE_PATH}/api-keys"
         request.session.modified = True
 
         if request.user.is_authenticated:
@@ -2299,7 +2300,7 @@ def _start_trial_promo_checkout(request, promo: TrialPromo):
     plan_id = str(plan.get("id") or "").lower()
     if plan_id and plan_id != PlanNames.FREE:
         messages.info(request, "This account already has an active paid plan.")
-        return redirect(reverse("billing"))
+        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
     decision = can_user_start_trial_promo(user=user, promo=promo, request=request)
     if not decision.allowed:
@@ -2547,7 +2548,7 @@ class StartupCheckoutView(NoIndexFollowMixin, LoginRequiredMixin, View):
         plan = reconcile_user_plan_from_stripe(user) or {}
         plan_id = str(plan.get("id") or "").lower()
         if plan_id and plan_id != PlanNames.FREE:
-            redirect_path = _pop_post_checkout_redirect(request) or reverse("billing")
+            redirect_path = _pop_post_checkout_redirect(request) or f"{IMMERSIVE_APP_BASE_PATH}/billing"
             return redirect(redirect_path)
 
         _prepare_stripe_or_404()

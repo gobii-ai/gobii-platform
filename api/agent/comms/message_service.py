@@ -22,7 +22,6 @@ from django.core.files.base import ContentFile, File
 from django.core.mail import send_mail
 from django.db import DatabaseError, transaction
 from django.template.loader import render_to_string
-from django.urls import NoReverseMatch, reverse
 from django.utils import timezone
 from api.agent.core.processing_flags import bump_human_inbound_generation
 from ..files.filespace_service import enqueue_import_after_commit, import_message_attachments_to_filespace
@@ -626,14 +625,13 @@ def ingest_inbound_message(
                             # Prepare and send out-of-credits reply via configured backend (Mailgun in prod)
                             try:
                                 try:
-                                    billing_url = _build_site_url(reverse("billing"))
+                                    billing_url = _build_site_url("/app/billing")
                                     if agent_obj.organization_id:
                                         billing_url = append_context_query(
                                             billing_url,
                                             agent_obj.organization_id,
                                         )
                                 except (
-                                    NoReverseMatch,
                                     Site.DoesNotExist,
                                     MultipleObjectsReturned,
                                     DatabaseError,

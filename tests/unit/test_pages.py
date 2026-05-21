@@ -1989,7 +1989,7 @@ class EngineeringProSignupTests(TestCase):
         session = self.client.session
         self.assertEqual(
             session.get(page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY),
-            reverse("api_keys"),
+            "/app/api-keys",
         )
 
     def test_engineering_trial_onboarding_redirects_anon_to_signup_when_cta_signup_first_enabled(self):
@@ -2043,7 +2043,7 @@ class EngineeringProSignupTests(TestCase):
         )
         self.assertEqual(response.status_code, 302)
         parsed = urlparse(response["Location"])
-        self.assertEqual(parsed.path, reverse("api_keys"))
+        self.assertEqual(parsed.path, "/app/api-keys")
 
 
 @tag("batch_pages")
@@ -2216,7 +2216,7 @@ class CheckoutRedirectTests(TestCase):
         self.client.force_login(user)
 
         session = self.client.session
-        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = reverse("api_keys")
+        session[page_views.POST_CHECKOUT_REDIRECT_SESSION_KEY] = "/app/api-keys"
         session.save()
 
         mock_get_user_plan.return_value = {"id": PlanNames.SCALE}
@@ -2225,7 +2225,7 @@ class CheckoutRedirectTests(TestCase):
 
         self.assertEqual(resp.status_code, 302)
         parsed = urlparse(resp["Location"])
-        self.assertEqual(parsed.path, reverse("api_keys"))
+        self.assertEqual(parsed.path, "/app/api-keys")
         mock_prepare.assert_not_called()
 
         session = self.client.session
@@ -4175,7 +4175,7 @@ class MarketingMetaTests(TestCase):
         parsed = urlparse(resp["Location"])
         params = parse_qs(parsed.query)
 
-        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(parsed.path, "/app/billing")
         self.assertEqual(params.get("subscribe_success"), ["1"])
         self.assertEqual(params.get("p"), ["275.00"])
         self.assertTrue(params.get("eid"))
@@ -4271,7 +4271,7 @@ class SubscriptionPriceParsingTests(TestCase):
         parsed = urlparse(resp["Location"])
         params = parse_qs(parsed.query)
 
-        self.assertEqual(parsed.path, "/console/billing/")
+        self.assertEqual(parsed.path, "/app/billing")
         self.assertEqual(params.get("subscribe_success"), ["1"])
         self.assertEqual(params.get("p"), ["275.00"])
         self.assertTrue(params.get("eid"))

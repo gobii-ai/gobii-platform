@@ -330,17 +330,17 @@ export function AgentChatLayout({
   currentContext = null,
   sidebarBillingUrl = null,
   onOpenBilling,
-  sidebarUsageUrl = '/console/usage/',
+  sidebarUsageUrl = '/app/usage',
   onOpenUsage,
-  sidebarApiKeysUrl = '/console/api-keys/',
+  sidebarApiKeysUrl = '/app/api-keys',
   onOpenApiKeys,
-  sidebarProfileUrl = '/console/profile/',
+  sidebarProfileUrl = '/app/profile',
   onOpenProfile,
   sidebarOrganizationUrl = null,
   onOpenOrganization,
-  sidebarSecretsUrl = '/console/secrets/',
+  sidebarSecretsUrl = '/app/secrets',
   onOpenSecrets,
-  sidebarIntegrationsUrl = '/console/advanced/mcp-servers/',
+  sidebarIntegrationsUrl = '/app/integrations',
   onOpenIntegrations,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
@@ -570,7 +570,7 @@ export function AgentChatLayout({
       return
     }
     if (typeof window !== 'undefined') {
-      window.location.assign(sidebarBillingUrl ?? '/console/billing/')
+      window.location.assign(sidebarBillingUrl ?? '/app/billing')
     }
   }, [onOpenBilling, sidebarBillingUrl])
 

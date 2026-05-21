@@ -128,3 +128,6 @@ STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.StaticF
 
 # Avoid relying on a running Vite dev server during test runs.
 VITE_USE_DEV_SERVER = False
+
+# Preserve direct access to legacy console view internals in existing tests.
+LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED = False

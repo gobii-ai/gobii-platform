@@ -1457,61 +1457,10 @@ class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
                 )
             return payload
 
-        if request.GET.get("seats_success"):
-            target_info = request.session.pop("org_seat_portal_target", None)
-            success_message = "Seat checkout started successfully. Features will unlock once payment completes."
-            if target_info and target_info.get("requested"):
-                requested = target_info.get("requested")
-                success_message = (
-                    f"Seat checkout started successfully. In Stripe, update your licensed seat quantity to {requested}."
-                )
+        if request.GET.get("seats_success") or request.GET.get("seats_cancelled"):
+            from console.billing_return import process_billing_return
 
-            org_id_for_reattach = None
-            if target_info and target_info.get("org_id"):
-                org_id_for_reattach = target_info.get("org_id")
-
-            if org_id_for_reattach:
-                try:
-                    _assign_stripe_api_key()
-                    if not _reattach_overage_from_session(request, org_id_for_reattach):
-                        logger.debug(
-                            "No pending overage SKU detach found for org %s on success redirect.",
-                            org_id_for_reattach,
-                        )
-                except Exception as exc:  # pragma: no cover - unexpected Stripe error
-                    logger.warning(
-                        "Failed to reattach overage SKU after success redirect for org %s: %s",
-                        org_id_for_reattach,
-                        exc,
-                    )
-
-            messages.success(request, success_message)
-
-        if request.GET.get("seats_cancelled"):
-            target_info = request.session.pop("org_seat_portal_target", None)
-            org_id_for_reattach = None
-            if target_info and target_info.get("org_id"):
-                org_id_for_reattach = target_info.get("org_id")
-
-            if org_id_for_reattach:
-                try:
-                    _assign_stripe_api_key()
-                    if not _reattach_overage_from_session(request, org_id_for_reattach):
-                        logger.debug(
-                            "No pending overage SKU detach found for org %s on cancel redirect.",
-                            org_id_for_reattach,
-                        )
-                except Exception as exc:  # pragma: no cover - unexpected Stripe error
-                    logger.warning(
-                        "Failed to reattach overage SKU after cancellation for org %s: %s",
-                        org_id_for_reattach,
-                        exc,
-                    )
-
-            messages.info(
-                request,
-                "Seat checkout was cancelled before completion.",
-            )
+            process_billing_return(request)
 
         requested_org_id = request.GET.get("org_id")
         if requested_org_id:
@@ -1853,7 +1802,7 @@ class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
 
         try:
             _assign_stripe_api_key()
-            return_url = request.build_absolute_uri(reverse("billing"))
+            return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing")
             session = stripe.billing_portal.Session.create(
                 customer=customer.id,
                 api_key=stripe.api_key,
@@ -2730,9 +2679,9 @@ class PersistentAgentsView(ConsoleViewMixin, TemplateView):
                 upgrade_url = None
 
         owner, owner_type, organization = self._resolve_context_owner(context)
-        manage_billing_url = reverse("billing")
+        manage_billing_url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
         if organization is not None:
-            manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
+            manage_billing_url = append_context_query(manage_billing_url, str(organization.id))
         account_pause = build_account_pause_payload(
             owner,
             manage_billing_url=manage_billing_url,
@@ -8723,8 +8672,8 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                     "requested": new_quantity,
                 }
 
-                return_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
-                cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
+                return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_success=1"
+                cancel_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_cancelled=1"
 
                 overage_detach_performed = _detach_org_overage_item(
                     subscription,
@@ -8889,10 +8838,10 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
             customer = get_or_create_stripe_customer(org)
 
             success_url = request.build_absolute_uri(
-                reverse("billing")
+                f"{IMMERSIVE_APP_BASE_PATH}/billing"
             ) + "?seats_success=1"
             cancel_url = request.build_absolute_uri(
-                reverse("billing")
+                f"{IMMERSIVE_APP_BASE_PATH}/billing"
             ) + "?seats_cancelled=1"
 
             line_items = [
@@ -9284,7 +9233,7 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
         try:
             _assign_stripe_api_key()
 
-            return_url = request.build_absolute_uri(reverse("billing"))
+            return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
             session = stripe.billing_portal.Session.create(
                 customer=billing.stripe_customer_id,
@@ -10583,9 +10532,9 @@ def remove_all_dedicated_ip(request, owner, owner_type):
 
 
 def _billing_redirect(owner, owner_type: str) -> str:
-    url = reverse('billing')
+    url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
     if owner_type == "organization" and owner is not None:
-        return f"{url}?org_id={owner.id}"
+        return append_context_query(url, str(owner.id))
     return url
 
 

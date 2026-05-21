@@ -168,11 +168,11 @@ export function AgentChatSettingsPanel({
   )
 
   const agentSettingsUrl = useMemo(() => {
-    if (!agentId) return '/console/agents/'
+    if (!agentId) return '/app/agents'
     const query = context
       ? `?context_type=${encodeURIComponent(context.type)}&context_id=${encodeURIComponent(context.id)}`
       : ''
-    return `/console/agents/${agentId}/${query}`
+    return `/app/agents/${agentId}/settings${query}`
   }, [agentId, context])
 
   useEffect(() => {

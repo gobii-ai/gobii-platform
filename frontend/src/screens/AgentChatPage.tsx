@@ -2945,7 +2945,7 @@ export function AgentChatPage({
       listingDescription: '',
       listingDescriptionSource: null,
       displayTags: [],
-      detailUrl: `/console/agents/${activeAgentId}/`,
+      detailUrl: `/app/agents/${activeAgentId}/settings`,
       cardGradientStyle: '',
       iconBackgroundHex: '',
       iconBorderHex: '',
@@ -3030,7 +3030,7 @@ export function AgentChatPage({
       return collaboratorInviteUrl
     }
     if (activeAgentId) {
-      return `/console/agents/${activeAgentId}/`
+      return `/app/agents/${activeAgentId}/settings`
     }
     return null
   }, [collaboratorInviteUrl, activeAgentId])
@@ -3393,7 +3393,7 @@ export function AgentChatPage({
           listingDescription: '',
           listingDescriptionSource: null,
           displayTags: [],
-          detailUrl: `/console/agents/${result.agent_id}/`,
+          detailUrl: `/app/agents/${result.agent_id}/settings`,
           cardGradientStyle: '',
           iconBackgroundHex: '',
           iconBorderHex: '',
@@ -3792,7 +3792,7 @@ export function AgentChatPage({
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
-  const organizationPurchasedSeats = usageSummary?.context.type === 'organization'
+  const organizationPurchasedSeats = usageSummary?.context?.type === 'organization'
     ? usageSummary.billing?.purchasedSeats
     : undefined
   const organizationHasNoPurchasedSeats = organizationPurchasedSeats !== undefined && organizationPurchasedSeats <= 0
@@ -3821,12 +3821,12 @@ export function AgentChatPage({
       return '/app/billing'
     }
     if (!effectiveContext) {
-      return '/console/billing/'
+      return '/app/billing'
     }
     if (effectiveContext.type === 'organization') {
-      return `/console/billing/?org_id=${effectiveContext.id}`
+      return `/app/billing?context_type=organization&context_id=${encodeURIComponent(effectiveContext.id)}`
     }
-    return '/console/billing/'
+    return '/app/billing'
   }, [effectiveContext, isImmersiveShellPath])
   const handleOpenBilling = useCallback(() => {
     if (onOpenBilling) {
@@ -3837,7 +3837,7 @@ export function AgentChatPage({
       window.location.assign(billingUrl)
     }
   }, [billingUrl, onOpenBilling])
-  const usageUrl = isImmersiveShellPath ? '/app/usage' : '/console/usage/'
+  const usageUrl = '/app/usage'
   const handleOpenUsage = useCallback(() => {
     if (onOpenUsage) {
       onOpenUsage()
@@ -3847,7 +3847,7 @@ export function AgentChatPage({
       window.location.assign(usageUrl)
     }
   }, [onOpenUsage, usageUrl])
-  const apiKeysUrl = isImmersiveShellPath ? '/app/api-keys' : '/console/api-keys/'
+  const apiKeysUrl = '/app/api-keys'
   const handleOpenApiKeys = useCallback(() => {
     if (onOpenApiKeys) {
       onOpenApiKeys()
@@ -3857,7 +3857,7 @@ export function AgentChatPage({
       window.location.assign(apiKeysUrl)
     }
   }, [apiKeysUrl, onOpenApiKeys])
-  const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
+  const profileUrl = '/app/profile'
   const handleOpenProfile = useCallback(() => {
     if (onOpenProfile) {
       onOpenProfile()
@@ -3868,7 +3868,7 @@ export function AgentChatPage({
     }
   }, [onOpenProfile, profileUrl])
   const organizationUrl = effectiveContext?.type === 'organization'
-    ? (isImmersiveShellPath ? '/app/organization' : `/console/organizations/${effectiveContext.id}/`)
+    ? '/app/organization'
     : null
   const handleOpenOrganization = useCallback(() => {
     if (onOpenOrganization) {
@@ -3879,7 +3879,7 @@ export function AgentChatPage({
       window.location.assign(organizationUrl)
     }
   }, [onOpenOrganization, organizationUrl])
-  const secretsUrl = isImmersiveShellPath ? '/app/secrets' : '/console/secrets/'
+  const secretsUrl = '/app/secrets'
   const handleOpenSecrets = useCallback(() => {
     if (onOpenSecrets) {
       onOpenSecrets()
@@ -3889,7 +3889,7 @@ export function AgentChatPage({
       window.location.assign(secretsUrl)
     }
   }, [onOpenSecrets, secretsUrl])
-  const integrationsUrl = isImmersiveShellPath ? '/app/integrations' : '/console/advanced/mcp-servers/'
+  const integrationsUrl = '/app/integrations'
   const handleOpenIntegrations = useCallback(() => {
     if (onOpenIntegrations) {
       onOpenIntegrations()

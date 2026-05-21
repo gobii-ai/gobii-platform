@@ -14,7 +14,7 @@
     let lastHistoryPath = null;
     const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     const APP_BASE_PATH = '/app';
-    const DEFAULT_RETURN_PATH = '/console/agents/';
+    const DEFAULT_RETURN_PATH = '/app/agents';
 
     const isNarrowScreen = () => window.matchMedia('(max-width: 900px)').matches;
     const shouldBypassOverlay = () => isTouchDevice && isNarrowScreen();

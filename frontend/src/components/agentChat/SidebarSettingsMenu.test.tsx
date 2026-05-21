@@ -10,7 +10,7 @@ describe('SidebarSettingsMenu', () => {
         context={{ type: 'personal', id: '1', name: 'Personal' }}
         viewerEmail="person@example.com"
         isProprietaryMode={true}
-        billingUrl="/console/billing/"
+        billingUrl="/app/billing"
         taskCredits={{
           usedToday: 12.5,
           remaining: 87.5,
@@ -22,13 +22,13 @@ describe('SidebarSettingsMenu', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open settings' }))
 
     expect(await screen.findByText('person@example.com')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Billing/i })).toHaveAttribute('href', '/console/billing/')
+    expect(screen.getByRole('link', { name: /Billing/i })).toHaveAttribute('href', '/app/billing')
     expect(screen.getByRole('link', { name: /Billing/i })).toHaveAttribute('target', '_blank')
-    expect(screen.getByRole('link', { name: /Global Secrets/i })).toHaveAttribute('href', '/console/secrets/')
+    expect(screen.getByRole('link', { name: /Global Secrets/i })).toHaveAttribute('href', '/app/secrets')
     expect(screen.getByRole('link', { name: /Global Secrets/i })).toHaveAttribute('target', '_blank')
     expect(screen.getByRole('link', { name: /Integrations & MCP/i })).toHaveAttribute(
       'href',
-      '/console/advanced/mcp-servers/',
+      '/app/integrations',
     )
     expect(screen.getByRole('link', { name: /Integrations & MCP/i })).toHaveAttribute('target', '_blank')
 
@@ -48,7 +48,7 @@ describe('SidebarSettingsMenu', () => {
         context={{ type: 'personal', id: '1', name: 'Personal' }}
         viewerEmail="person@example.com"
         isProprietaryMode={false}
-        billingUrl="/console/billing/"
+        billingUrl="/app/billing"
         taskCredits={{
           usedToday: 12.5,
           remaining: 87.5,

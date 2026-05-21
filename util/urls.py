@@ -81,10 +81,7 @@ def build_site_url(path: str) -> str:
 
 
 def build_agent_detail_url(agent_id: str | int, organization_id: str | None = None) -> str:
-    try:
-        path = reverse("agent_detail", kwargs={"pk": agent_id})
-    except NoReverseMatch:
-        return ""
+    path = f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent_id}/settings"
     return append_context_query(build_site_url(path), organization_id)
 
 

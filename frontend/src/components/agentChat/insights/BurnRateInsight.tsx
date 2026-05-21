@@ -116,7 +116,7 @@ export function BurnRateInsight({
   usageUrl,
 }: BurnRateInsightProps) {
   const metadata = insight.metadata as BurnRateMetadata
-  const detailsUrl = metadata.usageUrl || usageUrl || '/console/usage/'
+  const detailsUrl = metadata.usageUrl || usageUrl || '/app/usage'
 
   return (
     <motion.div

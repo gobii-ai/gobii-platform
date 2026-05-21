@@ -24,7 +24,7 @@ export function EmbeddedAgentFilesPanel({
       name: agentName,
     },
     backLink: {
-      url: `/console/agents/${agentId}/`,
+      url: `/app/agents/${agentId}/settings`,
       label: 'Back to Agent Settings',
     },
     permissions: {

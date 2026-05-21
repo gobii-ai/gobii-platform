@@ -64,11 +64,17 @@ def _has_active_pipedream_runtime() -> bool:
 
 
 def _build_console_url(route_name: str) -> str:
-    try:
-        path = reverse(route_name)
-    except NoReverseMatch:
-        logger.debug("search_tools: failed to reverse route %s", route_name, exc_info=True)
-        return ""
+    app_route_paths = {
+        "console-mcp-servers": "/app/integrations",
+    }
+    if route_name in app_route_paths:
+        path = app_route_paths[route_name]
+    else:
+        try:
+            path = reverse(route_name)
+        except NoReverseMatch:
+            logger.debug("search_tools: failed to reverse route %s", route_name, exc_info=True)
+            return ""
 
     base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").strip().rstrip("/")
     if base_url:

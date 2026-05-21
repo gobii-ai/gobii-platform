@@ -180,7 +180,7 @@
             // If currently on an organization detail page, redirect to the selected org
             const isOrgDetail = /^\/console\/organizations\/[^/]+\/$/.test(window.location.pathname);
             if (isOrgDetail && type === 'organization') {
-              window.location = `/console/organizations/${id}/`;
+              window.location = `/app/organization?context_type=organization&context_id=${encodeURIComponent(id)}`;
               return;
             }
 

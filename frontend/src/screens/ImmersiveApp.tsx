@@ -21,7 +21,7 @@ import '../styles/immersiveApp.css'
 
 const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
-const DEFAULT_CLOSE_PATH = '/console/agents/'
+const DEFAULT_CLOSE_PATH = '/app/agents'
 const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
 const APP_NAVIGATE_EVENT = 'gobii:app:navigate'
 

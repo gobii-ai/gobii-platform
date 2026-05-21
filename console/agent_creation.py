@@ -58,6 +58,7 @@ from util.trial_enforcement import (
     TrialRequiredValidationError,
     can_user_use_personal_agents_and_api,
 )
+from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 logger = logging.getLogger(__name__)
 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY = "agent_selected_pipedream_app_slugs"
@@ -187,7 +188,7 @@ def create_persistent_agent_from_charter(
         billing = getattr(organization, "billing", None)
         seats_purchased = getattr(billing, "purchased_seats", 0) if billing else 0
         if seats_purchased <= 0:
-            billing_url = f"{reverse('billing')}?org_id={organization.id}"
+            billing_url = append_context_query(f"{IMMERSIVE_APP_BASE_PATH}/billing", str(organization.id))
             request.session["context_type"] = "organization"
             request.session["context_id"] = str(organization.id)
             request.session["context_name"] = organization.name

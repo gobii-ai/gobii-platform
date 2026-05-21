@@ -307,7 +307,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
             return <span className="text-sm text-slate-500">—</span>
           }
 
-          const configureHref = embedded ? `/app/agents/${persistentId}` : `/console/agents/${persistentId}/`
+          const configureHref = `/app/agents/${persistentId}`
 
           return (
             <a href={configureHref} className={embedded ? 'text-sm font-semibold text-sky-300 hover:text-sky-200' : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}>
