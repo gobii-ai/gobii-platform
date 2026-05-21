@@ -217,7 +217,7 @@ function writeLlms(contentDocs, apiDocs) {
 
 function writeCompatibilityFiles() {
   fs.copyFileSync(openApiPath, path.join(buildDir, 'GobiiAPI.yaml'));
-  writeText('robots.txt', `User-agent: *\nDisallow:\nSitemap: ${siteUrl}/sitemap.xml\n`);
+  writeText('robots.txt', `User-agent: *\nDisallow: /mintlify-assets/\nSitemap: ${siteUrl}/sitemap.xml\n`);
 }
 
 function patchWebpackExports(source) {
