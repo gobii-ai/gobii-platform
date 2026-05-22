@@ -405,7 +405,7 @@ export function SidebarSettingsMenu({
               >
                 <span className="sidebar-settings__credits-title">
                   <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Task Credits Remaining</span>
+                  <span>Usage</span>
                 </span>
                 <ChevronDown
                   className="sidebar-settings__credits-chevron"
