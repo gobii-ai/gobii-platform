@@ -12,6 +12,7 @@ Gobii solves problems and gets real work done - the AI alone isn't the product, 
 - [Gobii homepage]({{ base_url }}/): Overview of Gobii and its AI agent platform.
 - [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
 - [Agent Library]({{ base_url }}/library/): Browse ready-to-use Gobii agents and templates.
+- [Documentation](https://docs.gobii.ai/): Documentation for Gobii agents and integrations.
 - [Full Context]({{ base_url }}/llms-full.txt): More detailed information for LLMs.
 
 ## Important Use Cases
