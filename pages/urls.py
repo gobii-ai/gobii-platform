@@ -116,8 +116,10 @@ urlpatterns = [
     # Add sitemap URL pattern
     path('sitemap.xml', sitemap, {'sitemaps': sitemaps}, name='django.contrib.sitemaps.views.sitemap'),
 
-    # Make robots.txt available through Django
+    # Make root-level machine-readable text files available through Django
     path('robots.txt', TemplateView.as_view(template_name='robots.txt', content_type='text/plain')),
+    path('llms.txt', TemplateView.as_view(template_name='llms.txt', content_type='text/plain')),
+    path('llms-full.txt', TemplateView.as_view(template_name='llms-full.txt', content_type='text/plain')),
 
     path('clear_signup_tracking', ClearSignupTrackingView.as_view(), name='clear_signup_tracking'),
 

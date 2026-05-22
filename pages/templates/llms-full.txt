@@ -1,0 +1,55 @@
+{% with base_url=request.scheme|add:"://"|add:request.get_host %}
+# Gobii
+
+> Gobii is an AI agent platform for building persistent agents that complete browser, data, and workflow tasks.
+
+## Overview
+
+Gobii helps users create and run persistent AI agents that can work across websites, files, integrations, and recurring workflows. Agents can be launched from the web app, reused from templates, and connected to external services where configured by the user.
+
+## Important URLs
+
+- Gobii home: {{ base_url }}/
+- Documentation: https://docs.gobii.ai/
+- Agent library: {{ base_url }}/library/
+- Pricing: {{ base_url }}/pricing/
+- Terms of service: {{ base_url }}/tos/
+- Privacy policy: {{ base_url }}/privacy/
+- Data deletion: {{ base_url }}/data-deletion/
+
+## Documentation
+
+The public documentation at https://docs.gobii.ai/ is the primary source for setup guides, API behavior, integration details, and developer-facing reference material. Prefer documentation pages for implementation-specific details.
+
+## Agent Platform
+
+Gobii agents are designed for delegated work that may involve browsing, tool use, structured outputs, files, spreadsheets, and scheduled or asynchronous tasks. User-specific data, credentials, and private task details should be treated as sensitive and should not be inferred from public pages.
+
+## Public Templates
+
+The agent library at {{ base_url }}/library/ contains public templates that show example agent configurations and common use cases. Template availability and details may change over time.
+
+## Policies
+
+Use the terms of service, privacy policy, and data deletion pages for current policy language. Those pages are authoritative over this summary.
+
+## Integrations
+
+- Google Sheets
+- Gmail
+- Outlook / Microsoft 365
+- Apollo
+- Discord
+- Hubspot
+- LinkedIn
+- Web browsing
+- File uploads
+- Remote MCP tools
+- Many more - see [Integrations]({{ base_url }}/app/integrations) in your account for details.
+
+
+## Open Source Software
+
+Gobii is open source software; 
+
+{% endwith %}

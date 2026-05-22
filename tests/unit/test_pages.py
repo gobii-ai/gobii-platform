@@ -1234,6 +1234,27 @@ class RobotsTxtTests(TestCase):
 
 
 @tag("batch_pages")
+class LlmsTxtTests(TestCase):
+    def test_llms_txt_is_served_from_root(self):
+        response = self.client.get("/llms.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
+        self.assertContains(response, "# Gobii")
+        self.assertContains(response, "http://testserver/llms-full.txt")
+        self.assertContains(response, "https://docs.gobii.ai/")
+
+    def test_llms_full_txt_is_served_from_root(self):
+        response = self.client.get("/llms-full.txt")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/plain")
+        self.assertContains(response, "# Gobii")
+        self.assertContains(response, "## Overview")
+        self.assertContains(response, "http://testserver/library/")
+
+
+@tag("batch_pages")
 class InstallScriptTests(TestCase):
     def test_install_script_is_served_from_root(self):
         response = self.client.get("/install.sh")

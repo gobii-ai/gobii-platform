@@ -1,0 +1,51 @@
+{% with base_url=request.scheme|add:"://"|add:request.get_host %}
+# Gobii
+
+> Gobii is an AI agent platform that lets individuals, teams, and businesses delegate research, lead generation, spreadsheet work, file analysis, email drafting, and other browser-based workflows to AI agents.
+
+Gobii is built for people with real jobs and no time. Users create or launch AI agents that can browse the web, work with files, interact with spreadsheets, draft messages, and complete multi-step tasks.
+
+Gobii solves problems and gets real work done - the AI alone isn't the product, results are.
+
+## Core Pages
+
+- [Gobii homepage]({{ base_url }}/): Overview of Gobii and its AI agent platform.
+- [Pricing]({{ base_url }}/pricing/): Self-serve pricing plans, including Pro and Scale.
+- [Agent Library]({{ base_url }}/library/): Browse ready-to-use Gobii agents and templates.
+
+## Important Use Cases
+
+- Lead generation
+- Recruiting and candidate sourcing
+- Market research
+- Spreadsheet automation
+- File and document analysis
+- Email and outreach drafting
+- Competitive research
+- Business operations workflows
+
+## Integrations
+
+- Google Sheets
+- Gmail
+- Outlook / Microsoft 365
+- Apollo
+- Discord
+- Hubspot
+- LinkedIn
+- Web browsing
+- File uploads
+- Remote MCP tools
+- Many more - see [Integrations]({{ base_url }}/app/integrations) in your account for details.
+
+## Product Positioning
+
+Gobii is not an AI toy or chatbot-only interface. It is designed to solve practical business and personal workflows by letting users delegate tasks to AI agents.
+
+## Support and Policies
+
+- [Terms of Service]({{ base_url }}/tos)
+- [Privacy Policy]({{ base_url }}/privacy)
+- [Support]({{ base_url }}/support)
+
+{% endwith %}
