@@ -439,6 +439,29 @@ class ImpliedSendTests(TestCase):
             0,
         )
 
+    def test_send_chat_skips_endpoint_and_search_kickoff_progress(self):
+        start_web_session(self.agent, self.user)
+
+        for body in (
+            "All 4 JSON endpoints are fetched. Now I'll query the working table.",
+            "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",
+        ):
+            result = execute_send_chat_message(
+                self.agent,
+                {
+                    "body": body,
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(result.get("status"), "ok")
+            self.assertTrue(result.get("skipped"))
+
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
     def test_planning_blocking_chat_question_routes_to_tracked_human_input(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])

@@ -274,8 +274,10 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             "Great, I've got the data. Let me update the charter and schedule, then report back.",
             "The last step was incomplete - the query results were fetched but never formatted. Let me fix that now",
             "All four sources are fetched. Now I'll run the clean aggregate query.",
+            "All 4 JSON endpoints are fetched. Now I'll query the working table.",
             "The data is in. Let me run the final analysis query and deliver the recommendation",
             "The `plan_candidates` table is populated with 8 rows. Now let me query it for the best plan.",
+            "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",
         )
         final_answers = (
             "All four pages are scraped and the comparison query is done. Here's the analysis:\n\n## Support Automation Platform Comparison\n\n**Source pages:**",
