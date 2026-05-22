@@ -111,14 +111,10 @@ def get_spawn_web_task_tool(agent: Optional[PersistentAgent] = None) -> Dict[str
         "function": {
             "name": "spawn_web_task",
             "description": (
-                "Spawn a new web automation task that runs asynchronously. Returns immediately with task_id. "
-                "WARNING: This is a slow, expensive headless browser. Use it only when search/scrape/structured-data/API tools cannot answer and the task requires rendered page state, JavaScript, login, or user interaction. "
-                "Be very detailed and specific in your instructions. "
-                "Give instructions an AI web browsing agent could realistically complete. If you need URLs, you will need to ask for them. "
-                "If you mention secrets, mention them using their direct name, e.g. google_username, not <<<google_username>>>. "
-                "Use stored secrets for classic username/password logins only. Do NOT request or attempt to use OAuth credentials (Google, Slack, etc.); "
-                "those are handled via MCP tools using connect/auth links. "
-                f"You will be automatically notified when the task completes and can see results in your context. Do not poll for completion; if blocked waiting on it, use sleep_until_next_trigger. {limit_sentence}"
+                "Async headless browser; returns task_id. Slow/expensive, so use only when search/scrape/structured-data/API tools cannot answer and rendered page state, JavaScript, login, or user interaction is required. "
+                "Give detailed, realistic instructions; ask for URLs if needed. Mention secrets by direct name, e.g. google_username, not <<<google_username>>>. "
+                "Stored secrets are for classic username/password logins only; OAuth uses MCP connect/auth links. "
+                f"Completion notifies you; do not poll. If blocked waiting, use sleep_until_next_trigger. {limit_sentence}"
             ),
             "parameters": {
                 "type": "object",

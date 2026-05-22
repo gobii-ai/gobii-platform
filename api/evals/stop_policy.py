@@ -19,6 +19,14 @@ AGENT_CONFIG_FIELD_PATTERNS = {
     "charter": re.compile(r"\bcharter\b", re.IGNORECASE),
     "schedule": re.compile(r"\bschedule\b", re.IGNORECASE),
 }
+AGENT_CONFIG_UPDATE_RE = re.compile(
+    r"\bupdate\s+__agent_config\b.*?\bset\b(?P<assignments>.*?)(?:\bwhere\b|\breturning\b|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+AGENT_CONFIG_INSERT_RE = re.compile(
+    r"\b(?:insert|replace)\s+(?:or\s+\w+\s+)?into\s+__agent_config\s*\((?P<columns>[^)]*)\)",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def split_sql_statements(sql: str) -> list[str]:
@@ -107,16 +115,44 @@ def sqlite_batch_is_only_eval_bookkeeping_read(tool_call) -> bool:
 
 
 def sqlite_batch_mutates_agent_config_field(tool_call, field_name: str) -> bool:
-    pattern = AGENT_CONFIG_FIELD_PATTERNS.get(field_name)
-    if not pattern:
+    if field_name not in AGENT_CONFIG_FIELD_PATTERNS:
         return False
     sql = sqlite_batch_sql(tool_call)
     if not sql:
         return False
     return any(
-        sql_mutates_planning_state(statement) and pattern.search(statement)
+        sql_mutates_planning_state(statement)
+        and _statement_assigns_agent_config_field(statement, field_name)
         for statement in split_sql_statements(sql)
     )
+
+
+def _normalized_sql_identifier(value: str) -> str:
+    return value.strip().strip('"`[]').lower()
+
+
+def _statement_assigns_agent_config_field(statement: str, field_name: str) -> bool:
+    field = field_name.lower()
+    update_match = AGENT_CONFIG_UPDATE_RE.search(statement or "")
+    if update_match:
+        assignments = update_match.group("assignments")
+        return bool(
+            re.search(
+                rf'(?<![\w"`\]])["`\[]?{re.escape(field)}["`\]]?\s*=',
+                assignments,
+                re.IGNORECASE,
+            )
+        )
+
+    insert_match = AGENT_CONFIG_INSERT_RE.search(statement or "")
+    if insert_match:
+        columns = [
+            _normalized_sql_identifier(column)
+            for column in insert_match.group("columns").split(",")
+        ]
+        return field in columns
+
+    return False
 
 
 def _params_match(actual_params: dict[str, Any], expected_params: dict[str, Any]) -> bool:

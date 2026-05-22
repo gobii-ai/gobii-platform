@@ -81,12 +81,12 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human-input only for a real blocker or planning question; it appears in web chat and does not send email/SMS. "
-                "If notifying by chat/email/SMS, send the exact question/options there too; questions sent only by chat, email, or SMS are not tracked. "
-                "In Planning Mode, planning questions must use this tool and include options; ask at most three. "
+                "Create tracked human-input only for real blockers or planning questions; it appears in web chat and does not send email/SMS. "
+                "If also notifying by chat/email/SMS, send the same question/options there; questions sent only by chat, email, or SMS are not tracked. "
+                "In Planning Mode, planning questions must use this tool with options, at most three. "
                 "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose afterward. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
-                f"Plain text only, no Markdown/HTML, max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
+                f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),
             "parameters": {
                 "type": "object",
@@ -99,21 +99,15 @@ def get_request_human_input_tool() -> dict[str, Any]:
                     "options": {
                         "type": "array",
                         "items": option_schema,
-                        "description": (
-                            "Optional choices; omit or [] for free text. Required in Planning Mode; include an open-ended option."
-                        ),
+                        "description": "Optional choices; omit/[] for free text. Required in Planning Mode; include open-ended option.",
                     },
                     "requests": {
                         "type": "array",
                         "items": request_schema,
-                        "description": (
-                            "Multiple requests. Omit top-level question/options. Planning Mode: at most three."
-                        ),
+                        "description": "Multiple requests; omit top-level question/options. Planning Mode: at most three.",
                     },
                     "recipient": {
-                        "description": (
-                            "Optional explicit recipient. Omit for the current implicit conversation target."
-                        ),
+                        "description": "Optional explicit recipient; omit for the current implicit conversation target.",
                         **recipient_schema,
                     },
                     "will_continue_work": {
@@ -203,6 +197,8 @@ def execute_request_human_input(agent: PersistentAgent, params: dict[str, Any]) 
         return recipient_error
 
     raw_requests = params.get("requests")
+    if raw_requests is None:
+        raw_requests = params.get("questions")
     if raw_requests is not None:
         if not isinstance(raw_requests, list) or not raw_requests:
             return {

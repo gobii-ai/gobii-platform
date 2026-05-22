@@ -64,11 +64,10 @@ def get_secure_credentials_request_tool() -> dict:
         "function": {
             "name": "secure_credentials_request",
             "description": (
-                "Request credentials only when you will immediately use them with http_request/API, spawn_web_task login, "
-                "or sandbox code. Do not use for MCP OAuth tools; call the MCP tool and surface its auth link. "
+                "Request credentials only for immediate http_request/API, spawn_web_task login, or sandbox-code use. Do not use for MCP OAuth; call the MCP tool and surface its auth link. "
                 "Use secret_type='credential' with domain_pattern for website placeholders. "
                 "If a custom tool script, python_exec, run_command, or MCP server reads os.environ, ALWAYS set secret_type='env_var' and omit domain_pattern. "
-                "Broad domains are usually better, e.g. *.google.com. It returns URL(s); message the user with the credential-entry URL for new requests or update/secrets URL for existing ones."
+                "Broad domains are usually better, e.g. *.google.com. Send the returned credential-entry/update URL to the user."
             ),
             "parameters": {
                 "type": "object",
@@ -78,16 +77,14 @@ def get_secure_credentials_request_tool() -> dict:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "name": {"type": "string", "description": "Human-readable credential name."},
-                                "description": {"type": "string", "description": "What this credential is used for."},
+                                "name": {"type": "string", "description": "Human-readable name."},
+                                "description": {"type": "string", "description": "Credential purpose."},
                                 "key": {"type": "string", "description": "Unique key, e.g. api_key or username."},
                                 "domain_pattern": {"type": "string", "description": "Required for credential; omit it for env_var."},
                                 "secret_type": {
                                     "type": "string",
                                     "enum": ["credential", "env_var"],
-                                    "description": "credential for domain-scoped secrets; env_var for os.environ. "
-                                                   "If sandbox code reads it, this MUST be env_var. "
-                                                   "env_var secrets are used for MCP servers, run_command, python_exec, and custom tool scripts via os.environ.",
+                                    "description": "credential for domain-scoped secrets; env_var for os.environ in custom tool scripts or sandbox code. If sandbox code reads it, this MUST be env_var.",
                                 },
                             },
                             "required": ["name", "description", "key"]

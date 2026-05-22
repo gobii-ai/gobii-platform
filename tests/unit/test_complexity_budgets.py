@@ -66,6 +66,21 @@ class ComplexityBudgetSourceFilterTests(SimpleTestCase):
             with self.subTest(path=path):
                 self.assert_not_counted(path)
 
+    def test_excludes_non_core_product_adjacent_paths(self):
+        non_core_paths = (
+            "marketing_events/views.py",
+            "pages/templates/pages/home.html",
+            "proprietary/enterprise_overlay.py",
+            "setup/bootstrap.sh",
+            "static/css/site.css",
+            "static/js/onboarding.js",
+            "templates/registration/login.html",
+        )
+
+        for path in non_core_paths:
+            with self.subTest(path=path):
+                self.assert_not_counted(path)
+
     def test_budget_file_source_metadata_matches_filter_constants(self):
         committed = budgets._load_budget()["source_loc"]
         generated = budgets._budget_metadata("test-sha")["source_loc"]

@@ -1,3 +1,4 @@
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from api.agent.comms.human_input_requests import dismiss_human_input_request
@@ -294,6 +295,33 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_106_maps_dental_lead_screen", "category": "local_research", "prompt": "Use Google Maps reviews to qualify local dental practices with scheduling complaints; return review evidence.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_107_schedule_vc_digest", "category": "monitoring", "prompt": "Set a weekly Monday 8am ET VC funding digest for AI infrastructure deals; include source links and do not run it now.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["send_email"], "plan_expected": False},
     {"slug": "common_use_case_108_sheets_read_before_upsert", "category": "sheets", "prompt": "In sheet-123 Leads, find row for alex@example.test before upserting status Qualified and source URL.", "expected_tools": ["google_sheets-find-row", "google_sheets-upsert-row"], "forbidden_tools": ["google_sheets-add-single-row"], "plan_expected": False},
+    {"slug": "common_use_case_109_http_json_dedupe_domains", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/vendors/alpha.json and https://api.example.test/vendors/beta.json, then use SQLite to dedupe vendors by domain and report the top score.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_110_scrape_compare_with_sqlite", "category": "intelligent_work", "prompt": "Scrape https://stripe.com/docs/security and https://auth0.com/docs/security, then call sqlite_batch over prior scrape results to compare claims. Do not spawn a browser task.", "expected_tools": ["mcp_brightdata_scrape_as_markdown", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_111_prior_results_sqlite_rank", "category": "intelligent_work", "prompt": "Prior pricing scrapes are in __tool_results; use one SQLite query to rank annual cost without one-result blob loops.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["read_file"], "plan_expected": False},
+    {"slug": "common_use_case_112_file_json_dedupe_report", "category": "intelligent_work", "prompt": "Read /uploads/vendor-feed.json and use SQLite/json_each to dedupe companies by domain before reporting export-ready rows.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
+    {"slug": "common_use_case_113_file_pipeline_sqlite_summary", "category": "intelligent_work", "prompt": "Read /uploads/pipeline.csv and use SQLite to group qualified pipeline by owner before reporting chart-ready rows.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
+    {"slug": "common_use_case_114_sheets_default_update_row", "category": "sheets", "prompt": "In sheet-123 Leads, find nina@example.test with sheets tools; if status is blank, assume Needs review and update that row. Do not ask.", "expected_tools": ["google_sheets-find-row", "google_sheets-update-row"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
+    {"slug": "common_use_case_115_sheets_read_sqlite_rank", "category": "sheets", "prompt": "Read sheet-123 Leads rows and use SQLite to dedupe by email before reporting the highest-priority alex@example.test row.", "expected_tools": ["google_sheets-read-rows", "sqlite_batch"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range"]}, "plan_expected": False},
+    {"slug": "common_use_case_116_maps_default_city_reviews", "category": "local_research", "prompt": "Find dental practices with scheduling complaints; if city is omitted, assume Austin and use Google Maps reviews.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_117_linkedin_default_company_jobs", "category": "lead_sourcing", "prompt": "Find remote fintech backend roles on LinkedIn; if company is unspecified, use a representative fintech company.", "expected_tools": ["mcp_brightdata_web_data_linkedin_job_listings"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "allowed_preamble_tools": LINKEDIN_DISCOVERY_PREAMBLE_TOOLS, "plan_expected": False},
+    {"slug": "common_use_case_118_apollo_dedupe_contacts_sqlite", "category": "lead_sourcing", "prompt": "Search Apollo for RevOps leaders at Texas logistics firms, then use SQLite to dedupe contacts by email.", "expected_tools": ["apollo_io-search-contacts", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "allowed_preamble_tools": ["search_tools"], "eval_synthetic_tools": ["apollo_io-search-contacts"], "plan_expected": False},
+    {"slug": "common_use_case_119_http_nested_json_recover", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/leads.json; if fields are nested/noisy, inspect with SQLite JSON functions.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_120_scrape_noisy_extract_sqlite", "category": "intelligent_work", "prompt": "Scrape https://vendor.example.test/reviews, then call sqlite_batch on noisy scrape text to extract unique complaint themes. Do not spawn a browser task.", "expected_tools": ["mcp_brightdata_scrape_as_markdown", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_121_sheets_direct_add_no_question", "category": "sheets", "prompt": "The tracker id is sheet-123. Add row: company Hexa, owner Lee, priority high; do not ask which sheet.", "expected_tools": ["google_sheets-add-single-row"], "forbidden_tools": ["request_human_input"], "plan_expected": False},
+    {"slug": "common_use_case_122_custom_tool_bulk_api_sqlite", "category": "intelligent_work", "prompt": "Create a custom tool to page product API URLs https://api.example.test/products?page=1 and https://api.example.test/products?page=2; store normalized rows in SQLite.", "expected_tools": ["create_custom_tool"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_123_custom_tool_partial_retry", "category": "intelligent_work", "prompt": "Create a custom tool that retries partial HTTP JSON pages from https://api.example.test/events?cursor=start, writes successes to SQLite, and returns next_action.", "expected_tools": ["create_custom_tool"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_124_tool_results_cte_dedupe_urls", "category": "intelligent_work", "prompt": "Prior scrapes are in __tool_results. Use one SQLite CTE over all scrape rows to dedupe URLs and summarize claims.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["read_file"], "plan_expected": False},
+    {"slug": "common_use_case_125_tool_results_json_each_plan", "category": "intelligent_work", "prompt": "Prior API results contain nested offers arrays; use sqlite_batch json_each to pick the cheapest HIPAA-ready plan.", "expected_tools": ["sqlite_batch"], "forbidden_tools": ["read_file"], "plan_expected": False},
+    {"slug": "common_use_case_126_http_sqlite_weekly_trend", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/signups.json, aggregate signups by week in SQLite, then report the trend.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_127_search_scrape_sqlite_extract", "category": "intelligent_work", "prompt": "Search for ExamplePay pricing pages, scrape the best result, then use SQLite to extract plan names.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_128_maps_reviews_sqlite_dedupe", "category": "local_research", "prompt": "Use Google Maps reviews for Austin cafes with long-wait complaints, then use SQLite to dedupe snippets by place.", "expected_tools": ["mcp_brightdata_web_data_google_maps_reviews", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_129_reddit_posts_sqlite_sentiment", "category": "social_research", "prompt": "Fetch Reddit posts about ExampleApp, then use SQLite to dedupe repeated complaints before summarizing sentiment.", "expected_tools": ["mcp_brightdata_web_data_reddit_posts", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_130_yahoo_finance_sqlite_calc", "category": "finance_research", "prompt": "Fetch Yahoo Finance business data for MSFT, then use SQLite to calculate market-cap-to-revenue if fields exist.", "expected_tools": ["mcp_brightdata_web_data_yahoo_finance_business", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_131_vendor_default_assumption", "category": "web_research", "prompt": "Find a representative customer-support AI vendor and summarize pricing; choose one if unspecified and disclose it.", "expected_tools": ["mcp_brightdata_search_engine"], "forbidden_tools": ["request_human_input", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_132_sheets_blank_due_bulk_update", "category": "sheets", "prompt": "Read sheet-123 Tasks, infer blank due dates as today, then update rows 12, 13, and 14 with follow_up_due.", "expected_tools": ["google_sheets-read-rows", "google_sheets-update-multiple-rows"], "forbidden_tools": ["request_human_input"], "accepted_tool_alternatives": {"google_sheets-read-rows": ["google_sheets-get-values-in-range"]}, "plan_expected": False},
+    {"slug": "common_use_case_133_http_sqlite_dedupe_report", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/accounts.json and use SQLite to dedupe domains before reporting export-ready rows.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_134_file_support_group_report", "category": "intelligent_work", "prompt": "Read /uploads/support-dump.json and group tickets by account in SQLite before reporting counts.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
+    {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -1675,6 +1703,22 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 "message": "Mocked file lookup for deterministic attachment eval.",
                 "content": "Attachment exists at the requested path.",
             }
+        if tool_name == "mcp_brightdata_scrape_as_markdown":
+            return {
+                "status": "ok",
+                "tool": tool_name,
+                "message": "Mocked scrape result for deterministic common-use-case eval.",
+                "url": "https://examplepay.com/pricing",
+                "result": (
+                    "# ExamplePay Pricing\n\n"
+                    "| Plan | Price | Notes |\n| Starter | $19/mo | Basic checkout links |\n"
+                    "| Growth | $49/mo | Invoicing, SSO, SOC 2 reports |\n"
+                    "| Enterprise | Custom | Audit logs and dedicated support |\n\n"
+                    "Review themes: onboarding delays, billing confusion, support wait times.\n"
+                    "This markdown is persisted in __tool_results.result_text for SQLite extraction."
+                ),
+                "content": {"ok": True},
+            }
         if tool_name == "mcp_brightdata_search_engine" and self.case.category == "lead_sourcing":
             return {
                 "status": "ok",
@@ -1749,7 +1793,7 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
         }
 
     def _mock_for_tool(self, tool_name):
-        result = self._mock_success(tool_name)
+        result = self._add_expected_next_step_hint(tool_name, self._mock_success(tool_name))
         if not self.case.expected_params or len(self.case.expected_tools) != 1:
             return result
 
@@ -1775,6 +1819,22 @@ class CommonUseCaseToolChoiceScenario(BehaviorMicroScenario):
                 },
             },
         }
+
+    def _add_expected_next_step_hint(self, tool_name, result):
+        expected_tools = list(self.case.expected_tools)
+        for index, expected_tool in enumerate(expected_tools[:-1]):
+            if tool_name not in self.case.accepted_tool_names_for_expected_tool(expected_tool):
+                continue
+            next_tool = expected_tools[index + 1]
+            updated = deepcopy(result)
+            content = updated.get("content")
+            if isinstance(content, dict):
+                content["next_step"] = f"{tool_name} succeeded; call {next_tool} next to continue the requested workflow."
+            updated["message"] = (
+                f"{updated.get('message', '').rstrip()} Next eval step: call {next_tool} next."
+            ).strip()
+            return updated
+        return result
 
     @staticmethod
     def _google_sheets_mock_success(tool_name):

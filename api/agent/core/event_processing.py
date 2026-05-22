@@ -21,6 +21,7 @@ from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
 import redis
+import sqlparse
 from opentelemetry import baggage, trace
 from pottery import Redlock
 from pottery.exceptions import ExtendUnlockedLock, TooManyExtensions
@@ -234,6 +235,36 @@ MESSAGE_TOOL_BODY_KEYS = {
     "send_chat_message": "body",
     "send_agent_message": "message",
 }
+SQLITE_MUTATION_RE = re.compile(r"\b(?:insert|update|delete|replace|alter|drop|create)\b", re.IGNORECASE)
+AGENT_CONFIG_TABLE_RE = re.compile(r"\b__agent_config\b", re.IGNORECASE)
+DURABLE_CONFIG_INTENT_RE = re.compile(
+    r"\b(?:going forward|from now on|in the future|next time|always|never|remember|prefer|preference|"
+    r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
+    r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
+    r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",
+    re.IGNORECASE,
+)
+TRANSIENT_CONFIG_SCOPE_RE = re.compile(
+    r"\b(?:for this (?:answer|response|report|task|time)|this time|just this once|today only|for now)\b",
+    re.IGNORECASE,
+)
+STRONG_DURABLE_CONFIG_INTENT_RE = re.compile(
+    r"\b(?:going forward|from now on|in the future|next time|always|never|remember|"
+    r"update (?:your )?(?:charter|schedule|instructions)|change (?:your )?(?:charter|schedule|instructions)|"
+    r"charter|schedule|scheduled|recurring|ongoing|proactive|monitor|track|alert|digest|cadence|"
+    r"setup|set up|role|scope|process|workflow|customer context|client context|operating boundary)\b",
+    re.IGNORECASE,
+)
+ONE_OFF_TASK_RE = re.compile(
+    r"\b(?:what is|what's|who is|tell me|look up|lookup|find|fetch|get|show|give me|summari[sz]e|"
+    r"report|latest|current|today|now|price|status|news|funding|one[- ](?:off|shot))\b",
+    re.IGNORECASE,
+)
+PLANNING_EXECUTE_NOW_RE = re.compile(
+    r"\b(?:do not ask questions|don't ask questions|just execute(?: now)?|execute now|just run(?: it| this)?|run (?:it|this) now|start (?:it|this|the task) now|go ahead and (?:run|execute|start|do)|just do (?:it|this|the task)|do (?:it|this|the task) now)\b",
+    re.IGNORECASE,
+)
+PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -256,8 +287,9 @@ CONTINUATION_PHRASES = (
 
 BLOCKING_HUMAN_INPUT_PATTERNS = (
     re.compile(r"\bbefore\s+(?:i|we)\b", re.IGNORECASE),
+    re.compile(r"\bi\s+need\s+to\s+know\b", re.IGNORECASE),
     re.compile(r"\bi\s+need\b.*\b(?:first|before|from you)\b", re.IGNORECASE),
-    re.compile(r"\b(?:please|can you|could you)\s+(?:provide|share|confirm|choose|tell|send)\b", re.IGNORECASE),
+    re.compile(r"\b(?:please|can you|could you)\s+(?:clarify|provide|share|confirm|choose|tell|send|point|direct|link)\b", re.IGNORECASE),
     re.compile(r"\bwhich\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\bwhat\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\b(?:which|what)\b.*\bwould\s+you\s+like\s+(?:me|us)\b", re.IGNORECASE),
@@ -303,6 +335,33 @@ def _extract_human_input_question(message_text: str) -> str:
 
     fallback = MARKDOWN_PUNCTUATION_RE.sub("", message_text or "").strip()
     return _truncate_text_bytes(fallback, 500).strip()
+
+
+def _request_human_input_params_from_blocking_chat_question(
+    agent: PersistentAgent,
+    message_text: str,
+    original_tool_params: Dict[str, Any],
+) -> Dict[str, Any]:
+    params = {
+        "question": _extract_human_input_question(message_text),
+        "will_continue_work": _coerce_optional_bool(original_tool_params.get("will_continue_work")) is True,
+    }
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        params["options"] = [
+            {
+                "label": "I'll provide details",
+                "description": "Share the missing planning detail before the agent continues.",
+            },
+            {
+                "label": "Use a default",
+                "description": "Let the agent choose a reasonable default and continue.",
+            },
+            {
+                "label": "Other",
+                "description": "Explain a different preference or constraint.",
+            },
+        ]
+    return params
 
 
 def _latest_inbound_message_text(agent: PersistentAgent) -> str:
@@ -400,8 +459,12 @@ def _looks_like_defaultable_setup_question(text: str) -> bool:
             "which data sources",
             "where should i send",
             "where should this",
+            "what details",
             "need a few details",
+            "need a few specifics",
+            "need to know",
             "need details",
+            "need specifics",
             "to make it work",
             "to make the digest useful",
             "before i configure",
@@ -410,7 +473,21 @@ def _looks_like_defaultable_setup_question(text: str) -> bool:
     )
 
 
+def _request_human_input_question_texts(tool_params: dict[str, Any]) -> list[str]:
+    texts = [str(tool_params.get("question") or "")]
+    for raw_requests in (tool_params.get("requests"), tool_params.get("questions")):
+        if isinstance(raw_requests, list):
+            for request in raw_requests:
+                if isinstance(request, dict):
+                    texts.append(str(request.get("question") or ""))
+        elif isinstance(raw_requests, dict):
+            texts.append(str(raw_requests.get("question") or ""))
+    return [text for text in texts if text.strip()]
+
+
 def _should_reject_defaultable_setup_question(agent: PersistentAgent, question_text: str) -> bool:
+    if agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        return False
     latest_user_text = _latest_inbound_message_text(agent)
     return _looks_like_defaultable_recurring_setup_request(
         latest_user_text
@@ -1977,6 +2054,98 @@ def _normalize_tool_params(tool_name: str, tool_params: Dict[str, Any]) -> Dict[
     return normalized_params
 
 
+def _sqlite_batch_statements(tool_params: Dict[str, Any]) -> list[str]:
+    raw_sql = tool_params.get("queries", tool_params.get("sql", tool_params.get("query")))
+    raw_items = raw_sql if isinstance(raw_sql, list) else [raw_sql]
+    statements: list[str] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, str):
+            continue
+        statements.extend(statement.strip() for statement in sqlparse.split(raw_item) if statement.strip())
+    return statements
+
+
+def _sqlite_batch_is_only_agent_config_mutation(tool_params: Dict[str, Any]) -> bool:
+    statements = _sqlite_batch_statements(tool_params)
+    return bool(statements) and any(
+        AGENT_CONFIG_TABLE_RE.search(statement) and SQLITE_MUTATION_RE.search(statement)
+        for statement in statements
+    ) and all(AGENT_CONFIG_TABLE_RE.search(statement) for statement in statements)
+
+
+def _user_text_has_durable_config_intent(text: str) -> bool:
+    normalized = " ".join((text or "").split())
+    if TRANSIENT_CONFIG_SCOPE_RE.search(normalized) and not STRONG_DURABLE_CONFIG_INTENT_RE.search(normalized):
+        return False
+    return bool(DURABLE_CONFIG_INTENT_RE.search(normalized))
+
+
+def _looks_like_one_off_user_task(text: str) -> bool:
+    normalized = " ".join((text or "").split())
+    return bool(normalized and ONE_OFF_TASK_RE.search(normalized) and not _user_text_has_durable_config_intent(normalized))
+
+
+def _should_skip_planning_execute_tool_search(agent: PersistentAgent, tool_name: str, prepared_calls: list[_PreparedToolExecution]) -> bool:
+    if tool_name != "search_tools" or agent.planning_state != PersistentAgent.PlanningState.PLANNING:
+        return False
+    if any(call.tool_name not in {"send_chat_message", "sleep_until_next_trigger"} for call in prepared_calls):
+        return False
+    latest_user_text = " ".join(_latest_inbound_message_text(agent).split())
+    return bool(latest_user_text and PLANNING_EXECUTE_NOW_RE.search(latest_user_text))
+
+
+def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) -> str:
+    body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
+    return str(tool_params.get(body_key) or "") if body_key else ""
+
+
+def _tool_call_likely_terminal_message(call: Any) -> bool:
+    tool_name = _get_tool_call_name(call)
+    if tool_name not in MESSAGE_TOOL_NAMES:
+        return False
+    try:
+        _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    body = _message_tool_body_from_params(tool_name, tool_params)
+    if not body:
+        return False
+    return not _looks_like_blocking_human_input_request(body) and not _should_infer_message_tool_continuation(body)
+
+
+def _should_skip_irrelevant_agent_config_mutation(
+    agent: PersistentAgent,
+    tool_name: str,
+    tool_params: Dict[str, Any],
+    *,
+    batch_has_terminal_message: bool,
+) -> bool:
+    if tool_name != "sqlite_batch" or not batch_has_terminal_message:
+        return False
+    if not _sqlite_batch_is_only_agent_config_mutation(tool_params):
+        return False
+    latest_user_text = _latest_inbound_message_text(agent)
+    return _looks_like_one_off_user_task(latest_user_text)
+
+
+def _record_irrelevant_agent_config_mutation_skip(
+    agent: PersistentAgent,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Skipped unrelated __agent_config mutation attached to a one-off final answer. "
+            "Deliver the requested answer without changing durable charter or schedule."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
 def _normalize_tool_name_for_execution(agent: PersistentAgent, tool_name: str) -> str:
     entry = resolve_tool_entry(agent, tool_name) if isinstance(tool_name, str) and tool_name.startswith("mcp_") else None
     return entry.full_name if entry else tool_name
@@ -2075,7 +2244,8 @@ def _record_duplicate_http_request_skip(
         "agent": agent,
         "description": (
             "Skipped duplicate http_request: this exact request already succeeded in this task. "
-            f"Use the prior tool result from step {prior_call.step_id}; do not fetch it again unless params change."
+            f"Use the prior tool result from step {prior_call.step_id}. "
+            "If it answers the request, send the final message next; do not refetch or inspect __tool_results just to reread it."
         ),
     }
     attach_completion(step_kwargs)
@@ -2281,6 +2451,8 @@ def _prepare_tool_batch(
         _get_tool_call_name(call) == "request_human_input"
         for call in tool_calls
     )
+    batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
+    batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False
 
     for idx, call in enumerate(tool_calls, start=1):
@@ -2408,7 +2580,7 @@ def _prepare_tool_batch(
             try:
                 raw_args = _get_tool_call_arguments(call)
                 raw_args, tool_params = _parse_tool_call_params(raw_args)
-            except Exception:
+            except (TypeError, ValueError, json.JSONDecodeError):
                 preview = (raw_args or "")[:ARG_LOG_MAX_CHARS]
                 logger.warning(
                     "Agent %s: invalid JSON for tool %s; prompting model to resend valid arguments (preview=%s%s)",
@@ -2420,7 +2592,8 @@ def _prepare_tool_batch(
                 try:
                     step_text = (
                         f"Tool call error: arguments for {tool_name} were not valid JSON. "
-                        "Re-send the SAME tool call immediately with valid JSON only. "
+                        "Re-send the SAME tool call immediately with valid JSON only; do not switch tools. "
+                        "For create_custom_tool, retry create_custom_tool with source_code instead of using create_file. "
                         "For HTML content, use single quotes for all attributes to avoid JSON conflicts."
                     )
                     step_kwargs = {"agent": agent, "description": step_text}
@@ -2441,10 +2614,11 @@ def _prepare_tool_batch(
                 message_body = str(tool_params.get("body") or "")
                 if _looks_like_blocking_human_input_request(message_body):
                     tool_name = "request_human_input"
-                    tool_params = {
-                        "question": _extract_human_input_question(message_body),
-                        "will_continue_work": _coerce_optional_bool(tool_params.get("will_continue_work")) is True,
-                    }
+                    tool_params = _request_human_input_params_from_blocking_chat_question(
+                        agent,
+                        message_body,
+                        tool_params,
+                    )
                     logger.info(
                         "Agent %s: routing blocking chat question to request_human_input.",
                         agent.id,
@@ -2452,6 +2626,13 @@ def _prepare_tool_batch(
 
             if tool_name == "send_chat_message":
                 message_body = str(tool_params.get("body") or "")
+                if not batch_has_planning_gate and agent.planning_state == PersistentAgent.PlanningState.PLANNING and _coerce_optional_bool(tool_params.get("will_continue_work")) is True and PLANNING_READY_WITHOUT_GATE_RE.search(message_body):
+                    step_kwargs = {"agent": agent, "description": "Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat."}
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    followup_required = True
+                    break
                 if _should_reject_defaultable_setup_question(agent, message_body):
                     _record_defaultable_setup_question_correction(
                         agent,
@@ -2462,8 +2643,10 @@ def _prepare_tool_batch(
                     break
 
             if tool_name == "request_human_input":
-                question_text = str(tool_params.get("question") or "")
-                if _should_reject_defaultable_setup_question(agent, question_text):
+                if any(
+                    _should_reject_defaultable_setup_question(agent, question_text)
+                    for question_text in _request_human_input_question_texts(tool_params)
+                ):
                     _record_defaultable_setup_question_correction(
                         agent,
                         attach_completion=attach_completion,
@@ -2508,10 +2691,45 @@ def _prepare_tool_batch(
                 call_id = call.get("id")
             if tool_name == "search_tools":
                 tool_params.pop("will_continue_work", None)
+                if _should_skip_planning_execute_tool_search(agent, tool_name, prepared_calls):
+                    step_kwargs = {
+                        "agent": agent,
+                        "description": (
+                            "Skipped search_tools before planning was completed. The user asked to execute now, "
+                            "so first call end_planning(full_plan=...) if the plan is sufficient, or request_human_input if blocked."
+                        ),
+                    }
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    logger.info(
+                        "Agent %s: skipped search_tools before planning gate for execute-now prompt.",
+                        agent.id,
+                    )
+                    if not batch_has_planning_gate:
+                        followup_required = True
+                        break
+                    continue
             if (normalized_tool_name := _normalize_tool_name_for_execution(agent, tool_name)) != tool_name:
                 logger.info("Agent %s: normalized tool call %s -> %s", agent.id, tool_name, normalized_tool_name)
                 tool_name = normalized_tool_name
             tool_params = _normalize_tool_params(tool_name, tool_params)
+            if _should_skip_irrelevant_agent_config_mutation(
+                agent,
+                tool_name,
+                tool_params,
+                batch_has_terminal_message=batch_has_terminal_message,
+            ):
+                _record_irrelevant_agent_config_mutation_skip(
+                    agent,
+                    attach_completion=attach_completion,
+                    attach_prompt_archive=attach_prompt_archive,
+                )
+                logger.info(
+                    "Agent %s: skipped irrelevant __agent_config mutation attached to one-off final answer.",
+                    agent.id,
+                )
+                continue
             explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
             inferred_continue = False
             if tool_name in MESSAGE_TOOL_NAMES:
@@ -2823,6 +3041,8 @@ def _finalize_tool_batch(
             and isinstance(result, dict)
             and result.get("skipped") is True
         )
+        effective_explicit_continue = prepared.explicit_continue
+        delivered_terminal_message = False
         if tool_name in MESSAGE_TOOL_NAMES and not message_delivery_skipped:
             status_label = str(status or "").lower()
             if status_label in MESSAGE_SUCCESS_STATUSES:
@@ -2832,7 +3052,10 @@ def _finalize_tool_batch(
                 if prepared.explicit_continue is True and _should_infer_message_tool_continuation(body):
                     progress_message_delivery_ok = True
                 else:
+                    delivered_terminal_message = True
                     terminal_message_delivery_ok = True
+                    if prepared.explicit_continue is True:
+                        effective_explicit_continue = False
 
         is_error_status = _is_error_status(result)
         tool_status = "error" if is_error_status else "complete"
@@ -2876,9 +3099,9 @@ def _finalize_tool_batch(
 
         allow_auto_sleep = isinstance(result, dict) and result.get(AUTO_SLEEP_FLAG) is True
         tool_had_warning = _is_warning_status(result)
-        if prepared.explicit_continue is not None:
-            last_explicit_continue = prepared.explicit_continue
-        if prepared.explicit_continue is True and prepared.inferred_continue:
+        if effective_explicit_continue is not None:
+            last_explicit_continue = effective_explicit_continue
+        if effective_explicit_continue is True and prepared.inferred_continue:
             inferred_message_continue_this_iteration = True
 
         if message_delivery_skipped:
@@ -2890,7 +3113,7 @@ def _finalize_tool_batch(
         elif is_error_status or tool_had_warning:
             followup_required = True
         elif (
-            prepared.explicit_continue is not True
+            effective_explicit_continue is not True
             and not allow_auto_sleep
             and not terminal_message_delivery_ok
             and not human_input_request_ok

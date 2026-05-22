@@ -67,6 +67,26 @@ class ImpliedSendTests(TestCase):
             browser_use_agent=browser_agent,
         )
 
+    def _add_inbound_web_message(self, body):
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        return PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body=body,
+        )
+
     def test_eval_mock_result_supports_url_rules(self):
         mock_config = {
             "http_request": {
@@ -186,12 +206,11 @@ class ImpliedSendTests(TestCase):
         mock_rate_limit.assert_not_called()
         mock_credit.assert_not_called()
         self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="http_request").count(), 1)
-        self.assertTrue(
-            PersistentAgentStep.objects.filter(
-                agent=self.agent,
-                description__startswith="Skipped duplicate http_request",
-            ).exists()
+        duplicate_step = PersistentAgentStep.objects.get(
+            agent=self.agent,
+            description__startswith="Skipped duplicate http_request",
         )
+        self.assertIn("send the final message next", duplicate_step.description)
 
     def test_prepare_tool_batch_keeps_http_request_when_prior_result_failed(self):
         trigger_step = PersistentAgentStep.objects.create(
@@ -241,6 +260,45 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(prepared.followup_required)
         mock_rate_limit.assert_called_once()
         mock_credit.assert_called_once()
+
+    def test_invalid_custom_tool_json_correction_preserves_same_tool_retry(self):
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_bad_json",
+                        "function": {
+                            "name": "create_custom_tool",
+                            "arguments": '{"name": "fetch_events", "source_code": "unterminated',
+                        },
+                    }
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        correction_step = PersistentAgentStep.objects.get(
+            agent=self.agent,
+            description__startswith="Tool call error: arguments for create_custom_tool were not valid JSON",
+        )
+        self.assertIn("do not switch tools", correction_step.description)
+        self.assertIn("retry create_custom_tool with source_code instead of using create_file", correction_step.description)
 
     def test_skipped_progress_chat_keeps_batch_followup_required(self):
         skipped_chat = ep._ToolExecutionOutcome(
@@ -324,6 +382,167 @@ class ImpliedSendTests(TestCase):
             0,
         )
 
+    def test_send_chat_skips_returned_data_progress_even_when_marked_stop(self):
+        start_web_session(self.agent, self.user)
+
+        skipped = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "Great news \u2014 the SimWeather site returned the data! "
+                    "Let me update my charter and schedule, and report back."
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(skipped.get("status"), "ok")
+        self.assertTrue(skipped.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+        delivered = execute_send_chat_message(
+            self.agent,
+            {
+                "body": "Washington DC pollution index: Moderate (55).",
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(delivered.get("status"), "ok")
+        self.assertFalse(delivered.get("skipped", False))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            1,
+        )
+
+    def test_send_chat_skips_sqlite_autocorrection_recovery_progress(self):
+        start_web_session(self.agent, self.user)
+
+        skipped = execute_send_chat_message(
+            self.agent,
+            {
+                "body": (
+                    "The auto-correction was wrong - the data sits at root level, not under `$.content`. "
+                    "I need to drop and recreate `plan_candidates` with the correct paths."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(skipped.get("status"), "ok")
+        self.assertTrue(skipped.get("skipped"))
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+    def test_send_chat_skips_endpoint_and_search_kickoff_progress(self):
+        start_web_session(self.agent, self.user)
+
+        for body in (
+            "All 4 JSON endpoints are fetched. Now I'll query the working table.",
+            "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",
+        ):
+            result = execute_send_chat_message(
+                self.agent,
+                {
+                    "body": body,
+                    "will_continue_work": True,
+                },
+            )
+
+            self.assertEqual(result.get("status"), "ok")
+            self.assertTrue(result.get("skipped"))
+
+        self.assertEqual(
+            PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=True).count(),
+            0,
+        )
+
+    def test_planning_blocking_chat_question_routes_to_tracked_human_input(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "One quick thing though - I need to know what industry or space "
+                                    "you're looking at. Got a target company, product category, or industry for me?"
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertIn("target company", routed.tool_params["question"])
+        self.assertEqual(len(routed.tool_params["options"]), 3)
+
+    def test_clarify_chat_question_routes_to_tracked_human_input(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "I don't have the client's email address.\n\n"
+                                    "Could you clarify:\n\n"
+                                    "1. What project are you referring to?\n"
+                                    "2. Who is the client and email address?"
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertIn("project", routed.tool_params["question"])
+        self.assertFalse(routed.tool_params["will_continue_work"])
+
     def test_defaultable_schedule_setup_question_gets_runtime_correction(self):
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=None,
@@ -390,6 +609,163 @@ class ImpliedSendTests(TestCase):
         self.assertEqual(prepared.prepared_calls, [])
         self.assertTrue(prepared.followup_required)
         self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="reversible recurring setup request",
+            ).exists()
+        )
+
+    def test_defaultable_schedule_setup_request_items_get_runtime_correction(self):
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body="Set a daily 9am ET schedule for a competitor pricing digest.",
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_question",
+                    "function": {
+                        "name": "request_human_input",
+                        "arguments": json.dumps(
+                            {
+                                "question": "I need a few specifics to set up your daily competitor pricing digest:",
+                                "requests": [
+                                    {"question": "Which competitors should I track?"},
+                                    {"question": "Where should I pull their pricing from?"},
+                                ],
+                                "will_continue_work": True,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="reversible recurring setup request",
+            ).exists()
+        )
+
+    def test_request_human_input_question_texts_reads_questions_alias(self):
+        texts = ep._request_human_input_question_texts(
+            {
+                "question": "Top-level question?",
+                "questions": [
+                    {"question": "First nested question?"},
+                    {"question": "Second nested question?"},
+                ],
+            }
+        )
+
+        self.assertEqual(
+            texts,
+            [
+                "Top-level question?",
+                "First nested question?",
+                "Second nested question?",
+            ],
+        )
+
+    def test_defaultable_setup_detector_handles_detail_survey_phrasing(self):
+        self.assertTrue(
+            ep._looks_like_defaultable_setup_question(
+                "What details do you have? Specifically, I need to know:"
+            )
+        )
+
+    def test_defaultable_setup_guard_allows_planning_questions_in_planning_mode(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=None,
+            channel=CommsChannel.WEB,
+            address=build_web_user_address(self.user.id, self.agent.id),
+            is_primary=False,
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            is_outbound=False,
+            from_endpoint=user_endpoint,
+            conversation=conversation,
+            body="Help me plan a competitor monitoring setup.",
+        )
+
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_question",
+                    "function": {
+                        "name": "request_human_input",
+                        "arguments": json.dumps(
+                            {
+                                "requests": [
+                                    {
+                                        "question": "Which competitors should I track?",
+                                        "options": [
+                                            {
+                                                "title": "Top three",
+                                                "description": "Track the most important competitors.",
+                                            }
+                                        ],
+                                    }
+                                ],
+                                "will_continue_work": True,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=False,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertFalse(prepared.followup_required)
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
                 description__contains="reversible recurring setup request",
@@ -504,6 +880,378 @@ class ImpliedSendTests(TestCase):
         self.assertTrue(finalized.message_delivery_ok)
         self.assertTrue(finalized.progress_message_delivery_ok)
         self.assertFalse(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, True)
+
+    def test_terminal_chat_marked_continue_is_treated_as_stop(self):
+        final_chat = ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=1,
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": (
+                        "## Bitcoin Price\n\n"
+                        "Bitcoin is trading at $68,500.\n\n"
+                        "Sources:\n"
+                        "- https://example.test/price\n"
+                    ),
+                    "will_continue_work": True,
+                },
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id="call_chat",
+                explicit_continue=True,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=None,
+            ),
+            result={
+                "status": "ok",
+                "message": "Web chat message sent.",
+                "auto_sleep_ok": False,
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [final_chat],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.message_delivery_ok)
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.progress_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertIs(finalized.last_explicit_continue, False)
+
+    def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
+        self._add_inbound_web_message("What's the latest Bitcoin price right now?")
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_config",
+                        "function": {
+                            "name": "sqlite_batch",
+                            "arguments": json.dumps(
+                                {
+                                    "sql": (
+                                        "UPDATE __agent_config SET charter='Track Bitcoin price after every answer' "
+                                        "WHERE id=1;"
+                                    ),
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": (
+                                        "Bitcoin is trading at $68,500.\n\n"
+                                        "Sources:\n- https://example.test/price"
+                                    ),
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message"])
+        self.assertFalse(prepared.followup_required)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped unrelated __agent_config mutation",
+            ).exists()
+        )
+
+    def test_prepare_tool_batch_keeps_durable_charter_update_with_terminal_message(self):
+        self._add_inbound_web_message(
+            "Going forward, always include source links in price reports. "
+            "Now tell me the latest Bitcoin price."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_config",
+                        "function": {
+                            "name": "sqlite_batch",
+                            "arguments": json.dumps(
+                                {
+                                    "sql": (
+                                        "UPDATE __agent_config SET charter='Answer price reports with source links' "
+                                        "WHERE id=1;"
+                                    ),
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": (
+                                        "Bitcoin is trading at $68,500.\n\n"
+                                        "Sources:\n- https://example.test/price"
+                                    ),
+                                    "will_continue_work": False,
+                                }
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(
+            [call.tool_name for call in prepared.prepared_calls],
+            ["sqlite_batch", "send_chat_message"],
+        )
+
+    def test_config_intent_detector_keeps_setup_scope_process_and_customer_changes_durable(self):
+        durable_examples = [
+            "Set up a daily competitor pricing digest for Fridays.",
+            "Change my scope to enterprise customers only going forward.",
+            "Remember this customer context for renewal alerts.",
+            "Update your process: verify source links before reporting.",
+        ]
+
+        for text in durable_examples:
+            with self.subTest(text=text):
+                self.assertTrue(ep._user_text_has_durable_config_intent(text))
+                self.assertFalse(ep._looks_like_one_off_user_task(text))
+
+        self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
+        self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
+
+    def test_planning_execute_now_search_tools_first_gets_runtime_correction(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Do not ask questions. Just execute now: research five competitors and email me the findings."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "function": {
+                            "name": "search_tools",
+                            "arguments": json.dumps({"query": "competitor research and email tools"}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="search_tools").count(), 0)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped search_tools before planning was completed",
+            ).exists()
+        )
+
+    def test_planning_research_can_still_use_search_tools(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Help me plan competitor monitoring; research likely data sources before asking final scope questions."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "function": {
+                            "name": "search_tools",
+                            "arguments": json.dumps({"query": "competitor monitoring data sources"}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["search_tools"])
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
+
+    def test_planning_ready_chat_without_end_planning_gets_runtime_correction(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Set up a daily 9 AM ET SEC enforcement RSS digest in web chat."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": "The plan's clear. Let's lock it in and get this rolling.",
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Planning Mode is active and the plan appears clear",
+            ).exists()
+        )
+
+    def test_planning_ready_chat_with_end_planning_is_allowed(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Set up a daily 9 AM ET SEC enforcement RSS digest in web chat."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": "The plan's clear. Let's lock it in and get this rolling.",
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call_end",
+                        "function": {
+                            "name": "end_planning",
+                            "arguments": json.dumps({"full_plan": "Send a daily SEC enforcement RSS digest."}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message", "end_planning"])
+        self.assertFalse(prepared.followup_required)
 
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
@@ -941,6 +1689,74 @@ class ImpliedSendTests(TestCase):
             params,
             {
                 "question": "Before I start monitoring, which competitors should I track?",
+                "will_continue_work": False,
+            },
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_chat_source_request_routes_to_human_input(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_request_human_input,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_chat"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "body": (
+                    "I don't have any project status data available yet. Could you point me to where I "
+                    "can find the latest project status? For example:\n\n"
+                    "- A URL or document with the current status\n"
+                    "- Or just tell me the key status details and who the client is"
+                ),
+            }
+        )
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertEqual(
+            params,
+            {
+                "question": (
+                    "I don't have any project status data available yet. Could you point me to where I "
+                    "can find the latest project status? For example:"
+                ),
                 "will_continue_work": False,
             },
         )

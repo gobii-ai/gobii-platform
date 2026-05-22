@@ -30,7 +30,7 @@ from api.evals.scenarios.effort_calibration import (
     _sqlite_result_text_reads,
     _web_query_value,
 )
-from api.evals.scenarios.sqlite_tool_results import SqliteToolResultScenario
+from api.evals.scenarios.sqlite_tool_results import SqliteDedupeRequeryScenario, SqliteIntermediateWorkingTableScenario, SqliteToolResultScenario
 from api.evals.stop_policy import should_stop_for_eval_policy
 from api.evals.suites import SuiteRegistry
 from api.models import (
@@ -144,6 +144,68 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertFalse(passed)
         self.assertIn("no aggregate __tool_results query", recorded[-1][1]["observed_summary"])
 
+    def test_sqlite_dedupe_usage_allows_bounded_schema_probe(self):
+        scenario, recorded = SqliteDedupeRequeryScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    SELECT substr(result_json, 1, 200) FROM __tool_results WHERE result_id='r1';
+                    SELECT json_extract(result_json, '$.content.text') FROM __tool_results WHERE result_id='r1';
+                    WITH claims AS (
+                        SELECT result_id, json_extract(result_json, '$.content.text') AS claim
+                        FROM __tool_results
+                        WHERE result_id IN ('r1', 'r2', 'r3', 'r4')
+                    )
+                    SELECT claim, count(*) FROM claims GROUP BY claim ORDER BY count(*) DESC;
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_sqlite_usage(
+                "run",
+                after=None,
+                task_name="verify_dedupe_sqlite_usage",
+                max_single_result_filters=scenario.max_single_result_filters,
+            )
+        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+
+    def test_sqlite_working_table_usage_allows_bounded_shape_repair(self):
+        scenario, recorded = SqliteIntermediateWorkingTableScenario(), []
+        scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
+        calls = [
+            SimpleNamespace(
+                step="step",
+                tool_name="sqlite_batch",
+                tool_params={
+                    "sql": """
+                    SELECT result_id, substr(result_json, 1, 500) FROM __tool_results WHERE result_id='r1';
+                    SELECT json_extract(result_json, '$.content.vendor') FROM __tool_results WHERE result_id='r1';
+                    DROP TABLE IF EXISTS plan_candidates;
+                    CREATE TABLE plan_candidates AS
+                    SELECT json_extract(result_json, '$.content.vendor') AS vendor,
+                           json_extract(p.value, '$.plan') AS plan
+                    FROM __tool_results, json_each(result_json, '$.content.plans') AS p;
+                    SELECT vendor, plan FROM plan_candidates ORDER BY vendor;
+                    SELECT result_json FROM __tool_results WHERE result_id='r1';
+                    """
+                },
+            )
+        ]
+        with patch("api.evals.scenarios.sqlite_tool_results._tool_calls_for_run", return_value=calls):
+            passed = scenario._record_sqlite_usage(
+                "run",
+                after=None,
+                task_name="verify_working_table_sqlite_usage",
+                require_working_table=True,
+                max_single_result_filters=scenario.max_single_result_filters,
+            )
+        self.assertTrue(passed, recorded[-1][1]["observed_summary"])
+
     def test_effort_no_question_check_rejects_progress_only_message(self):
         scenario, recorded = EffortCalibrationScenario(), []
         scenario.record_task_result = lambda *args, **kwargs: recorded.append((args, kwargs))
@@ -165,6 +227,10 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_question_count_ignores_source_url_query_strings(self):
         self.assertEqual(
             _question_count("Sources: https://www.ycombinator.com/companies?batch=Winter%202026"),
+            0,
+        )
+        self.assertEqual(
+            _question_count("Source: www.ycombinator.com/companies?batch=Winter%202026"),
             0,
         )
         self.assertEqual(
@@ -439,6 +505,33 @@ class EffortCalibrationHarnessTests(TestCase):
                 "body": (
                     "I now have detailed data from all 8 source pages. "
                     "Let me mark the research steps done and deliver the synthesized memo."
+                ),
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertTrue(result["skipped"])
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
+    def test_send_chat_skips_tool_recovery_progress_before_final(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="recovery_progress_chat_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Recovery Progress Chat Browser")
+        agent = PersistentAgent.objects.create(
+            name="Recovery Progress Chat Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+
+        result = execute_send_chat_message(
+            agent,
+            {
+                "body": (
+                    "The earlier queries with CTE + json_extract kept hitting a spurious error. "
+                    "Let me extract the markdown content directly and build the comparison data."
                 ),
                 "will_continue_work": True,
             },

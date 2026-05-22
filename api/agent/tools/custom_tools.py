@@ -485,10 +485,19 @@ def _function_bound_names(node: ast.FunctionDef | ast.AsyncFunctionDef, module_n
     return names
 
 
-def _simple_fstring_name(value: ast.AST) -> Optional[str]:
-    if isinstance(value, ast.Name):
-        return value.id
-    return None
+def _fstring_load_names(value: ast.AST) -> set[str]:
+    load_names: set[str] = set()
+    local_bindings: set[str] = set()
+
+    class FormattedValueNameVisitor(ast.NodeVisitor):
+        def visit_Name(self, node: ast.Name) -> None:
+            if isinstance(node.ctx, ast.Load):
+                load_names.add(node.id)
+            elif isinstance(node.ctx, ast.Store):
+                local_bindings.add(node.id)
+
+    FormattedValueNameVisitor().visit(value)
+    return load_names - local_bindings
 
 
 def _find_likely_undefined_fstring_names(tree: ast.Module) -> list[str]:
@@ -511,9 +520,7 @@ def _find_likely_undefined_fstring_names(tree: ast.Module) -> list[str]:
                 return
 
             def visit_FormattedValue(self, node: ast.FormattedValue) -> None:
-                name = _simple_fstring_name(node.value)
-                if name and name not in allowed_names:
-                    missing.add(name)
+                missing.update(name for name in _fstring_load_names(node.value) if name not in allowed_names)
                 self.generic_visit(node)
 
         FStringScopeVisitor().visit(scope)
@@ -992,23 +999,21 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
             "name": "create_custom_tool",
             "description": (
                 "Create or update a sandboxed Python custom tool for this agent. "
-                "Use it for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes. Small disposable tools are good. Those triggers are not exhaustive: err on the side of creating and using one. "
-                "Source is a complete Python script run via `uv run`: PEP 723 deps such as `# dependencies = [\"requests[socks]\"]`, `from _gobii_ctx import main`, `def run(params, ctx): ...`, and Exact final line: `if __name__ == '__main__': main(run)`. "
-                "Never list stdlib modules as dependencies. "
-                "For one-shot creation use source_path='/tools/my_tool.py' plus source_code; do not pass only `source_path` unless you already wrote that file. "
-                "ctx.call_tool(name, params) invokes agent tools. Prefer writing large/intermediate results to the same durable agent SQLite DB that sqlite_batch reads; Do not ATTACH sandbox file paths in sqlite_batch. "
-                "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. ctx.sqlite_db_path is only an advanced escape hatch. Use cursor.rowcount or SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT, because setting it later does not convert tuple rows and rows are not row.get(...). "
-                "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. "
-                "Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
-                "Do not manually repeat MCP/tool/API calls. For slow batches, design the tool to be chunkable by default: include `limit`/`batch_size` and status/id filters, durable progress, remaining counts/work/cursor, and patch it to process smaller resumable batches instead of manual single-action tool loops. "
+                "Small disposable tools are good for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
+                "Source is a complete `uv run` Python script: PEP 723 deps such as `# dependencies = [\"requests[socks]\"]`, `from _gobii_ctx import main`, `def run(params, ctx): ...`, and Exact final line: `if __name__ == '__main__': main(run)`. Never list stdlib deps. "
+                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' plus source_code; do not pass only `source_path` unless you already wrote that file; if malformed/rejected retry create_custom_tool, not create_file. "
+                "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB that sqlite_batch reads; do not ATTACH sandbox file paths. "
+                "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. ctx.sqlite_db_path is advanced only. Use cursor.rowcount or SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT because later changes do not convert tuples and rows are not row.get(...). "
+                "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless it intentionally reads verified state. "
+                "Avoid manual MCP/tool/API loops. Slow batches should be chunkable: include `limit`/`batch_size`, filters, progress, remaining work/cursor, and patch for smaller resumable batches. "
                 "Every success or error return dict should include `next_action`; keep returns concise with status, summary, what changed or which outputs are ready, counts/side effects, skipped duplicates, remaining work, and verification guidance. "
-                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values, rejected reasons, and whether more inputs are needed. URL/domain validators require concrete `urls`, `domains`, or `input_table` params. "
+                "Name ready outputs specifically (`direct_post_urls`, `scrape_ready_urls`, `rows_written`, `records_to_sync`). Validators return accepted ready-to-use values and rejected reasons. URL/domain validators require concrete `urls`, `domains`, or `input_table` params. "
                 "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
-                "Secrets are in os.environ; if missing, request `secret_type='env_var'` rather than a domain-scoped credential. "
-                "Network code needs the SOCKS5 proxy: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]` when needed, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, subprocess curl honors env vars, and prefer ctx.requests_proxies() or ctx.proxy_url(); not bare `requests`/`httpx`; direct HTTPS tunneling should use ALL_PROXY. For tool-to-tool calls, use ctx.call_tool. "
-                "Paths `/tools/my_tool.py` and `/exports/report.txt` are filespace paths for Gobii tool arguments; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. Inside code write real files under `/workspace/...`, e.g. Path('/workspace/exports/report.txt'), not open('/exports/report.txt', ...), and return `$[/exports/report.txt]`. "
-                "Latest workspace edits are synced automatically. Prefer patching the same file and reusing the same tool over creating near-duplicate tools. "
-                "The saved tool gets a canonical id like `custom_my_tool` and is enabled by default."
+                "Secrets are in os.environ; if missing, request `secret_type='env_var'`, not a domain-scoped credential. "
+                "Network code needs the SOCKS5 proxy, not bare `requests`/`httpx` or direct HTTPS tunneling: use requests[socks]/httpx[socks], declare `dependencies = [\"requests[socks]\"]`, read ALL_PROXY/HTTP_PROXY/HTTPS_PROXY/NO_PROXY, curl honors env vars, prefer ctx.requests_proxies() or ctx.proxy_url(). "
+                "Filespace paths like `/tools/my_tool.py` and `/exports/report.txt` are filespace paths/Gobii tool args; if using create_file first, pass file_path='/tools/my_tool.py' and content=<python source>. Inside code use Path('/workspace/exports/report.txt'), not open('/exports/report.txt', ...), and return `$[/exports/report.txt]`. "
+                "Latest workspace edits are synced automatically; Prefer patching the same file over creating near-duplicates. "
+                "Saved tool id like `custom_my_tool`; enabled by default."
             ),
             "parameters": {
                 "type": "object",
@@ -1348,10 +1353,9 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         "If you're about to chain 3+ tool calls or handle intermediate data between steps — stop and write a tool instead. "
         "Immediate triggers: repeated MCP/API calls, pagination/cursors, sync/import jobs, bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, retries/backoff, or checkpoint/resume flows. "
         "Bias toward creating tools early — they are cheap to write, test, and iterate on. "
-        "\nDEV LOOP: write `/tools/my_tool.py` -> create_custom_tool(source_path='/tools/my_tool.py', ...) -> "
-        "invoke the custom_* tool -> inspect result/error -> patch the file -> re-invoke. "
-        "Latest workspace edits are synced automatically before registration and execution. "
-        "For one-shot creation, pass both source_path and complete source_code; do not pass only source_path unless you already wrote that file. "
+        "\nDEV LOOP: create_custom_tool(source_path='/tools/my_tool.py', source_code=...) first; if malformed/rejected retry create_custom_tool, not create_file. "
+        "Then invoke custom_* -> inspect result/error -> patch the same file -> re-invoke. "
+        "Latest workspace edits sync before registration/execution; do not pass only source_path unless you already wrote that file. "
         "Prefer patching the same file over creating near-duplicate tools. "
         "Jump straight in — don't ask, just write the tool and run it. "
         "Start with a small sample/limit, verify a few rows, then widen scope. "

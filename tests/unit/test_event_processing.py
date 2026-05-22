@@ -350,7 +350,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("<agent_skills>", content)
         self.assertIn("System Skill: Runtime Planning", content)
-        self.assertIn("Use `update_plan` to track substantial multi-step work", content)
+        self.assertIn("Use `update_plan` for substantial multi-step work", content)
 
     def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
@@ -583,18 +583,15 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertRegex(
             combined,
-            re.compile(r"do not (?:query|poll)\s+__messages.*anything new", re.IGNORECASE),
+            re.compile(r"Use\s+__messages.*not freshness checks", re.IGNORECASE),
         )
         self.assertRegex(
             combined,
-            re.compile(
-                r"use\s+__messages\s+only\s+for\s+structured\s+analysis,\s+filtering/aggregation,\s+or\s+historical\s+lookup",
-                re.IGNORECASE,
-            ),
+            re.compile(r"Use\s+__messages\s+only\s+for\s+structured\s+analysis/history", re.IGNORECASE),
         )
         self.assertRegex(
             combined,
-            re.compile(r"new inbound messages.*already.*(unified history|shown below)", re.IGNORECASE),
+            re.compile(r"<unified_history>.*Fresh inbound message for this run", re.IGNORECASE | re.DOTALL),
         )
         self.assertNotIn(
             "inbound_unreadish → SELECT * FROM __messages WHERE is_outbound=0 ORDER BY timestamp DESC",
@@ -1383,11 +1380,11 @@ class PromptContextBuilderTests(TestCase):
         self.assertIsNotNone(system_message)
         content = system_message["content"]
         self.assertIn(
-            "and send_email/send_sms/send_agent_message for other channels",
+            "communicate with send_email/send_sms/send_agent_message/send_chat_message",
             content,
         )
         self.assertIn(
-            "If send_chat_message is unavailable, use the most recently active non-web channel from unified history/recent contacts",
+            "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts",
             content,
         )
 

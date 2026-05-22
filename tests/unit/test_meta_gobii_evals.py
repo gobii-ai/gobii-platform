@@ -38,8 +38,10 @@ from api.evals.scenarios.meta_gobii import (
 )
 from api.evals.suites import SuiteRegistry
 from api.models import (
+    AgentAllowlistInvite,
     BrowserUseAgent,
     CommsAllowlistEntry,
+    CommsAllowlistRequest,
     EvalRun,
     EvalRunTask,
     EvalSuiteRun,
@@ -1334,7 +1336,11 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
 
         class FakeIntrospection:
             def table_names(self):
-                return ["api_commsallowlistentry"]
+                return [
+                    "api_agentallowlistinvite",
+                    "api_commsallowlistentry",
+                    "api_commsallowlistrequest",
+                ]
 
             def get_table_description(self, cursor, table_name):
                 return [SimpleNamespace(name="id")]
@@ -1375,16 +1381,23 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
             "sms_contact_permission_attested",
             "sms_contact_permission_attested_at",
         )
-        self.assertEqual(added, len(expected_field_names))
+        self.assertEqual(added, len(expected_field_names) * 3)
         self.assertEqual(
-            [field.column for _, field in schema_editor.added_fields],
-            list(expected_field_names),
+            [(model, field.column) for model, field in schema_editor.added_fields],
+            [
+                (AgentAllowlistInvite, name)
+                for name in expected_field_names
+            ] + [
+                (CommsAllowlistEntry, name)
+                for name in expected_field_names
+            ] + [
+                (CommsAllowlistRequest, name)
+                for name in expected_field_names
+            ],
         )
-        self.assertTrue(
-            all(model == CommsAllowlistEntry for model, _ in schema_editor.added_fields)
-        )
+        self.assertIn("api_agentallowlistinvite.sms_contact_purpose", stdout.getvalue())
         self.assertIn("api_commsallowlistentry.sms_contact_purpose", stdout.getvalue())
-        self.assertIn("api_commsallowlistentry.sms_contact_permission_attested_at", stdout.getvalue())
+        self.assertIn("api_commsallowlistrequest.sms_contact_permission_attested_at", stdout.getvalue())
 
     def test_local_openrouter_profile_seed_uses_env_var_name_without_secret_output(self):
         stdout = StringIO()

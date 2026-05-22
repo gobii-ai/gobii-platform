@@ -900,6 +900,23 @@ class SqliteBatchToolTests(TestCase):
             self.assertEqual(out.get("status"), "ok", out.get("message"))
             self.assertEqual(out["results"][0]["result"], [{"result_id": "abc123"}])
 
+            out = execute_sqlite_batch(
+                self.agent,
+                {
+                    "sql": (
+                        "WITH scrape_data AS ("
+                        "SELECT result_id, json_extract(result_json, '$.ok') AS ok "
+                        "FROM __tool_results WHERE result_id IN ('abc123')"
+                        "), vendor_meta AS ("
+                        "SELECT CASE WHEN result_id='abc123' THEN 'AxonFlow' END AS vendor, ok "
+                        "FROM scrape_data"
+                        ") SELECT vendor, ok FROM vendor_meta;"
+                    )
+                },
+            )
+            self.assertEqual(out.get("status"), "ok", out.get("message"))
+            self.assertEqual(out["results"][0]["result"], [{"vendor": "AxonFlow", "ok": 1}])
+
     def test_autocorrect_missing_column_with_schema_unqualified(self):
         """Auto-corrects unqualified column names using schema."""
         with self._with_temp_db():

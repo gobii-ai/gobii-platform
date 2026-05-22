@@ -432,7 +432,7 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
     @staticmethod
     def _eval_stop_policy(case: CustomToolResultContractCase, custom_tool_name: str) -> dict[str, Any]:
         policy: dict[str, Any] = {
-            "max_relevant_tool_calls": 16,
+            "max_relevant_tool_calls": 24,
             "ignored_tool_names": ["update_plan", "end_planning"],
         }
         if case.requires_batching:
@@ -456,14 +456,14 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             f"Real-world basis: {case.real_world_basis}\n\n"
             f"User task: {case.user_task}\n\n"
             f"Custom tool job: {case.custom_tool_job}\n\n"
-            "Eval safety constraints: use representative sample data instead of live external data, and do not "
+            "Eval safety constraints: use explicit representative inputs instead of live external data, and do not "
             "perform real external writes or call real Google Sheets, LinkedIn, scraping, or MCP services. "
-            "Make the tool reusable with runtime parameters for source inputs/tables, destination outputs/tables, "
-            "dates/status/minimums/batch limits when relevant; when you run it, pass concrete representative values. "
+            "For data-sync tasks, create any sample SQLite tables outside the custom tool, then pass source and "
+            "destination table names as required runtime params; do not hide sample rows or seed-data defaults in "
+            "the tool. Make dates/status/minimums/batch limits runtime params when relevant. "
             "Candidate domains/URLs/tables must be explicit runtime inputs, and any batch/limit/cursor design must "
             "return remaining_work or next_cursor. Side-effect simulations must make completed writes and read-only "
-            "verification unambiguous. "
-            "Simulate any external side effects that would normally happen."
+            "verification unambiguous."
         )
 
     @staticmethod

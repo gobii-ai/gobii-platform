@@ -274,8 +274,10 @@ class WebChatProgressSuppressionTests(SimpleTestCase):
             "Great, I've got the data. Let me update the charter and schedule, then report back.",
             "The last step was incomplete - the query results were fetched but never formatted. Let me fix that now",
             "All four sources are fetched. Now I'll run the clean aggregate query.",
+            "All 4 JSON endpoints are fetched. Now I'll query the working table.",
             "The data is in. Let me run the final analysis query and deliver the recommendation",
             "The `plan_candidates` table is populated with 8 rows. Now let me query it for the best plan.",
+            "Hey! I'm Eval Agent. Let's dig up three current remote job listings from different sources right now.",
         )
         final_answers = (
             "All four pages are scraped and the comparison query is done. Here's the analysis:\n\n## Support Automation Platform Comparison\n\n**Source pages:**",
@@ -428,8 +430,8 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Continuation Mode", system_prompt)
-        self.assertIn("You are continuing an existing work thread, not starting a new task.", system_prompt)
-        self.assertIn("Prefer one direct next tool call over broad reassessment.", system_prompt)
+        self.assertIn("Continue the existing work thread", system_prompt)
+        self.assertIn("prefer one direct next tool call", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)

@@ -12,7 +12,11 @@ from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
-from api.evals.scenarios.bitcoin_price_multiturn import is_supported_bitcoin_price_api_url
+from api.evals.scenarios.bitcoin_price_multiturn import (
+    bitcoin_response_has_followup_question,
+    bitcoin_tool_calls_include_supported_price_api,
+    is_supported_bitcoin_price_api_url,
+)
 from api.evals.scenarios.behavior_micro import (
     BEHAVIOR_MICRO_SCENARIO_SLUGS,
     BehaviorMicroScenario,
@@ -45,12 +49,13 @@ from api.evals.scenarios.behavior_micro import (
     get_planning_mutation_calls_before_end_planning,
     tool_call_is_plan_activity,
 )
+from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
 from api.evals.scenarios.monitor_pollution import (
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
 )
 from api.evals.scenarios.permit_followup_single_reply import PermitFollowupSingleReplyScenario
-from api.evals.scenarios.weather_lookup import _is_free_weather_request
+from api.evals.scenarios.weather_lookup import _is_free_weather_request, _weather_lookup_http_mock
 from api.evals.stop_policy import (
     should_stop_for_eval_policy,
     sqlite_batch_mutates_agent_config_field,
@@ -103,9 +108,9 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
     def test_common_use_case_micro_evals_are_complete_and_registered(self):
         registered = ScenarioRegistry.list_all()
 
-        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 108)
-        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 108)
-        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 108)
+        self.assertEqual(len(COMMON_USE_CASE_EVAL_CASES), 135)
+        self.assertEqual(len(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS), 135)
+        self.assertEqual(len(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS)), 135)
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(TOOL_CHOICE_MICRO_SCENARIO_SLUGS))
         self.assertTrue(set(COMMON_USE_CASE_MICRO_SCENARIO_SLUGS).issubset(BEHAVIOR_MICRO_SCENARIO_SLUGS))
 
@@ -224,6 +229,96 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             by_slug["common_use_case_108_sheets_read_before_upsert"].expected_tools,
             ("google_sheets-find-row", "google_sheets-upsert-row"),
         )
+        new_intelligent_work_slugs = {
+            f"common_use_case_{index:03d}_{suffix}"
+            for index, suffix in [
+                (109, "http_json_dedupe_domains"),
+                (110, "scrape_compare_with_sqlite"),
+                (111, "prior_results_sqlite_rank"),
+                (112, "file_json_dedupe_report"),
+                (113, "file_pipeline_sqlite_summary"),
+                (114, "sheets_default_update_row"),
+                (115, "sheets_read_sqlite_rank"),
+                (116, "maps_default_city_reviews"),
+                (117, "linkedin_default_company_jobs"),
+                (118, "apollo_dedupe_contacts_sqlite"),
+                (119, "http_nested_json_recover"),
+                (120, "scrape_noisy_extract_sqlite"),
+                (121, "sheets_direct_add_no_question"),
+                (122, "custom_tool_bulk_api_sqlite"),
+                (123, "custom_tool_partial_retry"),
+                (124, "tool_results_cte_dedupe_urls"),
+                (125, "tool_results_json_each_plan"),
+                (126, "http_sqlite_weekly_trend"),
+                (127, "search_scrape_sqlite_extract"),
+                (128, "maps_reviews_sqlite_dedupe"),
+                (129, "reddit_posts_sqlite_sentiment"),
+                (130, "yahoo_finance_sqlite_calc"),
+                (131, "vendor_default_assumption"),
+                (132, "sheets_blank_due_bulk_update"),
+                (133, "http_sqlite_dedupe_report"),
+                (134, "file_support_group_report"),
+                (135, "search_scrape_two_sources"),
+            ]
+        }
+        self.assertEqual(len(new_intelligent_work_slugs), 27)
+        self.assertTrue(new_intelligent_work_slugs.issubset(by_slug))
+        self.assertEqual(
+            len({by_slug[slug].prompt for slug in new_intelligent_work_slugs}),
+            len(new_intelligent_work_slugs),
+        )
+        concrete_prompt_markers = {
+            "common_use_case_109_http_json_dedupe_domains": (
+                "https://api.example.test/vendors/alpha.json",
+                "https://api.example.test/vendors/beta.json",
+            ),
+            "common_use_case_110_scrape_compare_with_sqlite": (
+                "https://stripe.com/docs/security",
+                "https://auth0.com/docs/security",
+            ),
+            "common_use_case_122_custom_tool_bulk_api_sqlite": (
+                "https://api.example.test/products?page=1",
+            ),
+            "common_use_case_123_custom_tool_partial_retry": (
+                "https://api.example.test/events?cursor=start",
+            ),
+            "common_use_case_128_maps_reviews_sqlite_dedupe": ("Austin",),
+        }
+        for slug, markers in concrete_prompt_markers.items():
+            for marker in markers:
+                with self.subTest(slug=slug, marker=marker):
+                    self.assertIn(marker, by_slug[slug].prompt)
+        self.assertGreaterEqual(
+            sum("sqlite_batch" in by_slug[slug].expected_tools for slug in new_intelligent_work_slugs),
+            18,
+        )
+        self.assertEqual(
+            by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].expected_tools,
+            ("apollo_io-search-contacts", "sqlite_batch"),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].expected_tools,
+            ("create_custom_tool",),
+        )
+        self.assertIn(
+            "request_human_input",
+            by_slug["common_use_case_116_maps_default_city_reviews"].forbidden_tools,
+        )
+        workflow_case = by_slug["common_use_case_112_file_json_dedupe_report"]
+        scenario = CommonUseCaseToolChoiceScenario()
+        scenario.case = workflow_case
+        read_mock = scenario._mock_for_tool("read_file")
+        self.assertIn("call sqlite_batch next", read_mock["message"])
+        structured_workflow_case = by_slug["common_use_case_109_http_json_dedupe_domains"]
+        scenario.case = structured_workflow_case
+        http_mock = scenario._mock_for_tool("http_request")
+        self.assertEqual(http_mock["content"]["next_step"], "http_request succeeded; call sqlite_batch next to continue the requested workflow.")
+        scrape_sqlite_case = by_slug["common_use_case_127_search_scrape_sqlite_extract"]
+        scenario.case = scrape_sqlite_case
+        scrape_mock = scenario._mock_for_tool("mcp_brightdata_scrape_as_markdown")
+        self.assertIn("call sqlite_batch next", scrape_mock["message"])
+        self.assertIn("ExamplePay Pricing", scrape_mock["result"])
+        self.assertIn("__tool_results.result_text", scrape_mock["result"])
         self.assertEqual(
             by_slug["common_use_case_020_search_reddit_mentions"].accepted_tool_alternatives,
             {"mcp_brightdata_web_data_reddit_posts": ("mcp_brightdata_search_engine",)},
@@ -250,6 +345,10 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
             {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
         )
         self.assertEqual(
+            by_slug["common_use_case_132_sheets_blank_due_bulk_update"].accepted_tool_alternatives,
+            {"google_sheets-read-rows": ("google_sheets-get-values-in-range",)},
+        )
+        self.assertEqual(
             by_slug["common_use_case_060_sheets_append_rows"].accepted_tool_alternatives,
             {"google_sheets-add-rows": ("google_sheets-add-multiple-rows",)},
         )
@@ -268,6 +367,28 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 "ignore_sqlite_eval_bookkeeping_reads"
             ]
         )
+
+    def test_effort_report_shape_accepts_bare_source_urls(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "## Memo\n\n"
+                "- Source one: northstar.example.test/blog/atlas-launch\n"
+                "- Source two: news.example.test/northstar-series-b\n\n"
+                "| Company | Signal |\n"
+                "|---|---|\n"
+                "| Northstar | Atlas launch |"
+            ),
+            source_urls=(
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ),
+            min_source_count=2,
+            min_chars=50,
+            max_chars=500,
+            required_any_groups=(("Northstar",), ("|",)),
+        )
+
+        self.assertTrue(ok, summary)
 
     def test_eval_synthetic_tools_execute_without_external_integration_handlers(self):
         user = get_user_model().objects.create_user(username="eval-synth")
@@ -315,6 +436,27 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertFalse(invalid)
         self.assertIn("supported free weather API", reason)
 
+    def test_weather_eval_mock_rejects_empty_or_unsupported_urls(self):
+        mock_config = {"http_request": _weather_lookup_http_mock()}
+
+        missing_url = ep._resolve_eval_mock_result(mock_config, "http_request", {})
+        self.assertEqual(missing_url["status"], "error")
+
+        unsupported_url = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"url": "https://example.test/weather"},
+        )
+        self.assertEqual(unsupported_url["status"], "error")
+
+        forecast = ep._resolve_eval_mock_result(
+            mock_config,
+            "http_request",
+            {"url": "https://api.open-meteo.com/v1/forecast?latitude=39.4143&longitude=-77.4105"},
+        )
+        self.assertEqual(forecast["status"], "ok")
+        self.assertEqual(forecast["content"]["temperature_f"], 72)
+
     def test_sqlite_agent_config_reads_are_common_use_case_bookkeeping(self):
         call = SimpleNamespace(
             tool_name="sqlite_batch",
@@ -345,6 +487,36 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertTrue(is_supported_bitcoin_price_api_url("https://api.coindesk.com/v1/bpi/currentprice/USD.json"))
         self.assertFalse(is_supported_bitcoin_price_api_url("https://api.coindesk.com/v1/bpi/currentprice/BTC.json"))
         self.assertFalse(is_supported_bitcoin_price_api_url("https://example.test/bitcoin"))
+
+    def test_bitcoin_search_verifier_accepts_generic_query_when_api_call_succeeds(self):
+        calls = [
+            SimpleNamespace(tool_params={"url": "https://example.test/bitcoin"}),
+            SimpleNamespace(
+                tool_params={
+                    "url": "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+                }
+            ),
+        ]
+
+        self.assertTrue(bitcoin_tool_calls_include_supported_price_api(calls))
+        self.assertFalse(
+            bitcoin_tool_calls_include_supported_price_api(
+                [SimpleNamespace(tool_params={"url": "https://example.test/bitcoin"})]
+            )
+        )
+
+    def test_bitcoin_response_followup_check_ignores_url_query_strings(self):
+        self.assertFalse(
+            bitcoin_response_has_followup_question(
+                "The current price is $68,500.50 USD. "
+                "Source: https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd"
+            )
+        )
+        self.assertTrue(
+            bitcoin_response_has_followup_question(
+                "The current price is $68,500.50 USD. Want me to track it?"
+            )
+        )
 
     def test_monitor_pollution_checks_are_deterministic(self):
         charter_ok, charter_reason = _charter_mentions_pollution_monitoring(
@@ -989,6 +1161,31 @@ class BehaviorMicroHelperTests(TestCase):
         )
 
         self.assertTrue(should_stop)
+
+    def test_sqlite_config_field_detection_requires_assigned_column(self):
+        charter_only = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "UPDATE __agent_config SET charter = "
+                    "'Monitor support status on an hourly schedule' WHERE id = 1"
+                )
+            },
+        )
+        self.assertTrue(sqlite_batch_mutates_agent_config_field(charter_only, "charter"))
+        self.assertFalse(sqlite_batch_mutates_agent_config_field(charter_only, "schedule"))
+
+        PersistentAgentStep.objects.filter(eval_run=self.run).delete()
+        schedule_insert = self._add_tool_call(
+            "sqlite_batch",
+            {
+                "sql": (
+                    "INSERT INTO __agent_config (id, charter, schedule) "
+                    "VALUES (1, 'Monitor support status', '0 * * * *')"
+                )
+            },
+        )
+        self.assertTrue(sqlite_batch_mutates_agent_config_field(schedule_insert, "schedule"))
 
     def test_eval_stop_policy_can_wait_for_expected_charter_mutation_execution(self):
         policy = {

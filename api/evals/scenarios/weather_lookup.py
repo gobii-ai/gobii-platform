@@ -20,6 +20,45 @@ MOCK_WEATHER_RESULT = {
 }
 
 
+def _weather_lookup_http_mock():
+    weather_success = {
+        "status": "ok",
+        "content": MOCK_WEATHER_RESULT,
+        "status_code": 200,
+    }
+    return {
+        "rules": [
+            {
+                "url_contains": "geocoding-api.open-meteo.com",
+                "result": {
+                    "status": "ok",
+                    "content": {
+                        "results": [
+                            {
+                                "name": "Frederick",
+                                "admin1": "Maryland",
+                                "latitude": FREDERICK_MD_LATITUDE,
+                                "longitude": FREDERICK_MD_LONGITUDE,
+                            }
+                        ]
+                    },
+                    "status_code": 200,
+                },
+            },
+            {"url_contains": "api.weather.gov/points", "result": weather_success},
+            {"url_contains": "api.weather.gov/gridpoints", "result": weather_success},
+            {"url_contains": "api.open-meteo.com/v1/forecast", "result": weather_success},
+            {"url_contains": "wttr.in", "result": weather_success},
+            {"url_contains": "api.openweathermap.org/data/2.5/weather", "result": weather_success},
+        ],
+        "default": {
+            "status": "error",
+            "message": "Unsupported weather API endpoint in eval mock. Use a forecast or current-conditions URL.",
+            "retryable": True,
+        },
+    }
+
+
 def _query_float(query, key):
     values = query.get(key) or []
     if not values:
@@ -148,32 +187,7 @@ class WeatherLookupScenario(EvalScenario, ScenarioExecutionTools):
                     "Open-Meteo geocoding endpoints only resolve coordinates; they are not weather results."
                 ),
             },
-            "http_request": {
-                "rules": [
-                    {
-                        "url_contains": "geocoding-api.open-meteo.com",
-                        "result": {
-                            "status": "ok",
-                            "content": {
-                                "results": [
-                                    {
-                                        "name": "Frederick",
-                                        "admin1": "Maryland",
-                                        "latitude": FREDERICK_MD_LATITUDE,
-                                        "longitude": FREDERICK_MD_LONGITUDE,
-                                    }
-                                ]
-                            },
-                            "status_code": 200,
-                        },
-                    }
-                ],
-                "default": {
-                    "status": "ok",
-                    "content": MOCK_WEATHER_RESULT,
-                    "status_code": 200,
-                },
-            },
+            "http_request": _weather_lookup_http_mock(),
         }
 
         # Inject message with async processing via Celery

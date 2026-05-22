@@ -56,10 +56,9 @@ class AttachmentGuidanceTests(SimpleTestCase):
 
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("only way to create an actual email attachment", description)
-        self.assertIn("exact $[/path] value", description)
-        self.assertIn("`attach` field", description)
-        self.assertIn("does not attach anything", description)
+        self.assertIn("filespace paths or $[/path] variables", description)
+        self.assertIn("exact file-tool `attach` value", description)
+        self.assertIn("body text never attaches files", description)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()
