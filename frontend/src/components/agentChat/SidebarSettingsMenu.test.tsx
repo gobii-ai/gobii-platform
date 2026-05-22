@@ -32,7 +32,7 @@ describe('SidebarSettingsMenu', () => {
     )
     expect(screen.getByRole('link', { name: /Integrations & MCP/i })).toHaveAttribute('target', '_blank')
 
-    fireEvent.click(screen.getByRole('button', { name: /Task Credits Remaining/i }))
+    fireEvent.click(screen.getByRole('button', { name: /^Usage$/i }))
 
     expect(screen.getByText('Used Today')).toBeInTheDocument()
     expect(screen.getByText('12.5')).toBeInTheDocument()
@@ -61,7 +61,7 @@ describe('SidebarSettingsMenu', () => {
 
     expect(await screen.findByText('person@example.com')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Billing/i })).not.toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Task Credits Remaining/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /^Usage$/i })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Global Secrets/i })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Integrations & MCP/i })).toBeInTheDocument()
   })
