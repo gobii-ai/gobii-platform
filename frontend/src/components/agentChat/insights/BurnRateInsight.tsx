@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion'
 import { CalendarDays, Gauge } from 'lucide-react'
 import type { BurnRateMetadata, InsightEvent, UsageGaugeMetadata } from '../../../types/insight'
-import { InsightGauge } from './InsightGauge'
+import { InsightGauge } from '../../common/InsightGauge'
 
 type BurnRateInsightProps = {
   insight: InsightEvent

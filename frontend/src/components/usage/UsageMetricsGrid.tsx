@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { parseDate } from '@internationalized/date'
 
+import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
 import { useUsageStore } from './store'
 import type {
@@ -24,54 +25,6 @@ type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
   agentIds: string[]
   embedded?: boolean
-}
-
-function UsageQuotaGauge({ percent, embedded = false }: { percent: number; embedded?: boolean }) {
-  const clamped = Math.max(0, Math.min(100, percent))
-  const radius = 36
-  const circumference = 2 * Math.PI * radius
-  const dashOffset = circumference - (clamped / 100) * circumference
-  const gradientId = embedded ? 'usage-quota-gauge-embedded' : 'usage-quota-gauge'
-
-  return (
-    <div className="relative h-24 w-24 shrink-0" aria-hidden="true">
-      <svg viewBox="0 0 96 96" className="h-full w-full -rotate-90">
-        <defs>
-          <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0%" stopColor="#AA74CE" />
-            <stop offset="100%" stopColor="#7C4CA0" />
-          </linearGradient>
-        </defs>
-        <circle
-          cx="48"
-          cy="48"
-          r={radius}
-          fill="none"
-          stroke={embedded ? 'rgba(170, 116, 206, 0.18)' : 'rgba(170, 116, 206, 0.16)'}
-          strokeWidth="8"
-        />
-        <circle
-          cx="48"
-          cy="48"
-          r={radius}
-          fill="none"
-          stroke={`url(#${gradientId})`}
-          strokeLinecap="round"
-          strokeWidth="8"
-          strokeDasharray={circumference}
-          strokeDashoffset={dashOffset}
-        />
-      </svg>
-      <div className="absolute inset-0 flex items-center justify-center">
-        <span className={`text-lg font-semibold ${embedded ? 'text-slate-50' : 'text-slate-900'}`}>
-          {Math.round(clamped)}
-        </span>
-        <span className={`mt-1 text-[10px] font-semibold ${embedded ? 'text-slate-400' : 'text-slate-500'}`}>
-          %
-        </span>
-      </div>
-    </div>
-  )
 }
 
 export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: UsageMetricsGridProps) {
@@ -265,7 +218,27 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
             </div>
             {typeof card.gaugePct === 'number' ? (
               <>
-                <UsageQuotaGauge percent={card.gaugePct} embedded={embedded} />
+                <div className="relative h-24 w-24 shrink-0" aria-hidden="true">
+                  <InsightGauge
+                    value={card.gaugePct}
+                    max={100}
+                    size={96}
+                    gradientColors={['#AA74CE', '#7C4CA0']}
+                    thickness={8}
+                    radius="94%"
+                    showGlow={false}
+                    animate={false}
+                    trackColor={embedded ? 'rgba(170, 116, 206, 0.18)' : 'rgba(170, 116, 206, 0.16)'}
+                  />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className={`text-lg font-semibold ${embedded ? 'text-slate-50' : 'text-slate-900'}`}>
+                      {Math.round(card.gaugePct)}
+                    </span>
+                    <span className={`mt-1 text-[10px] font-semibold ${embedded ? 'text-slate-400' : 'text-slate-500'}`}>
+                      %
+                    </span>
+                  </div>
+                </div>
                 <span className="sr-only">{card.gaugePct}% of quota used</span>
               </>
             ) : null}

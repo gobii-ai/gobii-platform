@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
-import * as sizeSensor from 'size-sensor'
 
 import type {
   DateRangeValue,
@@ -17,6 +16,7 @@ import type {
 } from './types'
 import { fetchUsageTrends } from './api'
 import { getRangeLengthInDays } from './utils'
+import { useEchartsSizeSensor } from '../../hooks/useEchartsSizeSensor'
 
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
@@ -249,17 +249,7 @@ export function UsageTrendSection({
     })
   }, [trendData])
 
-  useLayoutEffect(() => {
-    if (!chartOption) {
-      return
-    }
-    const element = (chartRef.current as unknown as { ele?: HTMLElement })?.ele
-    if (!element) {
-      return
-    }
-    // echarts-for-react assumes a size-sensor binding exists when disposing.
-    sizeSensor.bind(element, () => {})
-  }, [chartOption])
+  useEchartsSizeSensor(chartRef, Boolean(chartOption))
 
   useEffect(() => {
     if (!chartOption) {
