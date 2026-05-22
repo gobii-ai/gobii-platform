@@ -2029,41 +2029,10 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(final_link.get("data-analytics-placement"), "final_cta")
         self.assertEqual(final_link.get("data-analytics-intent"), "view_how_it_works")
 
-    def test_generic_solution_uses_form_backed_spawn_cta(self):
+    def test_unknown_solution_slug_returns_404(self):
         response = self.client.get("/solutions/operations/")
 
-        self.assertEqual(response.status_code, 200)
-        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
-        form = soup.find("form", {"action": reverse("pages:home_agent_spawn")})
-
-        self.assertIsNotNone(form)
-        self.assertIsNotNone(form.find("input", {"name": "charter", "value": ""}))
-        self.assertIsNotNone(form.find("input", {"name": "source_page", "value": "solutions_generic_hero"}))
-
-    def test_generic_solution_spawn_modal_prep_sets_default_agent_intent(self):
-        with override_flag("cta_signup_modal", active=True):
-            response = self.client.post(
-                reverse("pages:home_agent_spawn"),
-                {
-                    "charter": "",
-                    "source_page": "solutions_generic_hero",
-                    "trial_onboarding": "1",
-                    "trial_onboarding_target": TRIAL_ONBOARDING_TARGET_AGENT_UI,
-                    "auth_modal": "1",
-                },
-            )
-
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        parsed = urlparse(payload["auth_url"])
-        self.assertEqual(parsed.path, reverse("account_signup_modal"))
-
-        session = self.client.session
-        self.assertEqual(session.get("agent_charter"), "Hello")
-        self.assertEqual(
-            session.get("agent_charter_override"),
-            "Have a friendly conversation with the user to understand what they need help with, then adapt to assist them.",
-        )
+        self.assertEqual(response.status_code, 404)
 
 
 @tag("batch_pages")

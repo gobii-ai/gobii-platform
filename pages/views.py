@@ -3065,7 +3065,7 @@ class SolutionsSitemap(sitemaps.Sitemap):
 
     def items(self):
         try:
-            return list(SolutionView.SOLUTION_DATA.keys())
+            return list(SolutionView.DEDICATED_TEMPLATES.keys())
         except Exception as e:
             logger.error("Failed to generate SolutionsSitemap items: %s", e, exc_info=True)
             return []
@@ -3230,8 +3230,6 @@ class ClearSignupTrackingView(View):
 
 
 class SolutionView(TemplateView):
-    template_name = "solutions/solution.html"
-
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
         'recruiting': 'solutions/recruiting.html',
@@ -3269,20 +3267,19 @@ class SolutionView(TemplateView):
         },
     }
 
+    def dispatch(self, request, *args, **kwargs):
+        if kwargs.get('slug', '') not in self.DEDICATED_TEMPLATES:
+            raise Http404("Solution not found")
+        return super().dispatch(request, *args, **kwargs)
+
     def get_template_names(self):
         slug = self.kwargs.get('slug', '')
-        if slug in self.DEDICATED_TEMPLATES:
-            return [self.DEDICATED_TEMPLATES[slug]]
-        return [self.template_name]
+        return [self.DEDICATED_TEMPLATES[slug]]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
-        data = self.SOLUTION_DATA.get(slug, {
-            'title': slug.replace('-', ' ').title(),
-            'tagline': 'AI Solutions for your industry.',
-            'description': 'Tailored AI agents and automation to help you scale.'
-        })
+        data = self.SOLUTION_DATA[slug]
 
         solution_spawn_requires_trial = False
         if self.request.user.is_authenticated:
