@@ -33,6 +33,7 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY,
     build_oauth_charter_stash_cache_key,
 )
+from constants.feature_flags import SOLUTION_CRAWLABLE_LINKS
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -1800,6 +1801,29 @@ class PretrainedWorkerHireRedirectTests(TestCase):
 
 @tag("batch_pages")
 class SolutionCtaCopyTests(TestCase):
+    SOLUTION_RELATED_LINKS = {
+        "recruiting": {
+            "slug": "talent-scout",
+            "label": "Talent Scout AI recruiting agent",
+        },
+        "sales": {
+            "slug": "lead-hunter",
+            "label": "Lead Hunter AI sales agent",
+        },
+        "health-care": {
+            "slug": "compliance-audit-sentinel",
+            "label": "Compliance Sentinel AI agent",
+        },
+        "defense": {
+            "slug": "public-safety-scout",
+            "label": "Public Safety Scout AI agent",
+        },
+        "engineering": {
+            "slug": "team-standup-coordinator",
+            "label": "Standup Coordinator AI agent",
+        },
+    }
+
     def setUp(self):
         self.request_factory = RequestFactory()
 
@@ -2014,9 +2038,9 @@ class SolutionCtaCopyTests(TestCase):
         expected_headings = {
             "recruiting": "AI recruiting agents for candidate sourcing",
             "sales": "AI sales agents for outbound lead generation",
-            "health-care": "Healthcare AI agents for intake and admin automation",
+            "health-care": "Healthcare AI agents for care and admin automation",
             "defense": "Open source AI agents for defense",
-            "engineering": "AI agent API for browser automation",
+            "engineering": "Agentic AI API for automation",
         }
 
         for slug, expected_heading in expected_headings.items():
@@ -2192,6 +2216,50 @@ class SolutionCtaCopyTests(TestCase):
         self.assertEqual(final_link.get("href"), "#how-it-works")
         self.assertEqual(final_link.get("data-analytics-placement"), "final_cta")
         self.assertEqual(final_link.get("data-analytics-intent"), "view_how_it_works")
+
+    @override_flag(SOLUTION_CRAWLABLE_LINKS, active=True)
+    def test_solution_pages_include_crawlable_related_links_when_flag_enabled(self):
+        for solution_slug, link_data in self.SOLUTION_RELATED_LINKS.items():
+            with self.subTest(solution_slug=solution_slug):
+                response = self.client.get(reverse("pages:solution", kwargs={"slug": solution_slug}))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                detail_url = reverse(
+                    "pages:pretrained_worker_detail",
+                    kwargs={"slug": link_data["slug"]},
+                )
+                detail_link = soup.find("a", {"href": detail_url}, string=re.compile(link_data["label"]))
+                self.assertIsNotNone(detail_link)
+                self.assertIsNone(detail_link.find_parent("form"))
+
+        sales_soup = BeautifulSoup(
+            self.client.get(reverse("pages:solution", kwargs={"slug": "sales"})).content,
+            "html.parser",
+        )
+        hero_source = sales_soup.find("input", {"name": "source_page", "value": "sales_hero"})
+        self.assertIsNotNone(hero_source)
+        hero_form = hero_source.find_parent("form")
+        self.assertIsNotNone(hero_form)
+        self.assertEqual(hero_form.get("method"), "post")
+        self.assertEqual(
+            hero_form.get("action"),
+            reverse("pages:pretrained_worker_hire", kwargs={"slug": "lead-hunter"}),
+        )
+
+    @override_flag(SOLUTION_CRAWLABLE_LINKS, active=False)
+    def test_solution_pages_hide_crawlable_related_links_when_flag_disabled(self):
+        for solution_slug, link_data in self.SOLUTION_RELATED_LINKS.items():
+            with self.subTest(solution_slug=solution_slug):
+                response = self.client.get(reverse("pages:solution", kwargs={"slug": solution_slug}))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                detail_url = reverse(
+                    "pages:pretrained_worker_detail",
+                    kwargs={"slug": link_data["slug"]},
+                )
+                self.assertIsNone(soup.find("a", {"href": detail_url}))
 
     def test_unknown_solution_slug_returns_404(self):
         response = self.client.get("/solutions/operations/")
