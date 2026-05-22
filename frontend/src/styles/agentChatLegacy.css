@@ -1800,6 +1800,8 @@
 }
 
 .composer-surface {
+  container-type: inline-size;
+  container-name: agent-composer;
   width: min(56rem, 100%);
   padding: 0;
   background: transparent;
@@ -2435,7 +2437,7 @@
   font-weight: 600;
 }
 
-@media (max-width: 480px) {
+@container agent-composer (max-width: 480px) {
   .composer-working-header-row {
     padding: 0.25rem 0.75rem;
     gap: 0.5rem;
@@ -2557,7 +2559,7 @@
   text-transform: uppercase;
 }
 
-@media (max-width: 767px) {
+@container agent-composer (max-width: 767px) {
   .composer-working-tasks-badge {
     display: none;
   }
@@ -2681,7 +2683,7 @@
   100% { background-position: 0% 50%; }
 }
 
-@media (max-width: 700px) {
+@container agent-composer (max-width: 700px) {
   .composer-working-content {
     height: 8rem;
   }
@@ -2696,7 +2698,7 @@
   }
 }
 
-@media (max-width: 480px) {
+@container agent-composer (max-width: 480px) {
   .composer-working-content {
     height: 7rem;
   }
