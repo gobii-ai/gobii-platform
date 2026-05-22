@@ -223,7 +223,13 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         accessorKey: 'name',
         enableSorting: true,
         header: ({ column }) => <SortableHeader column={column} embedded={embedded}>Agent</SortableHeader>,
-        cell: ({ getValue }) => <span>{getValue<string>()}</span>,
+        cell: ({ row, table }) => (
+          <LeaderboardAgentCell
+            row={row.original}
+            rank={table.getRowModel().rows.indexOf(row) + 1}
+            embedded={embedded}
+          />
+        ),
       },
       {
         id: 'tasksTotal',
@@ -381,16 +387,14 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
                 </td>
               </tr>
             ) : (
-              visibleRows.map((row, rowIndex) => (
+              visibleRows.map((row) => (
                 <tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <td
                       key={cell.id}
                       className={`${cell.column.id === 'name' ? 'text-left' : 'text-right'} px-3 md:px-6 py-4 align-middle`}
                     >
-                      {cell.column.id === 'name'
-                        ? <LeaderboardAgentCell row={row.original} rank={rowIndex + 1} embedded={embedded} />
-                        : flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
                     </td>
                   ))}
                 </tr>

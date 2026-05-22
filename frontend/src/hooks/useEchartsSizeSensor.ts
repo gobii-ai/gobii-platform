@@ -2,7 +2,9 @@ import { useLayoutEffect, type RefObject } from 'react'
 import * as sizeSensor from 'size-sensor'
 
 type EChartsHost = {
-  ele?: HTMLElement | null
+  getEchartsInstance?: () => {
+    getDom: () => HTMLElement | null
+  } | null
 }
 
 export function useEchartsSizeSensor<T extends EChartsHost>(
@@ -13,10 +15,10 @@ export function useEchartsSizeSensor<T extends EChartsHost>(
     if (!enabled) {
       return
     }
-    const element = chartRef.current?.ele
+    const element = chartRef.current?.getEchartsInstance?.()?.getDom()
     if (!element) {
       return
     }
-    sizeSensor.bind(element, () => {})
+    return sizeSensor.bind(element, () => {})
   }, [chartRef, enabled])
 }
