@@ -75,6 +75,17 @@ def get_legacy_console_redirect_path(request) -> str | None:
         return None
     if path in {"/console/switch-context/", "/console/mcp/oauth/callback/", "/console/email/oauth/callback/"}:
         return None
+
+    collaborator_invite_prefix = "/console/agent-collaborator-invite/"
+    if path.startswith(collaborator_invite_prefix):
+        remainder = path[len(collaborator_invite_prefix):].strip("/")
+        parts = remainder.split("/") if remainder else []
+        if len(parts) == 2 and parts[1] == "accept":
+            return _with_original_query(request, f"/app/agent-collaborator-invites/{parts[0]}/accept")
+        if len(parts) == 2 and parts[1] == "reject":
+            return _with_original_query(request, f"/app/agent-collaborator-invites/{parts[0]}/decline")
+        return None
+
     if path.startswith(("/console/staff/", "/console/tasks/", "/console/agent-", "/console/agents/create/")):
         return None
 

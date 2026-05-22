@@ -86,6 +86,7 @@ export function CollaboratorInviteDialog({
           'X-Requested-With': 'XMLHttpRequest',
           ...(csrfToken ? { 'X-CSRFToken': csrfToken } : {}),
         },
+        credentials: 'same-origin',
         body: formData,
       })
       const payload = await response.json().catch(() => ({}))

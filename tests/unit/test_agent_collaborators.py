@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.exceptions import ValidationError
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
@@ -115,8 +116,107 @@ class AgentCollaboratorInviteViewTests(TestCase):
         self.invite.refresh_from_db()
         self.assertEqual(self.invite.status, AgentCollaboratorInvite.InviteStatus.ACCEPTED)
 
+    def test_legacy_accept_get_redirects_to_immersive_app(self):
+        user = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("agent_collaborator_invite_accept", kwargs={"token": self.invite.token})
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            f"/app/agent-collaborator-invites/{self.invite.token}/accept",
+        )
+
+    def test_legacy_reject_get_redirects_to_immersive_app(self):
+        user = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("agent_collaborator_invite_reject", kwargs={"token": self.invite.token})
+
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(
+            response["Location"],
+            f"/app/agent-collaborator-invites/{self.invite.token}/decline",
+        )
+
+    def test_accept_api_creates_collaborator(self):
+        user = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("console-agent-collaborator-invite-accept-api", kwargs={"token": self.invite.token})
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "accept")
+        self.assertEqual(payload["agent"]["id"], str(self.agent.id))
+        self.assertEqual(
+            payload["redirectUrl"],
+            build_immersive_chat_url(
+                response.wsgi_request,
+                self.agent.id,
+                return_to="/app/agents",
+            ),
+        )
+        self.assertTrue(
+            AgentCollaborator.objects.filter(agent=self.agent, user=user).exists()
+        )
+
+    def test_decline_api_marks_invite_declined(self):
+        user = User.objects.create_user(
+            username="collab",
+            email="collab@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("console-agent-collaborator-invite-decline-api", kwargs={"token": self.invite.token})
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["action"], "decline")
+        self.assertEqual(payload["redirectUrl"], "/app/agents")
+        self.invite.refresh_from_db()
+        self.assertEqual(self.invite.status, AgentCollaboratorInvite.InviteStatus.REJECTED)
+
+    def test_accept_api_wrong_account_returns_app_issue_payload(self):
+        user = User.objects.create_user(
+            username="wrong",
+            email="wrong@example.com",
+            password="testpass123",
+        )
+        self.client.force_login(user)
+        url = reverse("console-agent-collaborator-invite-accept-api", kwargs={"token": self.invite.token})
+
+        response = self.client.post(url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "wrong_account")
+        self.assertEqual(payload["invitedEmail"], self.invite.email)
+
+    @patch("console.views.Analytics.track_event")
     @patch("api.agent.tasks.process_events.process_agent_events_task.delay")
-    def test_accept_view_records_system_step_and_triggers_processing(self, mock_delay):
+    def test_accept_view_records_system_step_and_triggers_processing(self, mock_delay, _mock_track_event):
         user = User.objects.create_user(
             username="collab",
             email="collab@example.com",
@@ -144,6 +244,31 @@ class AgentCollaboratorInviteViewTests(TestCase):
         self.assertIsNotNone(system_step)
         self.assertIn("collab@example.com", system_step.step.description)
         mock_delay.assert_called_once_with(str(self.agent.id))
+
+    @override_settings(
+        EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend",
+        PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
+    )
+    def test_collaborator_invite_email_uses_immersive_app_links(self):
+        self.client.force_login(self.owner)
+
+        response = self.client.post(
+            reverse("console_agent_settings", kwargs={"agent_id": self.agent.id}),
+            data={
+                "action": "add_collaborator",
+                "email": "new-collab@example.com",
+            },
+            HTTP_X_REQUESTED_WITH="XMLHttpRequest",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["success"])
+        self.assertEqual(len(mail.outbox), 1)
+        body = mail.outbox[0].body
+        self.assertIn("/app/agent-collaborator-invites/", body)
+        self.assertIn("/accept", body)
+        self.assertIn("/decline", body)
+        self.assertNotIn("/console/agent-collaborator-invite/", body)
 
 
 @tag("batch_agent_collaborators")

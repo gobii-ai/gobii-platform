@@ -18,6 +18,7 @@ APP_PATH_PREFIX = "/app"
 APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
 APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
+APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/agent-collaborator-invites"
 APP_ORGANIZATION_PATH_PREFIX = f"{APP_PATH_PREFIX}/organization"
 APP_ORGANIZATION_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/organizations/invites"
 APP_PROFILE_PATH_PREFIX = f"{APP_PATH_PREFIX}/profile"
@@ -323,6 +324,8 @@ class AppShellMiddleware:
             or path.startswith(f"{APP_BILLING_PATH_PREFIX}/")
             or path == APP_API_KEYS_PATH_PREFIX
             or path.startswith(f"{APP_API_KEYS_PATH_PREFIX}/")
+            or path == APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX
+            or path.startswith(f"{APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX}/")
             or path == APP_ORGANIZATION_PATH_PREFIX
             or path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/")
             or path == APP_ORGANIZATION_INVITES_PATH_PREFIX

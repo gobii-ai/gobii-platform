@@ -3244,10 +3244,10 @@ class AgentSettingsController(AgentOwnerContextOverrideMixin, ConsoleViewMixin, 
                 ))
 
                 accept_url = request.build_absolute_uri(
-                    reverse('agent_collaborator_invite_accept', kwargs={'token': invite.token})
+                    _agent_collaborator_invite_app_path(invite.token, "accept")
                 )
                 reject_url = request.build_absolute_uri(
-                    reverse('agent_collaborator_invite_reject', kwargs={'token': invite.token})
+                    _agent_collaborator_invite_app_path(invite.token, "decline")
                 )
                 context = {
                     'agent': agent,
@@ -6513,44 +6513,166 @@ class AgentAllowlistInviteRejectView(TemplateView):
         return redirect("agent_allowlist_invite_reject", token=token)
 
 
-class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
-    """Handle accepting an agent collaborator invitation."""
-    template_name = "console/agent_collaborator_invite_response.html"
+def _agent_collaborator_invite_app_path(token: str, action: str) -> str:
+    return f"{IMMERSIVE_APP_BASE_PATH}/agent-collaborator-invites/{token}/{action}"
 
+
+def _agent_collaborator_invite_agent_payload(invite: AgentCollaboratorInvite) -> dict[str, str]:
+    return {
+        "id": str(invite.agent_id),
+        "name": invite.agent.name,
+    }
+
+
+class AgentCollaboratorInviteValidationMixin:
     def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
         invite_email = (invite.email or "").strip().lower()
         if not invite_email:
             return False
         if (user.email or "").strip().lower() == invite_email:
             return True
+        from allauth.account.models import EmailAddress
+
+        return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
+
+    def _resolve_invite_or_issue(self, request, token: str):
         try:
-            from allauth.account.models import EmailAddress
-            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
-        except Exception:
-            return False
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        token = kwargs.get("token")
-
-        try:
-            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
-            context["invite"] = invite
-            context["agent"] = invite.agent
-
-            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
-                context["already_responded"] = True
-                context["status"] = invite.get_status_display()
-            elif invite.is_expired():
-                context["expired"] = True
-            elif not self._user_matches_invite(self.request.user, invite):
-                context["wrong_account"] = True
-            else:
-                context["can_accept"] = True
+            invite = AgentCollaboratorInvite.objects.select_related(
+                "agent",
+                "agent__user",
+                "agent__organization",
+                "invited_by",
+            ).get(token=token)
         except AgentCollaboratorInvite.DoesNotExist:
-            context["invalid_token"] = True
+            return None, "invalid", {}
 
-        return context
+        extra = {
+            "agent": invite.agent,
+            "invited_email": invite.email,
+            "invited_by": invite.invited_by,
+            "status": invite.get_status_display(),
+        }
+        if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
+            return invite, "already_responded", extra
+        if invite.is_expired():
+            return invite, "expired", extra
+        if not self._user_matches_invite(request.user, invite):
+            return invite, "wrong_account", extra
+        return invite, None, {}
+
+    def _issue_payload(self, issue: str, extra: dict, action: str) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "ok": False,
+            "issue": issue,
+            "action": action,
+        }
+        agent = extra.get("agent")
+        if agent is not None:
+            payload["agent"] = {
+                "id": str(agent.id),
+                "name": agent.name,
+            }
+        invited_email = extra.get("invited_email")
+        if invited_email:
+            payload["invitedEmail"] = invited_email
+        invited_by = extra.get("invited_by")
+        if invited_by is not None:
+            payload["invitedBy"] = invited_by.email or invited_by.username
+        status = extra.get("status")
+        if status:
+            payload["status"] = status
+        return payload
+
+
+class AgentCollaboratorInviteAcceptAPIView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            return JsonResponse(self._issue_payload(issue, extra, "accept"))
+
+        try:
+            invite.accept(request.user)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to accept invitation."
+            return JsonResponse({
+                "ok": False,
+                "issue": "invalid",
+                "action": "accept",
+                "message": message_text,
+            })
+
+        accept_props = Analytics.with_org_properties(
+            {
+                'agent_id': str(invite.agent_id),
+                'agent_name': invite.agent.name,
+                'invite_id': str(invite.id),
+                'invite_email': invite.email,
+                'invited_by_id': str(invite.invited_by_id),
+                'collaborator_user_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+            },
+            organization=getattr(invite.agent, "organization", None),
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_ACCEPTED,
+            source=AnalyticsSource.WEB,
+            properties=accept_props.copy(),
+        ))
+        return JsonResponse({
+            "ok": True,
+            "action": "accept",
+            "agent": _agent_collaborator_invite_agent_payload(invite),
+            "redirectUrl": build_immersive_chat_url(
+                request,
+                invite.agent_id,
+                return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
+            ),
+        })
+
+
+class AgentCollaboratorInviteDeclineAPIView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            return JsonResponse(self._issue_payload(issue, extra, "decline"))
+
+        invite.reject()
+        decline_props = Analytics.with_org_properties(
+            {
+                'agent_id': str(invite.agent_id),
+                'agent_name': invite.agent.name,
+                'invite_id': str(invite.id),
+                'invite_email': invite.email,
+                'invited_by_id': str(invite.invited_by_id),
+                'collaborator_user_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+            },
+            organization=getattr(invite.agent, "organization", None),
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_DECLINED,
+            source=AnalyticsSource.WEB,
+            properties=decline_props.copy(),
+        ))
+        return JsonResponse({
+            "ok": True,
+            "action": "decline",
+            "agent": _agent_collaborator_invite_agent_payload(invite),
+            "redirectUrl": f"{IMMERSIVE_APP_BASE_PATH}/agents",
+        })
+
+
+class AgentCollaboratorInviteAcceptView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return redirect(_agent_collaborator_invite_app_path(kwargs.get("token"), "accept"))
 
     def post(self, request, *args, **kwargs):
         token = kwargs.get("token")
@@ -6604,45 +6726,9 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
         return redirect("agent_collaborator_invite_accept", token=token)
 
 
-class AgentCollaboratorInviteRejectView(LoginRequiredMixin, TemplateView):
-    """Handle rejecting an agent collaborator invitation."""
-    template_name = "console/agent_collaborator_invite_response.html"
-
-    def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
-        invite_email = (invite.email or "").strip().lower()
-        if not invite_email:
-            return False
-        if (user.email or "").strip().lower() == invite_email:
-            return True
-        try:
-            from allauth.account.models import EmailAddress
-            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
-        except Exception:
-            return False
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        token = kwargs.get("token")
-
-        try:
-            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
-            context["invite"] = invite
-            context["agent"] = invite.agent
-            context["rejecting"] = True
-
-            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
-                context["already_responded"] = True
-                context["status"] = invite.get_status_display()
-            elif invite.is_expired():
-                context["expired"] = True
-            elif not self._user_matches_invite(self.request.user, invite):
-                context["wrong_account"] = True
-            else:
-                context["can_reject"] = True
-        except AgentCollaboratorInvite.DoesNotExist:
-            context["invalid_token"] = True
-
-        return context
+class AgentCollaboratorInviteRejectView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return redirect(_agent_collaborator_invite_app_path(kwargs.get("token"), "decline"))
 
     def post(self, request, *args, **kwargs):
         token = kwargs.get("token")

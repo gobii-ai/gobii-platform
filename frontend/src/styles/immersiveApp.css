@@ -83,6 +83,10 @@
   color: #86efac;
 }
 
+.immersive-invite-card--declined .immersive-invite-card__icon {
+  color: #fca5a5;
+}
+
 .immersive-invite-card--issue .immersive-invite-card__icon,
 .immersive-invite-card--error .immersive-invite-card__icon {
   color: #fbbf24;

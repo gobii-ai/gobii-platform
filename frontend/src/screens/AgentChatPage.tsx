@@ -3031,7 +3031,7 @@ export function AgentChatPage({
       return collaboratorInviteUrl
     }
     if (activeAgentId) {
-      return `/app/agents/${activeAgentId}/settings`
+      return `/console/api/agents/${activeAgentId}/settings/`
     }
     return null
   }, [collaboratorInviteUrl, activeAgentId])

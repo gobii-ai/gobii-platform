@@ -3509,6 +3509,7 @@ type ActionsSectionProps = {
 
 function ActionsSection({
   csrfToken,
+  urls,
   variant = 'standalone',
   agent,
   features,
@@ -3609,7 +3610,7 @@ function ActionsSection({
                 </p>
                 <p className="text-xs text-indigo-700 mt-1">They'll need to sign in with that email to accept.</p>
               </div>
-              <form method="post" className="flex">
+              <form method="post" action={urls.detail} className="flex">
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
                 <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
@@ -3618,7 +3619,7 @@ function ActionsSection({
               </form>
             </div>
           ) : (
-            <form method="post" className="space-y-4">
+            <form method="post" action={urls.detail} className="space-y-4">
               <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
               <input type="hidden" name="action" value="transfer_agent" />
               <div>

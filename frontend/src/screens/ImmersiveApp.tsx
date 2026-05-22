@@ -7,6 +7,7 @@ import type { SelectionShellPage } from '../components/agentChat/SelectionShellP
 import { AnalyticsEvent } from '../constants/analyticsEvents'
 import { useAgentRoster } from '../hooks/useAgentRoster'
 import { AgentChatPage } from './AgentChatPage'
+import { AgentCollaboratorInviteResponsePage } from './agentCollaborators/AgentCollaboratorInviteResponsePage'
 import { ImmersiveApiKeysPage } from './apiKeys/ImmersiveApiKeysPage'
 import { ImmersiveBillingPage } from './billing/ImmersiveBillingPage'
 import { ImmersiveMcpServersPage } from './integrations/ImmersiveMcpServersPage'
@@ -33,6 +34,7 @@ type AppRoute =
   | { kind: 'profile' }
   | { kind: 'organization' }
   | { kind: 'organization-invite-accept'; token: string }
+  | { kind: 'agent-collaborator-invite'; token: string; action: 'accept' | 'decline' }
   | { kind: 'secrets' }
   | { kind: 'usage' }
   | { kind: 'integrations' }
@@ -40,7 +42,7 @@ type AppRoute =
   | { kind: 'agent-chat'; agentId: string | null }
   | { kind: 'not-found' }
 
-type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'organization' | 'organization_invite_accept' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
+type AppAnalyticsRoute = 'command_center' | 'agent_select' | 'billing' | 'profile' | 'organization' | 'organization_invite_accept' | 'agent_collaborator_invite' | 'secrets' | 'usage' | 'integrations' | 'api_keys' | 'agent_new' | 'agent_chat' | 'not_found'
 
 type LocationSnapshot = {
   pathname: string
@@ -107,6 +109,14 @@ function parseRoute(pathname: string): AppRoute {
     return { kind: 'agent-chat', agentId: null }
   }
 
+  if (
+    parts[0] === 'agent-collaborator-invites'
+    && parts[1]
+    && (parts[2] === 'accept' || parts[2] === 'decline')
+  ) {
+    return { kind: 'agent-collaborator-invite', token: parts[1], action: parts[2] }
+  }
+
   if (parts[0] === 'agents' && parts[1]) {
     return { kind: 'agent-chat', agentId: parts[1] }
   }
@@ -169,6 +179,9 @@ function getAnalyticsRoute(route: AppRoute): AppAnalyticsRoute {
   if (route.kind === 'organization-invite-accept') {
     return 'organization_invite_accept'
   }
+  if (route.kind === 'agent-collaborator-invite') {
+    return 'agent_collaborator_invite'
+  }
   if (route.kind === 'secrets') {
     return 'secrets'
   }
@@ -206,6 +219,9 @@ function getAnalyticsPath(route: AppRoute, pathname: string): string {
   if (route.kind === 'organization-invite-accept') {
     return '/app/organizations/invites/:token/accept'
   }
+  if (route.kind === 'agent-collaborator-invite') {
+    return `/app/agent-collaborator-invites/:token/${route.action}`
+  }
   if (route.kind === 'secrets') {
     return '/app/secrets'
   }
@@ -242,6 +258,9 @@ function getAnalyticsTitle(route: AppRoute): string {
   }
   if (route.kind === 'organization-invite-accept') {
     return 'Organization Invite · Gobii'
+  }
+  if (route.kind === 'agent-collaborator-invite') {
+    return route.action === 'accept' ? 'Agent Invite · Gobii' : 'Decline Agent Invite · Gobii'
   }
   if (route.kind === 'secrets') {
     return 'Secrets · Gobii'
@@ -1124,6 +1143,13 @@ export function ImmersiveApp({
         ) : null}
         {route.kind === 'organization-invite-accept' ? (
           <OrganizationInviteAcceptPage token={route.token} onNavigate={navigateTo} />
+        ) : null}
+        {route.kind === 'agent-collaborator-invite' ? (
+          <AgentCollaboratorInviteResponsePage
+            token={route.token}
+            action={route.action}
+            onNavigate={navigateTo}
+          />
         ) : null}
         {route.kind === 'command-center' ? (
           <CommandCenter
