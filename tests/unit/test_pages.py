@@ -1910,6 +1910,57 @@ class SolutionCtaCopyTests(TestCase):
             any("All Solutions" in link.get_text(" ", strip=True) for link in hub_links)
         )
 
+    def test_dedicated_solution_pages_include_social_metadata(self):
+        for slug, data in page_views.SolutionView.SOLUTION_DATA.items():
+            with self.subTest(slug=slug):
+                response = self.client.get(reverse("pages:solution", kwargs={"slug": slug}))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                expected_image_url = response.wsgi_request.build_absolute_uri(static(data["social_image"]))
+
+                self.assertEqual(soup.title.get_text(strip=True), data["seo_title"])
+                self.assertEqual(len(soup.find_all("meta", {"name": "description"})), 1)
+                self.assertEqual(
+                    soup.find("meta", {"name": "description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
+                self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), data["seo_title"])
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:url"}).get("content"),
+                    response.wsgi_request.build_absolute_uri(response.wsgi_request.path),
+                )
+                self.assertEqual(soup.find("meta", {"property": "og:image"}).get("content"), expected_image_url)
+                self.assertEqual(
+                    soup.find("meta", {"property": "og:image:alt"}).get("content"),
+                    data["social_image_alt"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:card"}).get("content"),
+                    "summary_large_image",
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:title"}).get("content"),
+                    data["seo_title"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:description"}).get("content"),
+                    data["seo_description"],
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:image"}).get("content"),
+                    expected_image_url,
+                )
+                self.assertEqual(
+                    soup.find("meta", {"name": "twitter:image:alt"}).get("content"),
+                    data["social_image_alt"],
+                )
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")

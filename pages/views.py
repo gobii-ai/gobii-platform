@@ -3248,27 +3248,47 @@ class SolutionView(TemplateView):
         'recruiting': {
             'title': 'Recruiting',
             'tagline': 'Automate candidate sourcing and screening.',
-            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.'
+            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
+            'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
+            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.",
+            'social_image': 'images/solutions/recruiting-hero.jpg',
+            'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
         },
         'sales': {
             'title': 'Sales',
             'tagline': 'Supercharge your outbound outreach.',
-            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.'
+            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.',
+            'seo_title': 'AI Sales Agents - Automate Lead Gen & Outreach | Gobii',
+            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.",
+            'social_image': 'images/solutions/sales-hero.jpg',
+            'social_image_alt': 'Gobii AI sales agents for lead generation and account research',
         },
         'health-care': {
             'title': 'Health Care',
             'tagline': 'Streamline patient intake and administrative tasks.',
-            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.'
+            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.',
+            'seo_title': 'AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii',
+            'seo_description': 'Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.',
+            'social_image': 'images/solutions/healthcare-hero.jpg',
+            'social_image_alt': 'Gobii healthcare AI agents for patient intake and administrative workflows',
         },
         'defense': {
             'title': 'Defense',
             'tagline': 'Secure, on-premise AI intelligence.',
-            'description': 'Mission-critical automation for national security with strict data governance.'
+            'description': 'Mission-critical automation for national security with strict data governance.',
+            'seo_title': 'AI Agents for Defense - Open Source, Airgapped, Fully Auditable | Gobii',
+            'seo_description': 'Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.',
+            'social_image': 'images/solutions/defense-hero.jpg',
+            'social_image_alt': 'Gobii open source AI agents for secure defense environments',
         },
         'engineering': {
             'title': 'Engineering',
             'tagline': 'Accelerate development workflows.',
-            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.'
+            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.',
+            'seo_title': "AI Agents for Developers - Build on Gobii's Platform | Gobii",
+            'seo_description': "Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.",
+            'social_image': 'images/solutions/engineering-hero.jpg',
+            'social_image_alt': 'Gobii developer platform for building AI browser agents',
         },
     }
 
@@ -3294,6 +3314,10 @@ class SolutionView(TemplateView):
             'solution_title': data['title'],
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],
+            'solution_seo_title': data['seo_title'],
+            'solution_seo_description': data['seo_description'],
+            'solution_social_image_alt': data['social_image_alt'],
+            'solution_social_image_url': self.request.build_absolute_uri(static(data['social_image'])),
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
         })
         if slug in {"health-care", "defense"}:

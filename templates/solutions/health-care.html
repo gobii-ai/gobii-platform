@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .healthcare-panel {
     position: relative;

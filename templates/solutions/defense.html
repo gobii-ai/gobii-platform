@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}AI Agents for Defense | Open Source & Air-Gapped | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .defense-panel {
     position: relative;

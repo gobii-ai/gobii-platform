@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}AI Agents for Developers - Build on Gobii's Platform | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .engineering-panel {
     position: relative;

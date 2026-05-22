@@ -2,11 +2,11 @@
 {% load static %}
 {% load cta_tags %}
 
-{% block title %}AI Recruiting Agents - Automate Sourcing & Screening | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .recruiting-panel {
     position: relative;
