@@ -24,6 +24,9 @@ function normalizePathname(pathname: string): string {
 export function extractAgentChatShellAgentId(pathname: string): string | null {
   const normalized = normalizePathname(pathname)
   const appParts = normalized.split('/').filter(Boolean)
+  if (appParts[0] === 'app' && appParts[1] === 'agents' && appParts[2] === 'new') {
+    return null
+  }
   if (
     appParts[0] === 'app'
     && appParts[1] === 'agents'
