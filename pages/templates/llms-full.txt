@@ -50,6 +50,6 @@ Use the terms of service, privacy policy, and data deletion pages for current po
 
 ## Open Source Software
 
-Gobii is open source software; 
+Gobii is open-source software; the source code is available at https://github.com/gobii-ai/gobii-platform.
 
 {% endwith %}
