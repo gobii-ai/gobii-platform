@@ -7912,6 +7912,8 @@
 }
 
 .sidebar-settings[data-collapsed='true'] {
+  display: flex;
+  justify-content: center;
   padding: 0.75rem 0.75rem 0.75rem;
 }
 
