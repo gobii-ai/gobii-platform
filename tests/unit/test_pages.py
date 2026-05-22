@@ -1960,6 +1960,55 @@ class SolutionCtaCopyTests(TestCase):
                     soup.find("meta", {"name": "twitter:image:alt"}).get("content"),
                     data["social_image_alt"],
                 )
+                json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+                self.assertEqual(len(json_ld_scripts), 2)
+
+                structured_data = json.loads(json_ld_scripts[0].string)
+                expected_solution_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+                self.assertEqual(structured_data["@context"], "https://schema.org")
+                self.assertEqual(structured_data["@type"], "WebPage")
+                self.assertEqual(structured_data["name"], data["seo_title"])
+                self.assertEqual(structured_data["description"], data["seo_description"])
+                self.assertEqual(structured_data["url"], expected_solution_url)
+                self.assertEqual(structured_data["image"], expected_image_url)
+                self.assertEqual(structured_data["publisher"]["name"], "Gobii")
+                self.assertEqual(structured_data["isPartOf"]["@type"], "WebSite")
+                self.assertEqual(structured_data["isPartOf"]["name"], "Gobii")
+                self.assertEqual(structured_data["mainEntity"]["@type"], "Service")
+                self.assertEqual(
+                    structured_data["mainEntity"]["name"],
+                    f"Gobii {data['title']} AI agents",
+                )
+                self.assertEqual(structured_data["mainEntity"]["serviceType"], "AI agent solution")
+                self.assertEqual(structured_data["mainEntity"]["category"], data["title"])
+                self.assertEqual(structured_data["mainEntity"]["provider"]["name"], "Gobii")
+
+                breadcrumb_data = json.loads(json_ld_scripts[1].string)
+                self.assertEqual(breadcrumb_data["@context"], "https://schema.org")
+                self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
+                self.assertEqual(
+                    breadcrumb_data["itemListElement"],
+                    [
+                        {
+                            "@type": "ListItem",
+                            "position": 1,
+                            "name": "Home",
+                            "item": response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+                        },
+                        {
+                            "@type": "ListItem",
+                            "position": 2,
+                            "name": "Solutions",
+                            "item": response.wsgi_request.build_absolute_uri(reverse("pages:solutions")),
+                        },
+                        {
+                            "@type": "ListItem",
+                            "position": 3,
+                            "name": data["title"],
+                            "item": expected_solution_url,
+                        },
+                    ],
+                )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):

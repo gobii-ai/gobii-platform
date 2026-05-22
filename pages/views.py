@@ -3305,10 +3305,69 @@ class SolutionView(TemplateView):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
         data = self.SOLUTION_DATA[slug]
+        solution_url = self.request.build_absolute_uri(reverse('pages:solution', kwargs={'slug': slug}))
+        solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
+        home_url = self.request.build_absolute_uri(reverse('pages:home'))
+        social_image_url = self.request.build_absolute_uri(static(data['social_image']))
 
         solution_spawn_requires_trial = False
         if self.request.user.is_authenticated:
             solution_spawn_requires_trial = not can_user_use_personal_agents_and_api(self.request.user)
+
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            "name": data['seo_title'],
+            "description": data['seo_description'],
+            "url": solution_url,
+            "image": social_image_url,
+            "publisher": {
+                "@type": "Organization",
+                "name": "Gobii",
+            },
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+            "mainEntity": {
+                "@type": "Service",
+                "name": f"Gobii {data['title']} AI agents",
+                "description": data['seo_description'],
+                "url": solution_url,
+                "image": social_image_url,
+                "serviceType": "AI agent solution",
+                "category": data['title'],
+                "provider": {
+                    "@type": "Organization",
+                    "name": "Gobii",
+                },
+            },
+        }
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Solutions",
+                    "item": solutions_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": data['title'],
+                    "item": solution_url,
+                },
+            ],
+        }
 
         context.update({
             'solution_title': data['title'],
@@ -3317,7 +3376,9 @@ class SolutionView(TemplateView):
             'solution_seo_title': data['seo_title'],
             'solution_seo_description': data['seo_description'],
             'solution_social_image_alt': data['social_image_alt'],
-            'solution_social_image_url': self.request.build_absolute_uri(static(data['social_image'])),
+            'solution_social_image_url': social_image_url,
+            'solution_structured_data_json': html_safe_json_dumps(structured_data),
+            'solution_breadcrumb_json': html_safe_json_dumps(breadcrumb_data),
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
         })
         if slug in {"health-care", "defense"}:
