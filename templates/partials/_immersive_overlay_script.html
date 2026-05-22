@@ -20,16 +20,23 @@
     const shouldBypassOverlay = () => isTouchDevice && isNarrowScreen();
     const isAppPath = (pathname) => pathname === APP_BASE_PATH || pathname.startsWith(`${APP_BASE_PATH}/`);
 
-    const applyViewportVars = () => {
-      const viewport = window.visualViewport;
-      const height = viewport?.height ?? window.innerHeight ?? overlay.clientHeight;
-      root.style.setProperty('--immersive-viewport-height', `${height}px`);
-    };
+    const supportsDynamicViewportHeight =
+      window.CSS && typeof window.CSS.supports === 'function' && window.CSS.supports('height', '100dvh');
 
-    applyViewportVars();
-    window.addEventListener('resize', applyViewportVars);
-    window.visualViewport?.addEventListener('resize', applyViewportVars);
-    window.visualViewport?.addEventListener('scroll', applyViewportVars);
+    if (!supportsDynamicViewportHeight) {
+      const applyViewportVars = () => {
+        const viewport = window.visualViewport;
+        const height = viewport?.height ?? window.innerHeight;
+        if (height) {
+          root.style.setProperty('--immersive-viewport-height', `${height}px`);
+        }
+      };
+
+      applyViewportVars();
+      window.addEventListener('resize', applyViewportVars);
+      window.visualViewport?.addEventListener('resize', applyViewportVars);
+      window.visualViewport?.addEventListener('scroll', applyViewportVars);
+    }
 
     const setState = (state) => {
       overlay.dataset.state = state;
