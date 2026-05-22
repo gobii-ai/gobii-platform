@@ -748,7 +748,7 @@ def _build_trajectory_packet(
             "id": str(agent.id),
             "name": agent.name or "",
             "current_tier": tier.value,
-            "charter": _truncate(agent.charter or "", 1200),
+            "charter": agent.charter or "",
         },
         "packet_notes": [
             "This is a generic trajectory-debug packet for an advisory judge.",
@@ -767,14 +767,31 @@ def _build_trajectory_packet(
         "trigger_reasons": trigger_reasons,
         "non_judge_step_count": non_judge_step_count,
         "policy_excerpts": [
-            "If the agent is blocked or missing a user decision, it should reframe the blocker and ask a clearer question rather than repeating itself.",
-            "If the user repeats the same command and the agent repeats the same blocker for three turns, reframe the ask prominently with one clear next question.",
+            (
+                "If the agent is blocked or missing a decision, it should reframe the blocker and ask the "
+                "appropriate responsible participant, manager, peer agent, or user for one clearer next action "
+                "rather than repeating itself."
+            ),
+            (
+                "If the same participant repeats the same command and the agent repeats the same blocker for "
+                "three turns, reframe the ask prominently with one clear next question to the appropriate recipient."
+            ),
+            (
+                "When recommending outreach, respect the subject agent's charter, active system directives, "
+                "manager/peer routing, and known contact responsibilities; do not assume the account owner or "
+                "user is always the right recipient."
+            ),
             "If task complexity exceeds the current intelligence tier, suggest an intelligence upgrade instead of silently struggling.",
             (
                 "Do not suggest an intelligence upgrade when the evidence is burn-rate throttling or burn-rate "
                 "tier step-down. Higher intelligence tiers apply a task-credit multiplier, and burn-rate controls "
                 "scale with that multiplier, so intelligence level usually does not resolve burn rate. Recommend "
                 "lower-burn strategies such as batching, fewer tool calls, cached results, pausing, or narrower scope."
+            ),
+            (
+                "For burn-rate-only evidence, recommend autonomous lower-burn strategies; do not tell the "
+                "agent to ask the user or stop until a reply unless a real human decision is needed, such as "
+                "credentials, destructive action, or legal/policy judgment."
             ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],

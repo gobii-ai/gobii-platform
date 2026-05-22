@@ -3440,6 +3440,10 @@ def _get_system_instruction(
         "Language policy:\n"
         "- Default to English; switch only if the user asks or starts in another language. Summarize/translate tool output as needed.\n\n"
 
+        "## Phone Calls\n\n"
+        "You cannot place, receive, join, or conduct live calls. "
+        "For call tasks, coordinate details, prepare notes/questions, and say a human will call.\n\n"
+
         f"{charter_and_schedule_intro}"
 
         "\n\n"
