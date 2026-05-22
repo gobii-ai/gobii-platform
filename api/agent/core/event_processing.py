@@ -284,7 +284,7 @@ BLOCKING_HUMAN_INPUT_PATTERNS = (
     re.compile(r"\bbefore\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\bi\s+need\s+to\s+know\b", re.IGNORECASE),
     re.compile(r"\bi\s+need\b.*\b(?:first|before|from you)\b", re.IGNORECASE),
-    re.compile(r"\b(?:please|can you|could you)\s+(?:provide|share|confirm|choose|tell|send)\b", re.IGNORECASE),
+    re.compile(r"\b(?:please|can you|could you)\s+(?:clarify|provide|share|confirm|choose|tell|send)\b", re.IGNORECASE),
     re.compile(r"\bwhich\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\bwhat\b.*\bshould\s+(?:i|we)\b", re.IGNORECASE),
     re.compile(r"\b(?:which|what)\b.*\bwould\s+you\s+like\s+(?:me|us)\b", re.IGNORECASE),

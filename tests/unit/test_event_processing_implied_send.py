@@ -480,6 +480,46 @@ class ImpliedSendTests(TestCase):
         self.assertIn("target company", routed.tool_params["question"])
         self.assertEqual(len(routed.tool_params["options"]), 3)
 
+    def test_clarify_chat_question_routes_to_tracked_human_input(self):
+        prepared = ep._prepare_tool_batch(
+            self.agent,
+            tool_calls=[
+                {
+                    "id": "call_chat",
+                    "function": {
+                        "name": "send_chat_message",
+                        "arguments": json.dumps(
+                            {
+                                "body": (
+                                    "I don't have the client's email address.\n\n"
+                                    "Could you clarify:\n\n"
+                                    "1. What project are you referring to?\n"
+                                    "2. Who is the client and email address?"
+                                ),
+                                "will_continue_work": False,
+                            }
+                        ),
+                    },
+                },
+            ],
+            budget_ctx=None,
+            eval_run_id=None,
+            heartbeat=None,
+            lock_extender=None,
+            credit_snapshot={},
+            allow_inferred_message_continue=True,
+            has_non_sleep_calls=True,
+            has_user_facing_message=True,
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertEqual(len(prepared.prepared_calls), 1)
+        routed = prepared.prepared_calls[0]
+        self.assertEqual(routed.tool_name, "request_human_input")
+        self.assertIn("project", routed.tool_params["question"])
+        self.assertFalse(routed.tool_params["will_continue_work"])
+
     def test_defaultable_schedule_setup_question_gets_runtime_correction(self):
         user_endpoint = PersistentAgentCommsEndpoint.objects.create(
             owner_agent=None,
