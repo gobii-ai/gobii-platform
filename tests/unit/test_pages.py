@@ -1270,23 +1270,7 @@ class InstallScriptTests(TestCase):
 
 @tag("batch_pages")
 class CanonicalLinkTests(TestCase):
-    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
-    def test_canonical_present_in_production_proprietary(self):
-        response = self.client.get("/")
-        self.assertContains(response, '<link rel="canonical" href="http://testserver/">')
-
-    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=False)
-    def test_canonical_absent_when_not_proprietary(self):
-        response = self.client.get("/")
-        self.assertNotContains(response, 'rel="canonical"')
-
-    @override_settings(GOBII_RELEASE_ENV="staging", GOBII_PROPRIETARY_MODE=True)
-    def test_canonical_absent_when_not_production(self):
-        response = self.client.get("/")
-        self.assertNotContains(response, 'rel="canonical"')
-
-    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
-    def test_blog_pages_render_single_canonical_link(self):
+    def assert_blog_pages_render_single_canonical_link(self):
         blog_post = get_all_blog_posts()[0]
         cases = [
             (reverse("proprietary:blog_index"), "http://testserver/blog/"),
@@ -1307,6 +1291,29 @@ class CanonicalLinkTests(TestCase):
                     for link in soup.find_all("link", rel="canonical")
                 ]
                 self.assertEqual(canonical_hrefs, [expected_url])
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    def test_canonical_present_in_production_proprietary(self):
+        response = self.client.get("/")
+        self.assertContains(response, '<link rel="canonical" href="http://testserver/">')
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=False)
+    def test_canonical_absent_when_not_proprietary(self):
+        response = self.client.get("/")
+        self.assertNotContains(response, 'rel="canonical"')
+
+    @override_settings(GOBII_RELEASE_ENV="staging", GOBII_PROPRIETARY_MODE=True)
+    def test_canonical_absent_when_not_production(self):
+        response = self.client.get("/")
+        self.assertNotContains(response, 'rel="canonical"')
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    def test_blog_pages_render_single_canonical_link(self):
+        self.assert_blog_pages_render_single_canonical_link()
+
+    @override_settings(GOBII_RELEASE_ENV="staging", GOBII_PROPRIETARY_MODE=True)
+    def test_blog_pages_keep_canonical_when_global_link_is_disabled(self):
+        self.assert_blog_pages_render_single_canonical_link()
 
 
 @tag("batch_pages")

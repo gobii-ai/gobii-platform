@@ -2,6 +2,10 @@
 
 {% block title %}{{ seo_title }} - Gobii{% endblock %}
 
+{% block canonical_link %}
+  <link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
 {% block head_extras %}
   <meta name="description" content="{{ seo_description }}">
   <meta property="og:type" content="website">
