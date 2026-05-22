@@ -527,6 +527,7 @@ class ConsoleContextTests(TestCase):
         resp2 = self.client.get(url)
         self.assertEqual(resp2.status_code, 403)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_agent_detail_scoping(self):
         self._set_personal_context()
         url = reverse("agent_detail", kwargs={"pk": self.org_agent.id})
@@ -563,6 +564,7 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp2.status_code, 302)
         self.assertEqual(resp2.url, f"/app/agents/{self.org_agent.id}/settings")
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_agent_targeted_views_use_agent_owner_context_without_persisting_session(self):
         self._set_personal_context()
 
@@ -619,6 +621,7 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_org_detail_sets_console_context(self):
         # Visiting org detail should set session context to organization
         url = reverse("organization_detail", kwargs={"org_id": self.org.id})
@@ -670,6 +673,7 @@ class ConsoleContextTests(TestCase):
         html2 = resp2.content.decode()
         self.assertIn("Profile", html2)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_sidebar_nav_reflects_context(self):
         self._set_org_context()
         resp = self.client.get(reverse("agents"))
@@ -681,6 +685,7 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(resp2.status_code, 302)
         self.assertEqual(resp2.url, "/app/agents")
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_billing_query_switches_to_org_context(self):
         self._set_personal_context()
         billing_url = f"{reverse('billing')}?org_id={self.org.id}"

@@ -5,6 +5,7 @@ from typing import Any
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import IntegrityError, transaction
 from django.http import HttpRequest, HttpResponseBadRequest, JsonResponse
+from django.utils.translation import gettext_lazy as _
 from django.views import View
 
 from api.models import ApiKey, OrganizationMembership
@@ -172,7 +173,10 @@ class ApiKeyListAPIView(ApiLoginRequiredMixin, View):
                 {
                     "errors": {
                         "__all__": [
-                            "Email verification required to create API keys. Please verify your email address in your account settings."
+                            _(
+                                "Email verification required to create API keys. "
+                                "Please verify your email address in your account settings."
+                            )
                         ],
                     },
                 },
@@ -202,7 +206,7 @@ class ApiKeyListAPIView(ApiLoginRequiredMixin, View):
         except ValidationError as exc:
             return JsonResponse({"errors": _validation_error_payload(exc)}, status=400)
         except IntegrityError:
-            return JsonResponse({"errors": {"name": ["An API key with that name already exists."]}}, status=400)
+            return JsonResponse({"errors": {"name": [_("An API key with that name already exists.")]}}, status=400)
 
         props = _api_key_event_properties(ctx, {
             "key_id": str(api_key.id),

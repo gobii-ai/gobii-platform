@@ -298,6 +298,41 @@ class LegacyConsolePageRedirectTests(TestCase):
         self.assertEqual(parsed.path, reverse("account_login"))
         self.assertEqual(parse_qs(parsed.query), {"next": ["/app/billing?seats_success=1"]})
 
+    def test_unauthenticated_organization_redirect_preserves_context_for_after_login(self):
+        from api.models import Organization
+
+        User = get_user_model()
+        owner = User.objects.create_user(
+            username="legacy-org-link-owner@example.com",
+            email="legacy-org-link-owner@example.com",
+            password="testpass123",
+        )
+
+        organization = Organization.objects.create(
+            name="Legacy Org Link",
+            slug="legacy-org-link",
+            created_by=owner,
+        )
+
+        response = self.client.get(f"/console/organizations/{organization.id}/")
+
+        self.assertEqual(response.status_code, 302)
+        login_redirect = urlparse(response["Location"])
+        self.assertEqual(login_redirect.path, reverse("account_login"))
+        next_url = parse_qs(login_redirect.query).get("next", [""])[0]
+        app_redirect = urlparse(next_url)
+        self.assertEqual(app_redirect.path, "/app/organization")
+        self.assertEqual(parse_qs(app_redirect.query), {
+            "context_type": ["organization"],
+            "context_id": [str(organization.id)],
+        })
+
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=False)
+    def test_legacy_console_redirect_view_honors_disabled_setting(self):
+        response = self.client.get("/console/billing/")
+
+        self.assertEqual(response.status_code, 404)
+
     def test_authenticated_console_pages_redirect_to_app_equivalents(self):
         User = get_user_model()
         user = User.objects.create_user(

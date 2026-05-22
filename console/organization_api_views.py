@@ -1,4 +1,3 @@
-import json
 import logging
 import smtplib
 import uuid
@@ -18,6 +17,7 @@ from anymail.exceptions import AnymailError
 from waffle import flag_is_active
 
 from api.models import Organization, OrganizationInvite, OrganizationMembership
+from console.api_helpers import _parse_json_body as _parse_json_body_or_raise
 from console.context_helpers import build_console_context
 from console.forms import OrganizationForm, OrganizationInviteForm
 from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
@@ -49,11 +49,9 @@ def _json_field_errors(errors, *, status: int = 400):
 
 def _parse_json_body(request):
     try:
-        payload = json.loads(request.body or "{}")
-    except json.JSONDecodeError:
-        return None, _json_field_errors({"__all__": ["Invalid JSON body."]})
-    if not isinstance(payload, dict):
-        return None, _json_field_errors({"__all__": ["JSON object expected."]})
+        payload = _parse_json_body_or_raise(request)
+    except ValueError as exc:
+        return None, _json_field_errors({"__all__": [str(exc)]})
     return payload, None
 
 
@@ -171,6 +169,10 @@ def _require_current_org(request):
     if not org or not membership:
         return None, None, _json_error("Switch to an organization context first.", status=404)
     return org, membership, None
+
+
+def _lock_organization(org: Organization) -> Organization:
+    return Organization.objects.select_for_update().get(pk=org.pk)
 
 
 def _send_invitation_email(request, org: Organization, invite: OrganizationInvite) -> None:
@@ -382,6 +384,7 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
         if new_role not in allowed_role_values:
             return _json_error("Invalid role.", status=403)
 
+        org = _lock_organization(org)
         target_membership = get_object_or_404(
             OrganizationMembership,
             org=org,
@@ -441,6 +444,7 @@ class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
         if request.user.id == user_id:
             return _json_error("You cannot remove yourself.", status=400)
 
+        org = _lock_organization(org)
         target_membership = get_object_or_404(
             OrganizationMembership,
             org=org,

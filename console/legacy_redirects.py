@@ -1,6 +1,7 @@
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from django.contrib import messages
+from django.conf import settings
 from django.http import Http404, HttpResponseRedirect
 from django.views import View
 
@@ -43,6 +44,15 @@ def _set_org_context(request, org_id) -> bool:
     request.session["context_name"] = membership.org.name
     request.session.modified = True
     return True
+
+
+def _organization_context_target_path(request, target_path: str, org_id: str) -> str:
+    if not request.user.is_authenticated or _set_org_context(request, org_id):
+        return _append_query_params(
+            target_path,
+            {"context_type": "organization", "context_id": org_id},
+        )
+    return target_path
 
 
 _CONSOLE_PAGE_REDIRECTS = {
@@ -108,12 +118,7 @@ def get_legacy_console_redirect_path(request) -> str | None:
             return _with_original_query(request, f"/app/organizations/invites/{parts[1]}/accept")
         if not remainder or "/" in remainder:
             return None
-        target_path = "/app/organization"
-        if _set_org_context(request, remainder):
-            target_path = _append_query_params(
-                target_path,
-                {"context_type": "organization", "context_id": remainder},
-            )
+        target_path = _organization_context_target_path(request, "/app/organization", remainder)
         return _with_original_query(request, target_path)
 
     return None
@@ -121,11 +126,8 @@ def get_legacy_console_redirect_path(request) -> str | None:
 
 def _billing_target_path(request, target_path: str) -> str:
     org_id = (request.GET.get("org_id") or "").strip()
-    if org_id and _set_org_context(request, org_id):
-        return _append_query_params(
-            target_path,
-            {"context_type": "organization", "context_id": org_id},
-        )
+    if org_id:
+        return _organization_context_target_path(request, target_path, org_id)
     return target_path
 
 
@@ -133,6 +135,8 @@ class LegacyConsoleRedirectView(View):
     http_method_names = ["get", "head"]
 
     def get(self, request, *args, **kwargs):
+        if not settings.LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED:
+            raise Http404()
         target_path = get_legacy_console_redirect_path(request)
         if target_path is None:
             raise Http404()
