@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { SidebarSettingsMenu } from './SidebarSettingsMenu'
@@ -79,6 +79,27 @@ describe('SidebarSettingsMenu', () => {
 
     expect(await screen.findByText('Acme Ops')).toBeInTheDocument()
     expect(screen.queryByText('person@example.com')).not.toBeInTheDocument()
+  })
+
+  it('closes the menu when the open settings trigger is pressed again', async () => {
+    render(
+      <SidebarSettingsMenu
+        context={{ type: 'personal', id: '1', name: 'Personal' }}
+        viewerEmail="person@example.com"
+        isProprietaryMode={false}
+      />,
+    )
+
+    const trigger = screen.getByRole('button', { name: 'Open settings' })
+    fireEvent.click(trigger)
+
+    expect(await screen.findByText('person@example.com')).toBeInTheDocument()
+
+    fireEvent.pointerDown(trigger)
+
+    await waitFor(() => {
+      expect(screen.queryByText('person@example.com')).not.toBeInTheDocument()
+    })
   })
 
   it('renders the notifications toggle with permission status and handles changes', async () => {
