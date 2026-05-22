@@ -1157,7 +1157,7 @@
       const gateClose = gateModal ? gateModal.querySelectorAll('[data-gate-close]') : []
       const isAuthenticated = form ? form.dataset.authenticated === 'true' : false
       const requiresTrialFlow = form ? form.dataset.requiresTrial === 'true' : false
-      const billingUrl = selector.dataset.billingUrl || '/console/billing/'
+      const billingUrl = selector.dataset.billingUrl || '/app/billing'
       const upgradeUrl = selector.dataset.intelligenceUpgrade || ''
       const maxAllowedTier = selector.dataset.intelligenceMaxTier || 'standard'
       const LOW_CREDIT_DAY_THRESHOLD = 2

@@ -91,6 +91,9 @@ DEFERRED_REFERRAL_CREDITS_ENABLED = env.bool("DEFERRED_REFERRAL_CREDITS_ENABLED"
 FIRST_RUN_SETUP_ENABLED = env.bool("FIRST_RUN_SETUP_ENABLED", default=True)
 # Permit skipping LLM bootstrap enforcement (useful for non-interactive tests)
 LLM_BOOTSTRAP_OPTIONAL = env.bool("LLM_BOOTSTRAP_OPTIONAL", default=False)
+# Redirect legacy console HTML pages to the immersive app. Console APIs and
+# non-GET compatibility endpoints remain served by their existing URL patterns.
+LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED = env.bool("LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED", default=True)
 # Local eval runner ergonomics. Production settings leave these disabled; the
 # config.eval_local_settings module enables them for clean local SQLite runs.
 EVAL_LOCAL_SETUP_ENABLED = env.bool("EVAL_LOCAL_SETUP_ENABLED", default=False)

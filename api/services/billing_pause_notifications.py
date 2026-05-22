@@ -8,7 +8,6 @@ from django.db import DatabaseError
 from django.db.models import F
 from django.template.loader import render_to_string
 from django.templatetags.static import static
-from django.urls import NoReverseMatch, reverse
 
 from api.models import ExecutionPauseReasonChoices
 from util.urls import append_context_query
@@ -278,9 +277,8 @@ def _build_billing_pause_message_content(*, agent, reason: str, audience: str) -
 
 def _build_billing_url(agent) -> str:
     try:
-        billing_url = _build_site_url(reverse("billing"))
+        billing_url = _build_site_url("/app/billing")
     except (
-        NoReverseMatch,
         Site.DoesNotExist,
         MultipleObjectsReturned,
         DatabaseError,

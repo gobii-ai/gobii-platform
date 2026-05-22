@@ -1,9 +1,7 @@
-import json
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
 from django.test import Client, TestCase, override_settings, tag
 from django.urls import reverse
@@ -57,30 +55,26 @@ class BillingChurnKeyTests(TestCase):
         CHURN_KEY_API_KEY="super-secret",
         CHURN_KEY_APP_ID="jeqgxz3uq",
     )
-    @patch("console.views.Analytics.track_event")
-    @patch("console.views.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"})
+    @patch("console.billing_initial_data.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"})
     @patch("console.mixins.reconcile_user_plan_from_stripe", return_value={"id": "startup", "name": "Startup"})
-    @patch("console.views.get_subscription_base_price", return_value=(Decimal("99"), "USD"))
-    @patch("console.views.AddonEntitlementService.get_addon_context_for_owner", return_value={})
-    @patch("console.views.DedicatedProxyService.allocated_count", return_value=0)
-    @patch("console.views.DedicatedProxyService.allocated_proxies", return_value=EmptyProxyQuerySet())
-    @patch("console.views.is_multi_assign_enabled", return_value=False)
-    @patch("console.views._resolve_dedicated_ip_pricing", return_value=(Decimal("0"), "USD"))
-    @patch("console.views.get_stripe_customer", return_value=SimpleNamespace(id="cus_123", livemode=False))
-    @patch("console.views.get_active_subscription")
-    def test_billing_page_exposes_churnkey_payload_and_loader(
+    @patch("console.billing_initial_data.get_subscription_base_price", return_value=(Decimal("99"), "USD"))
+    @patch("console.billing_initial_data.AddonEntitlementService.get_addon_context_for_owner", return_value={})
+    @patch("console.billing_initial_data.DedicatedProxyService.allocated_proxies", return_value=EmptyProxyQuerySet())
+    @patch("console.billing_initial_data.is_multi_assign_enabled", return_value=False)
+    @patch("console.billing_initial_data._resolve_dedicated_ip_pricing", return_value=(Decimal("0"), "USD"))
+    @patch("console.billing_initial_data.get_stripe_customer", return_value=SimpleNamespace(id="cus_123", livemode=False))
+    @patch("console.billing_initial_data.get_active_subscription")
+    def test_billing_initial_data_exposes_churnkey_payload(
         self,
         mock_get_active_subscription,
         _mock_get_stripe_customer,
         _mock_resolve_dedicated_ip_pricing,
         _mock_is_multi_assign_enabled,
         _mock_allocated_proxies,
-        _mock_allocated_count,
         _mock_addon_context,
         _mock_get_subscription_base_price,
         _mock_console_mixins_plan,
-        _mock_console_views_plan,
-        _mock_track_event,
+        _mock_billing_initial_plan,
     ):
         mock_get_active_subscription.return_value = SimpleNamespace(
             id="sub_123",
@@ -93,17 +87,10 @@ class BillingChurnKeyTests(TestCase):
             is_status_current=lambda: True,
         )
 
-        response = self.client.get(reverse("billing"))
+        response = self.client.get(reverse("console_billing_initial_data"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "https://assets.churnkey.co/js/app.js?appId=jeqgxz3uq")
-
-        soup = BeautifulSoup(response.content, "html.parser")
-        payload_script = soup.find("script", id="billing-props")
-        self.assertIsNotNone(payload_script)
-        self.assertTrue(payload_script.string)
-
-        payload = json.loads(payload_script.string)
+        payload = response.json()
         self.assertEqual(
             payload["churnKey"],
             {

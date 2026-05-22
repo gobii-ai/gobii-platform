@@ -446,7 +446,7 @@ function buildRosterAgent(id: string, name: string) {
     listingDescription: '',
     listingDescriptionSource: null,
     displayTags: [],
-    detailUrl: `/console/agents/${id}/`,
+    detailUrl: `/app/agents/${id}/settings`,
     cardGradientStyle: '',
     iconBackgroundHex: '',
     iconBorderHex: '',

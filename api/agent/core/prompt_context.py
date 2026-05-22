@@ -952,11 +952,21 @@ def _get_recent_proactive_context(agent: PersistentAgent) -> dict | None:
 
 def _build_console_url(route_name: str, **kwargs) -> str:
     """Return a console URL, preferring absolute when PUBLIC_SITE_URL is set."""
-    try:
-        path = reverse(route_name, kwargs=kwargs or None)
-    except NoReverseMatch:
-        logger.debug("Failed to reverse URL for %s", route_name, exc_info=True)
-        path = ""
+    pk = kwargs.get("pk")
+    app_route_paths = {
+        "billing": "/app/billing",
+        "agent_detail": f"/app/agents/{pk}/settings" if pk else "",
+        "agent_secrets": f"/app/agents/{pk}/secrets" if pk else "",
+        "agent_email_settings": f"/app/agents/{pk}/email" if pk else "",
+    }
+    if route_name in app_route_paths:
+        path = app_route_paths[route_name]
+    else:
+        try:
+            path = reverse(route_name, kwargs=kwargs or None)
+        except NoReverseMatch:
+            logger.debug("Failed to reverse URL for %s", route_name, exc_info=True)
+            path = ""
 
     base_url = (getattr(settings, "PUBLIC_SITE_URL", "") or "").rstrip("/")
     if base_url and path:

@@ -21,6 +21,7 @@ from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
 )
 from util.trial_enforcement import is_user_freemium_grandfathered
+from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 try:
     import stripe
@@ -429,7 +430,7 @@ def build_agent_addons_payload(
         try:
             manage_billing_url = settings.STRIPE_CUSTOMER_PORTAL
             if agent.organization_id:
-                manage_billing_url = f"{reverse("billing")}?org_id={agent.organization_id}"
+                manage_billing_url = append_context_query(f"{IMMERSIVE_APP_BASE_PATH}/billing", str(agent.organization_id))
         except NoReverseMatch:
             manage_billing_url = None
 

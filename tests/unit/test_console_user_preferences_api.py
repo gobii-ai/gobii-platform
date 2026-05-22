@@ -382,20 +382,3 @@ class ConsoleUserPreferencesApiTests(TestCase):
         self.assertEqual(payload.get("email"), self.user.email)
         self.assertNotIn("simplified_chat_ui", payload)
         self.assertNotIn("simplified_chat_toggle_available", payload)
-
-    def test_profile_page_updates_timezone_preference(self):
-        response = self.client.post(
-            reverse("profile"),
-            {
-                "first_name": "Timezone",
-                "last_name": "Owner",
-                "timezone": "America/Chicago",
-            },
-        )
-        self.assertEqual(response.status_code, 302)
-
-        preferences = UserPreference.resolve_known_preferences(self.user)
-        self.assertEqual(
-            preferences.get(UserPreference.KEY_USER_TIMEZONE),
-            "America/Chicago",
-        )

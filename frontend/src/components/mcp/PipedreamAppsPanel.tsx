@@ -46,7 +46,7 @@ export function PipedreamAppsPanel({
   }, [onError, onSuccess, searchUrl, settingsQuery.data, settingsUrl, showModal])
 
   const sectionClassName = embedded
-    ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
+    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
     : 'gobii-card-base overflow-hidden'
   const headerClassName = embedded
     ? 'flex flex-col gap-4 px-6 py-4 sm:flex-row sm:items-center sm:justify-between'

@@ -1,9 +1,11 @@
 import hashlib
 import json
+from urllib.parse import urlsplit
 
 from django.contrib.auth.views import redirect_to_login
 from django.conf import settings
-from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified
+from django.core.exceptions import PermissionDenied
+from django.http import HttpResponse, HttpResponseNotAllowed, HttpResponseNotModified, HttpResponseRedirect
 from django.templatetags.static import static
 from django.urls import reverse
 
@@ -15,6 +17,14 @@ from util.fish_collateral import is_fish_collateral_enabled
 APP_PATH_PREFIX = "/app"
 APP_PROTECTED_PATH_PREFIX = f"{APP_PATH_PREFIX}/agents"
 APP_BILLING_PATH_PREFIX = f"{APP_PATH_PREFIX}/billing"
+APP_API_KEYS_PATH_PREFIX = f"{APP_PATH_PREFIX}/api-keys"
+APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/agent-collaborator-invites"
+APP_ORGANIZATION_PATH_PREFIX = f"{APP_PATH_PREFIX}/organization"
+APP_ORGANIZATION_INVITES_PATH_PREFIX = f"{APP_PATH_PREFIX}/organizations/invites"
+APP_PROFILE_PATH_PREFIX = f"{APP_PATH_PREFIX}/profile"
+APP_SECRETS_PATH_PREFIX = f"{APP_PATH_PREFIX}/secrets"
+APP_USAGE_PATH_PREFIX = f"{APP_PATH_PREFIX}/usage"
+APP_INTEGRATIONS_PATH_PREFIX = f"{APP_PATH_PREFIX}/integrations"
 APP_SHELL_CACHE_CONTROL = "no-cache, must-revalidate"
 
 
@@ -243,6 +253,13 @@ class AppShellMiddleware:
         self._cached_fish_collateral_enabled = None
 
     def __call__(self, request):
+        if request.method in {"GET", "HEAD"}:
+            legacy_console_redirect = self._legacy_console_redirect(request)
+            if legacy_console_redirect is not None:
+                if self._requires_login(urlsplit(legacy_console_redirect).path) and not request.user.is_authenticated:
+                    return redirect_to_login(legacy_console_redirect, login_url=reverse("account_login"))
+                return HttpResponseRedirect(legacy_console_redirect)
+
         if not self._should_handle(request.path):
             return self.get_response(request)
 
@@ -251,6 +268,14 @@ class AppShellMiddleware:
 
         if self._requires_login(request.path) and not request.user.is_authenticated:
             return redirect_to_login(request.get_full_path(), login_url=reverse("account_login"))
+
+        if request.user.is_authenticated:
+            self._apply_context_query(request)
+
+        if request.path == APP_BILLING_PATH_PREFIX or request.path.startswith(f"{APP_BILLING_PATH_PREFIX}/"):
+            from console.billing_return import process_billing_return
+
+            process_billing_return(request)
 
         fish_collateral_enabled = is_fish_collateral_enabled()
         if (
@@ -281,13 +306,63 @@ class AppShellMiddleware:
         return path == APP_PATH_PREFIX or path.startswith(f"{APP_PATH_PREFIX}/")
 
     @staticmethod
+    def _legacy_console_redirect(request) -> str | None:
+        if not settings.LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED:
+            return None
+        if not request.path.startswith("/console/"):
+            return None
+        from console.legacy_redirects import get_legacy_console_redirect_path
+
+        return get_legacy_console_redirect_path(request)
+
+    @staticmethod
     def _requires_login(path: str) -> bool:
         return (
             path == APP_PROTECTED_PATH_PREFIX
             or path.startswith(f"{APP_PROTECTED_PATH_PREFIX}/")
             or path == APP_BILLING_PATH_PREFIX
             or path.startswith(f"{APP_BILLING_PATH_PREFIX}/")
+            or path == APP_API_KEYS_PATH_PREFIX
+            or path.startswith(f"{APP_API_KEYS_PATH_PREFIX}/")
+            or path == APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX
+            or path.startswith(f"{APP_AGENT_COLLABORATOR_INVITES_PATH_PREFIX}/")
+            or path == APP_ORGANIZATION_PATH_PREFIX
+            or path.startswith(f"{APP_ORGANIZATION_PATH_PREFIX}/")
+            or path == APP_ORGANIZATION_INVITES_PATH_PREFIX
+            or path.startswith(f"{APP_ORGANIZATION_INVITES_PATH_PREFIX}/")
+            or path == APP_PROFILE_PATH_PREFIX
+            or path.startswith(f"{APP_PROFILE_PATH_PREFIX}/")
+            or path == APP_SECRETS_PATH_PREFIX
+            or path.startswith(f"{APP_SECRETS_PATH_PREFIX}/")
+            or path == APP_USAGE_PATH_PREFIX
+            or path.startswith(f"{APP_USAGE_PATH_PREFIX}/")
+            or path == APP_INTEGRATIONS_PATH_PREFIX
+            or path.startswith(f"{APP_INTEGRATIONS_PATH_PREFIX}/")
         )
+
+    @staticmethod
+    def _apply_context_query(request) -> None:
+        context_type = (request.GET.get("context_type") or "").strip().lower()
+        context_id = (request.GET.get("context_id") or "").strip()
+        if not context_type or not context_id:
+            return
+
+        try:
+            from console.context_helpers import resolve_console_context
+
+            resolved = resolve_console_context(
+                request.user,
+                request.session,
+                override={"type": context_type, "id": context_id},
+            )
+        except PermissionDenied:
+            return
+
+        current_context = resolved.current_context
+        request.session["context_type"] = current_context.type
+        request.session["context_id"] = current_context.id
+        request.session["context_name"] = current_context.name
+        request.session.modified = True
 
     def _etag_matches(self, request_etag: str | None) -> bool:
         if not request_etag or not self._cached_etag:

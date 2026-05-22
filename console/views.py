@@ -44,7 +44,6 @@ import uuid
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from agents.services import AgentService, PretrainedWorkerTemplateService
 from config.socialaccount_adapter import (
     OAUTH_ATTRIBUTION_COOKIE,
     OAUTH_CHARTER_COOKIE,
@@ -66,7 +65,6 @@ from api.services.dedicated_proxy_service import (
 )
 from api.services.system_settings import get_max_file_size
 from api.services.persistent_agents import maybe_sync_agent_email_display_name
-from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from api.agent.core.llm_config import (
     AgentLLMTier,
     TIER_ORDER,
@@ -95,17 +93,11 @@ from api.services.owner_execution_pause import (
     get_owner_account_pause_state,
     sync_owner_customer_account_pause,
 )
-from api.services.persistent_agent_secrets import (
-    ensure_global_secret_capacity_for_agent,
-    move_agent_secret_to_global,
-    validate_agent_secret_globalization,
-)
 from api.services.agent_settings_resume import (
     queue_owner_task_pack_resume,
     queue_settings_change_resume,
 )
 from api.services.agent_avatar_public import validate_public_agent_avatar_thumbnail_token
-from api.services.referral_service import ReferralService
 from api.services.trial_abuse import (
     evaluate_user_trial_eligibility,
     user_has_prior_individual_history,
@@ -118,7 +110,7 @@ from console.daily_credit import (
 )
 from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.home_metrics import get_console_home_metrics
-from console.role_constants import BILLING_MANAGE_ROLES, MEMBER_MANAGE_ROLES
+from console.role_constants import BILLING_MANAGE_ROLES
 from api.models import (
     ApiKey,
     UserBilling,
@@ -150,7 +142,6 @@ from api.models import (
 )
 from console.mixins import AgentOwnerContextOverrideMixin, ConsoleViewMixin, StripeFeatureRequiredMixin, SystemAdminRequiredMixin
 from observability import traced
-from pages.mixins import PhoneNumberMixin
 from pages.account_info_cache import invalidate_account_info_cache
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 
@@ -160,7 +151,6 @@ from .context_helpers import build_console_context
 from .org_billing_helpers import build_org_billing_overview
 from tasks.services import TaskCreditService
 from billing.addons import AddonEntitlementService
-from util import sms
 from util.payments_helper import PaymentsHelper
 from util.integrations import (
     IntegrationDisabledError,
@@ -176,7 +166,6 @@ from util.onboarding import (
 from util.personal_signup_preview import (
     resolve_personal_signup_preview,
 )
-from util.sms import find_unused_number, get_user_primary_sms_number
 from util.subscription_helper import (
     reconcile_user_plan_from_stripe,
     get_active_subscription,
@@ -186,7 +175,6 @@ from util.subscription_helper import (
     get_stripe_customer,
     get_or_create_stripe_customer,
     get_organization_plan,
-    has_unlimited_agents,
     is_community_unlimited_mode,
     get_user_max_contacts_per_agent,
     get_subscription_base_price,
@@ -196,7 +184,6 @@ from util.subscription_helper import (
 from util.trial_enforcement import (
     PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE,
     TrialRequiredValidationError,
-    can_user_access_personal_agent_chat,
     can_user_use_personal_agents_and_api,
 )
 from util.urls import (
@@ -216,11 +203,10 @@ from console.agent_chat.access import (
 )
 from config import settings
 from config.stripe_config import get_stripe_settings
-from config.plans import PLAN_CONFIG, AGENTS_UNLIMITED, get_plan_config
+from config.plans import PLAN_CONFIG, get_plan_config
 from waffle import flag_is_active
 from api.services.email_verification import has_verified_email
 from api.services.sandbox_compute import SANDBOX_COMPUTE_WAFFLE_FLAG
-from api.services.signup_preview import resume_signup_preview_agent_if_eligible
 
 def _normalize_agent_color_hex(hex_color: str) -> str | None:
     normalized = (hex_color or "").strip().lstrip("#")
@@ -251,6 +237,10 @@ def _posted_bool(value) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "t", "yes", "y", "on"}
 
 
+def _wants_json_response(request) -> bool:
+    return "application/json" in (request.headers.get("Accept") or "").lower()
+
+
 def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> None:
     if (
         agent.organization_id is None
@@ -259,6 +249,18 @@ def _enforce_personal_agent_access_or_raise(user, agent: PersistentAgent) -> Non
         and not can_user_use_personal_agents_and_api(user)
     ):
         raise PermissionDenied(PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
+
+
+def _agent_settings_app_path(agent: PersistentAgent) -> str:
+    return f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent.id}/settings"
+
+
+def _organization_app_path(org_id: Any | None = None) -> str:
+    path = f"{IMMERSIVE_APP_BASE_PATH}/organization"
+    if org_id:
+        return append_context_query(path, str(org_id))
+    return path
+
 
 def _safe_getattr(source, attr: str, default=None):
     if source is None:
@@ -385,16 +387,10 @@ def _resolve_dedicated_ip_pricing(plan):
 
 
 from .forms import (
-    ApiKeyForm,
-    PersistentAgentForm,
-    PersistentAgentContactForm,
     MCPServerConfigForm,
     UserProfileForm,
-    UserPhoneNumberForm,
     PhoneVerifyForm,
     PhoneAddForm,
-    OrganizationForm,
-    OrganizationInviteForm,
     OrganizationSeatPurchaseForm,
     OrganizationSeatReductionForm,
     DedicatedIpAddForm,
@@ -433,14 +429,12 @@ from opentelemetry import trace, baggage, context
 from api.agent.tools.mcp_manager import get_mcp_manager
 from api.agent.tasks import process_agent_events_task
 from api.services import mcp_servers as mcp_server_service
-from console.agent_creation import create_persistent_agent_from_charter, enable_agent_sms_contact
+from console.agent_creation import create_persistent_agent_from_charter
 from console.agent_reassignment import reassign_agent_organization
 from console.extra_tasks_settings import derive_extra_tasks_settings
-from console.forms import PersistentAgentEditSecretForm, PersistentAgentSecretsRequestForm, PersistentAgentAddSecretForm
 import logging
 from api.agent.comms.message_service import _get_or_create_conversation, _ensure_participant
 from api.models import CommsAllowlistEntry, AgentAllowlistInvite, AgentTransferInvite, OrganizationMembership, MCPServerConfig
-from console.forms import AllowlistEntryForm
 from console.forms import AgentEmailAccountConsoleForm
 from django.apps import apps
 User = get_user_model()
@@ -643,77 +637,6 @@ def _get_personal_signup_preview_config(
 # Whether to skip the phone number setup screen when the user already has a
 # verified phone number on their account. Toggle this to force showing the
 # phone screen even when a verified number exists.
-SKIP_VERIFIED_SMS_SCREEN = True
-
-OWNER_EQUIVALENT_ROLES = (
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-)
-
-def _resolve_allowed_role_choices_for_role(role: str | None) -> list[tuple[str, str]]:
-    all_role_choices = list(OrganizationMembership.OrgRole.choices)
-    if role in OWNER_EQUIVALENT_ROLES:
-        return all_role_choices
-    if role == OrganizationMembership.OrgRole.ADMIN:
-        return [
-            c
-            for c in all_role_choices
-            if c[0] not in OWNER_EQUIVALENT_ROLES
-    ]
-    return []
-
-def _can_invite_solutions_partner(allowed_roles: list[tuple[str, str]]) -> bool:
-    return any(
-        value == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
-        for value, _label in allowed_roles
-    )
-
-API_KEY_MANAGE_ROLES = {
-    OrganizationMembership.OrgRole.OWNER,
-    OrganizationMembership.OrgRole.ADMIN,
-    OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-}
-
-API_KEY_VIEW_ROLES = API_KEY_MANAGE_ROLES | {
-    OrganizationMembership.OrgRole.BILLING,
-}
-
-
-class ApiKeyOwnerMixin:
-    """Utilities for resolving API key ownership based on console context."""
-
-    @cached_property
-    def api_key_context(self):
-        resolved = build_console_context(self.request)
-        if resolved.current_context.type == "organization":
-            membership = resolved.current_membership
-            if membership is None:
-                raise PermissionDenied("Organization context is no longer available.")
-
-            can_view = membership.role in API_KEY_VIEW_ROLES
-            if not can_view:
-                raise PermissionDenied("You do not have access to organization API keys.")
-
-            return {
-                "type": "organization",
-                "organization": membership.org,
-                "membership": membership,
-                "can_manage": membership.role in API_KEY_MANAGE_ROLES,
-            }
-
-        return {
-            "type": "user",
-            "user": self.request.user,
-            "can_manage": True,
-        }
-
-    def _ensure_can_manage_api_keys(self):
-        ctx = self.api_key_context
-        if not ctx.get("can_manage"):
-            raise PermissionDenied("You do not have permission to manage API keys for this organization.")
-        return ctx
-
-
 def _resolve_org_from_request(request):
     """Return the Organization for the active console context, if any."""
     try:
@@ -1024,820 +947,6 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
 
         return context
 
-class ExampleConsolePage(LoginRequiredMixin, TemplateView):
-    """Example console page."""
-    template_name = "example_console_page.html"
-
-class ApiKeyListView(ApiKeyOwnerMixin, ConsoleViewMixin, FormMixin, ListView):
-    """List all API keys for the current user and handle creation."""
-    model = ApiKey
-    template_name = "api_keys.html"
-    context_object_name = 'api_keys'
-    form_class = ApiKeyForm
-    success_url = reverse_lazy('api_keys')
-
-    def dispatch(self, request, *args, **kwargs):
-        clear_trial_onboarding_intent(request)
-        return super().dispatch(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE API Key List - get_queryset")
-    def get_queryset(self):
-        ctx = self.api_key_context
-        if ctx["type"] == "organization":
-            return (
-                ApiKey.objects.select_related("created_by")
-                .filter(organization=ctx["organization"])
-                .order_by('-created_at')
-            )
-
-        return (
-            ApiKey.objects.select_related("created_by")
-            .filter(user=self.request.user)
-            .order_by('-created_at')
-        )
-
-    @tracer.start_as_current_span("CONSOLE API Key List - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add form to context."""
-        context = super().get_context_data(**kwargs)
-        context['form'] = kwargs.get("form") or self.get_form()
-        context['api_key_context'] = self.api_key_context
-        context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
-        context['email_verified'] = has_verified_email(self.request.user)
-        return context
-
-    @tracer.start_as_current_span("CONSOLE API Key List - get_form_kwargs")
-    def get_form_kwargs(self):
-        kwargs = super().get_form_kwargs()
-        ctx = self.api_key_context
-        if ctx["type"] == "organization":
-            kwargs["organization"] = ctx["organization"]
-        else:
-            kwargs["user"] = self.request.user
-        return kwargs
-
-    @tracer.start_as_current_span("CONSOLE API Key List - Create API Key")
-    def post(self, request, *args, **kwargs):
-        """Handle POST requests for creating a new API key."""
-        # Check if user is authenticated (redundant due to LoginRequiredMixin, but good practice)
-        if not request.user.is_authenticated:
-            return HttpResponseForbidden()
-
-        self._ensure_can_manage_api_keys()
-
-        form = self.get_form()
-        ctx = self.api_key_context
-        if ctx["type"] == "organization":
-            form.organization = ctx["organization"]
-            form.user = None
-        else:
-            form.user = self.request.user
-            form.organization = None
-        if form.is_valid():
-            try:
-                return self.form_valid(form)
-            except ValidationError as e:
-                # Extract the actual error message from the ValidationError
-                # ValidationError can be a dict, list, or string
-                if hasattr(e, 'message_dict'):
-                    # Get the first error from the '__all__' key if it exists
-                    error_message = e.message_dict.get('__all__', ['An error occurred'])[0]
-                elif hasattr(e, 'messages'):
-                    error_message = e.messages[0]
-                else:
-                    error_message = str(e)
-                
-                # Add the clean error message to the form
-                form.add_error(None, error_message)
-                
-                # Re-render the form with errors
-                if request.htmx:
-                    # On validation error, re-render the form and swap it in place
-                    # This maintains the original behavior
-                    response = render(request, "partials/_api_key_form.html", {"form": form})
-                    response["HX-Retarget"] = "#create-api-key-form"
-                    response['HX-Reswap'] = 'outerHTML'
-                    return response
-                else:
-                    self.object_list = self.get_queryset()
-                    return self.render_to_response(self.get_context_data(form=form))
-        else:
-            # If form is invalid, return the modal with errors for HTMX
-            if request.htmx:
-                # On validation error, re-render the form and swap it in place
-                response = render(request, "partials/_api_key_form.html", {"form": form})
-                response["HX-Retarget"] = "#create-api-key-form"
-                response['HX-Reswap'] = 'outerHTML'
-                return response
-            else:
-                # ListView doesn't have form_invalid, so we manually call get()
-                # to reconstruct the context including the invalid form.
-                self.object_list = self.get_queryset() # Need to set this for get()
-                return self.render_to_response(self.get_context_data(form=form))
-
-    def _render_form_errors(self, form):
-        if self.request.htmx:
-            response = render(self.request, "partials/_api_key_form.html", {"form": form})
-            response["HX-Retarget"] = "#create-api-key-form"
-            response["HX-Reswap"] = "outerHTML"
-            return response
-        self.object_list = self.get_queryset()
-        return self.render_to_response(self.get_context_data(form=form))
-
-    @transaction.atomic
-    def form_valid(self, form):
-        """Process a valid form to create an API key."""
-        if not has_verified_email(self.request.user):
-            form.add_error(None, "Email verification required to create API keys. Please verify your email address in your account settings.")
-            return self._render_form_errors(form)
-
-        name = form.cleaned_data['name']
-        ctx = self.api_key_context
-
-        if ctx["type"] == "organization":
-            raw_key, api_key = ApiKey.create_for_org(
-                ctx["organization"],
-                created_by=self.request.user,
-                name=name,
-            )
-        else:
-            if not can_user_use_personal_agents_and_api(self.request.user):
-                form.add_error(None, PERSONAL_USAGE_REQUIRES_TRIAL_MESSAGE)
-                return self._render_form_errors(form)
-
-            # create_for_user bypasses model validation by using objects.create
-            # The validation will now happen in the model's save method
-            # which could raise ValidationError (e.g., if key limit is reached)
-            raw_key, api_key = ApiKey.create_for_user(
-                self.request.user,
-                name=name,
-                created_by=self.request.user,
-            )
-
-        base_props = {
-            'key_id': str(api_key.id),
-            'key_name': name,
-        }
-        props = _org_event_properties(self.request, base_props)
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=self.request.user.id,
-            event=AnalyticsEvent.API_KEY_CREATED,
-            source=AnalyticsSource.WEB,
-            properties=props.copy(),
-        ))
-        if props.get('organization'):
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=self.request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_API_KEY_CREATED,
-                source=AnalyticsSource.WEB,
-                properties=props.copy(),
-            ))
-
-        if self.request.htmx:
-            # Return the newly created API key notification for HTMX
-            response = render(self.request, "partials/_api_key_created.html", {
-                "raw_key": raw_key,
-                "key_id": api_key.id
-            })
-            # Trigger events to refresh the table and close the modal
-            response["HX-Trigger"] = json.dumps({
-                "refreshApiKeysTable": None,
-                "close-modal": {"id": "create-api-key-modal"},
-            })
-            return response
-        else:
-            # Traditional flow with message and redirect
-            messages.success(
-                self.request,
-                f"New API key created: {raw_key}. Copy this key now, you won't be able to see it again!"
-            )
-            return redirect(self.get_success_url())
-
-
-class ApiKeyDetailView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
-    """Handle Revoke (PATCH) and Delete (DELETE) for a specific API key."""
-    http_method_names = ['get', 'patch', 'delete', 'options'] # Added GET for HTMX refresh
-
-    @tracer.start_as_current_span("API Key Get Object")
-    def get_object(self):
-        """Helper to get the API key or raise 404."""
-        ctx = self.api_key_context
-        base_qs = ApiKey.objects.select_related("created_by")
-
-        if ctx["type"] == "organization":
-            return get_object_or_404(
-                base_qs,
-                id=self.kwargs['pk'],
-                organization=ctx["organization"],
-            )
-
-        return get_object_or_404(
-            base_qs,
-            id=self.kwargs['pk'],
-            user=self.request.user,
-        )
-
-    @tracer.start_as_current_span("API Key Detail View - GET")
-    def get(self, request, *args, **kwargs):
-        """Handle GET requests to refresh a row via HTMX."""
-        if not request.htmx:
-            # If not HTMX, redirect to the list view
-            return redirect(reverse('api_keys'))
-            
-        # Get the API key and render just the row
-        api_key = self.get_object()
-
-        # Not tracking here as it's a small segment of larger page
-
-        return render(
-            request,
-            "partials/_api_key_row.html",
-            {
-                "key": api_key,
-                "api_key_context": self.api_key_context,
-                "can_manage_api_keys": self.api_key_context.get("can_manage", False),
-            },
-        )
-
-    @transaction.atomic
-    def patch(self, request, *args, **kwargs):
-        """Handle PATCH requests to revoke an API key."""
-        self._ensure_can_manage_api_keys()
-        api_key = self.get_object()
-        api_key.revoke()
-
-        props = _org_event_properties(request, {
-            'key_id': str(api_key.id),
-            'key_name': api_key.name,
-        })
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.ORGANIZATION_API_KEY_REVOKED if props.get('organization', None) else AnalyticsEvent.API_KEY_REVOKED,
-            source=AnalyticsSource.WEB,
-            properties=props.copy(),
-        ))
-        
-        if request.htmx:
-            # First return success message
-            response = render(request, "partials/_api_key_success.html", {
-                "message": f"API key '{api_key.name}' has been revoked.",
-                "id": api_key.id
-            })
-            # Set HX-Trigger to refresh the table row
-            response["HX-Trigger"] = f"refresh-row-{api_key.id}"
-            return response
-        else:
-            # Traditional response with message and redirect
-            messages.success(request, f"API key '{api_key.name}' has been revoked.")
-            return redirect(reverse('api_keys'))
-
-
-    @transaction.atomic
-    def delete(self, request, *args, **kwargs):
-        """Handle DELETE requests to permanently delete an API key."""
-        self._ensure_can_manage_api_keys()
-        api_key = self.get_object()
-        key_name = api_key.name # Store name before deleting
-        key_id = api_key.id     # Store ID before deleting
-        api_key.delete()
-
-        props = _org_event_properties(request, {
-            'key_id': str(key_id),
-            'key_name': key_name,
-        })
-        transaction.on_commit(lambda: Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.API_KEY_DELETED,
-            source=AnalyticsSource.WEB,
-            properties=props.copy(),
-        ))
-        if props.get('organization'):
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_API_KEY_DELETED,
-                source=AnalyticsSource.WEB,
-                properties=props.copy(),
-            ))
-        
-        if request.htmx:
-            # Render the success message partial
-            response = render(request, "partials/_api_key_deleted_message.html", {"key_name": key_name})
-            # Trigger table refresh and modal close
-            response['HX-Trigger'] = '{"refreshApiKeysTable": null, "closeDeleteModal": null}'
-
-            return response
-        else:
-            # Traditional response
-            messages.success(request, f"API key '{key_name}' has been permanently deleted.")
-            return redirect(reverse('api_keys'))
-
-    def http_method_not_allowed(self, request, *args, **kwargs):
-        """Handle disallowed methods."""
-        # Log or handle the error as needed
-        return HttpResponseNotAllowed(self._allowed_methods())
-
-class ApiKeyTableView(ApiKeyOwnerMixin, LoginRequiredMixin, ListView):
-    model = ApiKey
-    template_name = "partials/_api_key_table_body.html"  # New partial for just the table body
-    context_object_name = "api_keys"
-
-    @tracer.start_as_current_span("API Key Table View - GET")
-    def get_queryset(self):
-        ctx = self.api_key_context
-        if ctx["type"] == "organization":
-            return (
-                ApiKey.objects.select_related("created_by")
-                .filter(organization=ctx["organization"])
-                .order_by('-created_at')
-            )
-
-        return (
-            ApiKey.objects.select_related("created_by")
-            .filter(user=self.request.user)
-            .order_by('-created_at')
-        )
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['api_key_context'] = self.api_key_context
-        context['can_manage_api_keys'] = self.api_key_context.get("can_manage", False)
-        return context
-
-class ApiKeyBlankFormView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
-    @tracer.start_as_current_span("API Key Blank Form View - GET")
-    def get(self, request, *args, **kwargs):
-        ctx = self.api_key_context
-        if ctx["type"] == "organization":
-            self._ensure_can_manage_api_keys()
-            form = ApiKeyForm(organization=ctx["organization"])
-        else:
-            form = ApiKeyForm(user=request.user)
-        return render(request, "partials/_api_key_form.html", {"form": form})
-
-class ApiKeyCreateModalView(ApiKeyOwnerMixin, LoginRequiredMixin, View):
-    @tracer.start_as_current_span("API Key Create Modal View - GET")
-    def get(self, request, *args, **kwargs):
-        ctx = self.api_key_context
-        self._ensure_can_manage_api_keys()
-        if ctx["type"] == "organization":
-            form = ApiKeyForm(organization=ctx["organization"])
-        else:
-            form = ApiKeyForm(user=request.user)
-        return render(request, "partials/_api_key_modal.html", {"form": form})
-
-class BillingView(StripeFeatureRequiredMixin, ConsoleViewMixin, TemplateView):
-    """View for billing information."""
-    template_name = "console/billing.html"
-
-    @tracer.start_as_current_span("CONSOLE Billing View")
-    def get(self, request, *args, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["extra_tasks_default_max_tasks"] = EXTRA_TASKS_DEFAULT_MAX_TASKS
-
-        def _serialize_addon_context(addon_context: dict) -> dict[str, object]:
-            if not addon_context:
-                return {
-                    "kinds": {},
-                    "totals": {"amountCents": 0, "currency": "", "amountDisplay": ""},
-                }
-
-            def _kind_payload(kind: str) -> dict[str, object]:
-                options = ((addon_context or {}).get(kind) or {}).get("options") or []
-                payload_options: list[dict[str, object]] = []
-                for opt in options:
-                    payload_options.append(
-                        {
-                            "priceId": opt.get("price_id"),
-                            "quantity": opt.get("quantity") or 0,
-                            "delta": opt.get("delta_value") or 0,
-                            "unitAmount": opt.get("unit_amount"),
-                            "currency": opt.get("currency") or "",
-                            "priceDisplay": opt.get("price_display") or "",
-                        }
-                    )
-                return {"options": payload_options}
-
-            totals = (addon_context or {}).get("totals") or {}
-            return {
-                "kinds": {
-                    "taskPack": _kind_payload("task_pack"),
-                    "contactPack": _kind_payload("contact_pack"),
-                    "browserTaskPack": _kind_payload("browser_task_limit"),
-                    "advancedCaptcha": _kind_payload("advanced_captcha_resolution"),
-                },
-                "totals": {
-                    "amountCents": totals.get("amount_cents") or 0,
-                    "currency": totals.get("currency") or "",
-                    "amountDisplay": totals.get("amount_display") or "",
-                },
-            }
-
-        def _serialize_dedicated_proxies(owner, proxies_qs) -> list[dict[str, object]]:
-            payload: list[dict[str, object]] = []
-            for proxy in proxies_qs:
-                browser_agents = list(getattr(proxy, "browser_agents").all())
-                assigned_agents = [
-                    getattr(ba, "persistent_agent", None)
-                    for ba in browser_agents
-                    if getattr(ba, "persistent_agent", None) is not None
-                ]
-                assigned = [
-                    {"id": str(pa.id), "name": pa.name}
-                    for pa in assigned_agents
-                ]
-                payload.append(
-                    {
-                        "id": str(proxy.id),
-                        "label": proxy.static_ip or proxy.host,
-                        "name": proxy.name,
-                        "staticIp": proxy.static_ip,
-                        "host": proxy.host,
-                        "assignedAgents": assigned,
-                    }
-                )
-            return payload
-
-        if request.GET.get("seats_success"):
-            target_info = request.session.pop("org_seat_portal_target", None)
-            success_message = "Seat checkout started successfully. Features will unlock once payment completes."
-            if target_info and target_info.get("requested"):
-                requested = target_info.get("requested")
-                success_message = (
-                    f"Seat checkout started successfully. In Stripe, update your licensed seat quantity to {requested}."
-                )
-
-            org_id_for_reattach = None
-            if target_info and target_info.get("org_id"):
-                org_id_for_reattach = target_info.get("org_id")
-
-            if org_id_for_reattach:
-                try:
-                    _assign_stripe_api_key()
-                    if not _reattach_overage_from_session(request, org_id_for_reattach):
-                        logger.debug(
-                            "No pending overage SKU detach found for org %s on success redirect.",
-                            org_id_for_reattach,
-                        )
-                except Exception as exc:  # pragma: no cover - unexpected Stripe error
-                    logger.warning(
-                        "Failed to reattach overage SKU after success redirect for org %s: %s",
-                        org_id_for_reattach,
-                        exc,
-                    )
-
-            messages.success(request, success_message)
-
-        if request.GET.get("seats_cancelled"):
-            target_info = request.session.pop("org_seat_portal_target", None)
-            org_id_for_reattach = None
-            if target_info and target_info.get("org_id"):
-                org_id_for_reattach = target_info.get("org_id")
-
-            if org_id_for_reattach:
-                try:
-                    _assign_stripe_api_key()
-                    if not _reattach_overage_from_session(request, org_id_for_reattach):
-                        logger.debug(
-                            "No pending overage SKU detach found for org %s on cancel redirect.",
-                            org_id_for_reattach,
-                        )
-                except Exception as exc:  # pragma: no cover - unexpected Stripe error
-                    logger.warning(
-                        "Failed to reattach overage SKU after cancellation for org %s: %s",
-                        org_id_for_reattach,
-                        exc,
-                    )
-
-            messages.info(
-                request,
-                "Seat checkout was cancelled before completion.",
-            )
-
-        requested_org_id = request.GET.get("org_id")
-        if requested_org_id:
-            try:
-                membership_for_switch = OrganizationMembership.objects.select_related("org").get(
-                    user=request.user,
-                    org_id=requested_org_id,
-                    status=OrganizationMembership.OrgStatus.ACTIVE,
-                )
-            except OrganizationMembership.DoesNotExist:
-                messages.error(request, "You don't have access to that organization.")
-            else:
-                request.session['context_type'] = 'organization'
-                request.session['context_id'] = str(membership_for_switch.org.id)
-                request.session['context_name'] = membership_for_switch.org.name
-                request.session.modified = True
-
-                resolved_context = build_console_context(request)
-                context['current_context'] = {
-                    'type': resolved_context.current_context.type,
-                    'id': resolved_context.current_context.id,
-                    'name': resolved_context.current_context.name,
-                }
-                if resolved_context.current_membership is not None:
-                    context['current_membership'] = resolved_context.current_membership
-                context['can_manage_org_agents'] = resolved_context.can_manage_org_agents
-
-        current_context = context.get('current_context', {}) or {}
-        if current_context.get('type') == 'organization' and current_context.get('id'):
-            try:
-                organization = Organization.objects.select_related('billing').get(id=current_context['id'])
-            except Organization.DoesNotExist:
-                messages.error(request, 'Organization not found. Switching back to personal billing.')
-                request.session['context_type'] = 'personal'
-                request.session['context_id'] = str(request.user.id)
-                request.session['context_name'] = request.user.get_full_name() or request.user.email
-                return redirect('billing')
-            else:
-                overview = build_org_billing_overview(organization)
-                membership = context.get('current_membership')
-                can_manage_billing = bool(membership and membership.role in BILLING_MANAGE_ROLES)
-
-                configured_limit = int(overview['extra_tasks']['configured_limit'] or 0)
-                extra_tasks_endpoints = {
-                    "loadUrl": reverse("get_billing_settings"),
-                    "updateUrl": reverse("update_billing_settings"),
-                }
-                extra_tasks_settings = derive_extra_tasks_settings(
-                    configured_limit,
-                    can_modify=can_manage_billing,
-                    endpoints=extra_tasks_endpoints,
-                )
-                auto_purchase_state = {
-                    "enabled": extra_tasks_settings["enabled"],
-                    "infinite": extra_tasks_settings["infinite"],
-                    "max_tasks": extra_tasks_settings["maxTasks"],
-                }
-
-                billing = getattr(organization, "billing", None)
-                seat_purchase_required = bool(getattr(billing, "purchased_seats", 0) <= 0)
-                has_stripe_subscription = bool(getattr(billing, "stripe_subscription_id", None))
-                seat_purchase_form = OrganizationSeatPurchaseForm(org=organization)
-                seat_reduction_form = OrganizationSeatReductionForm(org=organization)
-
-                dedicated_total = DedicatedProxyService.allocated_count(organization)
-                dedicated_proxies_qs = (
-                    DedicatedProxyService.allocated_proxies(organization)
-                    .select_related("dedicated_allocation")
-                    .prefetch_related("browser_agents__persistent_agent")
-                    .order_by("static_ip", "host", "port")
-                )
-                dedicated_proxies = list(dedicated_proxies_qs)
-                dedicated_allowed = overview.get('plan', {}).get('id') != PlanNamesChoices.FREE.value
-
-                context.update({
-                    'dedicated_ip_add_form': DedicatedIpAddForm(),
-                    'dedicated_ip_total': dedicated_total,
-                    'dedicated_ip_available': dedicated_total,
-                    'dedicated_ip_proxies': dedicated_proxies,
-                    'dedicated_ip_multi_assign': is_multi_assign_enabled(),
-                    'dedicated_ip_allowed': dedicated_allowed,
-                    'dedicated_ip_error': None,
-                })
-
-                unit_price, price_currency = _resolve_dedicated_ip_pricing(overview.get('plan'))
-                context.update({
-                    'dedicated_ip_unit_price': unit_price,
-                    'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
-                    'dedicated_ip_currency': price_currency,
-                })
-
-                granted = Decimal(str(overview['credits']['granted'])) if overview['credits']['granted'] else Decimal('0')
-                used = Decimal(str(overview['credits']['used'])) if overview['credits']['used'] else Decimal('0')
-                usage_pct = 0
-                if granted > 0:
-                    usage_pct = min(100, float((used / granted) * 100))
-
-                addon_context = AddonEntitlementService.get_addon_context_for_owner(
-                    organization,
-                    "organization",
-                    overview.get("plan", {}).get("id"),
-                )
-                org_addons_disabled = (not can_manage_billing) or (not has_stripe_subscription)
-
-                org_plan_cfg = get_plan_config("org_team") or {}
-                seat_unit_price_raw = org_plan_cfg.get("price_per_seat", org_plan_cfg.get("price", 0)) or 0
-                try:
-                    seat_unit_price = float(Decimal(str(seat_unit_price_raw)))
-                except (InvalidOperation, TypeError, ValueError, OverflowError):
-                    seat_unit_price = 0.0
-                seat_currency = (org_plan_cfg.get("currency") or (overview.get("plan") or {}).get("currency") or "USD").upper()
-                pending_seats = overview.get("pending_seats") or {}
-                pending_effective_at = pending_seats.get("effective_at")
-                org_can_open_stripe = can_manage_billing and bool(overview['billing_record']['stripe_customer_id'])
-
-                billing_props = {
-                    "contextType": "organization",
-                    "organization": {"id": str(organization.id), "name": organization.name},
-                    "canManageBilling": can_manage_billing,
-                    "accountPause": build_account_pause_payload(organization),
-                    "plan": overview.get("plan") or {},
-                    "trial": {
-                        "isTrialing": False,
-                        "trialEndsAtIso": None,
-                    },
-                    "extraTasks": extra_tasks_settings,
-                    "paidSubscriber": overview.get("seats", {}).get("purchased", 0) > 0,
-                    "seats": {
-                        "purchased": overview.get("seats", {}).get("purchased", 0),
-                        "reserved": overview.get("seats", {}).get("reserved", 0),
-                        "available": overview.get("seats", {}).get("available", 0),
-                        "unitPrice": seat_unit_price,
-                        "currency": seat_currency,
-                        "pendingQuantity": pending_seats.get("quantity"),
-                        "pendingEffectiveAtIso": pending_effective_at.isoformat() if pending_effective_at is not None else None,
-                        "hasStripeSubscription": has_stripe_subscription,
-                    },
-                    "addons": _serialize_addon_context(addon_context),
-                    "addonsDisabled": bool(org_addons_disabled) or bool(seat_purchase_required),
-                    "dedicatedIps": {
-                        "allowed": bool(dedicated_allowed),
-                        "unitPrice": float(unit_price),
-                        "currency": price_currency,
-                        "multiAssign": bool(is_multi_assign_enabled()),
-                        "proxies": _serialize_dedicated_proxies(organization, dedicated_proxies_qs),
-                    },
-                    "endpoints": {
-                        "updateUrl": reverse("console_billing_update"),
-                        "stripePortalUrl": (
-                            reverse("organization_seat_portal", kwargs={"org_id": organization.id})
-                            if org_can_open_stripe
-                            else None
-                        ),
-                    },
-                }
-
-                context.update({
-                    'organization': organization,
-                    'org_billing_overview': overview,
-                    'org_can_manage_billing': can_manage_billing,
-                    'org_auto_purchase_state': auto_purchase_state,
-                    'org_credit_usage_pct': usage_pct,
-                    'org_can_open_stripe': org_can_open_stripe,
-                    'seat_purchase_form': seat_purchase_form,
-                    'seat_reduction_form': seat_reduction_form,
-                    'seat_purchase_required': seat_purchase_required,
-                    'org_has_stripe_subscription': has_stripe_subscription,
-                    'org_pending_seat_change': overview.get('pending_seats', {}),
-                    'addon_context': addon_context,
-                    'org_addons_disabled': org_addons_disabled,
-                    'billing_props': billing_props,
-                })
-                billing_view_props = Analytics.with_org_properties(
-                    {
-                        'actor_id': str(request.user.id),
-                        'has_stripe_subscription': bool(getattr(billing, "stripe_subscription_id", None)),
-                    },
-                    organization=organization,
-                )
-                Analytics.track_event(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.ORGANIZATION_BILLING_VIEWED,
-                    source=AnalyticsSource.WEB,
-                    properties=billing_view_props.copy(),
-                )
-                _apply_subscribe_success_context(
-                    request,
-                    context,
-                    plan_id=(overview.get('plan') or {}).get('id'),
-                )
-                return render(request, self.template_name, context)
-
-        # Personal billing fallback
-        subscription_plan = reconcile_user_plan_from_stripe(self.request.user)
-        sub = get_active_subscription(
-            self.request.user,
-            preferred_plan_id=(subscription_plan or {}).get("id"),
-            sync_with_stripe=True,
-        )
-        actual_price, actual_currency = get_subscription_base_price(sub)
-
-        if subscription_plan is None:
-            subscription_plan = {}
-        if actual_price is not None or actual_currency:
-            subscription_plan = subscription_plan.copy()
-            if actual_price is not None:
-                subscription_plan["price"] = float(actual_price)
-            if actual_currency:
-                subscription_plan["currency"] = actual_currency
-
-        context['subscription_plan'] = subscription_plan
-        paid_subscriber = sub is not None
-
-        if paid_subscriber:
-            context['period_start_date'] = sub.current_period_start.strftime("%B %d, %Y")
-            context['period_end_date'] = sub.current_period_end.strftime("%B %d, %Y")
-            context['subscription_active'] = sub.is_status_current()
-            context['cancel_at'] = sub.cancel_at.strftime("%B %d, %Y") if sub.cancel_at else None
-            context['cancel_at_period_end'] = sub.cancel_at_period_end
-
-        context['subscription'] = sub
-        context['paid_subscriber'] = paid_subscriber
-        context['personal_addons_disabled'] = not paid_subscriber
-
-        dedicated_plan = subscription_plan
-        dedicated_allowed = (dedicated_plan or {}).get('id') != PlanNamesChoices.FREE.value
-        dedicated_total = DedicatedProxyService.allocated_count(request.user)
-        dedicated_proxies_qs = (
-            DedicatedProxyService.allocated_proxies(request.user)
-            .select_related("dedicated_allocation")
-            .prefetch_related("browser_agents__persistent_agent")
-            .order_by("static_ip", "host", "port")
-        )
-        dedicated_proxies = list(dedicated_proxies_qs)
-        context.update({
-            'dedicated_ip_add_form': DedicatedIpAddForm(),
-            'dedicated_ip_total': dedicated_total,
-            'dedicated_ip_available': dedicated_total,
-            'dedicated_ip_proxies': dedicated_proxies,
-            'dedicated_ip_multi_assign': is_multi_assign_enabled(),
-            'dedicated_ip_allowed': dedicated_allowed,
-            'dedicated_ip_error': None,
-        })
-
-        unit_price, price_currency = _resolve_dedicated_ip_pricing(dedicated_plan)
-        context.update({
-            'dedicated_ip_unit_price': unit_price,
-            'dedicated_ip_total_cost': unit_price * Decimal(dedicated_total),
-            'dedicated_ip_currency': price_currency,
-        })
-
-        addon_context = AddonEntitlementService.get_addon_context_for_owner(
-            request.user,
-            "user",
-            subscription_plan.get("id"),
-        )
-        context["addon_context"] = addon_context
-
-        trial_end = getattr(sub, "trial_end", None) if sub is not None else None
-        is_trialing = bool(sub is not None and getattr(sub, "status", "") == "trialing")
-        user_billing, _ = UserBilling.objects.get_or_create(
-            user=request.user,
-            defaults={"max_extra_tasks": 0},
-        )
-        stripe_customer = get_stripe_customer(request.user)
-        personal_can_open_stripe = bool(stripe_customer)
-        churnkey_config = build_churnkey_cancel_flow_config(
-            customer_id=getattr(stripe_customer, "id", None),
-            subscription_id=getattr(sub, "id", None),
-            livemode=getattr(stripe_customer, "livemode", None),
-        )
-        context['personal_can_open_stripe'] = personal_can_open_stripe
-        personal_extra_limit = int(getattr(user_billing, "max_extra_tasks", 0) or 0)
-        personal_extra_settings = derive_extra_tasks_settings(
-            personal_extra_limit,
-            can_modify=True,
-            endpoints={
-                "loadUrl": reverse("get_billing_settings"),
-                "updateUrl": reverse("update_billing_settings"),
-            },
-        )
-
-        billing_props = {
-            "contextType": "personal",
-            "canManageBilling": True,
-            "accountPause": build_account_pause_payload(request.user),
-            "paidSubscriber": bool(paid_subscriber),
-            "plan": subscription_plan,
-            "trial": {
-                "isTrialing": bool(is_trialing),
-                "trialEndsAtIso": trial_end.isoformat() if trial_end else None,
-            },
-            "extraTasks": personal_extra_settings,
-            "periodStartDate": context.get("period_start_date"),
-            "periodEndDate": context.get("period_end_date"),
-            "cancelAt": context.get("cancel_at"),
-            "cancelAtPeriodEnd": bool(context.get("cancel_at_period_end")),
-            "churnKey": churnkey_config,
-            "addons": _serialize_addon_context(addon_context),
-            "addonsDisabled": bool(context.get("personal_addons_disabled")),
-            "dedicatedIps": {
-                "allowed": bool(dedicated_allowed),
-                "unitPrice": float(unit_price),
-                "currency": price_currency,
-                "multiAssign": bool(is_multi_assign_enabled()),
-                "proxies": _serialize_dedicated_proxies(request.user, dedicated_proxies_qs),
-            },
-            "endpoints": {
-                "updateUrl": reverse("console_billing_update"),
-                "cancelSubscriptionUrl": reverse("cancel_subscription"),
-                "churnKeySyncUrl": reverse("sync_billing_subscription_state"),
-                "resumeSubscriptionUrl": reverse("resume_subscription"),
-                "stripePortalUrl": reverse("billing_portal") if personal_can_open_stripe else None,
-            },
-        }
-        context["billing_props"] = billing_props
-
-        _apply_subscribe_success_context(request, context)
-        return render(request, self.template_name, context)
-
-    @tracer.start_as_current_span("CONSOLE Billing Post (not allowed)")
-    def post(self, request, *args, **kwargs):
-        # Handle any POST requests related to billing here
-        return HttpResponseNotAllowed(['GET'])
-
-
 class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
     """Open the Stripe billing portal for personal subscriptions."""
 
@@ -1845,71 +954,37 @@ class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
     def post(self, request, *args, **kwargs):
         customer = get_stripe_customer(request.user)
         if not customer or not getattr(customer, "id", None):
+            detail = "We couldn't find a Stripe customer for your account. Please contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_customer_missing", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We couldn't find a Stripe customer for your account. Please contact support.",
+                detail,
             )
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         try:
             _assign_stripe_api_key()
-            return_url = request.build_absolute_uri(reverse("billing"))
+            return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing")
             session = stripe.billing_portal.Session.create(
                 customer=customer.id,
                 api_key=stripe.api_key,
                 return_url=return_url,
             )
+            if _wants_json_response(request):
+                return JsonResponse({"ok": True, "redirectUrl": session.url})
             return redirect(session.url)
         except stripe.error.StripeError:
             logger.exception("Failed to create Stripe billing portal session for user %s", request.user.id)
+            detail = "We weren't able to open the Stripe billing portal. Please try again or contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_error", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We weren't able to open the Stripe billing portal. Please try again or contact support.",
+                detail,
             )
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
-
-class ProfileView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
-    """Allow users to manage basic profile information and phone number."""
-
-    template_name = "console/profile.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        user = self.request.user
-        context["profile_form"] = UserProfileForm(instance=user)
-        base_url = self.request.build_absolute_uri("/").rstrip("/")
-        context["referral_link"] = ReferralService.get_referral_link(
-            user,
-            base_url=base_url,
-            track=False,
-        )
-
-        return context
-
-    def post(self, request, *args, **kwargs):
-        """
-        • PhoneNumberMixin handles add / verify / delete.
-          If it returns an HttpResponse, we’re done.
-        • Otherwise we process the normal profile form.
-        •   If that fails validation, re-render the page with errors.
-        """
-
-        # 1️⃣ phone-related actions (HTMX or regular) ------------------------
-        resp = self._handle_phone_post()  # provided by the mixin
-        if resp is not None:  # mixin already produced a response
-            return resp
-
-        # 2️⃣ profile form ---------------------------------------------------
-        profile_form = UserProfileForm(request.POST, instance=request.user)
-        if profile_form.is_valid():
-            profile_form.save()
-            return redirect("profile")
-
-        # 3️⃣ invalid profile form → rebuild full context --------------------
-        context = self.get_context_data()
-        context["profile_form"] = profile_form  # include bound form with errors
-        return self.render_to_response(context)
 
 @login_required
 @require_POST
@@ -2636,413 +1711,6 @@ def task_result_view(request, task_id):
     return render(request, 'task_result.html', context)
 
 # ────────── Persistent Agents (Feature-Flagged) ──────────
-class PersistentAgentsView(ConsoleViewMixin, TemplateView):
-    template_name = "console/persistent_agents.html"
-
-    def _resolve_context_owner(self, context: dict[str, Any]) -> tuple[Any | None, str, Any | None]:
-        current_context = context.get('current_context', {})
-        membership = context.get('current_membership')
-        owner = self.request.user
-        owner_type = 'user'
-        organization = None
-
-        if current_context.get('type') == 'organization':
-            organization = getattr(membership, 'org', None)
-            if organization is None:
-                org_id = current_context.get('id')
-                if org_id:
-                    organization = Organization.objects.filter(id=org_id).first()
-            owner = organization
-            owner_type = 'organization'
-
-        return owner, owner_type, organization
-
-    def _resolve_agent_capacity(self, context: dict[str, Any]) -> dict[str, Any]:
-        owner, owner_type, organization = self._resolve_context_owner(context)
-
-        if owner is None:
-            return {
-                'agents_available': 0,
-                'agents_unlimited': False,
-                'can_spawn_agents': False,
-            }
-
-        if owner_type == "user" and not can_user_use_personal_agents_and_api(self.request.user):
-            return {
-                'agents_available': 0,
-                'agents_unlimited': False,
-                'can_spawn_agents': False,
-            }
-
-        try:
-            agents_available = AgentService.get_agents_available(owner)
-        except Exception:
-            agents_available = 0
-
-        try:
-            can_spawn_agents = AgentService.has_agents_available(owner)
-        except Exception:
-            can_spawn_agents = False
-
-        community_unlimited = is_community_unlimited_mode()
-        if owner_type == 'organization':
-            plan = get_organization_plan(organization) if organization else None
-            agents_unlimited = community_unlimited or (plan and plan.get('agent_limit') == AGENTS_UNLIMITED)
-        else:
-            agents_unlimited = community_unlimited or has_unlimited_agents(owner)
-
-        return {
-            'agents_available': max(int(agents_available), 0),
-            'agents_unlimited': bool(agents_unlimited),
-            'can_spawn_agents': bool(can_spawn_agents),
-        }
-
-    def _serialize_agent_for_frontend(
-        self,
-        agent: PersistentAgent,
-        *,
-        is_staff: bool = False,
-        is_shared: bool = False,
-    ) -> dict[str, Any]:
-        return serialize_agent_card_payload(
-            self.request,
-            agent,
-            avatar_variant="full",
-            is_staff=is_staff,
-            is_shared=is_shared,
-        )
-
-    def _build_agent_list_props(
-        self,
-        context: dict[str, Any],
-        agents: list[PersistentAgent],
-        shared_agents: list[PersistentAgent] | None = None,
-    ) -> dict[str, Any]:
-        capacity = self._resolve_agent_capacity(context)
-        can_spawn_agents = capacity['can_spawn_agents']
-        spawn_url = f"{reverse('pages:home')}?spawn=1"
-
-        upgrade_url = None
-        if settings.GOBII_PROPRIETARY_MODE:
-            try:
-                upgrade_url = reverse('proprietary:pricing')
-            except NoReverseMatch:
-                upgrade_url = None
-
-        owner, owner_type, organization = self._resolve_context_owner(context)
-        manage_billing_url = reverse("billing")
-        if organization is not None:
-            manage_billing_url = f"{manage_billing_url}?org_id={organization.id}"
-        account_pause = build_account_pause_payload(
-            owner,
-            manage_billing_url=manage_billing_url,
-        )
-
-        llm_intelligence = build_llm_intelligence_props(owner, owner_type, organization, upgrade_url)
-        is_staff = bool(self.request.user and (self.request.user.is_staff or self.request.user.is_superuser))
-        shared_agents = shared_agents or []
-
-        return {
-            'agents': [self._serialize_agent_for_frontend(agent, is_staff=is_staff) for agent in agents],
-            'sharedAgents': [
-                self._serialize_agent_for_frontend(agent, is_staff=is_staff, is_shared=True)
-                for agent in shared_agents
-            ],
-            'hasAgents': bool(agents or shared_agents),
-            'hasSharedAgents': bool(shared_agents),
-            'spawnAgentUrl': spawn_url,
-            'upgradeUrl': upgrade_url,
-            'canSpawnAgents': can_spawn_agents,
-            'showUpgradeCta': bool(upgrade_url) and settings.GOBII_PROPRIETARY_MODE and not can_spawn_agents,
-            'createFirstAgentEvent': AnalyticsCTAs.CTA_CREATE_FIRST_AGENT_CLICKED.value,
-            'agentsAvailable': capacity['agents_available'],
-            'agentsUnlimited': capacity['agents_unlimited'],
-            'llmIntelligence': llm_intelligence,
-            'isStaff': is_staff,
-            'emailVerified': has_verified_email(self.request.user),
-            'accountPause': account_pause,
-        }
-
-    @tracer.start_as_current_span("CONSOLE Persistent Agents View")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['pin_console_nav'] = True
-        
-        # Prefetch email endpoints and prefer primary first when available.
-        email_prefetch = models.Prefetch(
-            'comms_endpoints',
-            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.EMAIL).order_by('-is_primary', 'address'),
-            to_attr='email_endpoints_for_display'
-        )
-
-        primary_sms_prefetch = models.Prefetch(
-            'comms_endpoints',
-            queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS, is_primary=True),
-            to_attr='primary_sms_endpoints'  # Use a plural name as it's a list
-        )
-
-        # Filter agents based on current context
-        current_context = context.get('current_context', {})
-        if current_context.get('type') == 'organization':
-            # Show organization's agents
-            persistent_agents = PersistentAgent.objects.non_eval().alive().filter(
-                organization_id=current_context.get('id')
-            ).select_related('browser_use_agent', 'agent_color').prefetch_related(email_prefetch).prefetch_related(primary_sms_prefetch).order_by('-created_at')
-        else:
-            # Show personal agents
-            personal_agents = PersistentAgent.objects.non_eval().alive().filter(
-                user=self.request.user,
-                organization__isnull=True,  # Only personal agents
-            )
-            if can_user_access_personal_agent_chat(self.request.user):
-                persistent_agents = personal_agents
-            else:
-                persistent_agents = personal_agents.exclude(
-                    signup_preview_state=PersistentAgent.SignupPreviewState.NONE,
-                )
-            persistent_agents = (
-                persistent_agents
-                .select_related('browser_use_agent', 'agent_color')
-                .prefetch_related(email_prefetch)
-                .prefetch_related(primary_sms_prefetch)
-                .order_by('-created_at')
-            )
-        
-        persistent_agents = list(persistent_agents)
-        shared_agents_qs = (
-            PersistentAgent.objects
-            .non_eval()
-            .alive()
-            .filter(collaborators__user=self.request.user)
-            .select_related('browser_use_agent', 'agent_color')
-            .prefetch_related(email_prefetch)
-            .prefetch_related(primary_sms_prefetch)
-            .order_by('-created_at')
-        )
-        if persistent_agents:
-            shared_agents_qs = shared_agents_qs.exclude(
-                id__in=[agent.id for agent in persistent_agents]
-            )
-        shared_agents = list(shared_agents_qs)
-        all_agents = persistent_agents + shared_agents
-        owner, _, _ = self._resolve_context_owner(context)
-        enrich_agents_for_card_surface(all_agents, owner)
-
-        context['persistent_agents'] = persistent_agents
-        context['shared_agents'] = shared_agents
-        context['has_agents'] = bool(all_agents)
-        context['agent_list_props'] = self._build_agent_list_props(
-            context,
-            persistent_agents,
-            shared_agents,
-        )
-
-        pending_transfers_qs = AgentTransferInvite.objects.filter(
-            status=AgentTransferInvite.Status.PENDING,
-        ).filter(
-            Q(to_user=self.request.user) | Q(to_user__isnull=True, to_email__iexact=self.request.user.email)
-        ).select_related('agent', 'agent__user')
-
-        pending_transfers: list[AgentTransferInvite] = list(pending_transfers_qs)
-        if pending_transfers:
-            unsassigned_ids = [invite.id for invite in pending_transfers if invite.to_user_id is None]
-            if unsassigned_ids:
-                AgentTransferInvite.objects.filter(id__in=unsassigned_ids).update(to_user=self.request.user)
-                for invite in pending_transfers:
-                    if invite.id in unsassigned_ids:
-                        invite.to_user = self.request.user
-        context['pending_agent_transfer_invites'] = pending_transfers
-
-        pending_collaborator_invites: list[AgentCollaboratorInvite] = []
-        try:
-            from allauth.account.models import EmailAddress
-
-            user_emails = {
-                (self.request.user.email or "").strip().lower()
-            } if (self.request.user.email or "").strip() else set()
-            verified_emails = EmailAddress.objects.filter(user=self.request.user).values_list("email", flat=True)
-            for email in verified_emails:
-                normalized = (email or "").strip().lower()
-                if normalized:
-                    user_emails.add(normalized)
-        except Exception:
-            user_emails = {
-                (self.request.user.email or "").strip().lower()
-            } if (self.request.user.email or "").strip() else set()
-
-        if user_emails:
-            email_filter = Q()
-            for email in user_emails:
-                email_filter |= Q(email__iexact=email)
-            pending_collaborator_invites = list(
-                AgentCollaboratorInvite.objects.filter(
-                    email_filter,
-                    status=AgentCollaboratorInvite.InviteStatus.PENDING,
-                    expires_at__gt=timezone.now(),
-                )
-                .select_related("agent", "agent__user", "invited_by")
-                .order_by("created_at")
-            )
-
-        context["pending_collaborator_invites"] = pending_collaborator_invites
-
-        return context
-
-
-class AgentCreateContactView(ConsoleViewMixin, PhoneNumberMixin, TemplateView):
-    """Step 2: Contact preferences for agent creation."""
-    template_name = "console/agent_create_contact.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact View")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-
-        # Pre-populate with user's email and SMS if verified
-        if 'form' not in kwargs:
-            initial_data = {'contact_endpoint_email': self.request.user.email}
-
-            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
-
-            if template:
-                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                    template.default_tools or []
-                )
-                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
-                    template.recommended_contact_channel
-                )
-                context['selected_pretrained_worker'] = template
-                preferred = (template.recommended_contact_channel or '').lower()
-                valid_choices = {choice for choice, _ in PersistentAgentContactForm.CONTACT_METHOD_CHOICES}
-                if preferred in valid_choices:
-                    initial_data['preferred_contact_method'] = preferred
-
-            context['form'] = PersistentAgentContactForm(initial=initial_data)
-        else:
-            template_code = self.request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
-            template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
-            if template:
-                template.schedule_description = PretrainedWorkerTemplateService.describe_schedule(template.base_schedule)
-                template.display_default_tools = PretrainedWorkerTemplateService.get_tool_display_list(
-                    template.default_tools or []
-                )
-                template.contact_method_label = PretrainedWorkerTemplateService.describe_contact_channel(
-                    template.recommended_contact_channel
-                )
-                context['selected_pretrained_worker'] = template
-
-        current_context = context.get('current_context', {
-            'type': 'personal',
-            'name': self.request.user.get_full_name() or self.request.user.username,
-        })
-
-        if current_context.get('type') == 'organization':
-            context['agent_owner_label'] = current_context.get('name')
-        else:
-            context['agent_owner_label'] = self.request.user.get_full_name() or self.request.user.username
-
-        context.setdefault('can_manage_org_agents', True)
-        context['show_org_permission_warning'] = (
-            current_context.get('type') == 'organization' and not context['can_manage_org_agents']
-        )
-
-        return context
-
-    def get(self, request, *args, **kwargs):
-        """Render the contact preferences form."""
-        resolved_context = build_console_context(request)
-        organization = None
-        if resolved_context.current_context.type == "organization" and resolved_context.current_membership:
-            organization = resolved_context.current_membership.org
-
-        availability_checks: list[bool] = []
-        if organization is not None:
-            availability_checks.append(AgentService.has_agents_available(organization))
-        availability_checks.append(AgentService.has_agents_available(request.user))
-
-        if not any(availability_checks):
-            messages.error(request, "You do not have any persistent agents available. Please upgrade to spawn more.")
-            return redirect('pages:home')
-
-        # Check if we have charter data from step 1
-        if 'agent_charter' not in self.request.session:
-            messages.error(self.request, "Please start by describing what your agent should do.")
-            return redirect('agents')
-
-        return self.render_to_response(self.get_context_data())
-
-    @tracer.start_as_current_span("CONSOLE Agent Create Contact - Create Agent")
-    def post(self, request, *args, **kwargs):
-        """Handle step 2: create the agent with contact preferences."""
-
-        resp = self._handle_phone_post()
-        if resp:  # phone add/verify/delete handled
-            return resp
-
-        form = PersistentAgentContactForm(request.POST)
-        phone = self._current_phone()  # helper from PhoneNumberMixin
-
-        form_is_valid = form.is_valid()
-        if form_is_valid and form.cleaned_data['preferred_contact_method'] == 'sms':
-            if not phone or not phone.is_verified:
-                form.add_error(None, "Please verify a phone number before selecting SMS.")
-
-        if form.errors:
-            return self.render_to_response(self.get_context_data(form=form))
-
-        # Check if we have charter data from step 1
-        if 'agent_charter' not in request.session:
-            messages.error(request, "Please start by describing what your agent should do.")
-            return redirect('agents')
-
-        initial_user_message = request.session.get('agent_charter')
-        user_contact_email = form.cleaned_data.get('contact_endpoint_email') or ''
-        sms_enabled = form.cleaned_data.get('sms_enabled', False)
-        email_enabled = form.cleaned_data.get('email_enabled', False)
-        preferred_contact_method = form.cleaned_data['preferred_contact_method']
-        preferred_llm_tier_key = request.session.get("agent_preferred_llm_tier")
-
-        try:
-            result = create_persistent_agent_from_charter(
-                request,
-                initial_message=initial_user_message,
-                contact_email=user_contact_email,
-                email_enabled=email_enabled,
-                sms_enabled=sms_enabled,
-                preferred_contact_method=preferred_contact_method,
-                preferred_llm_tier_key=preferred_llm_tier_key,
-            )
-            if preferred_llm_tier_key:
-                request.session.pop("agent_preferred_llm_tier", None)
-            invalidate_account_info_cache(request.user.id)
-            return redirect('agent_welcome', pk=result.agent.id)
-        except ValidationError as exc:
-            error_messages = []
-            if hasattr(exc, 'message_dict'):
-                for field_errors in exc.message_dict.values():
-                    error_messages.extend(field_errors)
-            error_messages.extend(getattr(exc, 'messages', []))
-            if not error_messages:
-                error_messages.append(
-                    "We couldn't create that agent. Please check your organization settings and try again."
-                )
-            for message_text in error_messages:
-                form.add_error(None, message_text)
-                messages.error(request, message_text)
-        except Exception:
-            logger.exception("Error creating persistent agent")
-            messages.error(
-                request,
-                "We ran into a problem creating your agent. Please try again.",
-            )
-
-        # If form is invalid or has errors, re-render with them
-        context = self.get_context_data(form=form)
-        context['form'] = form
-        return self.render_to_response(context)
-
-
 class AgentQuickSpawnView(LoginRequiredMixin, View):
     """Create an agent from the saved charter and jump straight into chat."""
 
@@ -3060,12 +1728,12 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
 
         if 'agent_charter' not in request.session:
             messages.error(request, "Please start by describing what your agent should do.")
-            return redirect('agents')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/agents')
 
         contact_email = (request.user.email or "").strip()
         if not contact_email:
             messages.error(request, "Please add an email address to continue.")
-            return redirect('agents')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/agents')
 
         try:
             result = create_persistent_agent_from_charter(
@@ -3101,11 +1769,11 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
 
             for message_text in error_messages:
                 messages.error(request, message_text)
-            return redirect('agents')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/agents')
         except Exception:
             logger.exception("Error creating persistent agent")
             messages.error(request, "We ran into a problem creating your agent. Please try again.")
-            return redirect('agents')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/agents')
 
         session_return_to = request.session.pop(IMMERSIVE_RETURN_TO_SESSION_KEY, None)
         popped_intelligence = False
@@ -3117,7 +1785,7 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         embed = (request.GET.get("embed") or "").lower() in {"1", "true", "yes", "on"}
         # Default return_to to agents list so closing the chat doesn't redirect back
         # to this view (which would fail since agent_charter was consumed)
-        return_to = request.GET.get("return_to") or session_return_to or reverse("agents")
+        return_to = request.GET.get("return_to") or session_return_to or f"{IMMERSIVE_APP_BASE_PATH}/agents"
         invalidate_account_info_cache(request.user.id)
         app_url = build_immersive_chat_url(
             request,
@@ -3136,59 +1804,6 @@ class AgentQuickSpawnView(LoginRequiredMixin, View):
         return response
 
 
-class AgentEnableSmsView(LoginRequiredMixin, PhoneNumberMixin, TemplateView):
-    """Enable SMS communication for an existing agent."""
-
-    template_name = "console/agent_enable_sms.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        self.agent = get_object_or_404(
-            PersistentAgent.objects.non_eval().alive(),
-            pk=kwargs["pk"],
-            user=request.user,
-        )
-        _enforce_personal_agent_access_or_raise(request.user, self.agent)
-        return super().dispatch(request, *args, **kwargs)
-
-    def get(self, request, *args, **kwargs):
-        phone = self._current_phone()
-        if SKIP_VERIFIED_SMS_SCREEN and phone and phone.is_verified:
-            return self._enable_sms_and_redirect(phone)
-        return super().get(request, *args, **kwargs)
-
-    def post(self, request, *args, **kwargs):
-        resp = self._handle_phone_post()
-        if resp:
-            return resp
-
-        if "enable_sms" in request.POST:
-            phone = self._current_phone()
-            if not phone or not phone.is_verified:
-                messages.error(request, "Please verify a phone number before enabling SMS.")
-                return redirect(request.path)
-            return self._enable_sms_and_redirect(phone)
-
-        return super().get(request, *args, **kwargs)
-
-    def _enable_sms_and_redirect(self, phone: UserPhoneNumber):
-        try:
-            enable_agent_sms_contact(self.agent, phone)
-        except ValidationError as exc:
-            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Error enabling SMS."
-            messages.error(self.request, message_text)
-            return redirect("agent_detail", pk=self.agent.pk)
-        except Exception as exc:
-            logger.exception("Error enabling SMS", exc_info=True)
-            messages.error(
-                self.request,
-                f"Error enabling SMS: {str(exc)}",
-            )
-            return redirect("agent_detail", pk=self.agent.pk)
-
-        messages.success(self.request, "SMS has been enabled for this agent.")
-        return redirect("agent_detail", pk=self.agent.pk)
-
-
 class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
     """Apply one-click daily limit actions from the hard limit email."""
 
@@ -3205,7 +1820,7 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
         if action not in {"double", "unlimited"}:
             raise Http404()
         redirect_url = append_context_query(
-            reverse("agent_detail", kwargs={"pk": agent.pk}),
+            _agent_settings_app_path(agent),
             agent.organization_id,
         )
         token_payload = load_daily_limit_action_payload((request.GET.get("token") or "").strip())
@@ -3258,16 +1873,9 @@ class AgentDailyLimitEmailActionView(LoginRequiredMixin, View):
 
         return redirect(redirect_url)
 
-class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
-    """Configuration page for a single agent.
-
-    Uses ConsoleViewMixin to respect the current console context. When in
-    organization context, only agents belonging to that organization are
-    visible. In personal context, only the user's personal agents (no org)
-    are visible.
-    """
+class AgentSettingsController(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailView):
+    """Shared backend for agent settings payloads and mutations."""
     model = PersistentAgent
-    template_name = "console/agent_detail.html"
     context_object_name = "agent"
     pk_url_kwarg = "pk"
 
@@ -4092,13 +2700,12 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
         return {
             'csrfToken': get_token(request),
             'urls': {
-                'detail': reverse('agent_detail', args=[agent.id]),
-                'list': reverse('agents'),
+                'detail': reverse('console_agent_settings', args=[agent.id]),
+                'list': f"{IMMERSIVE_APP_BASE_PATH}/agents",
                 'chat': build_immersive_chat_url(request, agent.id, return_to=request.get_full_path()),
-                'secrets': reverse('agent_secrets', args=[agent.id]),
-                'emailSettings': reverse('agent_email_settings', args=[agent.id]),
-                'manageFiles': reverse('agent_files', args=[agent.id]),
-                'smsEnable': reverse('agent_enable_sms', args=[agent.id]),
+                'secrets': f"/app/agents/{agent.id}/secrets",
+                'emailSettings': f'{IMMERSIVE_APP_BASE_PATH}/agents/{agent.id}/email',
+                'manageFiles': f'{IMMERSIVE_APP_BASE_PATH}/agents/{agent.id}/files',
                 'contactRequests': build_immersive_contact_requests_url(
                     request,
                     agent.id,
@@ -4637,10 +3244,10 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 ))
 
                 accept_url = request.build_absolute_uri(
-                    reverse('agent_collaborator_invite_accept', kwargs={'token': invite.token})
+                    _agent_collaborator_invite_app_path(invite.token, "accept")
                 )
                 reject_url = request.build_absolute_uri(
-                    reverse('agent_collaborator_invite_reject', kwargs={'token': invite.token})
+                    _agent_collaborator_invite_app_path(invite.token, "decline")
                 )
                 context = {
                     'agent': agent,
@@ -4807,7 +3414,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
             # Import messages here if needed
             from django.contrib import messages as django_messages
             django_messages.error(request, "Please enable JavaScript to manage contacts.")
-            return redirect('agent_detail', pk=agent.pk)
+            return redirect(_agent_settings_app_path(agent))
 
         if action == 'transfer_agent':
             transfer_email = (request.POST.get('transfer_email') or '').strip()
@@ -4849,16 +3456,16 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                     )
             except ValidationError as exc:
                 messages.error(request, '; '.join(exc.messages if hasattr(exc, 'messages') else exc.args))
-                return redirect('agent_detail', pk=agent.pk)
+                return redirect(_agent_settings_app_path(agent))
             except AgentTransferError as exc:
                 messages.error(request, str(exc))
-                return redirect('agent_detail', pk=agent.pk)
+                return redirect(_agent_settings_app_path(agent))
 
             messages.success(
                 request,
                 f"Transfer invitation sent to {invite.to_email}. They'll need to sign in to accept it.",
             )
-            return redirect('agent_detail', pk=agent.pk)
+            return redirect(_agent_settings_app_path(agent))
 
         if action == 'cancel_transfer_invite':
             updated = AgentTransferInvite.objects.filter(
@@ -4872,13 +3479,13 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 messages.success(request, "Transfer invitation cancelled.")
             else:
                 messages.info(request, "There is no pending transfer invitation to cancel.")
-            return redirect('agent_detail', pk=agent.pk)
+            return redirect(_agent_settings_app_path(agent))
 
         def _general_error(message: str, status: int = 400):
             if is_ajax:
                 return JsonResponse({'success': False, 'error': message}, status=status)
             messages.error(request, message)
-            return redirect('agent_detail', pk=agent.pk)
+            return redirect(_agent_settings_app_path(agent))
 
         def _validate_avatar_file(file_obj: UploadedFile) -> str | None:
             max_bytes = 5 * 1024 * 1024  # 5 MB limit
@@ -5317,7 +3924,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
             if is_ajax:
                 return JsonResponse({'success': False, 'error': f"Error updating agent: {e}"}, status=500)
             messages.error(request, f"Error updating agent: {e}")
-            return redirect('agent_detail', pk=agent.pk)
+            return redirect(_agent_settings_app_path(agent))
 
         if is_ajax:
             return JsonResponse({
@@ -5328,10 +3935,10 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
                 'warning': preferred_tier_warning,
             })
 
-        return redirect('agent_detail', pk=agent.pk)
+        return redirect(_agent_settings_app_path(agent))
 
     def _handle_inbound_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
-        redirect_response = redirect('agent_detail', pk=agent.pk)
+        redirect_response = redirect(_agent_settings_app_path(agent))
         normalized_action = (action or "").lower()
 
         def _error_response(message: str, status: int = 400):
@@ -5435,7 +4042,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
         return _success_response("Inbound webhook saved.")
 
     def _handle_webhook_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
-        redirect_response = redirect('agent_detail', pk=agent.pk)
+        redirect_response = redirect(_agent_settings_app_path(agent))
         normalized_action = (action or "").lower()
 
         def _error_response(message: str, status: int = 400):
@@ -5535,7 +4142,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
             return _success_response("Webhook updated.")
 
     def _handle_mcp_server_update(self, request, agent: PersistentAgent, *, ajax: bool = False):
-        redirect_response = redirect('agent_detail', pk=agent.pk)
+        redirect_response = redirect(_agent_settings_app_path(agent))
 
         def _error_response(message: str, status: int = 400):
             if ajax:
@@ -5594,7 +4201,7 @@ class AgentDetailView(AgentOwnerContextOverrideMixin, ConsoleViewMixin, DetailVi
         return _error_response("Unsupported MCP server action.")
 
     def _handle_peer_link_action(self, request, agent: PersistentAgent, action: str, *, ajax: bool = False):
-        redirect_response = redirect('agent_detail', pk=agent.pk)
+        redirect_response = redirect(_agent_settings_app_path(agent))
 
         def _error_response(message: str, status: int = 400):
             if ajax:
@@ -5781,22 +4388,6 @@ class ConsoleDiagnosticsView(ConsoleViewMixin, TemplateView):
         return HttpResponseNotAllowed(['GET'])
 
 
-class ConsoleUsageView(ConsoleViewMixin, TemplateView):
-    template_name = "console/usage.html"
-
-    def get(self, request, *args, **kwargs):
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.CONSOLE_USAGE_VIEWED,
-            source=AnalyticsSource.WEB,
-        )
-        context = self.get_context_data(**kwargs)
-        return self.render_to_response(context)
-
-    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
-        return HttpResponseNotAllowed(['GET'])
-
-
 class ConsoleStatusView(SystemAdminRequiredMixin, TemplateView):
     template_name = "console/system_status.html"
 
@@ -5964,16 +4555,6 @@ class PlatformMCPServerManagementView(SystemAdminRequiredMixin, TemplateView):
         return context
 
 
-class GlobalSecretsView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
-    """React-based global secrets management page."""
-    template_name = "console/global_secrets.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["owner_scope"] = self.owner_scope
-        return context
-
-
 class SystemSkillProfilesView(ConsoleOwnerScopeMixin, ConsoleViewMixin, TemplateView):
     """React-based system skill profile management page."""
 
@@ -6071,68 +4652,20 @@ class ManagedAgentAccessMixin(AgentOwnerContextOverrideMixin):
         return agent
 
 
+
+
+def handle_agent_settings_post_for_request(request: HttpRequest, agent: PersistentAgent):
+    view = AgentSettingsController()
+    view.setup(request, pk=str(agent.id))
+    view.object = agent
+    return view.post(request, pk=str(agent.id))
+
 def build_agent_detail_props_for_request(request: HttpRequest, agent: PersistentAgent) -> dict[str, Any]:
-    view = AgentDetailView()
+    view = AgentSettingsController()
     view.setup(request, pk=str(agent.id))
     view.object = agent
     context = view.get_context_data(object=agent)
     return context["agent_detail_props"]
-
-
-class PersistentAgentChatShellView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
-    model = PersistentAgent
-    context_object_name = "agent"
-    pk_url_kwarg = "pk"
-    template_name = "console/persistent_agent_chat_shell.html"
-    allow_delinquent_personal_chat = True
-
-    def _resume_signup_preview_if_eligible(self, agent: PersistentAgent) -> PersistentAgent:
-        resume_signup_preview_agent_if_eligible(
-            agent,
-            self.request.user,
-            resume_source="chat_shell",
-        )
-        return agent
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self._resume_signup_preview_if_eligible(self.object)
-        self.object = agent
-        preview_config = _get_personal_signup_preview_config(self.request)
-        startup_trial_days, scale_trial_days = _get_checkout_trial_days()
-        immersive = (self.request.GET.get("immersive") or "").lower() in {"1", "true", "yes"}
-        context["immersive"] = immersive
-        context["can_manage_collaborators"] = self.can_manage_collaborators
-        context["is_collaborator"] = self.is_collaborator
-        context["startup_trial_days"] = startup_trial_days
-        context["scale_trial_days"] = scale_trial_days
-        context["startup_task_credits"] = get_active_public_plan_monthly_task_credits(PlanNames.STARTUP)
-        context["scale_task_credits"] = get_active_public_plan_monthly_task_credits(PlanNames.SCALE)
-        context["trial_eligible"] = _is_checkout_trial_eligible(self.request.user, self.request)
-        context["pricing_modal_almost_full_screen"] = _is_pricing_modal_almost_full_screen_enabled(self.request)
-        context["cta_pricing_cancel_text_under_btn"] = _is_cta_pricing_cancel_text_under_btn_enabled(self.request)
-        context["cta_start_free_trial"] = _is_cta_start_free_trial_enabled(self.request)
-        context["cta_unlock_agent_copy"] = _is_cta_unlock_agent_copy_enabled(self.request)
-        context["cta_pick_a_plan"] = _is_cta_pick_a_plan_enabled(self.request)
-        context["cta_continue_agent_btn"] = _is_cta_continue_agent_btn_enabled(self.request)
-        context["cta_no_charge_during_trial"] = _is_cta_no_charge_during_trial_enabled(self.request)
-        context["personal_signup_preview_available"] = preview_config.ui_enabled
-        context["personal_signup_preview_processing_available"] = preview_config.processing_limit_enabled
-        if immersive:
-            context["body_class"] = "min-h-screen bg-white"
-
-        # Get agent contact info for header display
-        agent_email_ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, is_primary=True).first()
-        agent_sms_ep = agent.comms_endpoints.filter(channel=CommsChannel.SMS).first()
-        context["agent_email"] = agent_email_ep.address if agent_email_ep else ""
-        context["agent_sms"] = agent_sms_ep.address if agent_sms_ep else ""
-        context["max_chat_upload_size_bytes"] = get_max_file_size()
-        context["pipedream_integrations_enabled"] = pipedream_status().enabled
-        context["agent_signup_preview_state"] = agent.signup_preview_state
-        return context
-
-    def post(self, request, *args, **kwargs):  # pragma: no cover - view is read-only
-        return HttpResponseNotAllowed(['GET'])
 
 
 AGENT_AVATAR_THUMBNAIL_SIZE = 128
@@ -6245,161 +4778,6 @@ class PublicAgentAvatarThumbnailView(View):
         return _serve_agent_avatar_thumbnail(agent, cache_control="public, max-age=86400")
 
 
-class AgentAllowlistView(LoginRequiredMixin, TemplateView):
-    """Manage manual allowlist and policy for an agent."""
-    template_name = "console/agent_allowlist.html"
-
-    def _get_agent(self):
-        pk = self.kwargs.get('pk')
-        agent = (
-            PersistentAgent.objects.non_eval().alive()
-            .filter(pk=pk)
-            .select_related('organization')
-            .first()
-        )
-        if not agent:
-            raise Http404
-        if not self._can_manage(self.request.user, agent):
-            raise PermissionDenied
-        return agent
-
-    def _can_manage(self, user, agent: PersistentAgent) -> bool:
-        if user.is_staff:
-            return True
-        if agent.organization_id:
-            return OrganizationMembership.objects.filter(
-                org=agent.organization,
-                user=user,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-                role__in=MEMBER_MANAGE_ROLES,
-            ).exists()
-        return user_can_manage_agent(user, agent)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self._get_agent()
-        context['agent'] = agent
-        context['entries'] = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-        context['form'] = kwargs.get('form') or AllowlistEntryForm()
-        context['policy'] = agent.whitelist_policy
-        return context
-
-    def get(self, request, *args, **kwargs):
-        return render(request, self.template_name, self.get_context_data())
-
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        agent = self._get_agent()
-        action = request.POST.get('action')
-
-        if action == 'add':
-            form = AllowlistEntryForm(request.POST)
-            if not form.is_valid():
-                messages.error(request, "Please correct the errors below.")
-                if request.headers.get('HX-Request'):
-                    # Return entries list unchanged
-                    ctx = self.get_context_data(form=form)
-                    return render(request, 'console/partials/_allowlist_entries.html', { 'entries': ctx['entries'] })
-                return render(request, self.template_name, self.get_context_data(form=form))
-            try:
-                from django.db import IntegrityError
-
-                entry = CommsAllowlistEntry(
-                    agent=agent,
-                    channel=form.cleaned_data['channel'],
-                    address=form.cleaned_data['address'],
-                    allow_inbound=form.cleaned_data.get('allow_inbound', True),
-                    allow_outbound=form.cleaned_data.get('allow_outbound', True),
-                    sms_contact_purpose=form.cleaned_data.get('sms_contact_purpose'),
-                    sms_contact_purpose_details=form.cleaned_data.get('sms_contact_purpose_details'),
-                    sms_contact_permission_attested=form.cleaned_data.get(
-                        'sms_contact_permission_attested'
-                    ),
-                )
-                entry.full_clean()  # This will run model validation
-                entry.save()
-                if entry.channel == CommsChannel.SMS:
-                    track_sms_contact_approval(
-                        user_id=request.user.id,
-                        agent=agent,
-                        address=entry.address,
-                        approval_source="legacy_agent_allowlist",
-                        approval_action="create",
-                        allow_inbound=entry.allow_inbound,
-                        allow_outbound=entry.allow_outbound,
-                        can_configure=entry.can_configure,
-                        sms_contact_purpose=entry.sms_contact_purpose,
-                        sms_contact_purpose_details=entry.sms_contact_purpose_details,
-                        sms_contact_permission_attested=entry.sms_contact_permission_attested,
-                        allowlist_entry_id=str(entry.id),
-                    )
-
-                messages.success(request, "Allowlist entry added.")
-            except (ValidationError, IntegrityError) as e:
-                messages.error(request, f"Could not add entry: {e}")
-            if request.headers.get('HX-Request'):
-                entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
-
-        elif action == 'delete':
-            entry_id = request.POST.get('entry_id')
-            deleted = CommsAllowlistEntry.objects.filter(agent=agent, id=entry_id).delete()[0]
-            if deleted:
-                messages.success(request, "Allowlist entry deleted.")
-            else:
-                messages.error(request, "Entry not found.")
-            if request.headers.get('HX-Request'):
-                entries = CommsAllowlistEntry.objects.filter(agent=agent).order_by('channel', 'address')
-                return render(request, 'console/partials/_allowlist_entries.html', { 'entries': entries })
-
-        elif action == 'policy':
-            policy = request.POST.get('whitelist_policy')
-            if policy in dict(PersistentAgent.WhitelistPolicy.choices):
-                agent.whitelist_policy = policy
-                agent.save(update_fields=['whitelist_policy'])
-                messages.success(request, "Whitelist policy updated.")
-            else:
-                messages.error(request, "Invalid policy value.")
-
-        return redirect('agent_allowlist', pk=agent.pk)
-
-
-class AgentFilesView(SharedAgentAccessMixin, ConsoleViewMixin, DetailView):
-    """File browser page for a single agent."""
-    model = PersistentAgent
-    template_name = "console/agent_files.html"
-    context_object_name = "agent"
-    pk_url_kwarg = "pk"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        can_manage = self.can_manage_agent
-        context["agent"] = agent
-        context["agent_files_props"] = {
-            "csrfToken": get_token(self.request),
-            "agent": {
-                "id": str(agent.id),
-                "name": agent.name,
-            },
-            "backLink": {
-                "url": reverse("agent_detail", args=[agent.id]) if can_manage else reverse("agents"),
-                "label": "Back to Agent Settings" if can_manage else "Back to Agents",
-            },
-            "permissions": {
-                "canManage": can_manage,
-            },
-            "urls": {
-                "files": reverse("console_agent_fs_list", kwargs={"agent_id": agent.id}),
-                "upload": reverse("console_agent_fs_upload", kwargs={"agent_id": agent.id}),
-                "delete": reverse("console_agent_fs_delete", kwargs={"agent_id": agent.id}),
-                "download": reverse("console_agent_fs_download", kwargs={"agent_id": agent.id}),
-                "createFolder": reverse("console_agent_fs_create_folder", kwargs={"agent_id": agent.id}),
-                "move": reverse("console_agent_fs_move", kwargs={"agent_id": agent.id}),
-            },
-        }
-        return context
-
 class AgentDeleteView(LoginRequiredMixin, View):
     """Handle agent deletion."""
 
@@ -6449,7 +4827,7 @@ class AgentDeleteView(LoginRequiredMixin, View):
             invalidate_account_info_cache(request.user.id)
 
             response = HttpResponse(status=200)
-            response['HX-Redirect'] = reverse('agents')
+            response['HX-Redirect'] = f'{IMMERSIVE_APP_BASE_PATH}/agents'
             return response
             
         except PersistentAgent.DoesNotExist:
@@ -6457,865 +4835,12 @@ class AgentDeleteView(LoginRequiredMixin, View):
         except PermissionDenied:
             raise
 
-class AgentSecretsView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """React-based secrets management page for a single agent."""
-    template_name = "console/agent_secrets_react.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_object")
-    def get_object(self):
-        return super().get_object()
-
-    def get(self, request, *args, **kwargs):
-        agent = self.get_object()
-        props = Analytics.with_org_properties(
-            {
-                'agent_id': str(agent.pk),
-                'agent_name': agent.name,
-            },
-            organization=agent.organization,
-        )
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_VIEWED,
-            source=AnalyticsSource.WEB,
-            properties=props.copy(),
-        )
-        return super().get(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent and secrets to context."""
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        context['agent'] = agent
-        
-        # Get secrets from the new model, split by requested/fulfilled
-        from api.models import PersistentAgentSecret
-        fulfilled_credential_qs = PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=False,
-            secret_type=PersistentAgentSecret.SecretType.CREDENTIAL,
-        ).order_by('domain_pattern', 'name')
-        fulfilled_env_var_qs = PersistentAgentSecret.objects.filter(
-            agent=agent,
-            requested=False,
-            secret_type=PersistentAgentSecret.SecretType.ENV_VAR,
-        ).order_by('name')
-        requested_qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by('secret_type', 'domain_pattern', 'name')
-        requested_credential_qs = requested_qs.filter(secret_type=PersistentAgentSecret.SecretType.CREDENTIAL)
-        requested_env_var_qs = requested_qs.filter(secret_type=PersistentAgentSecret.SecretType.ENV_VAR)
-
-        # Group fulfilled credential secrets by domain for display
-        credential_secrets = {}
-        for secret in fulfilled_credential_qs:
-            if secret.domain_pattern not in credential_secrets:
-                credential_secrets[secret.domain_pattern] = {}
-            credential_secrets[secret.domain_pattern][secret.name] = {
-                'id': secret.id,
-                'name': secret.name,
-                'description': secret.description,
-                'key': secret.key,
-                'secret_type': secret.secret_type,
-                'created_at': secret.created_at,
-                'updated_at': secret.updated_at
-            }
-        env_var_secrets = list(fulfilled_env_var_qs)
-        context['secrets'] = credential_secrets
-        context['credential_secrets'] = credential_secrets
-        context['env_var_secrets'] = env_var_secrets
-        context['has_secrets'] = bool(credential_secrets or env_var_secrets)
-        context['requested_secrets'] = requested_qs
-        context['requested_credential_secrets'] = requested_credential_qs
-        context['requested_env_var_secrets'] = requested_env_var_qs
-        context['has_requested_secrets'] = requested_qs.exists()
-
-        return context
-
-
-class AgentSecretsAddView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
-    """Add a new secret to an agent."""
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Add")
-    def get_object(self):
-        return super().get_object()
-
-    def post(self, request, *args, **kwargs):
-        """Handle adding a new secret."""
-        agent = self.get_object()
-        form = PersistentAgentAddSecretForm(request.POST, agent=agent)
-        
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    from api.models import PersistentAgentSecret
-                    
-                    # Create the new secret
-                    secret_type = form.cleaned_data['secret_type']
-                    domain = form.cleaned_data['domain']
-                    name = form.cleaned_data['name']
-                    description = form.cleaned_data.get('description', '')
-                    value = form.cleaned_data['value']
-                    
-                    # Create and save the secret
-                    secret = PersistentAgentSecret(
-                        agent=agent,
-                        secret_type=secret_type,
-                        domain_pattern=domain,
-                        name=name,
-                        description=description
-                    )
-                    # The key will be auto-generated in the clean() method
-                    secret.full_clean()  # This generates the key from name
-                    secret.set_value(value)  # This validates and encrypts the value
-                    secret.save()
-                    
-                    if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
-                        messages.success(request, f"Environment variable secret '{name}' added successfully.")
-                    else:
-                        messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
-
-                    # Count total secrets for analytics
-                    total_secrets = PersistentAgentSecret.objects.filter(agent=agent).count()
-
-                    transaction.on_commit(lambda: Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_ADDED,
-                        source=AnalyticsSource.WEB,
-                        properties={
-                            'agent_id': str(agent.pk),
-                            'agent_name': agent.name,
-                            'secret_name': name,
-                            'secret_key': secret.key,  # Generated key
-                            'secret_type': secret.secret_type,
-                            'domain': domain,
-                            'total_secrets': total_secrets,
-                        }
-                    ))
-                    marketing_props = Analytics.with_org_properties(
-                        {
-                            'agent_id': str(agent.pk),
-                            'secret_type': secret.secret_type,
-                            'total_secrets': total_secrets,
-                        },
-                        organization=agent.organization,
-                    )
-                    transaction.on_commit(
-                        lambda: emit_configured_custom_capi_event(
-                            user=request.user,
-                            event_name=ConfiguredCustomEvent.SECRET_ADDED,
-                            plan_owner=agent.organization or request.user,
-                            properties=marketing_props.copy(),
-                            request=request,
-                        )
-                    )
-
-            except Exception as e:
-                logger.error(f"Failed to add secret to agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to add secret. Please try again.")
-        
-        # Handle form errors by showing them as messages
-        if not form.is_valid():
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"{field}: {error}")
-        
-        return redirect('agent_secrets', pk=agent.pk)
-
-
-class AgentSecretsEditView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """Edit view for existing secret value (GET render + POST update)."""
-    template_name = "console/agent_secret_edit.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_object")
-    def get_object(self):
-        return super().get_object()
-
-    def get(self, request, *args, **kwargs):
-        """Load secret by ID for edit form."""
-        agent = self.get_object()
-        secret_id = kwargs.get('secret_id') or self.kwargs.get('secret_id')
-
-        from api.models import PersistentAgentSecret
-
-        if not secret_id:
-            messages.error(request, "Secret ID is required.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        try:
-            secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
-        except PersistentAgentSecret.DoesNotExist:
-            messages.error(request, "Secret not found.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        # Store the secret in kwargs for other methods
-        kwargs['secret_obj'] = secret
-        return super().get(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Edit - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent, secret info, and form to context."""
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        secret_obj = kwargs.get('secret_obj')
-        
-        context['agent'] = agent
-        context['secret_key'] = secret_obj.key if secret_obj else None
-        context['secret_name'] = secret_obj.name if secret_obj else None
-        context['secret_type'] = secret_obj.secret_type if secret_obj else None
-        context['domain'] = (
-            None
-            if (secret_obj and secret_obj.secret_type == "env_var")
-            else (secret_obj.domain_pattern if secret_obj else None)
-        )
-        context['form'] = PersistentAgentEditSecretForm(agent=agent, secret=secret_obj)
-        return context
-
-    def post(self, request, *args, **kwargs):
-        """Handle form submission for editing a secret value."""
-        agent = self.get_object()
-        secret_id = kwargs.get('secret_id') or self.kwargs.get('secret_id')
-
-        if not secret_id:
-            messages.error(request, "Secret ID is required.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        # Find the secret by ID
-        from api.models import PersistentAgentSecret
-        try:
-            secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
-        except PersistentAgentSecret.DoesNotExist:
-            messages.error(request, "Secret not found.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        form = PersistentAgentEditSecretForm(request.POST, agent=agent, secret=secret)
-
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    # Update the secret fields
-                    new_secret_type = form.cleaned_data['secret_type']
-                    new_domain = form.cleaned_data['domain']
-                    new_name = form.cleaned_data['name']
-                    new_description = form.cleaned_data.get('description', '')
-                    new_value = form.cleaned_data['value']
-                    
-                    secret.secret_type = new_secret_type
-                    secret.domain_pattern = new_domain
-                    # Update name and description
-                    secret.name = new_name
-                    secret.description = new_description
-                    # Preserve key stability on edit to avoid breaking existing references.
-                    secret.full_clean()
-                    secret.set_value(new_value)  # This validates and encrypts the value
-                    secret.save()
-                    
-                    if secret.secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
-                        messages.success(request, f"Environment variable secret '{secret.name}' updated successfully.")
-                    else:
-                        messages.success(request, f"Secret '{secret.name}' updated successfully.")
-
-                    transaction.on_commit(lambda: Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_UPDATED,
-                        source=AnalyticsSource.WEB,
-                        properties={
-                            'agent_id': str(agent.pk),
-                            'agent_name': agent.name,
-                            'secret_name': secret.name,
-                            'secret_key': secret.key,
-                            'secret_type': secret.secret_type,
-                            'domain': secret.domain_pattern,
-                        }
-                    ))
-
-                    return redirect('agent_secrets', pk=agent.pk)
-
-            except Exception as e:
-                logger.error(f"Failed to edit secret for agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to update secret. Please try again.")
-        
-        # If form is invalid or exception occurred, re-render with errors
-        context = self.get_context_data(**kwargs)
-        context['form'] = form
-        return self.render_to_response(context)
-
-
-class AgentSecretsDeleteView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
-    """Delete a secret from an agent."""
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Delete")
-    def get_object(self):
-        return super().get_object()
-
-    def post(self, request, *args, **kwargs):
-        """Handle deleting a secret by secret ID."""
-        agent = self.get_object()
-        secret_id = kwargs.get('secret_id')
-
-        if not secret_id:
-            messages.error(request, "Secret ID is required.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        # Get the specific secret by ID
-        try:
-            from api.models import PersistentAgentSecret
-            secret = PersistentAgentSecret.objects.get(
-                pk=secret_id,
-                agent=agent
-            )
-        except PersistentAgentSecret.DoesNotExist:
-            messages.error(request, "Secret not found.")
-            return redirect('agent_secrets', pk=agent.pk)
-
-        try:
-            with transaction.atomic():
-                secret_key = secret.key
-                secret_domain = secret.domain_pattern
-                secret_type = secret.secret_type
-
-                # Delete the secret
-                secret.delete()
-                
-                messages.success(request, f"Secret '{secret_key}' deleted successfully.")
-
-                # Count remaining secrets for analytics
-                remaining_secrets = PersistentAgentSecret.objects.filter(agent=agent).count()
-
-                transaction.on_commit(lambda: Analytics.track_event(
-                    user_id=request.user.id,
-                    event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_DELETED,
-                    source=AnalyticsSource.WEB,
-                    properties={
-                        'agent_id': str(agent.pk),
-                        'agent_name': agent.name,
-                        'secret_key': secret_key,
-                        'secret_type': secret_type,
-                        'domain': secret_domain,
-                        'remaining_secrets': remaining_secrets,
-                    }
-                ))
-
-        except Exception as e:
-            logger.error(f"Failed to delete secret {secret_id} for agent {agent.id}: {str(e)}")
-            messages.error(request, "Failed to delete secret. Please try again.")
-        
-        return redirect('agent_secrets', pk=agent.pk)
-
-
-class AgentEmailSettingsView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """Simple console page to edit an agent-owned email account settings."""
-    template_name = "console/agent_email_settings.html"
-
-    OAUTH_PROVIDER_DEFAULTS = EMAIL_OAUTH_PROVIDER_DEFAULTS
-
-    def _validate_smtp_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
-        try:
-            import smtplib
-            if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
-                client = smtplib.SMTP_SSL(account.smtp_host, int(account.smtp_port or 465), timeout=30)
-            else:
-                client = smtplib.SMTP(account.smtp_host, int(account.smtp_port or 587), timeout=30)
-            try:
-                client.ehlo()
-                if account.smtp_security == AgentEmailAccount.SmtpSecurity.STARTTLS:
-                    client.starttls()
-                    client.ehlo()
-                if account.smtp_auth == AgentEmailAccount.AuthMode.OAUTH2:
-                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
-                    identity, access_token, _credential = resolve_oauth_identity_and_token(account, "smtp")
-                    auth_string = build_xoauth2_string(identity, access_token)
-                    client.auth("XOAUTH2", lambda _=None: auth_string)
-                elif account.smtp_auth != AgentEmailAccount.AuthMode.NONE:
-                    client.login(account.smtp_username or '', account.get_smtp_password() or '')
-                try:
-                    client.noop()
-                except Exception:
-                    pass
-            finally:
-                try:
-                    client.quit()
-                except Exception:
-                    try:
-                        client.close()
-                    except Exception:
-                        pass
-            return True, ""
-        except Exception as exc:
-            return False, str(exc)
-
-    def _validate_imap_connection(self, account: AgentEmailAccount) -> tuple[bool, str]:
-        try:
-            import imaplib
-            if account.imap_security == AgentEmailAccount.ImapSecurity.SSL:
-                client = imaplib.IMAP4_SSL(account.imap_host, int(account.imap_port or 993), timeout=30)
-            else:
-                client = imaplib.IMAP4(account.imap_host, int(account.imap_port or 143), timeout=30)
-                if account.imap_security == AgentEmailAccount.ImapSecurity.STARTTLS:
-                    client.starttls()
-            try:
-                if account.imap_auth == AgentEmailAccount.ImapAuthMode.OAUTH2:
-                    from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_identity_and_token
-                    identity, access_token, _credential = resolve_oauth_identity_and_token(account, "imap")
-                    auth_string = build_xoauth2_string(identity, access_token)
-                    client.authenticate("XOAUTH2", lambda _: auth_string.encode("utf-8"))
-                elif account.imap_auth != AgentEmailAccount.ImapAuthMode.NONE:
-                    client.login(account.imap_username or '', account.get_imap_password() or '')
-                client.select(account.imap_folder or 'INBOX', readonly=True)
-                try:
-                    client.noop()
-                except Exception:
-                    pass
-            finally:
-                try:
-                    client.logout()
-                except Exception:
-                    try:
-                        client.shutdown()
-                    except Exception:
-                        pass
-            return True, ""
-        except Exception as exc:
-            return False, str(exc)
-
-    def get_agent(self):
-        return self.get_object()
-
-    def _get_email_endpoint(self, agent: PersistentAgent):
-        ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent, is_primary=True).first()
-        if not ep:
-            ep = agent.comms_endpoints.filter(channel=CommsChannel.EMAIL, owner_agent=agent).first()
-        return ep
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self.get_agent()
-        endpoint = self._get_email_endpoint(agent)
-        account = getattr(endpoint, 'agentemailaccount', None) if endpoint else None
-        oauth_credential = getattr(account, "oauth_credential", None) if account else None
-        from django.conf import settings as dj_settings
-        default_domain = getattr(dj_settings, 'DEFAULT_AGENT_EMAIL_DOMAIN', 'agents.localhost')
-        is_default_endpoint = False
-        if endpoint and endpoint.address and default_domain:
-            try:
-                is_default_endpoint = endpoint.address.lower().endswith('@' + default_domain.lower())
-            except Exception:
-                is_default_endpoint = False
-
-        if endpoint and account is None:
-            from api.models import AgentEmailAccount
-            account, _ = AgentEmailAccount.objects.get_or_create(
-                endpoint=endpoint,
-                defaults={"imap_idle_enabled": True},
-            )
-
-        initial = {}
-        if account:
-            initial = {
-                'smtp_host': account.smtp_host,
-                'smtp_port': account.smtp_port,
-                'smtp_security': account.smtp_security,
-                'smtp_auth': account.smtp_auth,
-                'smtp_username': account.smtp_username,
-                'is_outbound_enabled': account.is_outbound_enabled,
-                'imap_host': account.imap_host,
-                'imap_port': account.imap_port,
-                'imap_security': account.imap_security,
-                'imap_username': account.imap_username,
-                'imap_auth': account.imap_auth,
-                'imap_folder': account.imap_folder,
-                'is_inbound_enabled': account.is_inbound_enabled,
-                'imap_idle_enabled': account.imap_idle_enabled,
-                'poll_interval_sec': account.poll_interval_sec,
-                'connection_mode': account.connection_mode,
-            }
-
-        context['agent'] = agent
-        context['endpoint'] = endpoint
-        context['account'] = account
-        context['oauth_credential'] = oauth_credential
-        context['oauth_connected'] = oauth_credential is not None
-        context['oauth_scope'] = getattr(oauth_credential, "scope", "")
-        context['oauth_expires_at'] = getattr(oauth_credential, "expires_at", None)
-        context['oauth_provider'] = getattr(oauth_credential, "provider", "")
-        try:
-            context['oauth_return_url'] = reverse('agent_email_settings', args=[agent.pk])
-        except Exception:
-            context['oauth_return_url'] = ""
-        context['is_default_endpoint'] = is_default_endpoint
-        context['default_domain'] = default_domain
-        context['form'] = AgentEmailAccountConsoleForm(initial=initial)
-        return context
-
-    def post(self, request, *args, **kwargs):
-        agent = self.get_agent()
-        endpoint = self._get_email_endpoint(agent)
-        if not endpoint:
-            # Allow creating endpoint directly from this page
-            action = request.POST.get('action')
-            if action == 'create_endpoint':
-                address = (request.POST.get('address') or '').strip()
-                if not address or '@' not in address:
-                    messages.error(request, "Please provide a valid email address (e.g., agent@example.com).")
-                    return redirect('agent_email_settings', pk=agent.pk)
-                try:
-                    ep = PersistentAgentCommsEndpoint.objects.create(
-                        owner_agent=agent,
-                        channel=CommsChannel.EMAIL,
-                        address=address,
-                        is_primary=True,
-                    )
-                    messages.success(request, "Agent email endpoint created.")
-                    return redirect('agent_email_settings', pk=agent.pk)
-                except Exception as e:
-                    messages.error(request, f"Failed to create email endpoint: {e}")
-                    return redirect('agent_email_settings', pk=agent.pk)
-            else:
-                messages.error(request, "This agent has no email endpoint yet. Provide an email address to create one.")
-                return redirect('agent_email_settings', pk=agent.pk)
-
-        form = AgentEmailAccountConsoleForm(request.POST)
-        action = request.POST.get('action', 'save')
-        if not form.is_valid() and action == 'save':
-            for field, errors in form.errors.items():
-                for error in errors:
-                    messages.error(request, f"{field}: {error}")
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Load or create account for save/test operations
-        from api.models import AgentEmailAccount
-        account = getattr(endpoint, 'agentemailaccount', None)
-
-        # Handle save
-        if action == 'save':
-            data = form.cleaned_data
-            created = False
-            if not account:
-                account = AgentEmailAccount(endpoint=endpoint, imap_idle_enabled=True)
-                created = True
-            # Update endpoint address to match user-entered value, if provided
-            new_address = (request.POST.get('endpoint_address') or '').strip()
-            if new_address:
-                normalized_address = PersistentAgentCommsEndpoint.normalize_address(CommsChannel.EMAIL, new_address)
-                if normalized_address and normalized_address != endpoint.address:
-                    existing_endpoint = PersistentAgentCommsEndpoint.objects.filter(
-                        channel=CommsChannel.EMAIL,
-                        address__iexact=normalized_address,
-                    ).first()
-                    if existing_endpoint and existing_endpoint.id != endpoint.id:
-                        if existing_endpoint.owner_agent_id and existing_endpoint.owner_agent_id != agent.id:
-                            messages.error(
-                                request,
-                                "That email address is already assigned to another agent.",
-                            )
-                            return redirect('agent_email_settings', pk=agent.pk)
-                        try:
-                            from api.models import AgentEmailOAuthCredential
-                            with transaction.atomic():
-                                existing_endpoint.owner_agent = agent
-                                existing_endpoint.is_primary = True
-                                existing_endpoint.save(update_fields=["owner_agent", "is_primary"])
-                                if endpoint.is_primary:
-                                    endpoint.is_primary = False
-                                    endpoint.save(update_fields=["is_primary"])
-                                if account:
-                                    new_account, _ = AgentEmailAccount.objects.get_or_create(
-                                        endpoint=existing_endpoint,
-                                        defaults={"imap_idle_enabled": True},
-                                    )
-                                    if new_account.pk != account.pk:
-                                        for field in (
-                                            "smtp_host",
-                                            "smtp_port",
-                                            "smtp_security",
-                                            "smtp_auth",
-                                            "smtp_username",
-                                            "is_outbound_enabled",
-                                            "imap_host",
-                                            "imap_port",
-                                            "imap_security",
-                                            "imap_username",
-                                            "imap_auth",
-                                            "imap_folder",
-                                            "is_inbound_enabled",
-                                            "imap_idle_enabled",
-                                            "poll_interval_sec",
-                                            "last_polled_at",
-                                            "last_seen_uid",
-                                            "backoff_until",
-                                            "connection_mode",
-                                            "connection_last_ok_at",
-                                            "connection_error",
-                                        ):
-                                            setattr(new_account, field, getattr(account, field))
-                                        new_account.smtp_password_encrypted = account.smtp_password_encrypted
-                                        new_account.imap_password_encrypted = account.imap_password_encrypted
-                                        new_account.save()
-                                        try:
-                                            credential = account.oauth_credential
-                                        except AgentEmailOAuthCredential.DoesNotExist:
-                                            credential = None
-                                        if credential:
-                                            credential.account = new_account
-                                            credential.save(update_fields=["account"])
-                                        if account.pk:
-                                            account.delete()
-                                    account = new_account
-                                endpoint = existing_endpoint
-                        except Exception as e:
-                            messages.error(request, f"Failed to update agent email address: {e}")
-                            return redirect('agent_email_settings', pk=agent.pk)
-                    else:
-                        try:
-                            endpoint.address = normalized_address
-                            endpoint.save(update_fields=['address'])
-                        except Exception as e:
-                            messages.error(request, f"Failed to update agent email address: {e}")
-                            return redirect('agent_email_settings', pk=agent.pk)
-            # Assign simple fields
-            for f in ('smtp_host', 'smtp_port', 'smtp_security', 'smtp_auth', 'smtp_username', 'is_outbound_enabled',
-                      'imap_host', 'imap_port', 'imap_security', 'imap_username', 'imap_auth', 'imap_folder', 'is_inbound_enabled', 'imap_idle_enabled',
-                      'poll_interval_sec', 'connection_mode'):
-                setattr(account, f, data.get(f))
-            # Passwords
-            from api.encryption import SecretsEncryption
-            if data.get('smtp_password'):
-                account.smtp_password_encrypted = SecretsEncryption.encrypt_value(data.get('smtp_password'))
-            if data.get('imap_password'):
-                account.imap_password_encrypted = SecretsEncryption.encrypt_value(data.get('imap_password'))
-            if account.connection_mode == AgentEmailAccount.ConnectionMode.OAUTH2:
-                account.smtp_auth = AgentEmailAccount.AuthMode.OAUTH2
-                account.imap_auth = AgentEmailAccount.ImapAuthMode.OAUTH2
-                if not account.smtp_username:
-                    account.smtp_username = endpoint.address
-                if not account.imap_username:
-                    account.imap_username = endpoint.address
-                provider = ""
-                credential = getattr(account, "oauth_credential", None)
-                if credential:
-                    provider = (credential.provider or "").lower()
-                if not provider:
-                    provider = (request.POST.get("oauth_provider") or "").lower()
-                defaults = self.OAUTH_PROVIDER_DEFAULTS.get(provider)
-                if defaults:
-                    for key, value in defaults.items():
-                        if not getattr(account, key):
-                            setattr(account, key, value)
-                if credential:
-                    smtp_ok, smtp_error = self._validate_smtp_connection(account)
-                    imap_ok, imap_error = self._validate_imap_connection(account)
-                    errors = []
-                    if smtp_ok:
-                        account.is_outbound_enabled = True
-                    else:
-                        account.is_outbound_enabled = False
-                        errors.append(f"SMTP validation failed: {smtp_error}")
-                    if imap_ok:
-                        account.is_inbound_enabled = True
-                    else:
-                        account.is_inbound_enabled = False
-                        errors.append(f"IMAP validation failed: {imap_error}")
-                    if smtp_ok or imap_ok:
-                        account.connection_last_ok_at = timezone.now()
-                    if errors:
-                        account.connection_error = "; ".join(errors)
-                        for message_text in errors:
-                            messages.error(request, message_text)
-                    else:
-                        account.connection_error = ""
-            try:
-                account.full_clean()
-                account.save()
-                messages.success(request, "Email settings saved.")
-                # Analytics for create/update
-                try:
-                    Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.EMAIL_ACCOUNT_CREATED if created else AnalyticsEvent.EMAIL_ACCOUNT_UPDATED,
-                        source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
-                    )
-                except Exception:
-                    pass
-            except ValidationError as e:
-                for field, errs in e.message_dict.items():
-                    for err in errs:
-                        messages.error(request, f"{field}: {err}")
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Ensure account exists before tests / poll
-        if not account:
-            messages.error(request, "Please save email settings before testing or polling.")
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Test SMTP
-        if action == 'test_smtp':
-            ok, error = self._validate_smtp_connection(account)
-            if ok:
-                account.connection_last_ok_at = timezone.now()
-                account.connection_error = ""
-                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
-                messages.success(request, "SMTP test succeeded.")
-                try:
-                    Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.SMTP_TEST_PASSED,
-                        source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
-                    )
-                except Exception:
-                    pass
-            else:
-                account.connection_error = error
-                account.save(update_fields=['connection_error'])
-                messages.error(request, f"SMTP test failed: {error}")
-                try:
-                    Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.SMTP_TEST_FAILED,
-                        source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': error[:500]},
-                    )
-                except Exception:
-                    pass
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Test IMAP
-        if action == 'test_imap':
-            ok, error = self._validate_imap_connection(account)
-            if ok:
-                account.connection_last_ok_at = timezone.now()
-                account.connection_error = ""
-                account.save(update_fields=['connection_last_ok_at', 'connection_error'])
-                messages.success(request, "IMAP test succeeded.")
-                try:
-                    Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.IMAP_TEST_PASSED,
-                        source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address},
-                    )
-                except Exception:
-                    pass
-            else:
-                account.connection_error = error
-                account.save(update_fields=['connection_error'])
-                messages.error(request, f"IMAP test failed: {error}")
-                try:
-                    Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.IMAP_TEST_FAILED,
-                        source=AnalyticsSource.WEB,
-                        properties={'agent_id': str(agent.pk), 'endpoint': endpoint.address, 'error': error[:500]},
-                    )
-                except Exception:
-                    pass
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Poll now
-        if action == 'poll_now':
-            try:
-                from api.agent.tasks import poll_imap_inbox
-                poll_imap_inbox.delay(str(account.pk))
-                messages.success(request, "IMAP poll enqueued.")
-            except Exception as e:
-                messages.error(request, f"Failed to enqueue IMAP poll: {e}")
-            return redirect('agent_email_settings', pk=agent.pk)
-
-        # Default: redirect back
-        return redirect('agent_email_settings', pk=agent.pk)
-
-
-class AgentSecretsAddFormView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """Form view for adding a new secret to an agent."""
-    template_name = "console/agent_secret_add.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Add Form View - get_object")
-    def get_object(self):
-        return super().get_object()
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Add Form View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent and form to context."""
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-        context['agent'] = agent
-        context['form'] = PersistentAgentAddSecretForm(agent=agent)
-        return context
-
-    def post(self, request, *args, **kwargs):
-        """Handle form submission."""
-        agent = self.get_object()
-        form = PersistentAgentAddSecretForm(request.POST, agent=agent)
-        
-        if form.is_valid():
-            try:
-                with transaction.atomic():
-                    from api.models import PersistentAgentSecret
-                    
-                    # Create the new secret
-                    secret_type = form.cleaned_data['secret_type']
-                    domain = form.cleaned_data['domain']
-                    name = form.cleaned_data['name']
-                    description = form.cleaned_data.get('description', '')
-                    value = form.cleaned_data['value']
-
-                    # Create and save the secret
-                    secret = PersistentAgentSecret(
-                        agent=agent,
-                        secret_type=secret_type,
-                        domain_pattern=domain,
-                        name=name,
-                        description=description
-                    )
-                    # The key will be auto-generated in the clean() method
-                    secret.full_clean()  # This generates the key from name
-                    secret.set_value(value)  # This validates and encrypts the value
-                    secret.save()
-
-                    if secret_type == PersistentAgentSecret.SecretType.ENV_VAR:
-                        messages.success(request, f"Environment variable secret '{name}' added successfully.")
-                    else:
-                        messages.success(request, f"Secret '{name}' added successfully for domain '{domain}'.")
-
-                    # Count total secrets for analytics
-                    total_secrets = PersistentAgentSecret.objects.filter(agent=agent).count()
-
-                    transaction.on_commit(lambda: Analytics.track_event(
-                        user_id=request.user.id,
-                        event=AnalyticsEvent.PERSISTENT_AGENT_SECRET_ADDED,
-                        source=AnalyticsSource.WEB,
-                        properties={
-                            'agent_id': str(agent.pk),
-                            'agent_name': agent.name,
-                            'secret_name': name,
-                            'secret_key': secret.key,  # Generated key
-                            'secret_type': secret.secret_type,
-                            'domain': domain,
-                            'total_secrets': total_secrets,
-                        }
-                    ))
-
-                    return redirect('agent_secrets', pk=agent.pk)
-
-            except Exception as e:
-                logger.error(f"Failed to add secret to agent {agent.id}: {str(e)}")
-                messages.error(request, "Failed to add secret. Please try again.")
-        
-        # If form is invalid or exception occurred, re-render with errors
-        context = self.get_context_data(**kwargs)
-        context['form'] = form
-        return self.render_to_response(context)
-
-
-# (Consolidated) AgentSecretsEditFormView removed; logic merged into AgentSecretsEditView
-
 @login_required
 @require_POST
 @tracer.start_as_current_span("GRANT_CREDITS")
 def grant_credits(request):
     """Endpoint to grant 100 task credits to a user. Admin only."""
 
-    # Check if user is staff/admin
     if not request.user.is_staff:
         return JsonResponse({'success': False, 'error': 'Unauthorized. Admin access required.'}, status=403)
 
@@ -7330,381 +4855,33 @@ def grant_credits(request):
 
     try:
         with transaction.atomic():
-            # Create a new TaskCredit record for compensation
             grant_date = timezone.now()
-            expiration_date = grant_date + timedelta(days=365)  # 1 year expiration for admin grants
+            expiration_date = grant_date + timedelta(days=365)
 
-            task_credit = TaskCredit.objects.create(
+            TaskCredit.objects.create(
                 user=user,
                 credits=100,
                 credits_used=0,
                 granted_date=grant_date,
                 expiration_date=expiration_date,
-                plan=PlanNamesChoices.FREE,  # Use FREE plan for admin grants
+                plan=PlanNamesChoices.FREE,
                 grant_type=GrantTypeChoices.COMPENSATION,
                 additional_task=False,
-                voided=False
+                voided=False,
             )
 
-            logger.info(f"Admin {request.user.id} granted 100 task credits to user {user.id}")
+            logger.info("Admin %s granted 100 task credits to user %s", request.user.id, user.id)
 
             return JsonResponse({
                 'success': True,
                 'message': f"100 task credits granted to {user.email or user.username}.",
-                'credits_granted': 100
+                'credits_granted': 100,
             })
 
-    except Exception as e:
-        logger.error(f"Failed to grant credits to user {user_id}: {str(e)}")
-        return JsonResponse({'success': False, 'error': f"Failed to grant credits: {str(e)}"}, status=500)
+    except DatabaseError as exc:
+        logger.error("Failed to grant credits to user %s: %s", user_id, exc)
+        return JsonResponse({'success': False, 'error': "Failed to grant credits."}, status=500)
 
-
-class AgentSecretsRequestView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """View for displaying requested secrets that need values."""
-    template_name = "console/agent_secrets_request.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_object")
-    def get_object(self):
-        return super().get_object()
-
-    def _get_requested_secrets(self, agent):
-        from api.models import PersistentAgentSecret
-
-        return list(
-            PersistentAgentSecret.objects.filter(
-                agent=agent,
-                requested=True,
-            ).order_by("secret_type", "domain_pattern", "name")
-        )
-
-    def _build_request_form(self, requested_secrets, data=None):
-        if data is None:
-            return PersistentAgentSecretsRequestForm(requested_secrets=requested_secrets)
-        return PersistentAgentSecretsRequestForm(data, requested_secrets=requested_secrets)
-
-    def _build_requested_secret_rows(self, requested_secrets, form):
-        return [
-            {
-                "secret": secret,
-                "value_field": form[f"secret_{secret.id}"],
-            }
-            for secret in requested_secrets
-        ]
-
-    def _build_request_context(self, agent, requested_secrets, form):
-        return {
-            "agent": agent,
-            "requested_secrets": requested_secrets,
-            "requested_secret_rows": self._build_requested_secret_rows(requested_secrets, form),
-            "has_requested_secrets": bool(requested_secrets),
-            "form": form,
-            "make_global_field": form["make_global"],
-            "make_global_label": (
-                "Make global for this organization"
-                if agent.organization_id
-                else "Make global for your account"
-            ),
-            "make_global_help_text": (
-                "Shared across all agents in this organization"
-                if agent.organization_id
-                else "Shared across all agents in your account"
-            ),
-        }
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Request View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent and requested secrets to context."""
-        agent = kwargs.pop("agent", None) or self.get_object()
-        requested_secrets = kwargs.pop("requested_secrets", None)
-        form = kwargs.pop("form", None)
-        context = super().get_context_data(**kwargs)
-        if requested_secrets is None:
-            requested_secrets = self._get_requested_secrets(agent)
-        if form is None:
-            form = self._build_request_form(requested_secrets)
-        context.update(self._build_request_context(agent, requested_secrets, form))
-        return context
-
-    def post(self, request, *args, **kwargs):
-        """Handle saving values or removing requested secrets."""
-        agent = self.get_object()
-        action = (request.POST.get('action') or '').strip().lower()
-
-        from api.models import PersistentAgentSecret
-
-        # Bulk remove requested secrets
-        if request.resolver_match.url_name == 'agent_requested_secrets_remove' or action == 'remove_selected':
-            try:
-                ids = request.POST.getlist('secret_ids')
-                if not ids:
-                    messages.info(request, "No requests selected for removal.")
-                    return redirect('agent_secrets_request', pk=agent.pk)
-                with transaction.atomic():
-                    qs = PersistentAgentSecret.objects.filter(agent=agent, requested=True, id__in=ids)
-                    deleted_count = qs.count()
-                    qs.delete()
-                messages.success(request, f"Removed {deleted_count} requested credential(s).")
-            except Exception as e:
-                logger.error(f"Failed to bulk remove requested secrets for agent {agent.id}: {e}")
-                messages.error(request, "Failed to remove selected requests.")
-            return redirect('agent_secrets_request', pk=agent.pk)
-
-        # Single remove via per-row action
-        if request.resolver_match.url_name == 'agent_requested_secret_remove':
-            secret_id = self.kwargs.get('secret_id')
-            try:
-                with transaction.atomic():
-                    secret = PersistentAgentSecret.objects.get(agent=agent, id=secret_id, requested=True)
-                    name = secret.name
-                    secret.delete()
-                messages.success(request, f"Removed request for '{name}'.")
-            except PersistentAgentSecret.DoesNotExist:
-                messages.error(request, "Requested secret not found.")
-            except Exception as e:
-                logger.error(f"Failed to remove requested secret {secret_id} for agent {agent.id}: {e}")
-                messages.error(request, "Failed to remove request.")
-            return redirect('agent_secrets_request', pk=agent.pk)
-
-        # Default: save provided values (partial allowed)
-        requested_secrets = self._get_requested_secrets(agent)
-
-        form = self._build_request_form(requested_secrets, request.POST)
-
-        if form.is_valid():
-            should_make_global = form.cleaned_data.get("make_global")
-            globalized_secret_ids = [
-                secret.id
-                for secret in requested_secrets
-                if form.cleaned_data.get(f"secret_{secret.id}")
-            ]
-
-            if should_make_global and globalized_secret_ids:
-                try:
-                    ensure_global_secret_capacity_for_agent(agent, additional_count=len(globalized_secret_ids))
-                except ValidationError as exc:
-                    form.add_error("make_global", _format_validation_error(exc))
-
-                for secret in requested_secrets:
-                    field_name = f"secret_{secret.id}"
-                    value = form.cleaned_data.get(field_name)
-                    if not value:
-                        continue
-
-                    secret.set_value(value)
-                    secret.requested = False
-
-                    try:
-                        validate_agent_secret_globalization(secret)
-                    except ValidationError as exc:
-                        form.add_error("make_global", f"{secret.name}: {_format_validation_error(exc)}")
-
-            if form.errors:
-                context = self.get_context_data(agent=agent, requested_secrets=requested_secrets, form=form)
-                return self.render_to_response(context)
-
-            try:
-                with transaction.atomic():
-                    updated_count = 0
-                    provided_secret_types = set()
-                    for secret in requested_secrets:
-                        field_name = f'secret_{secret.id}'
-                        value = form.cleaned_data.get(field_name)
-                        if value:
-                            try:
-                                secret.set_value(value)
-                                if should_make_global:
-                                    move_agent_secret_to_global(secret)
-                                else:
-                                    secret.requested = False
-                                    secret.save()
-                            except ValidationError as exc:
-                                form.add_error(
-                                    "make_global" if should_make_global else field_name,
-                                    (
-                                        f"{secret.name}: {_format_validation_error(exc)}"
-                                        if should_make_global
-                                        else _format_validation_error(exc)
-                                    ),
-                                )
-                                raise
-                            except IntegrityError:
-                                form.add_error(
-                                    "make_global" if should_make_global else field_name,
-                                    (
-                                        f"{secret.name}: A global secret with that name already exists in this scope."
-                                        if should_make_global
-                                        else "A secret with that name already exists for this agent."
-                                    ),
-                                )
-                                raise
-                            updated_count += 1
-                            provided_secret_types.add(secret.secret_type)
-
-                    if updated_count > 0:
-                        from api.models import PersistentAgentStep, PersistentAgentSystemStep
-                        step = PersistentAgentStep.objects.create(
-                            agent=agent,
-                            description=f"User provided {updated_count} requested credential(s)"
-                        )
-                        PersistentAgentSystemStep.objects.create(
-                            step=step,
-                            code=PersistentAgentSystemStep.Code.CREDENTIALS_PROVIDED,
-                            notes=f"Secrets provided: {updated_count}"
-                        )
-                        from api.agent.tasks.process_events import process_agent_events_task
-                        transaction.on_commit(lambda: process_agent_events_task.delay(str(agent.pk)))
-                        Analytics.track_event(
-                            user_id=self.request.user.id,
-                            event=AnalyticsEvent.PERSISTENT_AGENT_SECRETS_PROVIDED,
-                            source=AnalyticsSource.WEB,
-                            properties={
-                                'agent_id': str(agent.pk),
-                                'agent_name': agent.name,
-                                'secrets_provided': updated_count,
-                                'secret_types': sorted(provided_secret_types),
-                            },
-                        )
-                        return redirect('agent_secrets_request_thanks', pk=agent.pk)
-                    else:
-                        messages.info(request, "No changes detected. Enter values to save or remove requests you no longer need.")
-            except ValidationError as exc:
-                logger.warning(f"Requested secret save validation failed for agent {agent.id}: {exc}")
-            except IntegrityError:
-                logger.warning(f"Requested secret save hit an integrity error for agent {agent.id}")
-
-        context = self.get_context_data(agent=agent, requested_secrets=requested_secrets, form=form)
-        return self.render_to_response(context)
-
-
-class AgentSecretRerequestView(LoginRequiredMixin, ManagedAgentAccessMixin, View):
-    """Mark a fulfilled secret as requested again and clear its stored value."""
-    def post(self, request, *args, **kwargs):
-        agent = self.get_object()
-        _enforce_personal_agent_access_or_raise(request.user, agent)
-        secret_id = self.kwargs.get('secret_id')
-        from api.models import PersistentAgentSecret
-        try:
-            with transaction.atomic():
-                secret = PersistentAgentSecret.objects.get(agent=agent, pk=secret_id)
-                secret.requested = True
-                secret.encrypted_value = b''
-                secret.save(update_fields=['requested', 'encrypted_value', 'updated_at'])
-            messages.success(request, f"Re-requested '{secret.name}'. A new value is now required.")
-        except PersistentAgentSecret.DoesNotExist:
-            messages.error(request, "Secret not found.")
-        except Exception as e:
-            logger.error(f"Failed to re-request secret {secret_id} for agent {agent.id}: {e}")
-            messages.error(request, "Failed to re-request secret.")
-        return redirect('agent_secrets', pk=agent.pk)
-
-
-class AgentSecretsRequestThanksView(ManagedAgentAccessMixin, ConsoleViewMixin, TemplateView):
-    """Thank you page after providing secret values."""
-    template_name = "console/agent_secrets_request_thanks.html"
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_object")
-    def get_object(self):
-        agent = super().get_object()
-        _enforce_personal_agent_access_or_raise(self.request.user, agent)
-        return agent
-
-    @tracer.start_as_current_span("CONSOLE Agent Secrets Request Thanks View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent to context."""
-        context = super().get_context_data(**kwargs)
-        context['agent'] = self.get_object()
-        return context
-
-class AgentWelcomeView(LoginRequiredMixin, DetailView):
-    """Welcome page shown immediately after creating an agent."""
-    model = PersistentAgent
-    template_name = "console/agent_welcome.html"
-    context_object_name = "agent"
-    pk_url_kwarg = "pk"
-
-    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_queryset")
-    def get_queryset(self):
-        # Ensure users can only access their own agents
-        qs = (
-            super()
-            .get_queryset()
-            .alive()
-            .filter(user=self.request.user)
-            .select_related('organization__billing')
-        )
-        if can_user_use_personal_agents_and_api(self.request.user):
-            return qs
-        return qs.exclude(organization__isnull=True)
-
-    @tracer.start_as_current_span("CONSOLE Agent Welcome View - get_context_data")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        agent = self.get_object()
-
-        # Show agent endpoints for each channel if they exist, regardless of primary flag
-        primary_email = agent.comms_endpoints.filter(
-            channel=CommsChannel.EMAIL
-        ).first()
-        primary_sms = agent.comms_endpoints.filter(
-            channel=CommsChannel.SMS
-        ).first()
-
-        context['primary_email'] = primary_email
-        context['primary_sms'] = primary_sms
-
-        # Determine the user's preferred contact channel from the agent's preference
-        preferred_channel = None
-        try:
-            preferred_ep = agent.preferred_contact_endpoint
-            if preferred_ep and preferred_ep.channel in (CommsChannel.SMS, CommsChannel.EMAIL):
-                preferred_channel = 'sms' if preferred_ep.channel == CommsChannel.SMS else 'email'
-        except Exception:
-            preferred_channel = None
-        # Fallback to detect a likely preference if not set
-        if preferred_channel is None:
-            if primary_sms and getattr(primary_sms, 'is_primary', False):
-                preferred_channel = 'sms'
-            elif primary_email and getattr(primary_email, 'is_primary', False):
-                preferred_channel = 'email'
-        context['preferred_channel'] = preferred_channel
-
-        owner_plan = reconcile_user_plan_from_stripe(self.request.user)
-        organization_name = None
-        org_has_paid_seats = False
-
-        if agent.organization_id:
-            organization = agent.organization
-            organization_name = getattr(organization, "name", None)
-            owner_plan = get_organization_plan(organization)
-            billing = getattr(organization, "billing", None)
-            org_has_paid_seats = bool(getattr(billing, "purchased_seats", 0) > 0)
-
-        plan_id = str(owner_plan.get("id", "")).lower() if owner_plan else ""
-
-        show_pro_scale_upsell = plan_id == PlanNamesChoices.FREE.value
-        show_scale_upsell = plan_id in (PlanNamesChoices.FREE.value, PlanNamesChoices.STARTUP.value)
-
-        upsell_count = 0
-        if show_pro_scale_upsell:
-            upsell_count += 1
-        if show_scale_upsell:
-            upsell_count += 1
-        if agent.organization_id and not org_has_paid_seats:
-            upsell_count += 1
-
-        context.update({
-            'owner_plan': owner_plan,
-            'owner_plan_id': plan_id,
-            'owner_plan_name': owner_plan.get("name", "") if owner_plan else "",
-            'agent_has_org': bool(agent.organization_id),
-            'agent_org_name': organization_name,
-            'org_has_paid_seats': org_has_paid_seats if agent.organization_id else None,
-            'show_pro_scale_upsell': show_pro_scale_upsell,
-            'show_scale_upsell': show_scale_upsell,
-            'upsell_count': upsell_count,
-        })
-
-        return context
 
 class AgentContactRequestsView(LoginRequiredMixin, View):
     """Compatibility route for legacy contact request approval links."""
@@ -7776,405 +4953,6 @@ class AgentContactRequestsView(LoginRequiredMixin, View):
         return render(request, "console/approval_link_issue.html", ctx, status=200)
 
 
-class AgentContactRequestsThanksView(LoginRequiredMixin, TemplateView):
-    """Thank you page after approving contact requests."""
-    template_name = "console/agent_contact_requests_thanks.html"
-    
-    def _resolve_agent_or_issue(self):
-        pk = self.kwargs['pk']
-        current_span = trace.get_current_span()
-        exists = PersistentAgent.objects.non_eval().alive().filter(pk=pk).exists()
-        if not exists:
-            if current_span:
-                current_span.set_attribute("approval.issue", "invalid")
-            logger.info("Agent contact-requests-thanks invalid agent id", extra={"agent_id": str(pk)})
-            return None, 'invalid'
-        agent = (
-            PersistentAgent.objects.non_eval().alive()
-            .filter(pk=pk, user=self.request.user)
-            .first()
-        )
-        if not agent:
-            if current_span:
-                current_span.set_attribute("approval.issue", "wrong_account")
-            logger.info("Agent contact-requests-thanks wrong account", extra={"agent_id": str(pk), "user_id": self.request.user.id})
-            return None, 'wrong_account'
-        if agent.organization_id is None and not can_user_use_personal_agents_and_api(self.request.user):
-            if current_span:
-                current_span.set_attribute("approval.issue", "wrong_account")
-            logger.info(
-                "Agent contact-requests-thanks blocked by personal trial enforcement",
-                extra={"agent_id": str(pk), "user_id": self.request.user.id},
-            )
-            return None, "wrong_account"
-        return agent, None
-
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get")
-    def get(self, request, *args, **kwargs):
-        agent, issue = self._resolve_agent_or_issue()
-        if issue:
-            return self._issue_response(request, action='view', issue=issue)
-        return redirect(
-            build_immersive_contact_requests_url(
-                request,
-                agent.id,
-                organization_id=str(agent.organization_id) if agent.organization_id else None,
-            )
-        )
-
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_object")
-    def get_object(self):
-        agent, issue = self._resolve_agent_or_issue()
-        if issue:
-            raise Http404("Agent not available")
-        return agent
-
-    def _issue_response(self, request, action: str, issue: str, extra: dict | None = None):
-        ctx = {
-            'issue': issue,
-            'context_type': 'agent_allowlist',
-            'action': action,
-        }
-        if extra:
-            ctx.update(extra)
-        return render(request, "console/approval_link_issue.html", ctx, status=200)
-    
-    @tracer.start_as_current_span("CONSOLE Agent Contact Requests Thanks View - get_context_data")
-    def get_context_data(self, **kwargs):
-        """Add agent to context."""
-        context = super().get_context_data(**kwargs)
-        context['agent'] = self.get_object()
-        return context
-
-@tracer.start_as_current_span("CONSOLE Profile - handle_send_verification")
-def handle_send_verification(request, phone):
-    """
-    Handle sending verification code
-
-    This function checks if the user has an unverified phone number and attempts to send a verification code. If the
-    phone number is already verified or does not exist, it shows an error message.
-
-    """
-    if not phone:
-        return JsonResponse({
-            'success': False,
-            'error': "No phone number found to send verification code."
-        })
-
-    try:
-        # Send verification SMS
-        with traced("CONSOLE Profile - Twilio - SMS Verification Send"):
-            sms.start_verification(phone)
-
-        logger.info(f"Verification code sent to user {request.user.id}")
-
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.SMS_VERIFICATION_CODE_SENT,
-            source=AnalyticsSource.WEB,
-            properties={
-                'phone_number': phone,
-                'user_id': request.user.id,
-            }
-        )
-
-        return JsonResponse({
-            'success': True,
-            'message': f"Verification code sent to {phone}"
-        })
-
-    except Exception as e:
-        logger.error(f"Failed to send verification code for user {request.user.id}: {str(e)}")
-
-    # If we're here, something went wrong
-    return JsonResponse({
-        'success': False,
-        'error': "Failed to send verification code. Please try again."
-    })
-
-@tracer.start_as_current_span("CONSOLE Profile - handle_resend_verification")
-def handle_resend_verification(request, phone_number):
-    """
-    Handle resending verification code
-
-    This function checks if the user has an unverified phone number and attempts to resend the verification code. If the
-    phone number is already verified or does not exist, it shows an error message.
-
-    """
-    try:
-        # Send verification SMS
-        with traced("CONSOLE Profile - Twilio - SMS Verification Send"):
-            sms.start_verification(phone_number)
-
-        logger.info(f"Verification code resent to user {request.user.id}")
-
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.SMS_RESEND_VERIFICATION_CODE,
-            source=AnalyticsSource.WEB,
-            properties={
-                'phone_number': phone_number,
-                'user_id': request.user.id,
-            }
-        )
-
-        return JsonResponse({
-            'success': True,
-            'message': f"Verification code resent to {phone_number}"
-        })
-
-    except Exception as e:
-        logger.error(f"Failed to resend verification code for user {request.user.id}: {str(e)}")
-        messages.error(request, "Failed to send verification code. Please try again.")
-
-    # If we're here, something went wrong
-    return JsonResponse({
-        'success': False,
-        'error': "Failed to resend verification code. Please try again."
-    })
-
-@tracer.start_as_current_span("CONSOLE Profile - handle_delete_phone")
-def handle_delete_phone(request):
-    """
-    Handle deleting phone number
-
-    This function checks if the user has a phone number and attempts to delete it. If the phone number does not exist,
-    it shows an error message. If deletion is successful, it shows a success message.
-    """
-    try:
-        # Get the user's phone number
-        phone = UserPhoneNumber.objects.get(user=request.user)
-
-        if not phone:
-            logger.warning(f"User {request.user.id} has no phone number but requested to delete it.")
-            return JsonResponse({
-                'success': False,
-                'error': "No phone number found to delete."
-            })
-
-        phone.delete()
-        logger.info(f"Phone number deleted for user {request.user.id}")
-
-        Analytics.identify(
-            user_id=request.user.id,
-            traits={
-                'has_phone': False,
-                'phone_verified': False,
-            }
-        )
-
-        Analytics.track_event(
-            user_id=request.user.id,
-            event=AnalyticsEvent.SMS_DELETED,
-            source=AnalyticsSource.WEB,
-            properties={
-                'user_id': request.user.id,
-            }
-        )
-
-        return JsonResponse({
-            'success': True,
-            'message': "Phone number deleted successfully."
-        })
-
-    except Exception as e:
-        logger.error(f"Failed to delete phone number for user {request.user.id}: {str(e)}")
-        messages.error(request, "Failed to delete phone number. Please try again.")
-
-    # If we're here, something went wrong
-    return JsonResponse({
-        'success': False,
-        'error': "Failed to delete phone number. Please try again."
-    })
-
-@tracer.start_as_current_span("CONSOLE Profile - handle_profile_update")
-def handle_profile_update(request, user, phone):
-    """Handle normal profile and phone form submission"""
-    profile_form = UserProfileForm(request.POST, instance=user)
-    phone_form = UserPhoneNumberForm(request.POST, user=user)
-
-    profile_valid = profile_form.is_valid()
-
-    if profile_valid:
-        try:
-            # Save profile changes
-            profile_form.save()
-
-            # Handle phone number changes
-            phone_number = phone_form.cleaned_data.get('phone_number')
-            verification_code = phone_form.cleaned_data.get('verification_code')
-
-            messages.success(request, "Profile updated successfully!")
-            return redirect('console:profile')
-
-        except Exception as e:
-            logger.error(f"Error updating profile for user {user.id}: {str(e)}")
-            messages.error(request, "An error occurred while updating your profile.")
-
-    # Form validation failed - redisplay with errors
-    context = {
-        "profile_form": profile_form,
-        "phone_form": phone_form,
-        "phone": phone,
-    }
-
-    return render(request, "console/profile.html", context)
-
-@tracer.start_as_current_span("CONSOLE Profile - handle_confirm_code")
-def handle_confirm_code(request, phone_number, verification_code):
-    """
-    Handle confirming verification code
-
-    This function checks if the user has an unverified phone number and attempts to confirm the verification code.
-    If the phone number is already verified or does not exist, it shows an error message.
-    """
-    if not verification_code:
-        return JsonResponse({
-            'success': False,
-            'error': "Verification code is required."
-        })
-
-    try:
-        check = False
-
-        with traced("CONSOLE Profile - Twilio - SMS Code Verification"):
-            check = sms.check_verification(phone_number, verification_code)
-
-        if check:
-            # If the phone number is verified, update the UserPhoneNumber model
-            phone, created = UserPhoneNumber.objects.get_or_create(
-                user=request.user,
-                phone_number=phone_number,
-                defaults={
-                    'is_verified': True,
-                    'is_primary': True,  # Set as primary if it's a new phone, and we only support one phone *for now*
-                    'verified_at': timezone.now(),
-                    'created_at': timezone.now(),
-                    'updated_at': timezone.now(),
-                }
-            )
-
-            Analytics.identify(
-                user_id=request.user.id,
-                traits={
-                    'has_phone': True,
-                    'phone_verified': True,
-                }
-            )
-
-            Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.SMS_VERIFIED,
-                source=AnalyticsSource.WEB,
-                properties={
-                    'phone_number': phone_number,
-                    'user_id': request.user.id,
-                }
-            )
-
-            return JsonResponse({'success': True, 'message': "Phone number verified successfully!"})
-        else:
-            return JsonResponse({'success': False, 'error': "Invalid verification code. Please try again."})
-
-    except Exception as e:
-        logger.warning(f"Failed to confirm verification code for user {request.user.id}: {str(e)}")
-
-    return JsonResponse({'success': False, 'error': "Failed to confirm verification code. Please try again."})
-
-
-class OrganizationListView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
-    """List organizations the user belongs to."""
-
-    waffle_flag = ORGANIZATIONS
-    template_name = "console/organizations.html"
-
-    @tracer.start_as_current_span("CONSOLE Organization List")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        memberships = (
-            OrganizationMembership.objects.filter(
-                user=self.request.user,
-                status=OrganizationMembership.OrgStatus.ACTIVE,
-            )
-            .select_related("org")
-            .order_by("org__name")
-        )
-        context["memberships"] = memberships
-        # Pending invitations for the current user's email
-        now = timezone.now()
-        pending_invites = (
-            OrganizationInvite.objects.filter(
-                email__iexact=self.request.user.email,
-                accepted_at__isnull=True,
-                revoked_at__isnull=True,
-                expires_at__gte=now,
-            )
-            .select_related("org", "invited_by")
-            .order_by("org__name")
-        )
-        context["pending_invites"] = pending_invites
-        return context
-
-
-class OrganizationCreateView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
-    """Create a new organization."""
-
-    waffle_flag = ORGANIZATIONS
-    template_name = "console/organization_create.html"
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["form"] = OrganizationForm()
-        return context
-
-    @tracer.start_as_current_span("CONSOLE Organization Create")
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        form = OrganizationForm(request.POST)
-        if form.is_valid():
-            org = form.save(commit=False)
-            org.slug = slugify(org.name)
-            org.created_by = request.user
-            org.save()
-            owner_membership = OrganizationMembership.objects.create(
-                org=org,
-                user=request.user,
-                role=OrganizationMembership.OrgRole.OWNER,
-            )
-
-            created_props = Analytics.with_org_properties(
-                {
-                    'organization_slug': org.slug,
-                },
-                organization=org,
-            )
-            member_props = Analytics.with_org_properties(
-                {
-                    'member_id': str(request.user.id),
-                    'member_role': owner_membership.role,
-                    'actor_id': str(request.user.id),
-                },
-                organization=org,
-            )
-
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_CREATED,
-                source=AnalyticsSource.WEB,
-                properties=created_props.copy(),
-            ))
-
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_MEMBER_ADDED,
-                source=AnalyticsSource.WEB,
-                properties=member_props.copy(),
-            ))
-            messages.success(request, "Organization created successfully.")
-            return redirect("organization_detail", org_id=org.id)
-        return render(request, self.template_name, {"form": form})
-
-
 def get_org_and_active_membership(request, org_id):
     """Return organization and the requesting user's active membership."""
     org = get_object_or_404(Organization, id=org_id)
@@ -8188,229 +4966,6 @@ def get_org_and_active_membership(request, org_id):
         .first()
     )
     return org, membership
-
-
-class OrganizationDetailView(WaffleFlagMixin, ConsoleViewMixin, TemplateView):
-    """Display organization details and members."""
-
-    waffle_flag = ORGANIZATIONS
-    template_name = "console/organization_detail.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        self.org, self.membership = get_org_and_active_membership(
-            request,
-            kwargs["org_id"],
-        )
-
-        if not self.membership:
-            return HttpResponseForbidden()
-
-        self.can_manage_members = self.membership.role in MEMBER_MANAGE_ROLES
-        self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
-        self.is_org_owner = self.membership.role == OrganizationMembership.OrgRole.OWNER
-        self.is_org_admin = self.membership.role == OrganizationMembership.OrgRole.ADMIN
-        self.is_org_solutions_partner = self.membership.role == OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
-        self.is_org_owner_equivalent = self.is_org_owner or self.is_org_solutions_partner
-        self.allowed_role_choices = self._resolve_allowed_role_choices()
-        # Set console context to this organization when visiting its page directly
-        request.session['context_type'] = 'organization'
-        request.session['context_id'] = str(self.org.id)
-        request.session['context_name'] = self.org.name
-        request.session.modified = True
-        return super().dispatch(request, *args, **kwargs)
-
-    @tracer.start_as_current_span("CONSOLE Organization Detail")
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-
-        memberships = OrganizationMembership.objects.filter(
-            org=self.org,
-            status=OrganizationMembership.OrgStatus.ACTIVE,
-        ).select_related("user")
-        solutions_partners = memberships.filter(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
-        members = memberships.exclude(role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER)
-        # Pending invites for this organization
-        now = timezone.now()
-        org_pending_invites = (
-            OrganizationInvite.objects.filter(
-                org=self.org,
-                accepted_at__isnull=True,
-                revoked_at__isnull=True,
-                expires_at__gte=now,
-            ).select_related("invited_by")
-        )
-        solutions_partner_invites = org_pending_invites.filter(
-            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-        )
-        pending_invites = org_pending_invites.exclude(
-            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-        )
-        billing = getattr(self.org, "billing", None)
-
-        invite_form = context.get("invite_form") or OrganizationInviteForm(
-            org=self.org,
-            allowed_roles=self.allowed_role_choices,
-        )
-
-        context.update(
-            {
-                "org": self.org,
-                "members": members,
-                "solutions_partners": solutions_partners,
-                "invite_form": invite_form,
-                "pending_invites": pending_invites,
-                "solutions_partner_invites": solutions_partner_invites,
-                "can_manage_members": self.can_manage_members,
-                "can_manage_billing": self.can_manage_billing,
-                "allowed_role_choices": self.allowed_role_choices,
-                "admin_locked_roles": list(OWNER_EQUIVALENT_ROLES),
-                "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
-                "is_org_owner": self.is_org_owner,
-                "is_org_admin": self.is_org_admin,
-                "is_org_solutions_partner": self.is_org_solutions_partner,
-                "org_billing": billing,
-            }
-        )
-        return context
-
-    def _resolve_allowed_role_choices(self) -> list[tuple[str, str]]:
-        role = self.membership.role if self.membership else None
-        return _resolve_allowed_role_choices_for_role(role)
-
-    @tracer.start_as_current_span("CONSOLE Organization Invite")
-    @transaction.atomic
-    def post(self, request, *args, **kwargs):
-        if not self.can_manage_members:
-            return HttpResponseForbidden()
-
-        form = OrganizationInviteForm(
-            request.POST,
-            org=self.org,
-            allowed_roles=self.allowed_role_choices,
-        )
-        # Defensive check: block when no seats available, even if submitted concurrently
-        billing = getattr(self.org, "billing", None)
-        invite_role = request.POST.get("role")
-        if (
-            billing
-            and billing.seats_available <= 0
-            and invite_role != OrganizationMembership.OrgRole.SOLUTIONS_PARTNER
-        ):
-            form.add_error(None, "No seats available. Increase the seat count before inviting new members.")
-        if form.is_valid():
-            invite = OrganizationInvite.objects.create(
-                org=self.org,
-                email=form.cleaned_data["email"],
-                role=form.cleaned_data["role"],
-                token=uuid.uuid4().hex,
-                expires_at=timezone.now() + timedelta(days=7),
-                invited_by=request.user,
-            )
-            invite_props = Analytics.with_org_properties(
-                {
-                    'invite_id': str(invite.id),
-                    'invite_token': invite.token,
-                    'invite_role': invite.role,
-                    'invite_email': invite.email,
-                    'actor_id': str(request.user.id),
-                },
-                organization=self.org,
-            )
-            transaction.on_commit(lambda: Analytics.track_event(
-                user_id=request.user.id,
-                event=AnalyticsEvent.ORGANIZATION_INVITE_SENT,
-                source=AnalyticsSource.WEB,
-                properties=invite_props.copy(),
-            ))
-            # Send invitation email
-            try:
-                accept_url = request.build_absolute_uri(
-                    reverse("org_invite_accept", kwargs={"token": invite.token})
-                )
-                reject_url = request.build_absolute_uri(
-                    reverse("org_invite_reject", kwargs={"token": invite.token})
-                )
-                context = {
-                    "org": self.org,
-                    "invited_by": request.user,
-                    "invite": invite,
-                    "accept_url": accept_url,
-                    "reject_url": reject_url,
-                }
-                html_body = render_to_string("emails/organization_invite.html", context)
-                text_body = render_to_string("emails/organization_invite.txt", context)
-                subject = f"You're invited to join {self.org.name} on Gobii"
-                send_mail(
-                    subject=subject,
-                    message=text_body,
-                    from_email=None,
-                    recipient_list=[invite.email],
-                    html_message=html_body,
-                    fail_silently=False,
-                )
-            except Exception as e:
-                logger.warning("Failed sending org invite email: %s", e)
-            messages.success(request, "Invite sent.")
-            if request.htmx:
-                response = HttpResponse(status=204)
-                response["HX-Redirect"] = reverse("organization_detail", kwargs={"org_id": self.org.id})
-                return response
-            return redirect("organization_detail", org_id=self.org.id)
-
-        logger.warning(
-            "Organization invite validation failed org_id=%s actor_id=%s email=%s role=%s seats_available=%s errors=%s",
-            str(self.org.id),
-            str(request.user.id),
-            (request.POST.get("email") or "").strip().lower(),
-            (request.POST.get("role") or "").strip(),
-            getattr(billing, "seats_available", None),
-            form.errors.get_json_data(),
-        )
-
-        if request.htmx:
-            context = {
-                "form": form,
-                "org": self.org,
-                "org_billing": billing,
-                "can_manage_billing": self.can_manage_billing,
-                "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
-            }
-            return render(
-                request,
-                "partials/_org_invite_modal.html",
-                context,
-                status=422,
-            )
-
-        context = self.get_context_data(invite_form=form)
-        return self.render_to_response(context)
-
-
-class OrganizationInviteModalView(WaffleFlagMixin, LoginRequiredMixin, View):
-    waffle_flag = ORGANIZATIONS
-
-    def dispatch(self, request, *args, **kwargs):
-        self.org, self.membership = get_org_and_active_membership(
-            request,
-            kwargs["org_id"],
-        )
-
-        if not self.membership or self.membership.role not in MEMBER_MANAGE_ROLES:
-            return HttpResponseForbidden()
-
-        self.can_manage_billing = self.membership.role in BILLING_MANAGE_ROLES
-        self.allowed_role_choices = _resolve_allowed_role_choices_for_role(self.membership.role)
-        return super().dispatch(request, *args, **kwargs)
-
-    def get(self, request, *args, **kwargs):
-        context = {
-            "form": OrganizationInviteForm(org=self.org, allowed_roles=self.allowed_role_choices),
-            "org": self.org,
-            "org_billing": getattr(self.org, "billing", None),
-            "can_manage_billing": self.can_manage_billing,
-            "can_invite_solutions_partner": _can_invite_solutions_partner(self.allowed_role_choices),
-        }
-        return render(request, "partials/_org_invite_modal.html", context)
 
 
 class OrganizationInviteValidationMixin:
@@ -8475,12 +5030,10 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
 
     waffle_flag = ORGANIZATIONS
 
-    def _accept(self, request, token: str):
+    def _accept_invite(self, request, token: str, *, add_message: bool = True):
         invite, issue, extra = self._resolve_invite_or_issue(request, token)
         if issue:
-            ctx = {"issue": issue, "context_type": "organization_invite", "action": "accept"}
-            ctx.update(extra)
-            return render(request, "console/approval_link_issue.html", ctx, status=200)
+            return None, issue, extra
 
         # Set console context to the invited organization for continuity
         request.session['context_type'] = 'organization'
@@ -8560,8 +5113,17 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
                 source=AnalyticsSource.WEB,
                 properties=seat_props.copy(),
             ))
-        messages.success(request, f"Joined {invite.org.name}.")
-        return redirect("organization_detail", org_id=invite.org.id)
+        if add_message:
+            messages.success(request, f"Joined {invite.org.name}.")
+        return invite, None, {}
+
+    def _accept(self, request, token: str):
+        invite, issue, extra = self._accept_invite(request, token)
+        if issue:
+            ctx = {"issue": issue, "context_type": "organization_invite", "action": "accept"}
+            ctx.update(extra)
+            return render(request, "console/approval_link_issue.html", ctx, status=200)
+        return redirect(_organization_app_path(invite.org.id))
 
     @tracer.start_as_current_span("CONSOLE Organization Invite Accept")
     @transaction.atomic
@@ -8572,6 +5134,45 @@ class OrganizationInviteAcceptView(OrganizationInviteValidationMixin, WaffleFlag
     @transaction.atomic
     def get(self, request, token: str):
         return self._accept(request, token)
+
+
+class OrganizationInviteAcceptAPIView(OrganizationInviteAcceptView):
+    """Accept an organization invite from the immersive app shell."""
+
+    http_method_names = ["post"]
+
+    @tracer.start_as_current_span("APP Organization Invite Accept")
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._accept_invite(request, token, add_message=False)
+        if issue:
+            payload: dict[str, object] = {
+                "ok": False,
+                "issue": issue,
+                "action": "accept",
+            }
+            org = extra.get("org")
+            if org is not None:
+                payload["organization"] = {
+                    "id": str(org.id),
+                    "name": org.name,
+                }
+            invited_email = extra.get("invited_email")
+            if invited_email:
+                payload["invitedEmail"] = invited_email
+            invited_by = extra.get("invited_by")
+            if invited_by is not None:
+                payload["invitedBy"] = invited_by.email or invited_by.username
+            return JsonResponse(payload)
+
+        return JsonResponse({
+            "ok": True,
+            "organization": {
+                "id": str(invite.org.id),
+                "name": invite.org.name,
+            },
+            "redirectUrl": _organization_app_path(invite.org.id),
+        })
 
 
 class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -8637,7 +5238,7 @@ class OrganizationInviteRejectView(OrganizationInviteValidationMixin, WaffleFlag
                 "invited_email": invite.email,
                 "invited_by": invite.invited_by,
             }, status=200)
-        return redirect("organizations")
+        return redirect(_organization_app_path())
 
     @tracer.start_as_current_span("CONSOLE Organization Invite Reject")
     @transaction.atomic
@@ -8674,13 +5275,13 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
         if not form.is_valid():
             for error in form.errors.get("seats", []):
                 messages.error(request, error)
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         billing = getattr(org, "billing", None)
         seat_count = form.cleaned_data["seats"]
         if seat_count <= 0:
             messages.error(request, "Please select at least one seat to purchase.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         stripe_settings = get_stripe_settings()
         seat_price_id = stripe_settings.org_team_price_id
@@ -8710,7 +5311,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                         request,
                         "We couldn't find a seat item on the active subscription. Please contact support.",
                     )
-                    return redirect("billing")
+                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
                 current_quantity = int(licensed_item.get("quantity") or 0)
                 if current_quantity < 0:
@@ -8723,8 +5324,8 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                     "requested": new_quantity,
                 }
 
-                return_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
-                cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
+                return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_success=1"
+                cancel_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_cancelled=1"
 
                 overage_detach_performed = _detach_org_overage_item(
                     subscription,
@@ -8854,7 +5455,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                             "We weren't able to update the seat count. Please try again or contact support.",
                         )
 
-                    return redirect("billing")
+                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
                 except Exception as portal_exc:
                     if overage_detach_performed:
                         reattached = _reattach_overage_from_session(request, str(org.id))
@@ -8877,22 +5478,22 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                     "We weren't able to start the checkout flow. Please try again or contact support.",
                 )
 
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         price_id = seat_price_id
         if not price_id:
             messages.error(request, "Stripe price not configured. Please contact support.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         try:
             _assign_stripe_api_key()
             customer = get_or_create_stripe_customer(org)
 
             success_url = request.build_absolute_uri(
-                reverse("billing")
+                f"{IMMERSIVE_APP_BASE_PATH}/billing"
             ) + "?seats_success=1"
             cancel_url = request.build_absolute_uri(
-                reverse("billing")
+                f"{IMMERSIVE_APP_BASE_PATH}/billing"
             ) + "?seats_cancelled=1"
 
             line_items = [
@@ -8949,7 +5550,7 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 request,
                 "We weren’t able to start the checkout flow. Please try again or contact support.",
             )
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -8976,12 +5577,12 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
         if not form.is_valid():
             for error in form.errors.get("future_seats", []):
                 messages.error(request, error)
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         billing = getattr(org, "billing", None)
         if not billing or not getattr(billing, "stripe_subscription_id", None):
             messages.error(request, "This organization does not have an active Stripe subscription yet.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         target_quantity = form.cleaned_data["future_seats"]
 
@@ -8990,7 +5591,7 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
 
         if not seat_price_id:
             messages.error(request, "Stripe seat price not configured. Please contact support.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         try:
             _assign_stripe_api_key()
@@ -9014,7 +5615,7 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                     request,
                     "We couldn't find a seat item on the active subscription. Please contact support.",
                 )
-                return redirect("billing")
+                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
             try:
                 current_quantity = int(licensed_item.get("quantity") or 0)
@@ -9023,14 +5624,14 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
 
             if current_quantity <= 0:
                 messages.error(request, "No seats are currently active to reduce.")
-                return redirect("billing")
+                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
             if target_quantity >= current_quantity:
                 messages.error(
                     request,
                     "Enter a number smaller than your current seat total to schedule a reduction.",
                 )
-                return redirect("billing")
+                return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
             existing_schedule_id = subscription.get("schedule") or getattr(billing, "pending_seat_schedule_id", "")
             if existing_schedule_id:
@@ -9047,7 +5648,7 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                         request,
                         "We weren't able to update the seat schedule. Please try again or contact support.",
                     )
-                    return redirect("billing")
+                    return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
                 billing.pending_seat_quantity = None
                 billing.pending_seat_effective_at = None
@@ -9186,7 +5787,7 @@ class OrganizationSeatScheduleView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 "We weren't able to schedule the seat reduction. Please try again or contact support.",
             )
 
-        return redirect("billing")
+        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9214,7 +5815,7 @@ class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagM
 
         if not billing or not schedule_id:
             messages.info(request, "No scheduled seat changes to cancel.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         try:
             _assign_stripe_api_key()
@@ -9230,7 +5831,7 @@ class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagM
                 request,
                 "We weren't able to cancel the scheduled seat change. Please try again or contact support.",
             )
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         billing.pending_seat_quantity = None
         billing.pending_seat_effective_at = None
@@ -9253,7 +5854,7 @@ class OrganizationSeatScheduleCancelView(StripeFeatureRequiredMixin, WaffleFlagM
             organization=org,
         )
         messages.success(request, "Scheduled seat changes were cancelled.")
-        return redirect("billing")
+        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9278,13 +5879,16 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
 
         billing = getattr(org, "billing", None)
         if not billing or not billing.stripe_customer_id:
+            detail = "This organization does not have an active Stripe subscription yet."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_customer_missing", "detail": detail}, status=400)
             messages.error(request, "This organization does not have an active Stripe subscription yet.")
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
         try:
             _assign_stripe_api_key()
 
-            return_url = request.build_absolute_uri(reverse("billing"))
+            return_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
             session = stripe.billing_portal.Session.create(
                 customer=billing.stripe_customer_id,
@@ -9292,14 +5896,19 @@ class OrganizationSeatPortalView(StripeFeatureRequiredMixin, WaffleFlagMixin, Lo
                 return_url=return_url,
             )
 
+            if _wants_json_response(request):
+                return JsonResponse({"ok": True, "redirectUrl": session.url})
             return redirect(session.url)
         except stripe.error.StripeError:
             logger.exception("Failed to create Stripe billing portal session for org %s", org.id)
+            detail = "We weren’t able to open the Stripe billing portal. Please try again or contact support."
+            if _wants_json_response(request):
+                return JsonResponse({"ok": False, "error": "stripe_error", "detail": detail}, status=400)
             messages.error(
                 request,
-                "We weren’t able to open the Stripe billing portal. Please try again or contact support.",
+                detail,
             )
-            return redirect("billing")
+            return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
 
 class _OrgPermissionMixin:
@@ -9377,7 +5986,7 @@ class OrganizationInviteRevokeOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                     properties=seat_props.copy(),
                 ))
             messages.success(request, "Invitation revoked.")
-        return redirect("organization_detail", org_id=org.id)
+        return redirect(_organization_app_path(org.id))
 
 
 class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9400,11 +6009,11 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
         invite = get_object_or_404(OrganizationInvite, org=org, token=token)
         if invite.accepted_at or invite.revoked_at or invite.expires_at < timezone.now():
             messages.error(request, "Cannot resend: invite is no longer valid.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect(_organization_app_path(org.id))
 
         try:
             accept_url = request.build_absolute_uri(
-                reverse("org_invite_accept", kwargs={"token": invite.token})
+                f"/app/organizations/invites/{invite.token}/accept"
             )
             reject_url = request.build_absolute_uri(
                 reverse("org_invite_reject", kwargs={"token": invite.token})
@@ -9447,7 +6056,7 @@ class OrganizationInviteResendOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             logger.warning("Failed resending org invite email: %s", e)
             messages.error(request, "Failed to resend invitation email.")
 
-        return redirect("organization_detail", org_id=org.id)
+        return redirect(_organization_app_path(org.id))
 
 
 class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9471,7 +6080,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
         # Prevent removing self via this action
         if request.user.id == user_id:
             messages.error(request, "You cannot remove yourself.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect(_organization_app_path(org.id))
 
         target_membership = get_object_or_404(
             OrganizationMembership,
@@ -9481,7 +6090,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
 
         if target_membership.status != OrganizationMembership.OrgStatus.ACTIVE:
             messages.info(request, "This member is already removed.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect(_organization_app_path(org.id))
 
         # Admins cannot remove owner-equivalent roles
         if (
@@ -9502,7 +6111,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
             ).count()
             if active_owner_count <= 1:
                 messages.error(request, "You must keep at least one owner in the organization.")
-                return redirect("organization_detail", org_id=org.id)
+                return redirect(_organization_app_path(org.id))
 
         target_membership.status = OrganizationMembership.OrgStatus.REMOVED
         target_membership.save(update_fields=["status"])
@@ -9539,7 +6148,7 @@ class OrganizationMemberRemoveOrgView(_OrgPermissionMixin, WaffleFlagMixin, Logi
                 properties=seat_props.copy(),
             ))
         messages.success(request, "Member removed.")
-        return redirect("organization_detail", org_id=org.id)
+        return redirect(_organization_app_path(org.id))
 
 
 class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9563,7 +6172,7 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
 
         if membership.status != OrganizationMembership.OrgStatus.ACTIVE:
             messages.info(request, "You are not an active member of this organization.")
-            return redirect("organizations")
+            return redirect(_organization_app_path())
 
         # Prevent leaving if this is the last remaining owner
         if membership.role == OrganizationMembership.OrgRole.OWNER:
@@ -9574,7 +6183,7 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
             ).count()
             if active_owner_count <= 1:
                 messages.error(request, "You are the last owner. Transfer ownership or add another owner before leaving.")
-                return redirect("organization_detail", org_id=org.id)
+                return redirect(_organization_app_path(org.id))
 
         membership.status = OrganizationMembership.OrgStatus.REMOVED
         membership.save(update_fields=["status"])
@@ -9616,7 +6225,7 @@ class OrganizationLeaveOrgView(WaffleFlagMixin, LoginRequiredMixin, View):
         request.session['context_name'] = request.user.get_full_name() or request.user.username
         request.session.modified = True
         messages.success(request, f"You left {org.name}.")
-        return redirect("organizations")
+        return redirect(_organization_app_path())
 
 
 class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, LoginRequiredMixin, View):
@@ -9652,7 +6261,7 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
         # No-op
         if target_membership.role == new_role:
             messages.info(request, "Role unchanged.")
-            return redirect("organization_detail", org_id=org.id)
+            return redirect(_organization_app_path(org.id))
 
         # Admins cannot modify owner-equivalent roles, nor assign them
         if acting_membership.role == OrganizationMembership.OrgRole.ADMIN:
@@ -9676,7 +6285,7 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
             ).count()
             if active_owner_count <= 1:
                 messages.error(request, "You must keep at least one owner in the organization.")
-                return redirect("organization_detail", org_id=org.id)
+                return redirect(_organization_app_path(org.id))
 
         previous_role = target_membership.role
         target_membership.role = new_role
@@ -9697,7 +6306,7 @@ class OrganizationMemberRoleUpdateOrgView(_OrgPermissionMixin, WaffleFlagMixin, 
             properties=role_props.copy(),
         ))
         messages.success(request, "Member role updated.")
-        return redirect("organization_detail", org_id=org.id)
+        return redirect(_organization_app_path(org.id))
 
 
 class AgentTransferInviteRespondView(LoginRequiredMixin, View):
@@ -9739,7 +6348,7 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
 
                 if original_owner_email:
                     try:
-                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent.id]))
+                        agent_url = request.build_absolute_uri(_agent_settings_app_path(agent))
                         context = {
                             'owner_name': original_owner.get_full_name() or original_owner_email,
                             'recipient_name': request.user.get_full_name() or request.user.email,
@@ -9769,7 +6378,7 @@ class AgentTransferInviteRespondView(LoginRequiredMixin, View):
 
                 if original_owner_email:
                     try:
-                        agent_url = request.build_absolute_uri(reverse('agent_detail', args=[agent_before.id]))
+                        agent_url = request.build_absolute_uri(_agent_settings_app_path(agent_before))
                         context = {
                             'owner_name': original_owner.get_full_name() or original_owner_email,
                             'recipient_name': request.user.get_full_name() or request.user.email,
@@ -9904,44 +6513,166 @@ class AgentAllowlistInviteRejectView(TemplateView):
         return redirect("agent_allowlist_invite_reject", token=token)
 
 
-class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
-    """Handle accepting an agent collaborator invitation."""
-    template_name = "console/agent_collaborator_invite_response.html"
+def _agent_collaborator_invite_app_path(token: str, action: str) -> str:
+    return f"{IMMERSIVE_APP_BASE_PATH}/agent-collaborator-invites/{token}/{action}"
 
+
+def _agent_collaborator_invite_agent_payload(invite: AgentCollaboratorInvite) -> dict[str, str]:
+    return {
+        "id": str(invite.agent_id),
+        "name": invite.agent.name,
+    }
+
+
+class AgentCollaboratorInviteValidationMixin:
     def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
         invite_email = (invite.email or "").strip().lower()
         if not invite_email:
             return False
         if (user.email or "").strip().lower() == invite_email:
             return True
+        from allauth.account.models import EmailAddress
+
+        return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
+
+    def _resolve_invite_or_issue(self, request, token: str):
         try:
-            from allauth.account.models import EmailAddress
-            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
-        except Exception:
-            return False
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        token = kwargs.get("token")
-
-        try:
-            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
-            context["invite"] = invite
-            context["agent"] = invite.agent
-
-            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
-                context["already_responded"] = True
-                context["status"] = invite.get_status_display()
-            elif invite.is_expired():
-                context["expired"] = True
-            elif not self._user_matches_invite(self.request.user, invite):
-                context["wrong_account"] = True
-            else:
-                context["can_accept"] = True
+            invite = AgentCollaboratorInvite.objects.select_related(
+                "agent",
+                "agent__user",
+                "agent__organization",
+                "invited_by",
+            ).get(token=token)
         except AgentCollaboratorInvite.DoesNotExist:
-            context["invalid_token"] = True
+            return None, "invalid", {}
 
-        return context
+        extra = {
+            "agent": invite.agent,
+            "invited_email": invite.email,
+            "invited_by": invite.invited_by,
+            "status": invite.get_status_display(),
+        }
+        if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
+            return invite, "already_responded", extra
+        if invite.is_expired():
+            return invite, "expired", extra
+        if not self._user_matches_invite(request.user, invite):
+            return invite, "wrong_account", extra
+        return invite, None, {}
+
+    def _issue_payload(self, issue: str, extra: dict, action: str) -> dict[str, object]:
+        payload: dict[str, object] = {
+            "ok": False,
+            "issue": issue,
+            "action": action,
+        }
+        agent = extra.get("agent")
+        if agent is not None:
+            payload["agent"] = {
+                "id": str(agent.id),
+                "name": agent.name,
+            }
+        invited_email = extra.get("invited_email")
+        if invited_email:
+            payload["invitedEmail"] = invited_email
+        invited_by = extra.get("invited_by")
+        if invited_by is not None:
+            payload["invitedBy"] = invited_by.email or invited_by.username
+        status = extra.get("status")
+        if status:
+            payload["status"] = status
+        return payload
+
+
+class AgentCollaboratorInviteAcceptAPIView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            return JsonResponse(self._issue_payload(issue, extra, "accept"))
+
+        try:
+            invite.accept(request.user)
+        except ValidationError as exc:
+            message_text = exc.messages[0] if getattr(exc, "messages", None) else "Unable to accept invitation."
+            return JsonResponse({
+                "ok": False,
+                "issue": "invalid",
+                "action": "accept",
+                "message": message_text,
+            })
+
+        accept_props = Analytics.with_org_properties(
+            {
+                'agent_id': str(invite.agent_id),
+                'agent_name': invite.agent.name,
+                'invite_id': str(invite.id),
+                'invite_email': invite.email,
+                'invited_by_id': str(invite.invited_by_id),
+                'collaborator_user_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+            },
+            organization=getattr(invite.agent, "organization", None),
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_ACCEPTED,
+            source=AnalyticsSource.WEB,
+            properties=accept_props.copy(),
+        ))
+        return JsonResponse({
+            "ok": True,
+            "action": "accept",
+            "agent": _agent_collaborator_invite_agent_payload(invite),
+            "redirectUrl": build_immersive_chat_url(
+                request,
+                invite.agent_id,
+                return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
+            ),
+        })
+
+
+class AgentCollaboratorInviteDeclineAPIView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request, token: str):
+        invite, issue, extra = self._resolve_invite_or_issue(request, token)
+        if issue:
+            return JsonResponse(self._issue_payload(issue, extra, "decline"))
+
+        invite.reject()
+        decline_props = Analytics.with_org_properties(
+            {
+                'agent_id': str(invite.agent_id),
+                'agent_name': invite.agent.name,
+                'invite_id': str(invite.id),
+                'invite_email': invite.email,
+                'invited_by_id': str(invite.invited_by_id),
+                'collaborator_user_id': str(request.user.id),
+                'actor_id': str(request.user.id),
+            },
+            organization=getattr(invite.agent, "organization", None),
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.AGENT_COLLABORATOR_INVITE_DECLINED,
+            source=AnalyticsSource.WEB,
+            properties=decline_props.copy(),
+        ))
+        return JsonResponse({
+            "ok": True,
+            "action": "decline",
+            "agent": _agent_collaborator_invite_agent_payload(invite),
+            "redirectUrl": f"{IMMERSIVE_APP_BASE_PATH}/agents",
+        })
+
+
+class AgentCollaboratorInviteAcceptView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return redirect(_agent_collaborator_invite_app_path(kwargs.get("token"), "accept"))
 
     def post(self, request, *args, **kwargs):
         token = kwargs.get("token")
@@ -9983,7 +6714,7 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
                 build_immersive_chat_url(
                     request,
                     invite.agent_id,
-                    return_to=reverse("agents"),
+                    return_to=f"{IMMERSIVE_APP_BASE_PATH}/agents",
                 )
             )
         except ValidationError as exc:
@@ -9995,45 +6726,9 @@ class AgentCollaboratorInviteAcceptView(LoginRequiredMixin, TemplateView):
         return redirect("agent_collaborator_invite_accept", token=token)
 
 
-class AgentCollaboratorInviteRejectView(LoginRequiredMixin, TemplateView):
-    """Handle rejecting an agent collaborator invitation."""
-    template_name = "console/agent_collaborator_invite_response.html"
-
-    def _user_matches_invite(self, user, invite: AgentCollaboratorInvite) -> bool:
-        invite_email = (invite.email or "").strip().lower()
-        if not invite_email:
-            return False
-        if (user.email or "").strip().lower() == invite_email:
-            return True
-        try:
-            from allauth.account.models import EmailAddress
-            return EmailAddress.objects.filter(user=user, email__iexact=invite_email).exists()
-        except Exception:
-            return False
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        token = kwargs.get("token")
-
-        try:
-            invite = AgentCollaboratorInvite.objects.select_related('agent__user').get(token=token)
-            context["invite"] = invite
-            context["agent"] = invite.agent
-            context["rejecting"] = True
-
-            if invite.status != AgentCollaboratorInvite.InviteStatus.PENDING:
-                context["already_responded"] = True
-                context["status"] = invite.get_status_display()
-            elif invite.is_expired():
-                context["expired"] = True
-            elif not self._user_matches_invite(self.request.user, invite):
-                context["wrong_account"] = True
-            else:
-                context["can_reject"] = True
-        except AgentCollaboratorInvite.DoesNotExist:
-            context["invalid_token"] = True
-
-        return context
+class AgentCollaboratorInviteRejectView(AgentCollaboratorInviteValidationMixin, LoginRequiredMixin, View):
+    def get(self, request, *args, **kwargs):
+        return redirect(_agent_collaborator_invite_app_path(kwargs.get("token"), "decline"))
 
     def post(self, request, *args, **kwargs):
         token = kwargs.get("token")
@@ -10084,10 +6779,10 @@ def _resolve_billing_owner(request):
         membership = resolved.current_membership
         if membership is None:
             messages.error(request, "You no longer have access to manage this organization.")
-            return redirect('billing')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
         if membership.role not in BILLING_MANAGE_ROLES:
             messages.error(request, "You do not have permission to modify billing settings for this organization.")
-            return redirect('billing')
+            return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
         return membership.org, "organization"
 
     return request.user, "user"
@@ -10217,7 +6912,7 @@ def _update_addon_quantity(
 ):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect("billing")
+        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
     form = AddonQuantityForm(request.POST, label=form_label)
     if not form.is_valid():
@@ -10387,7 +7082,7 @@ def update_addons(request, owner, owner_type):
 
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect("billing")
+        return redirect(f"{IMMERSIVE_APP_BASE_PATH}/billing")
 
     desired_quantities: dict[str, int] = {}
     for key, value in request.POST.items():
@@ -10448,7 +7143,7 @@ def update_addons(request, owner, owner_type):
 def add_dedicated_ip_quantity(request, owner, owner_type):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
+        return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
     owner_plan_id = None
     if owner_type == "user":
@@ -10506,7 +7201,7 @@ def add_dedicated_ip_quantity(request, owner, owner_type):
 def remove_dedicated_ip(request, owner, owner_type):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
+        return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
     proxy_id = request.POST.get("proxy_id")
     if not proxy_id:
@@ -10547,7 +7242,7 @@ def remove_dedicated_ip(request, owner, owner_type):
 def remove_all_dedicated_ip(request, owner, owner_type):
     if not stripe_status().enabled:
         messages.error(request, "Stripe billing is not available in this deployment.")
-        return redirect('billing')
+        return redirect(f'{IMMERSIVE_APP_BASE_PATH}/billing')
 
     from console.billing_update_service import (
         BillingUpdateError,
@@ -10583,9 +7278,9 @@ def remove_all_dedicated_ip(request, owner, owner_type):
 
 
 def _billing_redirect(owner, owner_type: str) -> str:
-    url = reverse('billing')
+    url = f"{IMMERSIVE_APP_BASE_PATH}/billing"
     if owner_type == "organization" and owner is not None:
-        return f"{url}?org_id={owner.id}"
+        return append_context_query(url, str(owner.id))
     return url
 
 

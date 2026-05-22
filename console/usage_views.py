@@ -500,6 +500,12 @@ class UsageSummaryAPIView(LoginRequiredMixin, View):
             },
         }
 
+        if organization is not None:
+            billing = getattr(organization, "billing", None)
+            payload["billing"] = {
+                "purchasedSeats": int(getattr(billing, "purchased_seats", 0) or 0),
+            }
+
         return JsonResponse(payload)
 
 

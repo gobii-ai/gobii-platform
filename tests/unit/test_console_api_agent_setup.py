@@ -225,7 +225,7 @@ class AgentSetupApiTests(TestCase):
         self.assertEqual(metadata["monthUsage"]["used"], 25.0)
         self.assertEqual(metadata["monthUsage"]["limit"], 100.0)
         self.assertEqual(metadata["monthUsage"]["percentUsed"], 25.0)
-        self.assertEqual(metadata["usageUrl"], reverse("usage"))
+        self.assertEqual(metadata["usageUrl"], "/app/usage")
 
     @patch("console.insight_views.get_agent_daily_credit_state")
     def test_insights_usage_metadata_handles_unlimited_daily_credits(self, mock_daily_state):

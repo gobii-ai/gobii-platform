@@ -385,7 +385,7 @@ export const AgentComposer = memo(function AgentComposer({
   isInsightsPaused = false,
   onOpenUsage,
   onOpenQuickSettings,
-  usageUrl = '/console/usage/',
+  usageUrl = '/app/usage',
   hideInsightsPanel = false,
   intelligenceConfig = null,
   intelligenceTier = null,

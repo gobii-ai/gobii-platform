@@ -31,6 +31,7 @@ from console.api_helpers import (
     _coerce_bool,
     _parse_json_body,
 )
+from util.urls import IMMERSIVE_APP_BASE_PATH
 from console.email_settings.constants import EMAIL_OAUTH_PROVIDER_DEFAULTS
 from console.agent_chat.access import resolve_manageable_agent_for_request
 from console.forms import AgentEmailAccountConsoleForm
@@ -584,7 +585,7 @@ def _serialize_agent_email_settings(
         "agent": {
             "id": str(agent.pk),
             "name": agent.name,
-            "backUrl": reverse("agent_detail", args=[agent.pk]),
+            "backUrl": f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent.pk}/settings",
             "helpUrl": "https://docs.gobii.ai/advanced-usage/custom-email-settings",
         },
         "providerDefaults": EMAIL_OAUTH_PROVIDER_DEFAULTS,

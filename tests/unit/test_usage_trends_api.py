@@ -813,6 +813,7 @@ class UsageSummaryAPITests(TestCase):
         self.assertEqual(payload["period"]["start"], period_start.isoformat())
         self.assertEqual(payload["period"]["end"], period_end.isoformat())
         self.assertEqual(payload["period"]["resetOn"], (period_end + timedelta(days=1)).isoformat())
+        self.assertEqual(payload["billing"]["purchasedSeats"], 1)
         self.assertAlmostEqual(payload["metrics"]["quota"]["total"], 25.0)
         self.assertAlmostEqual(payload["metrics"]["quota"]["available"], 25.0)
 

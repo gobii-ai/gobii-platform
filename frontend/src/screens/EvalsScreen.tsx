@@ -37,7 +37,7 @@ export function EvalsScreen() {
   const [scenarios, setScenarios] = useState<EvalScenario[]>([])
   const [suiteRuns, setSuiteRuns] = useState<EvalSuiteRun[]>([])
   const [globalSkills, setGlobalSkills] = useState<GlobalSkillEvalSkill[]>([])
-  const [globalSecretsUrl, setGlobalSecretsUrl] = useState<string>('/console/secrets/')
+  const [globalSecretsUrl, setGlobalSecretsUrl] = useState<string>('/app/secrets')
   const [rubricVersion, setRubricVersion] = useState<string>('v1')
   const [selectedSuites, setSelectedSuites] = useState<Set<string>>(new Set())
   const [selectedGlobalSkillId, setSelectedGlobalSkillId] = useState<string>('')

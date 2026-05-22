@@ -3707,7 +3707,7 @@ def handle_subscription_event(event, **kwargs):
                     }
                     cancel_properties = {k: v for k, v in cancel_properties.items() if v is not None}
                     cancel_context = dict(marketing_context)
-                    cancel_context["page"] = {"url": f"{settings.PUBLIC_SITE_URL.rstrip('/')}/console/billing/"}
+                    cancel_context["page"] = {"url": f"{settings.PUBLIC_SITE_URL.rstrip('/')}/app/billing"}
                     capi(
                         user=owner,
                         event_name="CancelSubscription",

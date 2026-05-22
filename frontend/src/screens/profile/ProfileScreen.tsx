@@ -27,7 +27,6 @@ import type { UserProfileFormState, UserProfilePayload } from '../../api/userPro
 
 type ProfileScreenProps = {
   initialData: UserProfilePayload
-  variant?: 'standalone' | 'embedded'
 }
 
 type ProfileFieldErrors = Partial<Record<keyof UserProfileFormState | 'profile' | 'nonFieldErrors', string[]>>
@@ -298,7 +297,7 @@ function PhoneSection({
   )
 }
 
-export function ProfileScreen({ initialData, variant = 'standalone' }: ProfileScreenProps) {
+export function ProfileScreen({ initialData }: ProfileScreenProps) {
   const [data, setData] = useState(initialData)
   const [draft, setDraft] = useState<UserProfileFormState>(initialData.profile)
   const [errors, setErrors] = useState<ProfileFieldErrors>({})
@@ -307,7 +306,6 @@ export function ProfileScreen({ initialData, variant = 'standalone' }: ProfileSc
   const [saving, setSaving] = useState(false)
   const [copyMessage, setCopyMessage] = useState<string | null>(null)
   const referralInputRef = useRef<HTMLInputElement | null>(null)
-  const isEmbedded = variant === 'embedded'
   const isDirty = useMemo(() => (
     draft.firstName !== data.profile.firstName
     || draft.lastName !== data.profile.lastName
@@ -360,7 +358,7 @@ export function ProfileScreen({ initialData, variant = 'standalone' }: ProfileSc
   }, [data.referralLink])
 
   return (
-    <div className={isEmbedded ? 'profile-screen profile-screen--embedded' : 'profile-screen'}>
+    <div className="profile-screen profile-screen--embedded">
       <header className="profile-screen__header">
         <div className="profile-screen__title-icon" aria-hidden="true">
           <User className="h-5 w-5" />

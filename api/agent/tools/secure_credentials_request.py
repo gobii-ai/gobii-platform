@@ -10,7 +10,6 @@ import logging
 from django.contrib.sites.models import Site
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
-from django.urls import reverse
 from ...models import PersistentAgent, PersistentAgentSecret
 from ...services.sandbox_compute import sandbox_compute_enabled_for_agent
 from ...domain_validation import DomainPatternValidator
@@ -259,13 +258,13 @@ def execute_secure_credentials_request(agent: PersistentAgent, params: dict) -> 
         current_site = Site.objects.get_current()
         # Use HTTPS as the default protocol based on project configuration
         protocol = 'https://'
-        relative_url = reverse('agent_secrets_request', kwargs={'pk': agent.id})
+        relative_url = f"/app/agents/{agent.id}/secrets/request"
         credentials_url = f"{protocol}{current_site.domain}{relative_url}"
 
-        relative_secret_url = reverse('agent_secrets', kwargs={'pk': agent.id})
+        relative_secret_url = f"/app/agents/{agent.id}/secrets"
         secrets_url = f"{protocol}{current_site.domain}{relative_secret_url}"
-    except Exception as e:
-        logger.warning("Failed to generate credentials URL for agent %s: %s", agent.id, str(e))
+    except Site.DoesNotExist as exc:
+        logger.warning("Failed to generate credentials URL for agent %s: %s", agent.id, str(exc))
         credentials_url = "the agent console"
         secrets_url = ""
     

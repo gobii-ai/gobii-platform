@@ -141,6 +141,7 @@ class AgentAvatarThumbnailTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_live_chat_payloads_use_thumbnail_urls(self):
         self._save_avatar()
 
@@ -155,5 +156,5 @@ class AgentAvatarThumbnailTests(TestCase):
         self.assertIn("/avatar/thumb/", timeline_response.json()["agent_avatar_url"])
 
         shell_response = self.client.get(reverse("agent_chat_shell", kwargs={"pk": self.agent.id}))
-        self.assertEqual(shell_response.status_code, 200)
-        self.assertContains(shell_response, "/avatar/thumb/")
+        self.assertEqual(shell_response.status_code, 302)
+        self.assertEqual(shell_response.url, f"/app/agents/{self.agent.id}")

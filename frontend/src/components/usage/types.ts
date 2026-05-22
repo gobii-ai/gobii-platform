@@ -19,6 +19,9 @@ export type UsageSummaryResponse = {
     id: string
     name: string
   }
+  billing?: {
+    purchasedSeats: number
+  }
   metrics: {
     tasks: {
       count: number

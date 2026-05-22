@@ -95,7 +95,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertIn(sender, mail.outbox[0].to)
         self.assertIn(self.owner.email, mail.outbox[0].to)
-        self.assertIn("/console/billing/", mail.outbox[0].body)
+        self.assertIn("/app/billing", mail.outbox[0].body)
         mock_delay.assert_not_called()
 
     @tag("batch_email")
@@ -223,7 +223,7 @@ class InboundOutOfCreditsReplyTests(PauseOwnerMixin, TestCase):
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(set(mail.outbox[0].to), {member.email, self.owner.email})
         self.assertNotIn(agent_creator.email, mail.outbox[0].to)
-        self.assertIn("/console/billing/?context_type=organization", mail.outbox[0].body)
+        self.assertIn("/app/billing?context_type=organization", mail.outbox[0].body)
         self.assertIn(str(org.id), mail.outbox[0].body)
         mock_delay.assert_not_called()
         mock_calc.assert_called_once()

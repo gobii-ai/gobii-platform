@@ -307,7 +307,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
             return <span className="text-sm text-slate-500">—</span>
           }
 
-          const configureHref = embedded ? `/app/agents/${persistentId}` : `/console/agents/${persistentId}/`
+          const configureHref = `/app/agents/${persistentId}`
 
           return (
             <a href={configureHref} className={embedded ? 'text-sm font-semibold text-sky-300 hover:text-sky-200' : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}>
@@ -330,7 +330,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   })
 
   const sectionClassName = embedded
-    ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
+    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
     : 'gobii-card-base'
   const headerClassName = embedded ? 'px-6 py-4' : 'border-b border-white/50 px-6 py-4'
   const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-slate-900'

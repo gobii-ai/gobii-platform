@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import { Check, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
+import { Check, CreditCard, EllipsisVertical, ListTodo, Mail, MessageSquare, Settings, Share2, Stethoscope, UserPlus, X, Zap } from 'lucide-react'
 import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
@@ -34,6 +34,8 @@ type AgentChatBannerProps = {
   onPlanHoverChange?: (hovered: boolean) => void
   processingActive?: boolean
   dailyCreditsStatus?: DailyCreditsStatus | null
+  showPurchaseSeatsButton?: boolean
+  onPurchaseSeats?: () => void
   onSettingsOpen?: () => void
   settingsDisabled?: boolean
   settingsDisabledReason?: string | null
@@ -83,6 +85,8 @@ export const AgentChatBanner = memo(function AgentChatBanner({
   onPlanHoverChange,
   processingActive = false,
   dailyCreditsStatus,
+  showPurchaseSeatsButton = false,
+  onPurchaseSeats,
   onSettingsOpen,
   settingsDisabled = false,
   settingsDisabledReason = null,
@@ -113,10 +117,12 @@ export const AgentChatBanner = memo(function AgentChatBanner({
     ensureAuthenticated,
   } = useSubscriptionStore()
   const canShowBannerActions = canManageAgent !== false && !isCollaborator
+  const showPurchaseSeatsCta = canShowBannerActions && showPurchaseSeatsButton && Boolean(onPurchaseSeats)
 
   // Determine if we should show upgrade button and what it should say
   // Only show in proprietary mode, and not for org-owned agents (billing is handled at org level)
   const showUpgradeButton = canShowBannerActions
+    && !showPurchaseSeatsCta
     && isProprietaryMode
     && !isOrgOwned
     && (currentPlan === 'free' || currentPlan === 'startup')
@@ -293,6 +299,18 @@ export const AgentChatBanner = memo(function AgentChatBanner({
 
         {/* Right: Upgrade button + Close button */}
         <div className="banner-right">
+          {showPurchaseSeatsCta ? (
+            <button
+              type="button"
+              className="banner-upgrade"
+              onClick={onPurchaseSeats}
+              aria-label="Purchase Seats"
+              title="Purchase Seats"
+            >
+              <CreditCard size={14} strokeWidth={2} />
+              <span>Purchase Seats</span>
+            </button>
+          ) : null}
           {showUpgradeButton && (
             <button
               type="button"

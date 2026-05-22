@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { BarChart3, Check, ChevronDown, CreditCard, KeyRound, LayoutGrid, ServerCog, UserRound, type LucideIcon } from 'lucide-react'
+import { BarChart3, Building2, Check, ChevronDown, CreditCard, KeyRound, LayoutGrid, ServerCog, UserRound, type LucideIcon } from 'lucide-react'
 import {
   Button,
   Dialog,
@@ -11,15 +11,17 @@ import {
   type Selection,
 } from 'react-aria-components'
 
-export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'secrets' | 'usage' | 'integrations'
+export type SelectionShellPage = 'agents' | 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'
 
 export const SELECTION_SHELL_PAGE_LABELS: Record<SelectionShellPage, string> = {
   agents: 'My Agents',
   billing: 'Billing',
   profile: 'Profile',
+  organization: 'Organization',
   secrets: 'Secrets',
   usage: 'Usage',
   integrations: 'Integrations',
+  'api-keys': 'API Keys',
 }
 
 type SelectionPageOption = {
@@ -32,22 +34,30 @@ const PAGE_OPTIONS: SelectionPageOption[] = [
   { key: 'agents', label: SELECTION_SHELL_PAGE_LABELS.agents, icon: LayoutGrid },
   { key: 'billing', label: SELECTION_SHELL_PAGE_LABELS.billing, icon: CreditCard },
   { key: 'profile', label: SELECTION_SHELL_PAGE_LABELS.profile, icon: UserRound },
+  { key: 'organization', label: SELECTION_SHELL_PAGE_LABELS.organization, icon: Building2 },
   { key: 'secrets', label: SELECTION_SHELL_PAGE_LABELS.secrets, icon: KeyRound },
   { key: 'usage', label: SELECTION_SHELL_PAGE_LABELS.usage, icon: BarChart3 },
   { key: 'integrations', label: SELECTION_SHELL_PAGE_LABELS.integrations, icon: ServerCog },
+  { key: 'api-keys', label: SELECTION_SHELL_PAGE_LABELS['api-keys'], icon: KeyRound },
 ]
 
 type SelectionShellPageSwitcherProps = {
   currentPage: SelectionShellPage
   onSelectPage: (page: SelectionShellPage) => void
+  showOrganization?: boolean
 }
 
 export function SelectionShellPageSwitcher({
   currentPage,
   onSelectPage,
+  showOrganization = true,
 }: SelectionShellPageSwitcherProps) {
   const [open, setOpen] = useState(false)
   const selectedKeys = useMemo(() => new Set<Key>([currentPage]), [currentPage])
+  const pageOptions = useMemo(
+    () => PAGE_OPTIONS.filter((option) => showOrganization || option.key !== 'organization'),
+    [showOrganization],
+  )
 
   const handleSelectionChange = useCallback(
     (keys: Selection) => {
@@ -64,7 +74,7 @@ export function SelectionShellPageSwitcher({
       if (!resolvedKey) {
         return
       }
-      const nextPage = PAGE_OPTIONS.find((option) => option.key === resolvedKey)?.key
+      const nextPage = pageOptions.find((option) => option.key === resolvedKey)?.key
       if (!nextPage) {
         return
       }
@@ -73,7 +83,7 @@ export function SelectionShellPageSwitcher({
         onSelectPage(nextPage)
       }
     },
-    [currentPage, onSelectPage],
+    [currentPage, onSelectPage, pageOptions],
   )
 
   return (
@@ -99,7 +109,7 @@ export function SelectionShellPageSwitcher({
             onSelectionChange={(keys) => handleSelectionChange(keys as Selection)}
             className="selection-shell-switcher__list"
           >
-            {PAGE_OPTIONS.map((option) => {
+            {pageOptions.map((option) => {
               const Icon = option.icon
               return (
                 <ListBoxItem

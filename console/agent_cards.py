@@ -9,7 +9,7 @@ from django.utils import timezone
 from api.agent.short_description import build_listing_description, build_mini_description
 from api.models import AgentTransferInvite, PersistentAgent, PersistentAgentStep
 from api.services.daily_credit_settings import get_daily_credit_settings_for_owner
-from util.urls import build_immersive_chat_url
+from util.urls import IMMERSIVE_APP_BASE_PATH, build_immersive_chat_url
 
 
 def _clamp_color(value: int) -> int:
@@ -246,7 +246,7 @@ def serialize_agent_card_payload(
     remaining = _coerce_decimal_to_float(getattr(agent, "daily_credit_remaining", None))
     recent_burn = _coerce_decimal_to_float(getattr(agent, "daily_credit_last_24h_usage", None))
     chat_url = build_immersive_chat_url(request, agent.id, return_to=request.get_full_path())
-    detail_url = reverse("agent_detail", kwargs={"pk": agent.id})
+    detail_url = f"{IMMERSIVE_APP_BASE_PATH}/agents/{agent.id}/settings"
     if is_shared:
         detail_url = chat_url
     avatar_url = agent.get_avatar_thumbnail_url() if avatar_variant == "thumbnail" else agent.get_avatar_url()

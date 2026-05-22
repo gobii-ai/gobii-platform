@@ -1,14 +1,36 @@
 import json
 from django.core.exceptions import PermissionDenied
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.utils.text import slugify
 from waffle import flag_is_active
 
-from api.models import OrganizationMembership
+from api.models import Organization, OrganizationMembership
+from console.forms import OrganizationForm
 from console.agent_context import resolve_context_override_for_agent
 from console.context_helpers import build_console_context, resolve_console_context
 from console.context_overrides import get_context_override
+from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
+
+
+def _unique_organization_slug(name: str) -> str:
+    base_slug = slugify(name) or "organization"
+    slug = base_slug
+    suffix = 2
+    while Organization.objects.filter(slug=slug).exists():
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    return slug
+
+
+def _serialize_context(context_type: str, context_id: str, context_name: str) -> dict:
+    return {
+        "type": context_type,
+        "id": str(context_id),
+        "name": context_name,
+    }
 
 
 class SwitchContextView(LoginRequiredMixin, View):
@@ -132,11 +154,7 @@ class SwitchContextView(LoginRequiredMixin, View):
             
             return JsonResponse({
                 'success': True,
-                'context': {
-                    'type': context_type,
-                    'id': str(context_id),
-                    'name': context_name
-                }
+                'context': _serialize_context(context_type, str(context_id), context_name),
             })
             
         except Exception as e:
@@ -144,3 +162,91 @@ class SwitchContextView(LoginRequiredMixin, View):
             # import logging
             # logging.exception("Error switching context")
             return JsonResponse({'error': 'An unexpected error occurred.'}, status=500)
+
+
+class OrganizationCreateAPIView(LoginRequiredMixin, View):
+    """Create an organization from the live chat context picker."""
+
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request):
+        if not flag_is_active(request, "organizations"):
+            return JsonResponse({"error": "Organizations are not available."}, status=404)
+
+        try:
+            payload = json.loads(request.body or "{}")
+        except json.JSONDecodeError:
+            return JsonResponse({"errors": {"__all__": ["Invalid JSON body."]}}, status=400)
+        if not isinstance(payload, dict):
+            return JsonResponse({"errors": {"__all__": ["JSON object expected."]}}, status=400)
+
+        form = OrganizationForm(data={"name": payload.get("name", "")})
+        if not form.is_valid():
+            return JsonResponse(
+                {
+                    "errors": {
+                        field: [str(message) for message in messages]
+                        for field, messages in form.errors.items()
+                    },
+                },
+                status=400,
+            )
+
+        org = form.save(commit=False)
+        org.slug = _unique_organization_slug(org.name)
+        org.created_by = request.user
+        try:
+            org.save()
+        except IntegrityError:
+            return JsonResponse(
+                {"errors": {"name": ["Unable to create an organization with that name."]}},
+                status=400,
+            )
+
+        owner_membership = OrganizationMembership.objects.create(
+            org=org,
+            user=request.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+        )
+
+        request.session["context_type"] = "organization"
+        request.session["context_id"] = str(org.id)
+        request.session["context_name"] = org.name
+
+        created_props = Analytics.with_org_properties(
+            {"organization_slug": org.slug},
+            organization=org,
+        )
+        member_props = Analytics.with_org_properties(
+            {
+                "member_id": str(request.user.id),
+                "member_role": owner_membership.role,
+                "actor_id": str(request.user.id),
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_CREATED,
+            source=AnalyticsSource.WEB,
+            properties=created_props.copy(),
+        ))
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_MEMBER_ADDED,
+            source=AnalyticsSource.WEB,
+            properties=member_props.copy(),
+        ))
+
+        return JsonResponse(
+            {
+                "organization": {
+                    "id": str(org.id),
+                    "name": org.name,
+                    "role": owner_membership.get_role_display(),
+                },
+                "context": _serialize_context("organization", str(org.id), org.name),
+            },
+            status=201,
+        )

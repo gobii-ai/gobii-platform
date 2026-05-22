@@ -6,7 +6,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.contrib.auth import get_user_model
 from django.http import QueryDict
 from django.test import RequestFactory
-from django.test import TestCase, tag
+from django.test import TestCase, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.datastructures import MultiValueDict
@@ -22,7 +22,7 @@ from api.models import (
     ProxyServer,
 )
 from api.webhooks import _parse_inbound_agent_webhook_request
-from console.views import AgentDetailView
+from console.views import AgentSettingsController
 from util.analytics import AnalyticsEvent
 
 
@@ -200,6 +200,7 @@ class AgentWebhookToolTests(TestCase):
         self.assertIn("Webhook not found", result.get("message", ""))
 
 
+@override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
 class AgentWebhookConsoleViewTests(TestCase):
     @classmethod
     def setUpTestData(cls):
@@ -227,7 +228,7 @@ class AgentWebhookConsoleViewTests(TestCase):
     @tag("batch_agent_webhooks")
     def test_console_creates_webhook(self):
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "webhook_action": "create",
                 "webhook_name": "CI Hook",
@@ -247,7 +248,7 @@ class AgentWebhookConsoleViewTests(TestCase):
             url="https://example.com/old",
         )
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "webhook_action": "update",
                 "webhook_id": str(webhook.id),
@@ -268,7 +269,7 @@ class AgentWebhookConsoleViewTests(TestCase):
             url="https://example.com/delete",
         )
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "webhook_action": "delete",
                 "webhook_id": str(webhook.id),
@@ -282,7 +283,7 @@ class AgentWebhookConsoleViewTests(TestCase):
     @tag("batch_agent_webhooks")
     def test_console_creates_inbound_webhook(self):
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "inbound_webhook_action": "create",
                 "inbound_webhook_name": "Build Trigger",
@@ -302,7 +303,7 @@ class AgentWebhookConsoleViewTests(TestCase):
             is_active=True,
         )
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "inbound_webhook_action": "update",
                 "inbound_webhook_id": str(webhook.id),
@@ -323,7 +324,7 @@ class AgentWebhookConsoleViewTests(TestCase):
         )
         old_secret = webhook.secret
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "inbound_webhook_action": "rotate_secret",
                 "inbound_webhook_id": str(webhook.id),
@@ -340,7 +341,7 @@ class AgentWebhookConsoleViewTests(TestCase):
             name="Inbound Delete",
         )
         response = self.client.post(
-            reverse("agent_detail", args=[self.agent_id]),
+            reverse("console_agent_settings", args=[self.agent_id]),
             {
                 "inbound_webhook_action": "delete",
                 "inbound_webhook_id": str(webhook.id),
@@ -354,7 +355,7 @@ class AgentWebhookConsoleViewTests(TestCase):
     @tag("batch_agent_webhooks")
     @patch("console.views.Analytics.track_event")
     def test_inbound_webhook_actions_emit_analytics(self, mock_track_event):
-        view = AgentDetailView()
+        view = AgentSettingsController()
 
         create_request = self.factory.post(
             "/console/agents/test/",

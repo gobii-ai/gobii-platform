@@ -7,12 +7,13 @@ import {
   useState,
   type CSSProperties,
   type Dispatch,
+  type FormEvent,
   type MutableRefObject,
   type ReactNode,
   type SetStateAction,
 } from 'react'
 import { useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { AlertTriangle, Plus } from 'lucide-react'
+import { AlertTriangle, Building2, Plus } from 'lucide-react'
 import noiseDarkTextureUrl from '../assets/textures/noise-dark.png'
 
 import { createAgent, updateAgent } from '../api/agents'
@@ -47,11 +48,13 @@ import { AgentChatLayout } from '../components/agentChat/AgentChatLayout'
 import { EmbeddedAgentContactRequestsPanel } from '../components/agentChat/EmbeddedAgentContactRequestsPanel'
 import { EmbeddedAgentEmailSettingsPanel } from '../components/agentChat/EmbeddedAgentEmailSettingsPanel'
 import { EmbeddedAgentFilesPanel } from '../components/agentChat/EmbeddedAgentFilesPanel'
+import { EmbeddedAgentSecretRequestsPanel } from '../components/agentChat/EmbeddedAgentSecretRequestsPanel'
 import { EmbeddedAgentSettingsPanel } from '../components/agentChat/EmbeddedAgentSettingsPanel'
 import { EmbeddedAgentSecretsPanel } from '../components/agentChat/EmbeddedAgentSecretsPanel'
 import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelligenceGateModal'
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
+import { Modal } from '../components/common/Modal'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -920,7 +923,9 @@ export type AgentChatPageProps = {
   onSelectionPageChange?: (page: SelectionShellPage) => void
   onOpenBilling?: () => void
   onOpenUsage?: () => void
+  onOpenApiKeys?: () => void
   onOpenProfile?: () => void
+  onOpenOrganization?: () => void
   onOpenSecrets?: () => void
   onOpenIntegrations?: () => void
 }
@@ -971,7 +976,9 @@ export function AgentChatPage({
   onSelectionPageChange,
   onOpenBilling,
   onOpenUsage,
+  onOpenApiKeys,
   onOpenProfile,
+  onOpenOrganization,
   onOpenSecrets,
   onOpenIntegrations,
 }: AgentChatPageProps) {
@@ -1054,6 +1061,7 @@ export function AgentChatPage({
     isSwitching: contextSwitching,
     error: contextError,
     switchContext,
+    createOrganizationContext,
   } = useConsoleContextSwitcher({
     enabled: true,
     forAgentId: contextLookupAgentId,
@@ -1062,6 +1070,10 @@ export function AgentChatPage({
   })
 
   const [switchingAgentId, setSwitchingAgentId] = useState<string | null>(null)
+  const [createOrganizationOpen, setCreateOrganizationOpen] = useState(false)
+  const [createOrganizationName, setCreateOrganizationName] = useState('')
+  const [createOrganizationBusy, setCreateOrganizationBusy] = useState(false)
+  const [createOrganizationErrors, setCreateOrganizationErrors] = useState<string[]>([])
   const [selectionSidebarMode, setSelectionSidebarMode] = useState(() => (
     agentId === undefined
       ? (selectionPage === 'agents' ? (readSelectionSidebarModePreference() ?? 'gallery') : 'gallery')
@@ -2638,7 +2650,7 @@ export function AgentChatPage({
     if (!showContextSwitcher) {
       return null
     }
-    if (!contextData || !contextData.organizationsEnabled || contextData.organizations.length === 0) {
+    if (!contextData) {
       return null
     }
     return {
@@ -2646,10 +2658,49 @@ export function AgentChatPage({
       personal: contextData.personal,
       organizations: contextData.organizations,
       onSwitch: switchContext,
+      onCreateOrganization: () => {
+        setCreateOrganizationName('')
+        setCreateOrganizationErrors([])
+        setCreateOrganizationOpen(true)
+      },
       isBusy: contextSwitching,
       errorMessage: contextError,
     }
   }, [contextData, contextError, contextSwitching, showContextSwitcher, switchContext])
+
+  const handleCreateOrganizationSubmit = useCallback(async (event: FormEvent) => {
+    event.preventDefault()
+    const name = createOrganizationName.trim()
+    if (!name) {
+      setCreateOrganizationErrors(['Organization name is required.'])
+      return
+    }
+    setCreateOrganizationBusy(true)
+    setCreateOrganizationErrors([])
+    try {
+      await createOrganizationContext(name)
+      setCreateOrganizationOpen(false)
+      setCreateOrganizationName('')
+    } catch (error) {
+      if (error instanceof HttpError && typeof error.body === 'object' && error.body) {
+        const body = error.body as Record<string, unknown>
+        if (body.errors && typeof body.errors === 'object') {
+          const messages = Object.values(body.errors as Record<string, unknown>).flatMap((value) => (
+            Array.isArray(value) ? value.map(String) : [String(value)]
+          ))
+          setCreateOrganizationErrors(messages)
+        } else if (body.error) {
+          setCreateOrganizationErrors([String(body.error)])
+        } else {
+          setCreateOrganizationErrors([error.statusText])
+        }
+      } else {
+        setCreateOrganizationErrors([safeErrorMessage(error) || 'Unable to create organization.'])
+      }
+    } finally {
+      setCreateOrganizationBusy(false)
+    }
+  }, [createOrganizationContext, createOrganizationName])
   const connectionIndicator = useMemo(
     () => {
       // For new agent, show ready state since there's no socket/session yet
@@ -2895,7 +2946,7 @@ export function AgentChatPage({
       listingDescription: '',
       listingDescriptionSource: null,
       displayTags: [],
-      detailUrl: `/console/agents/${activeAgentId}/`,
+      detailUrl: `/app/agents/${activeAgentId}/settings`,
       cardGradientStyle: '',
       iconBackgroundHex: '',
       iconBorderHex: '',
@@ -2980,7 +3031,7 @@ export function AgentChatPage({
       return collaboratorInviteUrl
     }
     if (activeAgentId) {
-      return `/console/agents/${activeAgentId}/`
+      return `/console/api/agents/${activeAgentId}/settings/`
     }
     return null
   }, [collaboratorInviteUrl, activeAgentId])
@@ -3171,6 +3222,10 @@ export function AgentChatPage({
     navigateToShellSubview('secrets')
   }, [navigateToShellSubview])
 
+  const handleOpenEmbeddedSecretRequests = useCallback(() => {
+    navigateToShellSubview('secret-requests')
+  }, [navigateToShellSubview])
+
   const handleOpenEmbeddedEmailSettings = useCallback(() => {
     navigateToShellSubview('email')
   }, [navigateToShellSubview])
@@ -3284,7 +3339,7 @@ export function AgentChatPage({
     let returnToPath: string | undefined
     if (requiresTrialPlanSelection) {
       returnToPath = onboardingTarget === 'api_keys'
-        ? '/console/api-keys/'
+        ? '/app/api-keys'
         : '/console/agents/create/quick/'
     }
     const checkoutUrl = appendReturnTo(checkoutPath, returnToPath)
@@ -3343,7 +3398,7 @@ export function AgentChatPage({
           listingDescription: '',
           listingDescriptionSource: null,
           displayTags: [],
-          detailUrl: `/console/agents/${result.agent_id}/`,
+          detailUrl: `/app/agents/${result.agent_id}/settings`,
           cardGradientStyle: '',
           iconBackgroundHex: '',
           iconBorderHex: '',
@@ -3742,11 +3797,16 @@ export function AgentChatPage({
   })
   const taskQuota = usageSummary?.metrics.quota ?? null
   const extraTasksEnabled = Boolean(usageSummary?.extra_tasks?.enabled)
+  const organizationPurchasedSeats = usageSummary?.context?.type === 'organization'
+    ? usageSummary.billing?.purchasedSeats
+    : undefined
+  const organizationHasNoPurchasedSeats = organizationPurchasedSeats !== undefined && organizationPurchasedSeats <= 0
   const hasUnlimitedQuota = taskQuota ? taskQuota.total < 0 || taskQuota.available < 0 : false
   // Use < 1 threshold to catch "dust credits" (e.g., 0.001) that aren't enough to do anything
   const isOutOfTaskCredits = Boolean(taskQuota && !hasUnlimitedQuota && taskQuota.available < 1)
   const showTaskCreditsWarning = Boolean(
     taskQuota
+    && !organizationHasNoPurchasedSeats
     && !hasUnlimitedQuota
     && !extraTasksEnabled
     && (
@@ -3766,12 +3826,12 @@ export function AgentChatPage({
       return '/app/billing'
     }
     if (!effectiveContext) {
-      return '/console/billing/'
+      return '/app/billing'
     }
     if (effectiveContext.type === 'organization') {
-      return `/console/billing/?org_id=${effectiveContext.id}`
+      return `/app/billing?context_type=organization&context_id=${encodeURIComponent(effectiveContext.id)}`
     }
-    return '/console/billing/'
+    return '/app/billing'
   }, [effectiveContext, isImmersiveShellPath])
   const handleOpenBilling = useCallback(() => {
     if (onOpenBilling) {
@@ -3782,7 +3842,7 @@ export function AgentChatPage({
       window.location.assign(billingUrl)
     }
   }, [billingUrl, onOpenBilling])
-  const usageUrl = isImmersiveShellPath ? '/app/usage' : '/console/usage/'
+  const usageUrl = '/app/usage'
   const handleOpenUsage = useCallback(() => {
     if (onOpenUsage) {
       onOpenUsage()
@@ -3792,7 +3852,17 @@ export function AgentChatPage({
       window.location.assign(usageUrl)
     }
   }, [onOpenUsage, usageUrl])
-  const profileUrl = isImmersiveShellPath ? '/app/profile' : '/console/profile/'
+  const apiKeysUrl = '/app/api-keys'
+  const handleOpenApiKeys = useCallback(() => {
+    if (onOpenApiKeys) {
+      onOpenApiKeys()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(apiKeysUrl)
+    }
+  }, [apiKeysUrl, onOpenApiKeys])
+  const profileUrl = '/app/profile'
   const handleOpenProfile = useCallback(() => {
     if (onOpenProfile) {
       onOpenProfile()
@@ -3802,7 +3872,19 @@ export function AgentChatPage({
       window.location.assign(profileUrl)
     }
   }, [onOpenProfile, profileUrl])
-  const secretsUrl = isImmersiveShellPath ? '/app/secrets' : '/console/secrets/'
+  const organizationUrl = effectiveContext?.type === 'organization'
+    ? '/app/organization'
+    : null
+  const handleOpenOrganization = useCallback(() => {
+    if (onOpenOrganization) {
+      onOpenOrganization()
+      return
+    }
+    if (organizationUrl && typeof window !== 'undefined') {
+      window.location.assign(organizationUrl)
+    }
+  }, [onOpenOrganization, organizationUrl])
+  const secretsUrl = '/app/secrets'
   const handleOpenSecrets = useCallback(() => {
     if (onOpenSecrets) {
       onOpenSecrets()
@@ -3812,7 +3894,7 @@ export function AgentChatPage({
       window.location.assign(secretsUrl)
     }
   }, [onOpenSecrets, secretsUrl])
-  const integrationsUrl = isImmersiveShellPath ? '/app/integrations' : '/console/advanced/mcp-servers/'
+  const integrationsUrl = '/app/integrations'
   const handleOpenIntegrations = useCallback(() => {
     if (onOpenIntegrations) {
       onOpenIntegrations()
@@ -3871,12 +3953,16 @@ export function AgentChatPage({
     isProprietaryMode,
     billingUrl,
     usageUrl,
+    apiKeysUrl,
     profileUrl,
+    organizationUrl,
     secretsUrl,
     integrationsUrl,
     onOpenBilling: onOpenBilling ? handleOpenBilling : null,
     onOpenUsage: isImmersiveShellPath ? handleOpenUsage : null,
+    onOpenApiKeys: isImmersiveShellPath ? handleOpenApiKeys : null,
     onOpenProfile: isImmersiveShellPath ? handleOpenProfile : null,
+    onOpenOrganization: isImmersiveShellPath ? handleOpenOrganization : null,
     onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
     onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
     taskCredits: taskQuota
@@ -3893,13 +3979,17 @@ export function AgentChatPage({
     handleOpenBilling,
     handleOpenUsage,
     handleOpenProfile,
+    handleOpenOrganization,
     handleOpenSecrets,
     handleOpenIntegrations,
     isProprietaryMode,
     isImmersiveShellPath,
     onOpenBilling,
+    handleOpenApiKeys,
     usageUrl,
+    apiKeysUrl,
     profileUrl,
+    organizationUrl,
     secretsUrl,
     integrationsUrl,
     taskQuota,
@@ -3938,12 +4028,70 @@ export function AgentChatPage({
   const agentChatPageStyle = useMemo<AgentChatPageStyle>(() => ({
     '--agent-chat-grain-texture': `url("${RESOLVED_NOISE_DARK_TEXTURE_URL}")`,
   }), [])
+  const createOrganizationModal = createOrganizationOpen ? (
+    <Modal
+      title="Add Organization"
+      onClose={() => {
+        if (!createOrganizationBusy) {
+          setCreateOrganizationOpen(false)
+        }
+      }}
+      widthClass="sm:max-w-lg"
+      icon={Building2}
+      iconBgClass="bg-blue-100"
+      iconColorClass="text-blue-600"
+      dismissible={!createOrganizationBusy}
+    >
+      <form id="create-organization-form" onSubmit={handleCreateOrganizationSubmit} className="space-y-4">
+        {createOrganizationErrors.length > 0 ? (
+          <div className="rounded-md border border-red-200 bg-red-50 p-3">
+            {createOrganizationErrors.map((message) => (
+              <p key={message} className="text-sm text-red-700">{message}</p>
+            ))}
+          </div>
+        ) : null}
+        <div>
+          <label htmlFor="organization-name" className="block text-sm font-medium text-slate-700">
+            Organization Name
+          </label>
+          <input
+            id="organization-name"
+            type="text"
+            required
+            value={createOrganizationName}
+            onChange={(event) => setCreateOrganizationName(event.target.value)}
+            className="mt-1 block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            placeholder="Acme Operations"
+            autoFocus
+          />
+        </div>
+        <div className="flex flex-col gap-3 pt-2 sm:flex-row-reverse">
+          <button
+            type="submit"
+            className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+            disabled={createOrganizationBusy}
+          >
+            {createOrganizationBusy ? 'Creating...' : 'Create Organization'}
+          </button>
+          <button
+            type="button"
+            className="inline-flex w-full justify-center rounded-md border border-slate-300 bg-white px-4 py-2 text-base font-medium text-slate-700 shadow-sm transition hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:w-auto sm:text-sm"
+            onClick={() => setCreateOrganizationOpen(false)}
+            disabled={createOrganizationBusy}
+          >
+            Cancel
+          </button>
+        </div>
+      </form>
+    </Modal>
+  ) : null
   const renderSelectionLayout = (content: ReactNode) => (
     <div
       className="agent-chat-page agent-chat-page--framed"
       data-processing="false"
       style={agentChatPageStyle}
     >
+      {createOrganizationModal}
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName} data-sidebar-mode={selectionSidebarMode}>
         <div id="agent-workspace-root">
@@ -4299,7 +4447,7 @@ export function AgentChatPage({
     if (spawnIntent.onboarding_target !== 'api_keys') {
       return
     }
-    window.location.assign('/console/api-keys/')
+    window.location.assign('/app/api-keys')
   }, [isNewAgent, spawnFlow, spawnIntent, spawnIntentStatus])
 
   useEffect(() => {
@@ -4363,6 +4511,8 @@ export function AgentChatPage({
     switch (shellSubview) {
       case 'secrets':
         return 'Agent Secrets'
+      case 'secret-requests':
+        return 'Secret Requests'
       case 'email':
         return 'Email Settings'
       case 'files':
@@ -4391,6 +4541,16 @@ export function AgentChatPage({
         agentId={activeAgentId}
         agentName={resolvedAgentName || 'Agent'}
         onBack={handleCloseEmbeddedSettings}
+        onOpenRequests={handleOpenEmbeddedSecretRequests}
+      />
+    ) : shellSubview === 'secret-requests' ? (
+      <EmbeddedAgentSecretRequestsPanel
+        agentId={activeAgentId}
+        agentName={resolvedAgentName || 'Agent'}
+        onBack={handleCloseEmbeddedSettings}
+        onOpenSecrets={handleOpenEmbeddedSecrets}
+        onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
+        onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
       />
     ) : shellSubview === 'email' ? (
       <EmbeddedAgentEmailSettingsPanel
@@ -4534,6 +4694,7 @@ export function AgentChatPage({
         agentName={resolvedAgentName || agentName}
         onClose={handleClosePublicShare}
       />
+      {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
         agentFirstName={isNewAgent ? 'New Agent' : agentFirstName}
@@ -4543,7 +4704,7 @@ export function AgentChatPage({
         agentSms={resolvedAgentSms}
         agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || 'Agent')}
         auditUrl={activeAuditUrl}
-        agentIsOrgOwned={resolvedIsOrgOwned}
+        agentIsOrgOwned={resolvedIsOrgOwned || effectiveContext?.type === 'organization'}
         isCollaborator={isCollaboratorOnly}
         canManageAgent={activeCanManageAgent}
         hideInsightsPanel={isCollaboratorOnly}
@@ -4575,8 +4736,12 @@ export function AgentChatPage({
         onOpenBilling={isImmersiveShellPath ? handleOpenBilling : undefined}
         sidebarUsageUrl={usageUrl}
         onOpenUsage={isImmersiveShellPath ? handleOpenUsage : undefined}
+        sidebarApiKeysUrl={apiKeysUrl}
+        onOpenApiKeys={isImmersiveShellPath ? handleOpenApiKeys : undefined}
         sidebarProfileUrl={profileUrl}
         onOpenProfile={isImmersiveShellPath ? handleOpenProfile : undefined}
+        sidebarOrganizationUrl={organizationUrl}
+        onOpenOrganization={isImmersiveShellPath ? handleOpenOrganization : undefined}
         sidebarSecretsUrl={secretsUrl}
         onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
         sidebarIntegrationsUrl={integrationsUrl}
@@ -4618,6 +4783,7 @@ export function AgentChatPage({
         onUpdateTaskPacks={taskPackCanManageBilling ? handleUpdateTaskPacks : undefined}
         addonsTrial={addonsTrial}
         taskQuota={taskQuota}
+        showPurchaseSeatsPrompt={organizationHasNoPurchasedSeats}
         showTaskCreditsWarning={showTaskCreditsWarning}
         taskCreditsWarningVariant={taskCreditsWarningVariant}
         showTaskCreditsUpgrade={taskPackShowUpgrade}
@@ -4666,6 +4832,10 @@ export function AgentChatPage({
         onResolveSpawnRequest={handleResolveSpawnRequest}
         onFulfillRequestedSecrets={handleFulfillRequestedSecrets}
         onRemoveRequestedSecrets={handleRemoveRequestedSecrets}
+        onOpenAgentSecrets={handleOpenEmbeddedSecrets}
+        onOpenAgentSecretRequests={handleOpenEmbeddedSecretRequests}
+        onOpenAgentEmailSettings={handleOpenEmbeddedEmailSettings}
+        onOpenAgentFiles={handleOpenEmbeddedFiles}
         onResolveContactRequests={handleResolveContactRequests}
         onViewAllContactRequests={handleOpenEmbeddedContactRequests}
         onJumpToLatest={handleJumpToLatest}

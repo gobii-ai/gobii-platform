@@ -56,11 +56,7 @@ def _build_urls(agent: PersistentAgent, spawn_request: AgentSpawnRequest) -> tup
         decision_path = f"/console/api/agents/{agent.id}/spawn-requests/{spawn_request.id}/decision/"
     decision_path = append_context_query(decision_path, org_id)
 
-    try:
-        chat_path = reverse("agent_chat_shell", kwargs={"pk": agent.id})
-    except NoReverseMatch:
-        logger.warning("Failed to reverse chat URL for agent %s", agent.id, exc_info=True)
-        chat_path = f"/console/agents/{agent.id}/chat/"
+    chat_path = f"/app/agents/{agent.id}"
     chat_path = append_query_params(chat_path, {"spawn_request_id": str(spawn_request.id)})
     chat_path = append_context_query(chat_path, org_id)
 

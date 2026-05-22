@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName, standaloneSettingsSurfaceClassName } from './settingsSurfaceClasses'
+import { embeddedSettingsSurfaceClassName, standaloneSettingsSurfaceClassName } from './settingsSurfaceClasses'
 
 type SettingsBannerVariant = 'standalone' | 'embedded'
 
@@ -47,7 +47,7 @@ export function SettingsBanner({
 
   return (
     <header className="sticky top-0 z-20 py-1">
-      <div className={`${sharedSettingsGlassFrameClassName} ${surfaceClassName}`}>
+      <div className={`settings-banner-surface overflow-hidden rounded-2xl border ${surfaceClassName}`}>
         <div className="px-6 py-4">
           <div className={`flex items-start gap-3 ${leading ? '' : 'justify-between'}`}>
             {leading ? <div className="shrink-0">{leading}</div> : null}

@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from django.urls import reverse
@@ -65,38 +66,148 @@ class ApiKeyFormTests(TestCase):
 
 
 @tag("batch_console_api_keys")
-class ApiKeyListViewTrialEnforcementTests(TestCase):
+@override_settings(
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
+)
+class ApiKeyJsonAPIViewTests(TestCase):
     def setUp(self):
         self.user = User.objects.create_user(
-            username="api-keys-enforcement@example.com",
-            email="api-keys-enforcement@example.com",
+            username="api-json@example.com",
+            email="api-json@example.com",
             password="password123",
+        )
+        self.org = Organization.objects.create(
+            name="API JSON Org",
+            slug="api-json-org",
+            created_by=self.user,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.user,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
         )
         self.client.force_login(self.user)
 
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @patch("console.views.has_verified_email", return_value=True)
-    def test_blocks_personal_api_key_creation_without_trial(self, _mock_verified):
-        response = self.client.post(reverse("api_keys"), data={"name": "Blocked Key"})
+    def _set_org_context(self):
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
 
-        self.assertEqual(response.status_code, status.HTTP_200_OK)
-        form = response.context.get("form")
-        self.assertIsNotNone(form)
-        self.assertTrue(
-            any("Start a free trial" in error for error in form.non_field_errors()),
-            form.non_field_errors(),
+    def _json_post(self, url, payload):
+        return self.client.post(url, data=json.dumps(payload), content_type="application/json")
+
+    @patch("console.api_keys_api_views.has_verified_email", return_value=True)
+    def test_lists_personal_api_keys_without_raw_key(self, _mock_verified):
+        _raw_key, api_key = ApiKey.create_for_user(self.user, name="Personal JSON Key")
+
+        response = self.client.get(reverse("console-api-key-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["owner_scope"], "user")
+        self.assertTrue(payload["can_manage"])
+        self.assertEqual(payload["api_keys"][0]["id"], str(api_key.id))
+        self.assertEqual(payload["api_keys"][0]["name"], "Personal JSON Key")
+        self.assertNotIn("raw_key", payload["api_keys"][0])
+
+    @patch("console.api_keys_api_views.has_verified_email", return_value=True)
+    def test_lists_organization_api_keys(self, _mock_verified):
+        self._set_org_context()
+        _raw_key, api_key = ApiKey.create_for_org(self.org, created_by=self.user, name="Org JSON Key")
+
+        response = self.client.get(reverse("console-api-key-list"))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["owner_scope"], "organization")
+        self.assertEqual(payload["owner_name"], self.org.name)
+        self.assertEqual(payload["api_keys"][0]["id"], str(api_key.id))
+        self.assertEqual(payload["api_keys"][0]["created_by"], self.user.email)
+
+    @patch("console.api_keys_api_views.can_user_use_personal_agents_and_api", return_value=True)
+    @patch("console.api_keys_api_views.has_verified_email", return_value=True)
+    def test_create_returns_raw_key_once(self, _mock_verified, _mock_can_use_api):
+        response = self._json_post(reverse("console-api-key-list"), {"name": "Created JSON Key"})
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        self.assertEqual(payload["api_key"]["name"], "Created JSON Key")
+        self.assertTrue(payload["raw_key"])
+        self.assertTrue(ApiKey.objects.filter(user=self.user, name="Created JSON Key").exists())
+
+        list_response = self.client.get(reverse("console-api-key-list"))
+        self.assertNotIn("raw_key", list_response.json()["api_keys"][0])
+
+    @patch("console.api_keys_api_views.has_verified_email", return_value=False)
+    def test_create_blocks_unverified_email(self, _mock_verified):
+        response = self._json_post(reverse("console-api-key-list"), {"name": "Blocked JSON Key"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Email verification required", response.json()["errors"]["__all__"][0])
+        self.assertFalse(ApiKey.objects.filter(user=self.user, name="Blocked JSON Key").exists())
+
+    @patch("console.api_keys_api_views.has_verified_email", return_value=True)
+    def test_billing_org_role_can_view_but_not_manage(self, _mock_verified):
+        billing_user = User.objects.create_user(
+            username="api-json-billing@example.com",
+            email="api-json-billing@example.com",
+            password="password123",
         )
-        self.assertFalse(ApiKey.objects.filter(user=self.user, name="Blocked Key").exists())
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=billing_user,
+            role=OrganizationMembership.OrgRole.BILLING,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        ApiKey.create_for_org(self.org, created_by=self.user, name="Viewable Org Key")
+        self.client.force_login(billing_user)
+        self._set_org_context()
 
-    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True)
-    @patch("console.views.has_verified_email", return_value=True)
-    def test_allows_personal_api_key_creation_for_grandfathered_user(self, _mock_verified):
-        UserFlags.objects.create(user=self.user, is_freemium_grandfathered=True)
+        list_response = self.client.get(reverse("console-api-key-list"))
+        create_response = self._json_post(reverse("console-api-key-list"), {"name": "Forbidden Key"})
 
-        response = self.client.post(reverse("api_keys"), data={"name": "Grandfathered Key"})
+        self.assertEqual(list_response.status_code, 200)
+        self.assertFalse(list_response.json()["can_manage"])
+        self.assertEqual(create_response.status_code, 403)
 
-        self.assertEqual(response.status_code, status.HTTP_302_FOUND)
-        self.assertTrue(ApiKey.objects.filter(user=self.user, name="Grandfathered Key").exists())
+    def test_non_view_org_role_cannot_list(self):
+        member_user = User.objects.create_user(
+            username="api-json-member@example.com",
+            email="api-json-member@example.com",
+            password="password123",
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=member_user,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(member_user)
+        self._set_org_context()
+
+        response = self.client.get(reverse("console-api-key-list"))
+
+        self.assertEqual(response.status_code, 403)
+
+    @patch("console.api_keys_api_views.has_verified_email", return_value=True)
+    def test_revoke_and_delete_api_key(self, _mock_verified):
+        _raw_key, api_key = ApiKey.create_for_user(self.user, name="Mutable JSON Key")
+
+        revoke_response = self.client.patch(reverse("console-api-key-detail", args=[api_key.id]))
+        api_key.refresh_from_db()
+
+        self.assertEqual(revoke_response.status_code, 200)
+        self.assertFalse(api_key.is_active)
+        self.assertFalse(revoke_response.json()["api_key"]["is_active"])
+
+        delete_response = self.client.delete(reverse("console-api-key-detail", args=[api_key.id]))
+
+        self.assertEqual(delete_response.status_code, 200)
+        self.assertFalse(ApiKey.objects.filter(id=api_key.id).exists())
 
 
 @tag("batch_api_agents")

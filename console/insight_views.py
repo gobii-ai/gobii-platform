@@ -14,14 +14,15 @@ from typing import Any, Optional
 
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.http import HttpRequest, JsonResponse
+from django.urls import reverse
 from django.utils import timezone
 from django.views import View
-from django.urls import reverse
 
 from api.models import (
     CommsChannel,
     PersistentAgent,
 )
+from util.urls import IMMERSIVE_APP_BASE_PATH
 from api.agent.core.prompt_context import get_agent_daily_credit_state
 from billing.services import BillingService
 from console.agent_chat.access import resolve_agent_for_request
@@ -345,7 +346,7 @@ def _get_burn_rate_metadata(ctx: InsightContext) -> dict:
         "agentName": ctx.agent.name,
         "todayUsage": today_usage,
         "monthUsage": month_usage,
-        "usageUrl": reverse("usage"),
+        "usageUrl": f"{IMMERSIVE_APP_BASE_PATH}/usage",
     }
 
 

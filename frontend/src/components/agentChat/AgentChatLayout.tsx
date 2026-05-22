@@ -55,6 +55,7 @@ import {
   filterChangedPlanSnapshot,
   hasCompletedPlanDeliverables,
 } from './planSnapshotUtils'
+import type { AgentChatShellSubview } from '../../util/agentChatShellRoutes'
 
 type TaskQuotaInfo = {
   available: number
@@ -68,30 +69,67 @@ function normalizeAgentSettingsPathname(pathname: string): string {
   return trimmed || '/'
 }
 
-function isCurrentAgentSettingsHref(href: string, agentId: string): boolean {
-  if (typeof window === 'undefined') {
-    return false
-  }
-  try {
-    const url = new URL(href, window.location.origin)
-    return normalizeAgentSettingsPathname(url.pathname) === `/console/agents/${agentId}`
-  } catch {
-    return false
+type AgentChatMessageLinkSubview = Exclude<AgentChatShellSubview, 'chat'>
+
+function isAgentChatMessageLinkSubview(value?: string | null): value is AgentChatMessageLinkSubview {
+  switch (value) {
+    case 'settings':
+    case 'secrets':
+    case 'secret-requests':
+    case 'email':
+    case 'files':
+    case 'contact-requests':
+      return true
+    default:
+      return false
   }
 }
 
-function isCurrentAgentContactRequestsHref(href: string, agentId: string): boolean {
+function getCurrentAgentMessageLinkSubview(href: string, agentId: string): AgentChatMessageLinkSubview | null {
   if (typeof window === 'undefined') {
-    return false
+    return null
   }
   try {
     const url = new URL(href, window.location.origin)
     const pathname = normalizeAgentSettingsPathname(url.pathname)
-    return pathname === `/app/agents/${agentId}/contact-requests`
-      || pathname === `/console/agents/${agentId}/contact-requests`
-      || pathname === `/console/agents/${agentId}/chat/contact-requests`
+    const parts = pathname.split('/').filter(Boolean)
+
+    if (parts[0] === 'app' && parts[1] === 'agents' && parts[2] === agentId) {
+      if (
+        parts[3] === 'secrets'
+        && parts[4] === 'request'
+        && parts.length === 5
+      ) {
+        return 'secret-requests'
+      }
+      if (parts.length === 4 && isAgentChatMessageLinkSubview(parts[3])) {
+        return parts[3]
+      }
+      return null
+    }
+
+    if (parts[0] === 'console' && parts[1] === 'agents' && parts[2] === agentId) {
+      if (parts.length === 3) {
+        return 'settings'
+      }
+      if (
+        parts[3] === 'secrets'
+        && parts[4] === 'request'
+        && parts.length === 5
+      ) {
+        return 'secret-requests'
+      }
+      if (parts[3] === 'chat' && parts.length === 5 && isAgentChatMessageLinkSubview(parts[4])) {
+        return parts[4]
+      }
+      if (parts.length === 4 && isAgentChatMessageLinkSubview(parts[3])) {
+        return parts[3]
+      }
+    }
+
+    return null
   } catch {
-    return false
+    return null
   }
 }
 
@@ -148,8 +186,12 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenBilling?: () => void
   sidebarUsageUrl?: string | null
   onOpenUsage?: () => void
+  sidebarApiKeysUrl?: string | null
+  onOpenApiKeys?: () => void
   sidebarProfileUrl?: string | null
   onOpenProfile?: () => void
+  sidebarOrganizationUrl?: string | null
+  onOpenOrganization?: () => void
   sidebarSecretsUrl?: string | null
   onOpenSecrets?: () => void
   sidebarIntegrationsUrl?: string | null
@@ -197,6 +239,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   stopProcessingRequested?: boolean
   addonsTrial?: TrialInfo | null
   taskQuota?: TaskQuotaInfo | null
+  showPurchaseSeatsPrompt?: boolean
   showTaskCreditsWarning?: boolean
   taskCreditsWarningVariant?: 'low' | 'out' | null
   showTaskCreditsUpgrade?: boolean
@@ -267,6 +310,10 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onResolveSpawnRequest?: (decisionApiUrl: string, decision: 'approve' | 'decline') => Promise<void>
   onFulfillRequestedSecrets?: (values: Record<string, string>, makeGlobal: boolean) => Promise<void>
   onRemoveRequestedSecrets?: (secretIds: string[]) => Promise<void>
+  onOpenAgentSecrets?: () => void
+  onOpenAgentSecretRequests?: () => void
+  onOpenAgentEmailSettings?: () => void
+  onOpenAgentFiles?: () => void
   onResolveContactRequests?: (
     responses: Array<{
       requestId: string
@@ -325,13 +372,17 @@ export function AgentChatLayout({
   currentContext = null,
   sidebarBillingUrl = null,
   onOpenBilling,
-  sidebarUsageUrl = '/console/usage/',
+  sidebarUsageUrl = '/app/usage',
   onOpenUsage,
-  sidebarProfileUrl = '/console/profile/',
+  sidebarApiKeysUrl = '/app/api-keys',
+  onOpenApiKeys,
+  sidebarProfileUrl = '/app/profile',
   onOpenProfile,
-  sidebarSecretsUrl = '/console/secrets/',
+  sidebarOrganizationUrl = null,
+  onOpenOrganization,
+  sidebarSecretsUrl = '/app/secrets',
   onOpenSecrets,
-  sidebarIntegrationsUrl = '/console/advanced/mcp-servers/',
+  sidebarIntegrationsUrl = '/app/integrations',
   onOpenIntegrations,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
@@ -376,6 +427,7 @@ export function AgentChatLayout({
   stopProcessingRequested = false,
   addonsTrial = null,
   taskQuota = null,
+  showPurchaseSeatsPrompt = false,
   showTaskCreditsWarning = false,
   taskCreditsWarningVariant = null,
   showTaskCreditsUpgrade = false,
@@ -439,6 +491,10 @@ export function AgentChatLayout({
   onResolveSpawnRequest,
   onFulfillRequestedSecrets,
   onRemoveRequestedSecrets,
+  onOpenAgentSecrets,
+  onOpenAgentSecretRequests,
+  onOpenAgentEmailSettings,
+  onOpenAgentFiles,
   onResolveContactRequests,
   onViewAllContactRequests,
 }: AgentChatLayoutProps) {
@@ -553,6 +609,16 @@ export function AgentChatLayout({
     setSettingsOpen(false)
     onOpenFullSettings?.()
   }, [onOpenFullSettings])
+
+  const handlePurchaseSeats = useCallback(() => {
+    if (onOpenBilling) {
+      onOpenBilling()
+      return
+    }
+    if (typeof window !== 'undefined') {
+      window.location.assign(sidebarBillingUrl ?? '/app/billing')
+    }
+  }, [onOpenBilling, sidebarBillingUrl])
 
   const handleAddonsOpen = useCallback((mode: 'contacts' | 'tasks') => {
     setAddonsMode(mode)
@@ -718,7 +784,7 @@ export function AgentChatLayout({
 
   useEffect(() => {
     if (typeof window === 'undefined' || !agentId) return
-    const showTaskCredits = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+    const showTaskCredits = Boolean(showTaskCreditsWarning && !showPurchaseSeatsPrompt && !taskCreditsDismissed)
     if (!showTaskCredits) return
     const messageType = taskCreditsWarningVariant === 'out' ? 'task_credits_exhausted' : 'task_credits_low'
     const storageKey = `upsell-tracked:${agentId}:${messageType}`
@@ -731,7 +797,7 @@ export function AgentChatLayout({
       recipient_type: 'owner',
       upsell_shown: showTaskCreditsUpgrade,
     })
-  }, [agentId, showTaskCreditsWarning, taskCreditsDismissed, taskCreditsWarningVariant, showTaskCreditsUpgrade])
+  }, [agentId, showPurchaseSeatsPrompt, showTaskCreditsWarning, taskCreditsDismissed, taskCreditsWarningVariant, showTaskCreditsUpgrade])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !agentId) return
@@ -851,7 +917,8 @@ export function AgentChatLayout({
     }
   }, [onUpdateDailyCredits, quickIncreaseTarget, quickIncreaseBusy, onRefreshDailyCredits])
   const showContactCapCallout = Boolean(contactCapStatus?.limitReached && !contactCapDismissed)
-  const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !taskCreditsDismissed)
+  const showNoSeatsCallout = Boolean(showPurchaseSeatsPrompt)
+  const showTaskCreditsCallout = Boolean(showTaskCreditsWarning && !showNoSeatsCallout && !taskCreditsDismissed)
   const showHighPriorityBanner = Boolean(
     highPriorityBanner && (!highPriorityBannerDismissible || !highPriorityDismissed),
   )
@@ -911,15 +978,51 @@ export function AgentChatLayout({
     if (!agentId) {
       return false
     }
-    if (onViewAllContactRequests && isCurrentAgentContactRequestsHref(href, agentId)) {
+    const linkedSubview = getCurrentAgentMessageLinkSubview(href, agentId)
+    if (!linkedSubview) {
+      return false
+    }
+    if (linkedSubview === 'contact-requests') {
+      if (!onViewAllContactRequests) {
+        return false
+      }
       onViewAllContactRequests()
       return true
     }
-    if (!isCurrentAgentSettingsHref(href, agentId)) {
-      return false
+    if (linkedSubview === 'secrets') {
+      if (!onOpenAgentSecrets) {
+        return false
+      }
+      onOpenAgentSecrets()
+      return true
+    }
+    if (linkedSubview === 'secret-requests') {
+      if (!onOpenAgentSecretRequests) {
+        return false
+      }
+      onOpenAgentSecretRequests()
+      return true
+    }
+    if (linkedSubview === 'email') {
+      if (!onOpenAgentEmailSettings) {
+        return false
+      }
+      onOpenAgentEmailSettings()
+      return true
+    }
+    if (linkedSubview === 'files') {
+      if (!onOpenAgentFiles) {
+        return false
+      }
+      onOpenAgentFiles()
+      return true
     }
     if (previewActionsDisabled && onBlockedSettingsClick) {
       onBlockedSettingsClick('banner_desktop')
+      return true
+    }
+    if (onOpenFullSettings) {
+      onOpenFullSettings()
       return true
     }
     if (!canOpenQuickSettings) {
@@ -932,6 +1035,11 @@ export function AgentChatLayout({
     canOpenQuickSettings,
     handleSettingsOpen,
     onBlockedSettingsClick,
+    onOpenAgentEmailSettings,
+    onOpenAgentFiles,
+    onOpenAgentSecretRequests,
+    onOpenAgentSecrets,
+    onOpenFullSettings,
     onViewAllContactRequests,
     previewActionsDisabled,
   ])
@@ -1211,7 +1319,9 @@ export function AgentChatLayout({
     isProprietaryMode,
     billingUrl: sidebarBillingUrl,
     usageUrl: sidebarUsageUrl,
+    apiKeysUrl: sidebarApiKeysUrl,
     profileUrl: sidebarProfileUrl,
+    organizationUrl: sidebarOrganizationUrl,
     secretsUrl: sidebarSecretsUrl,
     integrationsUrl: sidebarIntegrationsUrl,
     notificationsEnabled: sidebarNotificationsEnabled,
@@ -1219,7 +1329,9 @@ export function AgentChatLayout({
     onNotificationsEnabledChange: onSidebarNotificationsEnabledChange,
     onOpenBilling,
     onOpenUsage,
+    onOpenApiKeys,
     onOpenProfile,
+    onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
     taskCredits: taskQuota
@@ -1236,12 +1348,16 @@ export function AgentChatLayout({
     onSidebarNotificationsEnabledChange,
     onOpenBilling,
     onOpenUsage,
+    onOpenApiKeys,
     onOpenProfile,
+    onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
     sidebarBillingUrl,
     sidebarUsageUrl,
+    sidebarApiKeysUrl,
     sidebarProfileUrl,
+    sidebarOrganizationUrl,
     sidebarSecretsUrl,
     sidebarIntegrationsUrl,
     sidebarCreditsResetOn,
@@ -1324,6 +1440,8 @@ export function AgentChatLayout({
           onPlanHoverChange={showPlanInterface ? handlePlanHoverChange : undefined}
           processingActive={processingActive}
           dailyCreditsStatus={dailyCreditsStatus}
+          showPurchaseSeatsButton={showPurchaseSeatsPrompt}
+          onPurchaseSeats={handlePurchaseSeats}
           onSettingsOpen={canOpenQuickSettings ? handleSettingsOpen : undefined}
           settingsDisabled={previewActionsDisabled}
           settingsDisabledReason={previewActionsDisabledReason}
@@ -1455,7 +1573,13 @@ export function AgentChatLayout({
                     showUpsell={hardLimitShowUpsell}
                   />
                 ) : null}
-                {showTaskCreditsCallout ? (
+                {showNoSeatsCallout ? (
+                  <TaskCreditsCalloutCard
+                    billingIssue="no_org_seats"
+                    onPurchaseSeats={handlePurchaseSeats}
+                    variant="out"
+                  />
+                ) : showTaskCreditsCallout ? (
                   <TaskCreditsCalloutCard
                     onOpenPacks={taskPackCanManageBilling && (taskPackOptions?.length ?? 0) > 0
                       ? () => handleAddonsOpen('tasks')

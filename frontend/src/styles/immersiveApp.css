@@ -45,3 +45,111 @@
   line-height: 1.6;
   color: rgba(30, 41, 59, 0.75);
 }
+
+.immersive-invite-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
+  background:
+    linear-gradient(135deg, rgba(15, 23, 42, 0.94), rgba(49, 20, 83, 0.92)),
+    #0f172a;
+}
+
+.immersive-invite-card {
+  width: min(100%, 32rem);
+  border: 1px solid rgba(226, 232, 240, 0.18);
+  border-radius: 1.25rem;
+  background: var(--console-card-surface, #0f172a);
+  color: #f8fafc;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.immersive-invite-card__icon {
+  width: 3rem;
+  height: 3rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(226, 232, 240, 0.22);
+  display: grid;
+  place-items: center;
+  color: #c4b5fd;
+}
+
+.immersive-invite-card--accepted .immersive-invite-card__icon {
+  color: #86efac;
+}
+
+.immersive-invite-card--declined .immersive-invite-card__icon {
+  color: #fca5a5;
+}
+
+.immersive-invite-card--issue .immersive-invite-card__icon,
+.immersive-invite-card--error .immersive-invite-card__icon {
+  color: #fbbf24;
+}
+
+.immersive-invite-card__icon-svg {
+  width: 1.35rem;
+  height: 1.35rem;
+}
+
+.immersive-invite-card__icon-svg--spin {
+  animation: immersive-invite-spin 0.9s linear infinite;
+}
+
+.immersive-invite-card__eyebrow {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.62);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+}
+
+.immersive-invite-card__title {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1.65rem;
+  line-height: 1.15;
+  font-weight: 700;
+}
+
+.immersive-invite-card__message {
+  margin: 0;
+  color: rgba(226, 232, 240, 0.78);
+  font-size: 0.98rem;
+  line-height: 1.55;
+}
+
+.immersive-invite-card__button {
+  margin-top: 0.5rem;
+  width: fit-content;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid rgba(196, 181, 253, 0.38);
+  border-radius: 0.8rem;
+  background: rgba(196, 181, 253, 0.12);
+  color: #f8fafc;
+  padding: 0.7rem 1rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  transition: border-color 0.16s ease, background-color 0.16s ease;
+}
+
+.immersive-invite-card__button:hover {
+  border-color: rgba(196, 181, 253, 0.72);
+  background: rgba(196, 181, 253, 0.18);
+}
+
+@keyframes immersive-invite-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -31,6 +31,11 @@ type SwitchContextResponsePayload = {
   error?: string
 }
 
+type CreateOrganizationResponsePayload = {
+  organization: { id: string; name: string; role: string | null }
+  context: ConsoleContextPayload
+}
+
 export type ConsoleContextData = {
   context: ConsoleContext
   personal: ConsoleContext
@@ -75,4 +80,24 @@ export async function switchConsoleContext(
     throw new Error(payload.error || 'Unable to switch context')
   }
   return payload.context
+}
+
+export async function createOrganization(name: string): Promise<{
+  organization: ConsoleContextOption
+  context: ConsoleContext
+}> {
+  const payload = await jsonRequest<CreateOrganizationResponsePayload>('/console/api/organizations/', {
+    method: 'POST',
+    json: { name },
+    includeCsrf: true,
+  })
+  return {
+    organization: {
+      type: 'organization',
+      id: payload.organization.id,
+      name: payload.organization.name,
+      role: payload.organization.role ?? null,
+    },
+    context: payload.context,
+  }
 }

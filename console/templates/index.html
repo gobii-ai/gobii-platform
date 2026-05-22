@@ -62,7 +62,7 @@
             <div class="mt-3 flex items-center justify-center">
               <p class="mt-1.5">
                 {% if stripe_enabled %}
-                <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+                <a href="/app/billing" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
                   Update settings
                   <i aria-hidden="true" data-lucide="chevron-right" class="ml-0.5 h-3 w-3"></i>
                 </a>
@@ -89,7 +89,7 @@
             <div class="mt-3 flex items-center justify-center">
               <p class="mt-1.5">
               {% if stripe_enabled %}
-              <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+              <a href="/app/billing" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
                 Update settings
                 <i aria-hidden="true" data-lucide="chevron-right" class="ml-0.5 h-3 w-3"></i>
               </a>
@@ -127,7 +127,7 @@
           <div class="mt-3 flex items-center justify-center">
             <p class="mt-1.5">
               {% if stripe_enabled %}
-              <a href="/console/billing/" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
+              <a href="/app/billing" class="text-xs text-blue-700 hover:text-blue-800 font-medium flex items-center">
                 Update settings
                 <i aria-hidden="true" data-lucide="chevron-right" class="ml-0.5 h-3 w-3"></i>
               </a>
@@ -264,7 +264,7 @@
         <p class="text-sm text-gray-700">No API key is available. Create a new API key to access our services.</p>
       </div>
       <div class="mt-3">
-        <a href="{% url 'api_keys' %}" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium text-sm shadow-sm hover:shadow-md transition-all">
+        <a href="/app/api-keys" class="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 focus:ring-4 focus:ring-blue-300 font-medium text-sm shadow-sm hover:shadow-md transition-all">
           Create API Key
         </a>
       </div>
@@ -272,7 +272,7 @@
     {% endif %}
     
     <div class="mt-3">
-      <a href="{% url 'api_keys' %}" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
+      <a href="/app/api-keys" class="text-sm text-blue-600 hover:text-blue-800 font-medium">
         Manage API Keys →
       </a>
     </div>

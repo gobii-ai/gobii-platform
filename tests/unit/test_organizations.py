@@ -51,158 +51,11 @@ class OrganizationInvitesTest(TestCase):
         billing.purchased_seats = 2
         billing.save(update_fields=["purchased_seats"])
 
-    @tag("batch_organizations")
-    def test_invite_email_and_accept_flow(self):
-        # Inviter sends invite
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
 
-        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertEqual(resp.status_code, 302)
 
-        # Email sent
-        self.assertEqual(len(mail.outbox), 1)
-        message = mail.outbox[0]
-        self.assertIn(self.invitee_email, message.to)
-        self.assertIn(self.org.name, message.subject)
 
-        invite = OrganizationInvite.objects.get(org=self.org, email__iexact=self.invitee_email)
 
-        # Accept link present in email body
-        accept_url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        self.assertIn(accept_url, message.body)  # plain text body contains URL
 
-        # Pending invites should be visible on organizations list for invitee
-        self.client.force_login(self.invitee)
-        orgs_url = reverse("organizations")
-        resp = self.client.get(orgs_url)
-        self.assertEqual(resp.status_code, 200)
-        # Context var should include the invite
-        pending = resp.context.get("pending_invites")
-        self.assertIsNotNone(pending)
-        self.assertEqual(list(pending), [invite])
-
-        # Invitee accepts (GET supported for email link)
-        resp = self.client.get(accept_url)
-        self.assertEqual(resp.status_code, 302)
-
-        # Membership created and invite marked accepted
-        membership = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
-        self.assertEqual(membership.status, OrganizationMembership.OrgStatus.ACTIVE)
-        self.assertEqual(membership.role, OrganizationMembership.OrgRole.MEMBER)
-
-        invite.refresh_from_db()
-        self.assertIsNotNone(invite.accepted_at)
-
-    @tag("batch_organizations")
-    def test_invite_blocked_when_no_seats_available(self):
-        billing = self.org.billing
-        billing.purchased_seats = 0
-        billing.save(update_fields=["purchased_seats"])
-
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-
-        self.assertEqual(resp.status_code, 200)
-        form = resp.context.get("invite_form")
-        self.assertIsNotNone(form)
-        self.assertIn("No seats available", " ".join(form.non_field_errors()))
-        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
-
-    @tag("batch_organizations")
-    @patch("console.views.logger.warning")
-    def test_invite_validation_htmx_returns_422_and_logs(self, mock_warning):
-        billing = self.org.billing
-        billing.purchased_seats = 0
-        billing.save(update_fields=["purchased_seats"])
-
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        resp = self.client.post(
-            detail_url,
-            {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.OWNER},
-            HTTP_HX_REQUEST="true",
-        )
-
-        self.assertEqual(resp.status_code, 422)
-        self.assertContains(resp, "No seats available", status_code=422)
-        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
-
-        mock_warning.assert_called_once()
-        self.assertIn("Organization invite validation failed", mock_warning.call_args.args[0])
-
-    @tag("batch_organizations")
-    def test_invite_blocked_when_pending_invite_exists(self):
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        # First invite succeeds (seat reserved)
-        self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).exists())
-
-        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertEqual(resp.status_code, 200)
-        form = resp.context.get("invite_form")
-        self.assertIn("already has a pending invitation", " ".join(form.errors.get("email", [])))
-        self.assertEqual(OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).count(), 1)
-
-    @tag("batch_organizations")
-    def test_second_invite_blocked_when_only_one_seat_available(self):
-        """With 1 purchased seat (beyond founder), only one pending invite should be allowed."""
-        # Setup: 1 seat purchased beyond founder allowance
-        billing = self.org.billing
-        billing.purchased_seats = 1
-        billing.save(update_fields=["purchased_seats"])
-
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-
-        # First invite should succeed
-        email1 = "first@example.com"
-        resp1 = self.client.post(detail_url, {"email": email1, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertEqual(resp1.status_code, 302)
-        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email__iexact=email1).exists())
-
-        # Second invite (different email) should be blocked due to seats_reserved including pending invite
-        email2 = "second@example.com"
-        resp2 = self.client.post(detail_url, {"email": email2, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertEqual(resp2.status_code, 200)
-        form = resp2.context.get("invite_form")
-        self.assertIsNotNone(form)
-        # Non-field error should indicate no seats available
-        self.assertTrue(any("No seats available" in e for e in form.non_field_errors()))
-        self.assertFalse(OrganizationInvite.objects.filter(org=self.org, email__iexact=email2).exists())
-
-    @tag("batch_organizations")
-    def test_solutions_partner_invite_does_not_require_seat(self):
-        solutions_partner = get_user_model().objects.create_user(
-            email="sp-inviter@example.com",
-            password="pw",
-            username="sp-inviter",
-        )
-        OrganizationMembership.objects.create(
-            org=self.org,
-            user=solutions_partner,
-            role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-        )
-        billing = self.org.billing
-        billing.purchased_seats = 0
-        billing.save(update_fields=["purchased_seats"])
-
-        self.client.force_login(solutions_partner)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        resp = self.client.post(
-            detail_url,
-            {"email": "sp-invitee@example.com", "role": OrganizationMembership.OrgRole.SOLUTIONS_PARTNER},
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertTrue(
-            OrganizationInvite.objects.filter(
-                org=self.org,
-                email__iexact="sp-invitee@example.com",
-                role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
-            ).exists()
-        )
 
     @patch("config.stripe_config._load_from_database", return_value=None)
     @patch("console.views.stripe.checkout.Session.create")
@@ -317,14 +170,10 @@ class OrganizationInvitesTest(TestCase):
 
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
-        resp = self.client.post(url, {"seats": 1}, follow=True)
+        resp = self.client.post(url, {"seats": 1})
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(
-            resp,
-            "We couldn&#x27;t find a seat item on the active subscription.",
-            status_code=200,
-        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/app/billing")
         mock_retrieve.assert_called_once()
         mock_portal_create.assert_not_called()
 
@@ -536,14 +385,10 @@ class OrganizationInvitesTest(TestCase):
 
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
-        resp = self.client.post(url, {"seats": 2}, follow=True)
+        resp = self.client.post(url, {"seats": 2})
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(
-            resp,
-            "Stripe portal seat updates are disabled, so we applied the seat change immediately.",
-            status_code=200,
-        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/app/billing")
 
         self.assertEqual(mock_retrieve.call_count, 2)
         mock_portal_create.assert_called_once()
@@ -580,7 +425,7 @@ class OrganizationInvitesTest(TestCase):
         }
         session.save()
 
-        resp = self.client.get(reverse("billing") + "?seats_success=1")
+        resp = self.client.get("/app/billing?seats_success=1")
 
         self.assertEqual(resp.status_code, 200)
         mock_get_key.assert_called_once()
@@ -613,7 +458,7 @@ class OrganizationInvitesTest(TestCase):
         }
         session.save()
 
-        resp = self.client.get(reverse("billing") + "?seats_cancelled=1")
+        resp = self.client.get("/app/billing?seats_cancelled=1")
 
         self.assertEqual(resp.status_code, 200)
         mock_get_key.assert_called_once()
@@ -663,10 +508,10 @@ class OrganizationInvitesTest(TestCase):
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
         with patch("console.views.get_stripe_settings", return_value=custom_settings):
-            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+            resp = self.client.post(url, {"future_seats": 3})
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/app/billing")
 
         mock_schedule_release.assert_not_called()
         mock_schedule_create.assert_called_once()
@@ -737,10 +582,10 @@ class OrganizationInvitesTest(TestCase):
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_schedule", kwargs={"org_id": self.org.id})
         with patch("console.views.get_stripe_settings", return_value=custom_settings):
-            resp = self.client.post(url, {"future_seats": 3}, follow=True)
+            resp = self.client.post(url, {"future_seats": 3})
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Seat reduction scheduled", status_code=200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/app/billing")
 
         mock_schedule_release.assert_any_call("ssch_old")
         mock_schedule_create.assert_called_once()
@@ -766,10 +611,10 @@ class OrganizationInvitesTest(TestCase):
 
         self.client.force_login(self.inviter)
         url = reverse("organization_seat_schedule_cancel", kwargs={"org_id": self.org.id})
-        resp = self.client.post(url, follow=True)
+        resp = self.client.post(url)
 
-        self.assertEqual(resp.status_code, 200)
-        self.assertContains(resp, "Scheduled seat changes were cancelled", status_code=200)
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], "/app/billing")
 
         mock_schedule_release.assert_called_once_with("ssch_cancel")
         mock_schedule_modify.assert_not_called()
@@ -796,6 +641,23 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/portal")
         mock_portal.assert_called_once()
 
+    @patch("console.views.stripe.billing_portal.Session.create")
+    def test_seat_portal_returns_json_redirect_for_app(self, mock_portal):
+        mock_portal.return_value = MagicMock(url="https://stripe.test/portal")
+        billing = self.org.billing
+        billing.purchased_seats = 2
+        billing.stripe_customer_id = "cus_portal"
+        billing.stripe_subscription_id = "sub_portal"
+        billing.save(update_fields=["purchased_seats", "stripe_customer_id", "stripe_subscription_id"])
+
+        self.client.force_login(self.inviter)
+        url = reverse("organization_seat_portal", kwargs={"org_id": self.org.id})
+        resp = self.client.post(url, headers={"accept": "application/json"})
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json(), {"ok": True, "redirectUrl": "https://stripe.test/portal"})
+        mock_portal.assert_called_once()
+
     def test_seat_portal_requires_membership(self):
         stranger = get_user_model().objects.create_user(email="another@example.com", password="pw", username="another")
         self.client.force_login(stranger)
@@ -805,12 +667,14 @@ class OrganizationInvitesTest(TestCase):
 
     @tag("batch_organizations")
     def test_reject_flow(self):
-        # Create another invite
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.VIEWER})
-        self.assertEqual(resp.status_code, 302)
-        invite = OrganizationInvite.objects.filter(org=self.org, email__iexact=self.invitee_email).latest("sent_at")
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email=self.invitee_email,
+            role=OrganizationMembership.OrgRole.VIEWER,
+            token="reject-flow-token",
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.inviter,
+        )
 
         # Invitee rejects
         self.client.force_login(self.invitee)
@@ -824,30 +688,18 @@ class OrganizationInvitesTest(TestCase):
         # No membership should be created/modified by rejection
         self.assertFalse(OrganizationMembership.objects.filter(org=self.org, user=self.invitee, role=OrganizationMembership.OrgRole.VIEWER).exists())
 
-    @tag("batch_organizations")
-    def test_org_detail_shows_pending_invites(self):
-        # Owner creates an invite
-        self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        resp = self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-        self.assertEqual(resp.status_code, 302)
-
-        invite = OrganizationInvite.objects.get(org=self.org, email__iexact=self.invitee_email)
-
-        # Owner views org detail; pending invite should be present in context
-        resp = self.client.get(detail_url)
-        self.assertEqual(resp.status_code, 200)
-        pending = resp.context.get("pending_invites")
-        self.assertIsNotNone(pending)
-        self.assertIn(invite, list(pending))
 
     @tag("batch_organizations")
     def test_revoke_and_resend_from_org_detail(self):
-        # Owner creates invite
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email=self.invitee_email,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="resend-revoke-token",
+            expires_at=timezone.now() + timedelta(days=7),
+            invited_by=self.inviter,
+        )
         self.client.force_login(self.inviter)
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        self.client.post(detail_url, {"email": self.invitee_email, "role": OrganizationMembership.OrgRole.MEMBER})
-        invite = OrganizationInvite.objects.get(org=self.org, email__iexact=self.invitee_email)
 
         # Resend
         mail.outbox.clear()
@@ -945,19 +797,6 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
             status=OrganizationMembership.OrgStatus.REMOVED,
         )
 
-    @tag("batch_organizations")
-    def test_org_detail_requires_active_membership(self):
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-
-        # Non-member forbidden
-        self.client.force_login(self.outsider)
-        resp = self.client.get(detail_url)
-        self.assertEqual(resp.status_code, 403)
-
-        # Removed member forbidden
-        self.client.force_login(self.removed_user)
-        resp = self.client.get(detail_url)
-        self.assertEqual(resp.status_code, 403)
 
     @tag("batch_organizations")
     def test_only_admin_or_owner_can_manage_invites(self):
@@ -1053,22 +892,6 @@ class OrganizationPermissionsAndGuardsTest(TestCase):
         m = OrganizationMembership.objects.get(org=self.org, user=self.viewer)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
 
-    @tag("batch_organizations")
-    def test_solutions_partner_can_invite_members(self):
-        detail_url = reverse("organization_detail", kwargs={"org_id": self.org.id})
-        self.client.force_login(self.solutions_partner)
-        resp = self.client.post(
-            detail_url,
-            {"email": "member-invite@example.com", "role": OrganizationMembership.OrgRole.MEMBER},
-        )
-        self.assertEqual(resp.status_code, 302)
-        self.assertTrue(
-            OrganizationInvite.objects.filter(
-                org=self.org,
-                email__iexact="member-invite@example.com",
-                role=OrganizationMembership.OrgRole.MEMBER,
-            ).exists()
-        )
 
     @tag("batch_organizations")
     @patch("console.views.stripe.billing_portal.Session.create")
@@ -1196,9 +1019,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.ADMIN, token="tok-reactivate")
 
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 302)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
 
         m = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
         self.assertEqual(m.status, OrganizationMembership.OrgStatus.ACTIVE)
@@ -1215,9 +1039,10 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.ADMIN, token="tok-update")
 
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 302)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["ok"])
 
         m = OrganizationMembership.objects.get(org=self.org, user=self.invitee)
         self.assertEqual(m.role, OrganizationMembership.OrgRole.ADMIN)
@@ -1226,10 +1051,13 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.MEMBER, token="tok-wrong")
 
         self.client.force_login(self.other_user)
-        url = reverse("org_invite_accept", kwargs={"token": invite.token})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": invite.token})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("not associated", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "wrong_account")
+        self.assertEqual(payload["invitedEmail"], self.invitee.email)
 
     def test_accept_expired_invite_shows_friendly_page_and_no_membership_created(self):
         expired_invite = self._create_invite(
@@ -1240,10 +1068,12 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
         )
 
         self.client.force_login(self.other_user)
-        url = reverse("org_invite_accept", kwargs={"token": expired_invite.token})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": expired_invite.token})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("expired", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "expired")
         self.assertFalse(
             OrganizationMembership.objects.filter(org=self.org, user=self.other_user).exists()
         )
@@ -1263,10 +1093,24 @@ class OrganizationInviteAcceptEdgeCasesTest(TestCase):
 
     def test_accept_invalid_token_shows_friendly_page(self):
         self.client.force_login(self.invitee)
-        url = reverse("org_invite_accept", kwargs={"token": "nonexistent-token"})
-        resp = self.client.get(url)
+        url = reverse("console-org-invite-accept-api", kwargs={"token": "nonexistent-token"})
+        resp = self.client.post(url)
         self.assertEqual(resp.status_code, 200)
-        self.assertIn("invalid", resp.content.decode().lower())
+        payload = resp.json()
+        self.assertFalse(payload["ok"])
+        self.assertEqual(payload["issue"], "invalid")
+
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
+    def test_legacy_accept_get_redirects_to_app_invite_page(self):
+        invite = self._create_invite(self.invitee.email, OrganizationMembership.OrgRole.MEMBER, token="tok-legacy")
+
+        self.client.force_login(self.invitee)
+        url = reverse("org_invite_accept", kwargs={"token": invite.token})
+        resp = self.client.get(url)
+
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp["Location"], f"/app/organizations/invites/{invite.token}/accept")
+        self.assertFalse(OrganizationMembership.objects.filter(org=self.org, user=self.invitee).exists())
 
     @tag("batch_organizations")
     def test_admin_can_approve_pending_invite(self):

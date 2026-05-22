@@ -23,6 +23,7 @@ from console.context_helpers import build_console_context
 from console.role_constants import BILLING_MANAGE_ROLES
 from util.integrations import stripe_status
 from util.payments_helper import PaymentsHelper
+from util.urls import IMMERSIVE_APP_BASE_PATH
 from util.subscription_helper import (
     ensure_single_individual_subscription,
     get_active_subscription,
@@ -520,8 +521,8 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                     if not customer or not getattr(customer, "id", None):
                         raise BillingUpdateError("stripe_customer_missing", status=400)
 
-                    success_url = request.build_absolute_uri(reverse("billing")) + "?seats_success=1"
-                    cancel_url = request.build_absolute_uri(reverse("billing")) + "?seats_cancelled=1"
+                    success_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_success=1"
+                    cancel_url = request.build_absolute_uri(f"{IMMERSIVE_APP_BASE_PATH}/billing") + "?seats_cancelled=1"
 
                     checkout_metadata = build_checkout_flow_metadata(
                         {
@@ -763,7 +764,7 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
             )
             if action == "absent" or not updated:
                 checkout_name = "proprietary:startup_checkout" if plan_target == "startup" else "proprietary:scale_checkout"
-                checkout_redirect = f"{reverse(checkout_name)}?{urlencode({'return_to': reverse('billing')})}"
+                checkout_redirect = f"{reverse(checkout_name)}?{urlencode({'return_to': f'{IMMERSIVE_APP_BASE_PATH}/billing'})}"
                 logger.info(
                     "Plan change requested without active subscription for user %s (target=%s, action=%s); redirecting to checkout",
                     getattr(owner_obj, "id", None),

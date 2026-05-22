@@ -99,22 +99,6 @@ class ConsoleSecretsTests(TestCase):
         secret.save()
         return secret
 
-    def test_global_secrets_page_uses_personal_scope_mount_attributes(self):
-        response = self.client.get(reverse("console-secrets"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-owner-scope="user"')
-        self.assertNotContains(response, "data-owner-label=")
-
-    def test_global_secrets_page_uses_organization_scope_mount_attributes(self):
-        self._set_org_context()
-
-        response = self.client.get(reverse("console-secrets"))
-
-        self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'data-owner-scope="organization"')
-        self.assertNotContains(response, "data-owner-label=")
-
     def test_create_global_secret_returns_created(self):
         response = self.client.post(
             reverse("console-global-secret-list"),

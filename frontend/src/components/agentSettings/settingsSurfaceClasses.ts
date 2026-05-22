@@ -1,3 +1,3 @@
-export const sharedSettingsGlassFrameClassName = 'overflow-hidden rounded-2xl border backdrop-blur-xl'
-export const embeddedSettingsSurfaceClassName = 'border-slate-200/70 bg-slate-900/80 text-slate-100'
-export const standaloneSettingsSurfaceClassName = 'border-gray-200/70 bg-white/78 text-gray-900'
+export const sharedSettingsGlassFrameClassName = 'settings-card-surface overflow-hidden rounded-2xl border'
+export const embeddedSettingsSurfaceClassName = 'settings-card-surface--embedded border-slate-200/20 text-slate-100'
+export const standaloneSettingsSurfaceClassName = 'settings-card-surface--standalone border-gray-200/70 text-gray-900'

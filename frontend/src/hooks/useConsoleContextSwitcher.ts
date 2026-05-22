@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
+  createOrganization,
   fetchConsoleContext,
   switchConsoleContext,
   type ConsoleContext,
   type ConsoleContextData,
+  type ConsoleContextOption,
 } from '../api/context'
 import { readStoredConsoleContext, storeConsoleContext } from '../util/consoleContextStorage'
 
@@ -22,6 +24,7 @@ type UseConsoleContextSwitcherResult = {
   isSwitching: boolean
   error: string | null
   switchContext: (context: ConsoleContext) => Promise<void>
+  createOrganizationContext: (name: string) => Promise<ConsoleContext>
   refresh: () => Promise<void>
 }
 
@@ -50,6 +53,34 @@ export function useConsoleContextSwitcher({
   useEffect(() => {
     dataRef.current = data
   }, [data])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return undefined
+    }
+    const handleContextUpdated = (event: Event) => {
+      const detail = (event as CustomEvent<ConsoleContext>).detail
+      if (!detail || !detail.type || !detail.id) {
+        return
+      }
+      setData((prev) => (
+        prev
+          ? {
+              ...prev,
+              context: detail,
+              organizations: detail.type === 'organization'
+                ? prev.organizations.map((org) => (org.id === detail.id ? { ...org, name: detail.name } : org))
+                : prev.organizations,
+            }
+          : prev
+      ))
+      storeConsoleContext(detail)
+    }
+    window.addEventListener('gobii:console-context-updated', handleContextUpdated)
+    return () => {
+      window.removeEventListener('gobii:console-context-updated', handleContextUpdated)
+    }
+  }, [])
 
   const refresh = useCallback(async () => {
     if (!enabled) {
@@ -137,6 +168,54 @@ export function useConsoleContextSwitcher({
     [data, isSwitching, onSwitched, persistSession, resolvedForAgentId],
   )
 
+  const createOrganizationContext = useCallback(
+    async (name: string) => {
+      if (isSwitching) {
+        throw new Error('Context switch already in progress.')
+      }
+      const requestId = ++requestIdRef.current
+      setIsSwitching(true)
+      setError(null)
+      try {
+        const created = await createOrganization(name)
+        if (!mountedRef.current || requestId !== requestIdRef.current) {
+          return created.context
+        }
+        const nextOrganization: ConsoleContextOption = created.organization
+        setData((prev) => {
+          if (!prev) {
+            return prev
+          }
+          const organizations = [
+            ...prev.organizations.filter((org) => org.id !== nextOrganization.id),
+            nextOrganization,
+          ].sort((left, right) => left.name.localeCompare(right.name))
+          return {
+            ...prev,
+            context: created.context,
+            organizations,
+            organizationsEnabled: true,
+          }
+        })
+        setResolvedForAgentId(undefined)
+        storeConsoleContext(created.context)
+        onSwitched?.(created.context)
+        return created.context
+      } catch (err) {
+        if (mountedRef.current && requestId === requestIdRef.current) {
+          console.error('Failed to create organization:', err)
+          setError('Unable to create organization.')
+        }
+        throw err
+      } finally {
+        if (mountedRef.current && requestId === requestIdRef.current) {
+          setIsSwitching(false)
+        }
+      }
+    },
+    [isSwitching, onSwitched],
+  )
+
   return {
     data,
     resolvedForAgentId,
@@ -144,6 +223,7 @@ export function useConsoleContextSwitcher({
     isSwitching,
     error,
     switchContext,
+    createOrganizationContext,
     refresh,
   }
 }

@@ -100,7 +100,7 @@ class GlobalSkillEvalAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertEqual(payload["rubric_version"], "v1")
-        self.assertEqual(payload["global_secrets_url"], reverse("console-secrets"))
+        self.assertEqual(payload["global_secrets_url"], "/app/secrets")
         self.assertEqual(len(payload["global_skills"]), 1)
         skill_payload = payload["global_skills"][0]
         self.assertEqual(skill_payload["id"], str(skill.id))

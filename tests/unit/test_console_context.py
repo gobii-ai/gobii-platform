@@ -1,13 +1,16 @@
 import uuid
+import json
 import tempfile
-from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
 
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
 from waffle.models import Flag
+from waffle.testutils import override_flag
 
 from api.models import (
     Organization,
@@ -18,14 +21,309 @@ from api.models import (
     BrowserUseAgentTask,
     TaskCredit,
     OrganizationInvite,
-    ProxyServer,
-    DedicatedProxyAllocation,
 )
 from django.utils import timezone
+from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 
 
 User = get_user_model()
+
+
+@tag("batch_console_context")
+@override_settings(
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
+)
+class OrganizationCreateAPITests(TestCase):
+    def setUp(self):
+        Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
+        self.user = User.objects.create_user(username="org-create", email="org-create@example.com", password="pw")
+        self.client.force_login(self.user)
+
+    def test_create_organization_api_creates_owner_membership_and_switches_context(self):
+        resp = self.client.post(
+            reverse("console-organization-create"),
+            data=json.dumps({"name": "New Ops Org"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 201)
+        payload = resp.json()
+        org = Organization.objects.get(name="New Ops Org")
+        self.assertEqual(payload["organization"]["id"], str(org.id))
+        self.assertEqual(payload["context"], {
+            "type": "organization",
+            "id": str(org.id),
+            "name": "New Ops Org",
+        })
+        self.assertTrue(
+            OrganizationMembership.objects.filter(
+                org=org,
+                user=self.user,
+                role=OrganizationMembership.OrgRole.OWNER,
+                status=OrganizationMembership.OrgStatus.ACTIVE,
+            ).exists()
+        )
+        session = self.client.session
+        self.assertEqual(session["context_type"], "organization")
+        self.assertEqual(session["context_id"], str(org.id))
+        self.assertEqual(session["context_name"], "New Ops Org")
+
+    def test_create_organization_api_requires_feature_flag(self):
+        with override_flag("organizations", active=False):
+            resp = self.client.post(
+                reverse("console-organization-create"),
+                data=json.dumps({"name": "Disabled Org"}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(resp.status_code, 404)
+        self.assertFalse(Organization.objects.filter(name="Disabled Org").exists())
+
+
+@tag("batch_console_context")
+@override_settings(
+    SEGMENT_WRITE_KEY="",
+    SEGMENT_WEB_WRITE_KEY="",
+)
+class CurrentOrganizationAPITests(TestCase):
+    def setUp(self):
+        Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
+        self.owner = User.objects.create_user(username="org-owner", email="owner@example.com", password="pw")
+        self.admin = User.objects.create_user(username="org-admin", email="admin@example.com", password="pw")
+        self.member = User.objects.create_user(username="org-member", email="member@example.com", password="pw")
+        self.org = Organization.objects.create(
+            name="Acme Team",
+            slug="acme-team",
+            plan="free",
+            created_by=self.owner,
+        )
+        billing = self.org.billing
+        billing.purchased_seats = 5
+        billing.save(update_fields=["purchased_seats"])
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.admin,
+            role=OrganizationMembership.OrgRole.ADMIN,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        OrganizationMembership.objects.create(
+            org=self.org,
+            user=self.member,
+            role=OrganizationMembership.OrgRole.MEMBER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+
+    def _login_in_org_context(self, user):
+        self.client.force_login(user)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(self.org.id)
+        session["context_name"] = self.org.name
+        session.save()
+
+    def test_current_organization_api_lists_members_and_invites_for_org_context(self):
+        self._login_in_org_context(self.owner)
+
+        resp = self.client.get(reverse("console-current-organization"))
+
+        self.assertEqual(resp.status_code, 200)
+        payload = resp.json()
+        self.assertEqual(payload["organization"]["id"], str(self.org.id))
+        self.assertEqual(payload["viewer"]["role"], OrganizationMembership.OrgRole.OWNER)
+        self.assertTrue(payload["viewer"]["canEditOrganization"])
+        self.assertTrue(payload["viewer"]["canManageMembers"])
+        self.assertEqual({member["email"] for member in payload["members"]}, {
+            "owner@example.com",
+            "admin@example.com",
+            "member@example.com",
+        })
+
+    def test_current_organization_api_requires_org_context(self):
+        self.client.force_login(self.owner)
+
+        resp = self.client.get(reverse("console-current-organization"))
+
+        self.assertEqual(resp.status_code, 404)
+
+    def test_owner_can_update_organization_name(self):
+        self._login_in_org_context(self.owner)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"name": "Renamed Team"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, "Renamed Team")
+        session = self.client.session
+        self.assertEqual(session["context_name"], "Renamed Team")
+
+    def test_admin_cannot_update_organization_name(self):
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization"),
+            data=json.dumps({"name": "Blocked Name"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.org.refresh_from_db()
+        self.assertEqual(self.org.name, "Acme Team")
+
+    def test_admin_can_invite_member_and_update_non_owner_role(self):
+        self._login_in_org_context(self.admin)
+
+        invite_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "new@example.com", "role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+        role_resp = self.client.patch(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.member.id}),
+            data=json.dumps({"role": OrganizationMembership.OrgRole.VIEWER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(invite_resp.status_code, 201)
+        self.assertTrue(OrganizationInvite.objects.filter(org=self.org, email="new@example.com").exists())
+        self.assertEqual(role_resp.status_code, 200)
+        membership = OrganizationMembership.objects.get(org=self.org, user=self.member)
+        self.assertEqual(membership.role, OrganizationMembership.OrgRole.VIEWER)
+
+    def test_owner_can_invite_solutions_partner_without_available_seats(self):
+        seatless_org = Organization.objects.create(
+            name="Seatless Team",
+            slug="seatless-team",
+            plan="free",
+            created_by=self.owner,
+        )
+        OrganizationMembership.objects.create(
+            org=seatless_org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(seatless_org.id)
+        session["context_name"] = seatless_org.name
+        session.save()
+
+        standard_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "standard@example.com", "role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+        partner_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "partner@example.com", "role": OrganizationMembership.OrgRole.SOLUTIONS_PARTNER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(standard_resp.status_code, 400)
+        self.assertEqual(partner_resp.status_code, 201)
+        self.assertTrue(
+            OrganizationInvite.objects.filter(
+                org=seatless_org,
+                email="partner@example.com",
+                role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            ).exists()
+        )
+
+    def test_admin_cannot_modify_owner_role(self):
+        self._login_in_org_context(self.admin)
+
+        resp = self.client.patch(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.owner.id}),
+            data=json.dumps({"role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
+        self.assertEqual(membership.role, OrganizationMembership.OrgRole.OWNER)
+
+    def test_owner_can_remove_member_and_revoke_invite(self):
+        self._login_in_org_context(self.owner)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+
+        remove_resp = self.client.delete(
+            reverse("console-current-organization-member-detail", kwargs={"user_id": self.member.id}),
+        )
+        revoke_resp = self.client.delete(
+            reverse("console-current-organization-invite-detail", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(remove_resp.status_code, 200)
+        self.assertEqual(revoke_resp.status_code, 200)
+        self.assertEqual(
+            OrganizationMembership.objects.get(org=self.org, user=self.member).status,
+            OrganizationMembership.OrgStatus.REMOVED,
+        )
+        invite.refresh_from_db()
+        self.assertIsNotNone(invite.revoked_at)
+
+    def test_owner_can_resend_invite_from_current_organization_api(self):
+        self._login_in_org_context(self.owner)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-resend-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+        original_sent_at = timezone.now() - timezone.timedelta(days=1)
+        OrganizationInvite.objects.filter(pk=invite.pk).update(sent_at=original_sent_at)
+
+        resp = self.client.post(
+            reverse("console-current-organization-invite-resend", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        invite.refresh_from_db()
+        self.assertGreater(invite.sent_at, original_sent_at)
+        payload = resp.json()
+        resent_invite = next(item for item in payload["pendingInvites"] if item["token"] == invite.token)
+        self.assertEqual(resent_invite["email"], "pending@example.com")
+
+    def test_member_cannot_resend_invite_from_current_organization_api(self):
+        self._login_in_org_context(self.member)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-resend-forbidden-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+
+        resp = self.client.post(
+            reverse("console-current-organization-invite-resend", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(len(mail.outbox), 0)
 
 
 @override_settings(
@@ -41,6 +339,43 @@ User = get_user_model()
 
 @tag('batch_console_context')
 class ConsoleContextTests(TestCase):
+    def _ensure_current_month_task_credit(self, *, user=None, organization=None):
+        now = timezone.now()
+        expiration_date = now + timezone.timedelta(days=30)
+        credit = (
+            TaskCredit.objects.filter(
+                user=user,
+                organization=organization,
+                plan=PlanNamesChoices.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+                voided=False,
+                granted_date__year=now.year,
+                granted_date__month=now.month,
+            )
+            .order_by("-granted_date")
+            .first()
+        )
+        if credit:
+            credit.credits = 10
+            credit.credits_used = 0
+            credit.expiration_date = expiration_date
+            credit.save(update_fields=["credits", "credits_used", "expiration_date"])
+            return credit
+
+        return TaskCredit.objects.create(
+            user=user,
+            organization=organization,
+            credits=10,
+            credits_used=0,
+            granted_date=now,
+            expiration_date=expiration_date,
+            plan=PlanNamesChoices.FREE,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
+
     def setUp(self):
         # Enable organizations feature flag for all requests
         Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
@@ -86,14 +421,10 @@ class ConsoleContextTests(TestCase):
             browser_use_agent=self.org_browser,
         )
 
-        # Ensure the organization has credits so org tasks can be created
-        TaskCredit.objects.create(
-            organization=self.org,
-            credits=10,
-            credits_used=0,
-            granted_date=timezone.now(),
-            expiration_date=timezone.now() + timezone.timedelta(days=30),
-        )
+        # Ensure both contexts have credits so task fixtures can be created
+        # regardless of whether signup bootstrap credits are enabled.
+        self._ensure_current_month_task_credit(organization=self.org)
+        self._ensure_current_month_task_credit(user=self.owner)
 
         # Tasks: one personal, one org-owned, one agent-less
         self.personal_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=self.personal_browser)
@@ -281,20 +612,21 @@ class ConsoleContextTests(TestCase):
         resp2 = self.client.get(url)
         self.assertEqual(resp2.status_code, 403)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_agent_detail_scoping(self):
         self._set_personal_context()
         url = reverse("agent_detail", kwargs={"pk": self.org_agent.id})
 
-        # Direct navigation to another context's agent should still render.
+        # Direct navigation to a legacy agent page should redirect into the app
+        # without mutating the user's persisted session context.
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.context["current_context"]["type"], "organization")
-        self.assertEqual(resp.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, f"/app/agents/{self.org_agent.id}/settings")
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
-        # Explicit context override query should also render and not mutate session.
+        # Explicit context override query should be preserved for the app shell.
         resp_with_override = self.client.get(
             url,
             {
@@ -302,48 +634,42 @@ class ConsoleContextTests(TestCase):
                 "context_id": str(self.org.id),
             },
         )
-        self.assertEqual(resp_with_override.status_code, 200)
-        self.assertEqual(resp_with_override.context["current_context"]["type"], "organization")
-        self.assertEqual(resp_with_override.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(resp_with_override.status_code, 302)
+        redirect = urlsplit(resp_with_override.url)
+        self.assertEqual(redirect.path, f"/app/agents/{self.org_agent.id}/settings")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
-        # Org context with membership: should 200
         self._set_org_context()
         resp2 = self.client.get(url)
-        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(resp2.status_code, 302)
+        self.assertEqual(resp2.url, f"/app/agents/{self.org_agent.id}/settings")
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_agent_targeted_views_use_agent_owner_context_without_persisting_session(self):
         self._set_personal_context()
 
         chat_response = self.client.get(
             reverse("agent_chat_shell", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(chat_response.status_code, 200)
-        self.assertEqual(chat_response.context["current_context"]["type"], "organization")
-        self.assertEqual(chat_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(chat_response.status_code, 302)
+        self.assertEqual(chat_response.url, f"/app/agents/{self.org_agent.id}")
 
         files_response = self.client.get(
             reverse("agent_files", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(files_response.status_code, 200)
-        self.assertEqual(files_response.context["current_context"]["type"], "organization")
-        self.assertEqual(files_response.context["current_context"]["id"], str(self.org.id))
-
-        secrets_response = self.client.get(
-            reverse("agent_secrets", kwargs={"pk": self.org_agent.id}),
-        )
-        self.assertEqual(secrets_response.status_code, 200)
-        self.assertEqual(secrets_response.context["current_context"]["type"], "organization")
-        self.assertEqual(secrets_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(files_response.status_code, 302)
+        self.assertEqual(files_response.url, f"/app/agents/{self.org_agent.id}/files")
 
         email_response = self.client.get(
             reverse("agent_email_settings", kwargs={"pk": self.org_agent.id}),
         )
-        self.assertEqual(email_response.status_code, 200)
-        self.assertEqual(email_response.context["current_context"]["type"], "organization")
-        self.assertEqual(email_response.context["current_context"]["id"], str(self.org.id))
+        self.assertEqual(email_response.status_code, 302)
+        self.assertEqual(email_response.url, f"/app/agents/{self.org_agent.id}/email")
 
         session = self.client.session
         self.assertEqual(session.get("context_type"), "personal")
@@ -380,11 +706,17 @@ class ConsoleContextTests(TestCase):
         self.assertEqual(session.get("context_type"), "personal")
         self.assertEqual(session.get("context_id"), str(self.owner.id))
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_org_detail_sets_console_context(self):
         # Visiting org detail should set session context to organization
         url = reverse("organization_detail", kwargs={"org_id": self.org.id})
         resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        redirect = urlsplit(resp.url)
+        self.assertEqual(redirect.path, "/app/organization")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get("context_type"), "organization")
         self.assertEqual(session.get("context_id"), str(self.org.id))
@@ -426,131 +758,34 @@ class ConsoleContextTests(TestCase):
         html2 = resp2.content.decode()
         self.assertIn("Profile", html2)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_sidebar_nav_reflects_context(self):
-        # Org context: sidebar should show Organization link
         self._set_org_context()
         resp = self.client.get(reverse("agents"))
-        self.assertEqual(resp.status_code, 200)
-        content = resp.content.decode()
-        self.assertIn("Organization", content)
-        # Personal context: sidebar should show Profile link
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "/app/agents")
+
         self._set_personal_context()
         resp2 = self.client.get(reverse("agents"))
-        self.assertEqual(resp2.status_code, 200)
-        content2 = resp2.content.decode()
-        self.assertIn("Profile", content2)
+        self.assertEqual(resp2.status_code, 302)
+        self.assertEqual(resp2.url, "/app/agents")
 
-    def test_agent_detail_includes_dedicated_ip_counts(self):
-        self._set_personal_context()
-        proxy = ProxyServer.objects.create(
-            name="Dedicated Proxy",
-            proxy_type=ProxyServer.ProxyType.HTTP,
-            host="dedicated.example.com",
-            port=8080,
-            username="dedicated",
-            password="secret",
-            static_ip="203.0.113.5",
-            is_active=True,
-            is_dedicated=True,
-        )
-        DedicatedProxyAllocation.objects.assign_to_owner(proxy, self.owner)
-
-        url = reverse("agent_detail", kwargs={"pk": self.personal_agent.id})
-        resp = self.client.get(url)
-        self.assertEqual(resp.status_code, 200)
-        props = resp.context.get("agent_detail_props") or {}
-        dedicated_ips = props.get("dedicatedIps") or {}
-        self.assertEqual(dedicated_ips.get("total"), 1)
-        self.assertEqual(dedicated_ips.get("available"), 1)
-        self.assertEqual(dedicated_ips.get("ownerType"), "user")
-        self.assertEqual(dedicated_ips.get("selectedId"), None)
-        options = dedicated_ips.get("options") or []
-        self.assertEqual(len(options), 1)
-        self.assertEqual(options[0]["label"], "203.0.113.5")
-        self.assertEqual(options[0]["assignedNames"], [])
-
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_billing_query_switches_to_org_context(self):
         self._set_personal_context()
         billing_url = f"{reverse('billing')}?org_id={self.org.id}"
         resp = self.client.get(billing_url)
-        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.status_code, 302)
+        redirect = urlsplit(resp.url)
+        self.assertEqual(redirect.path, "/app/billing")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(self.org.id)])
+        self.assertEqual(query.get("org_id"), [str(self.org.id)])
         session = self.client.session
         self.assertEqual(session.get('context_type'), 'organization')
         self.assertEqual(session.get('context_id'), str(self.org.id))
         self.assertEqual(session.get('context_name'), self.org.name)
-
-    def test_agent_contact_view_shows_org_context_banner(self):
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "help the organization"
-        session.save()
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn('id="agent-owner-selector-contact"', html)
-        self.assertIn(self.org.name, html)
-        self.assertNotIn('disabled aria-disabled="true"', html)
-
-    def test_agent_contact_view_blocks_member_role(self):
-        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
-        membership.role = OrganizationMembership.OrgRole.MEMBER
-        membership.save(update_fields=["role"])
-
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "help the organization"
-        session.save()
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn('id="agent-owner-selector-contact"', html)
-        self.assertIn("You need to be an organization owner or admin", html)
-        self.assertIn('disabled aria-disabled="true"', html)
-
-    @patch("console.views.AgentService.has_agents_available")
-    def test_agent_contact_view_allows_when_personal_capacity_available(self, mock_has_capacity):
-        """Users can proceed when personal capacity exists even if org is full."""
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "coordinate research across teams"
-        session.save()
-
-        def _side_effect(owner):
-            if isinstance(owner, Organization):
-                return False
-            return True
-
-        mock_has_capacity.side_effect = _side_effect
-
-        resp = self.client.get(reverse("agent_create_contact"))
-        self.assertEqual(resp.status_code, 200)
-        self.assertGreaterEqual(mock_has_capacity.call_count, 2)
-
-    def test_agent_contact_post_denied_for_member_role(self):
-        membership = OrganizationMembership.objects.get(org=self.org, user=self.owner)
-        membership.role = OrganizationMembership.OrgRole.MEMBER
-        membership.save(update_fields=["role"])
-
-        self._set_org_context()
-        session = self.client.session
-        session["agent_charter"] = "orchestrate research"
-        session.save()
-
-        payload = {
-            "preferred_contact_method": "email",
-            "contact_endpoint_email": "owner@example.com",
-            "email_enabled": "on",
-        }
-
-        resp = self.client.post(reverse("agent_create_contact"), data=payload)
-        self.assertEqual(resp.status_code, 200)
-        html = resp.content.decode()
-        self.assertIn("You need to be an organization owner or admin", html)
-        # Ensure no additional org-owned agents were created
-        org_agent_count = PersistentAgent.objects.filter(organization=self.org).count()
-        self.assertEqual(org_agent_count, 1)
 
     def test_org_invite_accept_sets_context_and_membership(self):
         # Create invite for a new user

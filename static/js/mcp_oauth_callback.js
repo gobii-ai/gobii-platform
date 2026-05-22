@@ -78,7 +78,7 @@ async function completeOAuth() {
 
     clearPendingKeys(sessionData.serverId, state);
     setStatus("Connection complete! Redirecting…");
-    const payload = sessionData.returnUrl || "/console/advanced/mcp-servers/?oauth=success";
+    const payload = sessionData.returnUrl || "/app/integrations?oauth=success";
     setTimeout(() => {
       window.location.href = payload;
     }, 1200);

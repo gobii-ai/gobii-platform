@@ -214,7 +214,7 @@ export function McpServersScreen({
     ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-2 text-sm text-rose-100'
     : 'rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800'
   const tableShellClassName = isEmbedded
-    ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35'
+    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
     : 'gobii-card-base'
   const headerClassName = isEmbedded
     ? 'px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'

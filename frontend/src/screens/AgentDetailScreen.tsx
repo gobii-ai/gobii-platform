@@ -2,7 +2,6 @@ import type { FormEvent, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle,
-  ArrowLeft,
   ArrowUpFromLine,
   Check,
   CheckCircle2,
@@ -13,7 +12,6 @@ import {
   Info,
   KeyRound,
   Mail,
-  MessageSquare,
   Phone,
   Plus,
   ServerCog,
@@ -36,6 +34,7 @@ import { Modal } from '../components/common/Modal'
 import { AddCollaboratorModal } from '../components/agentSettings/AddCollaboratorModal'
 import { EmbeddedAgentShellBackButton } from '../components/agentChat/EmbeddedAgentShellBackButton'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
+import { embeddedSettingsSurfaceClassName, sharedSettingsGlassFrameClassName } from '../components/agentSettings/settingsSurfaceClasses'
 import { AgentIntelligenceSlider } from '../components/common/AgentIntelligenceSlider'
 import { SaveBar } from '../components/common/SaveBar'
 import { AddContactModal } from '../components/agentSettings/AddContactModal'
@@ -119,10 +118,6 @@ type ConfirmActionConfig = {
   onConfirm?: () => Promise<void> | void
 }
 
-export type AgentDetailScreenProps = {
-  initialData: AgentSettingsData
-}
-
 type AgentSettingsWorkspaceVariant = 'standalone' | 'embedded'
 
 export type AgentSettingsWorkspaceSavePayload = {
@@ -136,7 +131,6 @@ export type AgentSettingsWorkspaceSavePayload = {
 
 export type AgentSettingsWorkspaceProps = {
   initialData: AgentSettingsData
-  variant?: AgentSettingsWorkspaceVariant
   onBack?: () => void
   onSaved?: (payload: AgentSettingsWorkspaceSavePayload) => void
   onDeleted?: () => void
@@ -416,7 +410,6 @@ function areSetsEqual<T>(a: Set<T>, b: Set<T>): boolean {
 
 export function AgentSettingsWorkspace({
   initialData,
-  variant = 'standalone',
   onBack,
   onSaved,
   onDeleted,
@@ -426,7 +419,6 @@ export function AgentSettingsWorkspace({
   onOpenContactRequests,
   onReassigned,
 }: AgentSettingsWorkspaceProps) {
-  const isEmbedded = variant === 'embedded'
   const fallbackSliderMax = initialData.dailyCredits.sliderMax
   const fallbackSliderEmptyValue = initialData.dailyCredits.sliderEmptyValue ?? fallbackSliderMax
   const fallbackSliderLimitMax = initialData.dailyCredits.sliderLimitMax ?? fallbackSliderMax
@@ -1645,26 +1637,18 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'Reassignment failed. Please try again.')
         }
-        if (variant === 'embedded') {
-          onReassigned?.({
-            context: data.context as { type: string; id: string; name?: string | null } | undefined,
-            redirect: (data.redirect as string | null | undefined) ?? null,
-            organization: (data.organization as AgentOrganization | undefined) ?? null,
-          })
-          return
-        }
-        if (data.redirect) {
-          window.location.href = data.redirect as string
-          return
-        }
-        window.location.reload()
+        onReassigned?.({
+          context: data.context as { type: string; id: string; name?: string | null } | undefined,
+          redirect: (data.redirect as string | null | undefined) ?? null,
+          organization: (data.organization as AgentOrganization | undefined) ?? null,
+        })
       } catch (error) {
         setReassignError(error instanceof Error ? error.message : 'An unexpected error occurred.')
       } finally {
         setReassigning(false)
       }
     },
-    [initialData.csrfToken, initialData.urls.detail, onReassigned, variant],
+    [initialData.csrfToken, initialData.urls.detail, onReassigned],
   )
 
   const deleteAgent = useCallback(async () => {
@@ -1682,18 +1666,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         const message = (await response.text())?.trim()
         throw new Error(message || 'Failed to delete agent. Please try again.')
       }
-      if (variant === 'embedded') {
-        onDeleted?.()
-        return
-      }
-      const redirectTarget = response.headers.get('HX-Redirect') || initialData.urls.list
-      window.location.assign(redirectTarget)
+      onDeleted?.()
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to delete agent. Please try again.'
       setDeleteError(message)
       throw error
     }
-  }, [initialData.csrfToken, initialData.urls.delete, initialData.urls.list, onDeleted, variant])
+  }, [initialData.csrfToken, initialData.urls.delete, onDeleted])
 
   const confirmDeleteAgent = useCallback(() => {
     openConfirmAction({
@@ -1772,18 +1751,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
     [peerLinkCandidates, peerLinkDefaults, showModal, stagePeerLinkCreate, stagePeerLinkUpdate],
   )
 
-  const sectionClassName = isEmbedded
-    ? 'group rounded-none border-0 bg-transparent shadow-none'
-    : 'gobii-card-base group'
-  const sectionSummaryClassName = isEmbedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
-    : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const sectionBodyClassName = isEmbedded ? 'px-0 pt-5' : 'p-6 sm:p-8'
-  const stackedSectionBodyClassName = isEmbedded ? 'px-0 pt-5 space-y-6' : 'p-6 sm:p-8 space-y-6'
+  const sectionClassName = `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+  const sectionSummaryClassName = 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
+  const sectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5'
+  const stackedSectionBodyClassName = 'border-t border-slate-200/15 px-5 py-5 space-y-6'
   const embeddedUtilityLinkClassName = 'inline-flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white sm:w-auto'
   const embeddedNeutralButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-3 py-2 text-sm font-semibold text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55 hover:text-white'
   const embeddedDestructiveButtonClassName = 'inline-flex items-center gap-2 rounded-lg border border-rose-300/25 bg-rose-950/35 px-3 py-2 text-sm font-semibold text-rose-200 transition-colors hover:border-rose-200/40 hover:bg-rose-900/50'
-  const standaloneHeaderActionClassName = 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-800 shadow-sm transition-colors hover:bg-blue-50'
   const embeddedHeaderActions = (
     <>
       {onOpenSecrets ? (
@@ -1842,68 +1816,17 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       )}
     </>
   )
-  const standaloneHeaderActions = (
-    <>
-      <a
-        href={initialData.urls.chat}
-        className={standaloneHeaderActionClassName}
-      >
-        <MessageSquare className="w-4 h-4" aria-hidden="true" />
-        Web Chat
-      </a>
-      <a
-        href={initialData.urls.secrets}
-        className={standaloneHeaderActionClassName}
-      >
-        <KeyRound className="w-4 h-4" aria-hidden="true" />
-        Secrets
-      </a>
-      <a
-        href={initialData.urls.emailSettings}
-        className={standaloneHeaderActionClassName}
-      >
-        <Mail className="w-4 h-4" aria-hidden="true" />
-        Email Settings
-      </a>
-      <a
-        href={initialData.urls.manageFiles}
-        className={standaloneHeaderActionClassName}
-      >
-        <Folder className="w-4 h-4" aria-hidden="true" />
-        Manage Files
-      </a>
-    </>
-  )
 
   return (
-    <div className={isEmbedded ? 'space-y-6 pb-24' : 'space-y-6 pb-6'}>
-      {isEmbedded ? (
-        <SettingsBanner
-          variant="embedded"
-          leading={<EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to gallery" />}
-          eyebrow="Agent settings"
-          title={(formState.name || 'Agent').trim()}
-          headingId="agent-name-heading"
-          actions={embeddedHeaderActions}
-        />
-      ) : (
-        <SettingsBanner
-          variant="standalone"
-          title={`${(formState.name || 'Agent').trim()} Settings`}
-          subtitle="Manage your agent settings and preferences"
-          supportingContent={(
-            <a
-              href={initialData.urls.list}
-              className="group inline-flex items-center gap-2 text-sm text-blue-600 transition-colors hover:text-blue-800"
-            >
-              <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" aria-hidden="true" />
-              Back to Agents
-            </a>
-          )}
-          headingId="agent-name-heading"
-          actions={standaloneHeaderActions}
-        />
-      )}
+    <div className="space-y-6 pb-24">
+      <SettingsBanner
+        variant="embedded"
+        leading={<EmbeddedAgentShellBackButton onClick={onBack} ariaLabel="Back to gallery" />}
+        eyebrow="Agent settings"
+        title={(formState.name || 'Agent').trim()}
+        headingId="agent-name-heading"
+        actions={embeddedHeaderActions}
+      />
 
       {initialData.agent.pendingTransfer && (
         <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded-xl shadow-md px-5 py-4 flex flex-col gap-2">
@@ -1959,7 +1882,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       {initialData.allowlist.show && (
         <input type="hidden" name="whitelist_policy" value={initialData.agent.whitelistPolicy} />
       )}
-        <details className={sectionClassName} id="agent-identity" {...(isEmbedded ? {} : { open: true })}>
+        <details className={sectionClassName} id="agent-identity">
           <summary className={sectionSummaryClassName}>
             <div>
               <h2 className="text-lg font-semibold text-gray-800">General Settings</h2>
@@ -2008,7 +1931,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                       <button
                         type="button"
                         onClick={() => avatarInputRef.current?.click()}
-                        className={isEmbedded ? embeddedNeutralButtonClassName : 'inline-flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-semibold text-gray-800 shadow-sm transition-colors hover:border-blue-300 hover:text-blue-700'}
+                        className={embeddedNeutralButtonClassName}
                       >
                         <ArrowUpFromLine className="h-4 w-4" aria-hidden="true" />
                         Upload
@@ -2017,7 +1940,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                         <button
                           type="button"
                           onClick={handleAvatarRemove}
-                          className={isEmbedded ? embeddedDestructiveButtonClassName : 'inline-flex items-center gap-2 rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 shadow-sm transition-colors hover:border-red-300'}
+                          className={embeddedDestructiveButtonClassName}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden="true" />
                           Remove
@@ -2038,7 +1961,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <AgentColorPicker
                   colors={initialData.agentColors}
                   selectedHex={formState.agentColorHex}
-                  embedded={isEmbedded}
+                  embedded
                   onChange={(hex) => setFormState((prev) => ({ ...prev, agentColorHex: hex }))}
                 />
                 <p className="mt-2 text-xs text-gray-500">Choose the accent color used across agent chat and cards.</p>
@@ -2065,7 +1988,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <span className="inline-block text-sm font-medium text-gray-800 mt-2.5">Status</span>
               </div>
               <div className="sm:col-span-9">
-                <div className={isEmbedded ? 'flex flex-col gap-4 rounded-lg border border-slate-200/70 bg-transparent p-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6' : 'flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6 p-4 border border-gray-200 rounded-lg bg-gray-50/60'}>
+                <div className="flex flex-col gap-4 rounded-lg border border-slate-200/70 bg-transparent p-4 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
                   <div className="flex items-center gap-3">
                     <div className={`flex items-center justify-center w-10 h-10 rounded-full ${formState.isActive ? 'bg-green-100' : 'bg-gray-100'}`}>
                       {formState.isActive ? (
@@ -2135,7 +2058,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
                 <CircleHelp className="ms-1 inline-block size-3 text-gray-400" aria-hidden="true" />
               </div>
               <div className="sm:col-span-9 space-y-4">
-                <DailyCreditSummary dailyCredits={initialData.dailyCredits} embedded={isEmbedded} formatNumber={formatNumber} />
+                <DailyCreditSummary dailyCredits={initialData.dailyCredits} embedded formatNumber={formatNumber} />
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-3">
                     <label htmlFor="daily-credit-limit-slider" className="inline-block text-sm font-medium text-gray-700">
@@ -2206,7 +2129,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
               <div className="sm:col-span-9">
                 <DedicatedIpSummary
                   dedicatedIps={initialData.dedicatedIps}
-                  embedded={isEmbedded}
+                  embedded
                   organizationName={initialData.agent.organization?.name ?? null}
                   selectedValue={formState.dedicatedProxyId}
                   onChange={(value) => setFormState((prev) => ({ ...prev, dedicatedProxyId: value }))}
@@ -2224,17 +2147,6 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         </details>
       </form>
 
-      {variant === 'standalone' ? (
-        <SaveBar
-          id="agent-save-bar"
-          visible={hasAnyChanges}
-          onCancel={handleResetAll}
-          onSave={handleSaveAll}
-          busy={saving}
-          error={saveError}
-        />
-      ) : null}
-
       <details className={sectionClassName} id="agent-contact-controls">
         <summary className={sectionSummaryClassName}>
           <div>
@@ -2248,14 +2160,13 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
             primaryEmail={initialData.primaryEmail}
             primarySms={initialData.primarySms}
             emailSettingsUrl={initialData.urls.emailSettings}
-            smsEnableUrl={initialData.urls.smsEnable}
-            embedded={isEmbedded}
+            embedded
             onOpenEmailSettings={onOpenEmailSettings}
           />
 
           {initialData.allowlist.show && (
             <AllowlistManager
-              embedded={isEmbedded}
+              embedded
               state={savedAllowlistState}
               rows={allowlistRows}
               projectedSlotsUsed={projectedContactSlots}
@@ -2268,7 +2179,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
           )}
 
           <CollaboratorManager
-            embedded={isEmbedded}
+            embedded
             state={savedCollaboratorState}
             rows={collaboratorRows}
             projectedTotalCount={projectedCollaboratorTotalCount}
@@ -2282,7 +2193,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       </details>
 
       <IntegrationsSection
-        variant={variant}
+        variant="embedded"
         mcpServers={initialData.mcpServers}
         isOrgAgent={Boolean(initialData.agent.organization)}
         selectedOrgServers={selectedOrgServers}
@@ -2310,7 +2221,7 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
       <ActionsSection
         csrfToken={initialData.csrfToken}
         urls={initialData.urls}
-        variant={variant}
+        variant="embedded"
         agent={initialData.agent}
         features={initialData.features}
         reassignment={initialData.reassignment}
@@ -2323,26 +2234,20 @@ const toggleOrganizationServer = useCallback((serverId: string) => {
         deleteError={deleteError}
       />
 
-      {isEmbedded ? (
-        <SaveBar
-          visible={hasAnyChanges}
-          onCancel={handleResetAll}
-          onSave={handleSaveAll}
-          busy={saving}
-          error={saveError}
-          helperText="Save now to update the chat shell and gallery immediately."
-          variant="embedded"
-          placement="sticky"
-        />
-      ) : null}
+      <SaveBar
+        visible={hasAnyChanges}
+        onCancel={handleResetAll}
+        onSave={handleSaveAll}
+        busy={saving}
+        error={saveError}
+        helperText="Save now to update the chat shell and gallery immediately."
+        variant="embedded"
+        placement="sticky"
+      />
 
       {modal}
     </div>
   )
-}
-
-export function AgentDetailScreen({ initialData }: AgentDetailScreenProps) {
-  return <AgentSettingsWorkspace initialData={initialData} variant="standalone" />
 }
 
 type DailyCreditSummaryProps = {
@@ -2512,7 +2417,6 @@ type PrimaryContactsProps = {
   primaryEmail: PrimaryEndpoint | null
   primarySms: PrimaryEndpoint | null
   emailSettingsUrl: string
-  smsEnableUrl: string | null
   embedded?: boolean
   onOpenEmailSettings?: () => void
 }
@@ -2521,7 +2425,6 @@ function PrimaryContacts({
   primaryEmail,
   primarySms,
   emailSettingsUrl,
-  smsEnableUrl,
   embedded = false,
   onOpenEmailSettings,
 }: PrimaryContactsProps) {
@@ -2562,13 +2465,6 @@ function PrimaryContacts({
             <p className="mt-2 text-xs text-gray-500">The agent's primary email address for communication.</p>
             <div className="mt-2 space-y-1">
               {manageEmailSettingsLink}
-              {!primarySms && smsEnableUrl && (
-                <div>
-                  <a href={smsEnableUrl} className="text-sm text-blue-600 hover:text-blue-800">
-                    Enable SMS
-                  </a>
-                </div>
-              )}
             </div>
           </>
         ) : (
@@ -2856,14 +2752,20 @@ function IntegrationsSection({
   onConfirmAction,
 }: IntegrationsSectionProps) {
   const embedded = variant === 'embedded'
-  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const sectionClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    : 'gobii-card-base group'
   const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-6 px-0 py-5' : 'p-6 sm:p-8 space-y-6'
-  const cardClassName = embedded ? 'rounded-xl border border-slate-200/20 bg-slate-950/35 p-4 space-y-4' : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
-  const tableWrapperClassName = embedded ? 'overflow-hidden rounded-xl border border-slate-200/20 bg-slate-950/35' : 'overflow-hidden border border-gray-200 rounded-xl'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-6 px-5 py-5' : 'p-6 sm:p-8 space-y-6'
+  const cardClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} p-4 space-y-4 shadow-none`
+    : 'border border-gray-200 rounded-xl bg-white p-4 space-y-4'
+  const tableWrapperClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} overflow-hidden shadow-none`
+    : 'overflow-hidden border border-gray-200 rounded-xl'
   const tableHeadClassName = embedded ? 'bg-slate-950/45' : 'bg-gray-50'
   const tableBodyClassName = embedded ? 'bg-transparent divide-y divide-slate-200/15' : 'bg-white divide-y divide-gray-200'
   const primaryActionButtonClassName = embedded
@@ -3607,6 +3509,7 @@ type ActionsSectionProps = {
 
 function ActionsSection({
   csrfToken,
+  urls,
   variant = 'standalone',
   agent,
   features,
@@ -3620,12 +3523,14 @@ function ActionsSection({
   deleteError,
 }: ActionsSectionProps) {
   const embedded = variant === 'embedded'
-  const sectionClassName = embedded ? 'group rounded-none border-0 bg-transparent shadow-none' : 'gobii-card-base group'
+  const sectionClassName = embedded
+    ? `${sharedSettingsGlassFrameClassName} ${embeddedSettingsSurfaceClassName} group shadow-none`
+    : 'gobii-card-base group'
   const summaryClassName = embedded
-    ? 'flex cursor-pointer list-none items-center justify-between gap-3 border-b border-slate-200/70 px-0 pb-4'
+    ? 'flex cursor-pointer list-none items-center justify-between gap-3 px-5 py-4'
     : 'flex items-center justify-between gap-3 px-6 py-4 border-b border-gray-200/70 cursor-pointer list-none'
-  const wrapperClassName = embedded ? 'divide-y divide-slate-200/70' : 'divide-y divide-gray-200/70'
-  const sectionBodyClassName = embedded ? 'space-y-4 px-0 py-5' : 'p-6 sm:p-8 space-y-4'
+  const wrapperClassName = embedded ? 'divide-y divide-slate-200/15 border-t border-slate-200/15' : 'divide-y divide-gray-200/70'
+  const sectionBodyClassName = embedded ? 'space-y-4 px-5 py-5' : 'p-6 sm:p-8 space-y-4'
 
   return (
     <details className={sectionClassName} id="agent-ownership">
@@ -3705,7 +3610,7 @@ function ActionsSection({
                 </p>
                 <p className="text-xs text-indigo-700 mt-1">They'll need to sign in with that email to accept.</p>
               </div>
-              <form method="post" className="flex">
+              <form method="post" action={urls.detail} className="flex">
                 <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
                 <input type="hidden" name="action" value="cancel_transfer_invite" />
                 <button type="submit" className={embedded ? 'inline-flex items-center gap-2 rounded-lg border border-slate-200/25 bg-slate-900/35 px-4 py-2 text-sm font-medium text-slate-100 transition-colors hover:border-slate-100/35 hover:bg-slate-900/55' : 'inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-lg hover:bg-slate-50'}>
@@ -3714,7 +3619,7 @@ function ActionsSection({
               </form>
             </div>
           ) : (
-            <form method="post" className="space-y-4">
+            <form method="post" action={urls.detail} className="space-y-4">
               <input type="hidden" name="csrfmiddlewaretoken" value={csrfToken} />
               <input type="hidden" name="action" value="transfer_agent" />
               <div>

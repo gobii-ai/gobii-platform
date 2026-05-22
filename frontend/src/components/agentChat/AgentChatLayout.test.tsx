@@ -29,9 +29,8 @@ vi.mock('./TimelineVirtualItem', () => ({
         data-testid="timeline-message-link"
         href={href}
         onClick={(event) => {
-          if (onMessageLinkClick?.(href)) {
-            event.preventDefault()
-          }
+          onMessageLinkClick?.(href)
+          event.preventDefault()
         }}
       >
         Open settings
@@ -375,7 +374,7 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'true')
   })
 
-  it('routes quick settings to the embedded full settings view callback', () => {
+  it('routes current agent settings message links to the embedded full settings view callback', () => {
     const handleOpenFullSettings = vi.fn()
 
     render(
@@ -389,12 +388,89 @@ describe('AgentChatLayout upgrade modal gating', () => {
     )
 
     fireEvent.click(screen.getByTestId('timeline-message-link'))
-    expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'true')
-
-    fireEvent.click(screen.getByTestId('agent-chat-settings-more'))
 
     expect(handleOpenFullSettings).toHaveBeenCalledTimes(1)
     expect(screen.getByTestId('agent-chat-settings-panel')).toHaveAttribute('data-open', 'false')
+  })
+
+  it('routes app secret request message links to the embedded secret requests view', () => {
+    const handleOpenAgentSecretRequests = vi.fn()
+
+    render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: 'https://app.example.test/app/agents/agent-123/secrets/request' } as any]}
+        onOpenAgentSecretRequests={handleOpenAgentSecretRequests}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+
+    expect(handleOpenAgentSecretRequests).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not intercept app message links for a different agent', () => {
+    const handleOpenAgentSecretRequests = vi.fn()
+
+    render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-456/secrets/request' } as any]}
+        onOpenAgentSecretRequests={handleOpenAgentSecretRequests}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+
+    expect(handleOpenAgentSecretRequests).not.toHaveBeenCalled()
+  })
+
+  it('routes app agent subview message links to embedded views', () => {
+    const handleOpenAgentSecrets = vi.fn()
+    const handleOpenAgentEmailSettings = vi.fn()
+    const handleOpenAgentFiles = vi.fn()
+
+    const { rerender } = render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/agents/agent-123/secrets' } as any]}
+        onOpenAgentSecrets={handleOpenAgentSecrets}
+        onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
+        onOpenAgentFiles={handleOpenAgentFiles}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+    expect(handleOpenAgentSecrets).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-2', kind: 'message', messageLinkHref: '/app/agents/agent-123/email' } as any]}
+        onOpenAgentSecrets={handleOpenAgentSecrets}
+        onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
+        onOpenAgentFiles={handleOpenAgentFiles}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+    expect(handleOpenAgentEmailSettings).toHaveBeenCalledTimes(1)
+
+    rerender(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-3', kind: 'message', messageLinkHref: '/app/agents/agent-123/files' } as any]}
+        onOpenAgentSecrets={handleOpenAgentSecrets}
+        onOpenAgentEmailSettings={handleOpenAgentEmailSettings}
+        onOpenAgentFiles={handleOpenAgentFiles}
+      />,
+    )
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+    expect(handleOpenAgentFiles).toHaveBeenCalledTimes(1)
   })
 
   it('forces the sidebar into gallery mode while embedded settings are visible', () => {

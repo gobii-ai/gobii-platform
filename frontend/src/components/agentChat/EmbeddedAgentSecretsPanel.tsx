@@ -5,6 +5,7 @@ type EmbeddedAgentSecretsPanelProps = {
   agentId: string
   agentName: string
   onBack?: () => void
+  onOpenRequests?: () => void
 }
 
 const SECRET_PLACEHOLDER_ID = '00000000-0000-0000-0000-000000000000'
@@ -13,6 +14,7 @@ export function EmbeddedAgentSecretsPanel({
   agentId,
   agentName,
   onBack,
+  onOpenRequests,
 }: EmbeddedAgentSecretsPanelProps) {
   return (
     <EmbeddedAgentShellPanel>
@@ -22,11 +24,10 @@ export function EmbeddedAgentSecretsPanel({
         listUrl={`/console/api/agents/${agentId}/secrets/`}
         detailUrlTemplate={`/console/api/agents/${agentId}/secrets/${SECRET_PLACEHOLDER_ID}/`}
         promoteUrlTemplate={`/console/api/agents/${agentId}/secrets/${SECRET_PLACEHOLDER_ID}/promote/`}
-        agentDetailUrl={`/console/agents/${agentId}/`}
-        globalSecretsUrl="/console/secrets/"
-        requestUrl={`/console/agents/${agentId}/secrets/request/`}
-        variant="embedded"
+        globalSecretsUrl="/app/secrets"
+        requestUrl={`/app/agents/${agentId}/secrets/request`}
         onBack={onBack}
+        onOpenRequests={onOpenRequests}
       />
     </EmbeddedAgentShellPanel>
   )

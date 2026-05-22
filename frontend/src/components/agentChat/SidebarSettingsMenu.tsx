@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   BarChart3,
   Bell,
+  Building2,
   ChevronDown,
   ClipboardList,
   CreditCard,
@@ -32,8 +33,11 @@ export type SidebarSettingsInfo = {
   usageUrl?: string | null
   onOpenUsage?: (() => void) | null
   apiKeysUrl?: string | null
+  onOpenApiKeys?: (() => void) | null
   profileUrl?: string | null
   onOpenProfile?: (() => void) | null
+  organizationUrl?: string | null
+  onOpenOrganization?: (() => void) | null
   secretsUrl?: string | null
   onOpenSecrets?: (() => void) | null
   globalSecretsUrl?: string | null
@@ -101,17 +105,20 @@ export function SidebarSettingsMenu({
   isProprietaryMode,
   billingUrl = null,
   onOpenBilling = null,
-  usageUrl = '/console/usage/',
+  usageUrl = '/app/usage',
   onOpenUsage = null,
-  apiKeysUrl = '/console/api-keys/',
-  profileUrl = '/console/profile/',
+  apiKeysUrl = '/app/api-keys',
+  onOpenApiKeys = null,
+  profileUrl = '/app/profile',
   onOpenProfile = null,
+  organizationUrl = null,
+  onOpenOrganization = null,
   secretsUrl = null,
   onOpenSecrets = null,
-  globalSecretsUrl = '/console/secrets/',
+  globalSecretsUrl = '/app/secrets',
   integrationsUrl = null,
   onOpenIntegrations = null,
-  advancedMcpUrl = '/console/advanced/mcp-servers/',
+  advancedMcpUrl = '/app/integrations',
   notificationsEnabled = true,
   notificationStatus = 'off',
   onNotificationsEnabledChange,
@@ -158,8 +165,9 @@ export function SidebarSettingsMenu({
   }, [context, viewerEmail])
   const canShowBilling = Boolean(isProprietaryMode && (billingUrl || onOpenBilling))
   const canShowUsage = Boolean(usageUrl || onOpenUsage)
-  const canShowApiKeys = Boolean(apiKeysUrl)
+  const canShowApiKeys = Boolean(apiKeysUrl || onOpenApiKeys)
   const canShowProfile = Boolean(profileUrl || onOpenProfile)
+  const canShowOrganization = Boolean(context?.type === 'organization' && (organizationUrl || onOpenOrganization))
   const resolvedSecretsUrl = secretsUrl ?? globalSecretsUrl
   const canShowSecrets = Boolean(resolvedSecretsUrl || onOpenSecrets)
   const resolvedIntegrationsUrl = integrationsUrl ?? advancedMcpUrl
@@ -255,6 +263,26 @@ export function SidebarSettingsMenu({
                 </a>
               )
             ) : null}
+            {canShowOrganization ? (
+              onOpenOrganization ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenOrganization()
+                  }}
+                >
+                  <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Organization</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={organizationUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <Building2 className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>Organization</span>
+                </a>
+              )
+            ) : null}
             {canShowBilling ? (
               onOpenBilling ? (
                 <button
@@ -336,10 +364,24 @@ export function SidebarSettingsMenu({
               )
             ) : null}
             {canShowApiKeys ? (
-              <a className="sidebar-settings__link" href={apiKeysUrl ?? undefined} target="_blank" rel="noreferrer">
-                <KeyRound className="sidebar-settings__link-icon" aria-hidden="true" />
-                <span>API Keys</span>
-              </a>
+              onOpenApiKeys ? (
+                <button
+                  type="button"
+                  className="sidebar-settings__link"
+                  onClick={() => {
+                    handleOpenChange(false)
+                    onOpenApiKeys()
+                  }}
+                >
+                  <KeyRound className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>API Keys</span>
+                </button>
+              ) : (
+                <a className="sidebar-settings__link" href={apiKeysUrl ?? undefined} target="_blank" rel="noreferrer">
+                  <KeyRound className="sidebar-settings__link-icon" aria-hidden="true" />
+                  <span>API Keys</span>
+                </a>
+              )
             ) : null}
           </div>
 

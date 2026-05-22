@@ -296,7 +296,7 @@ export function FileTable({
                 <tr
                   className={[
                     'cursor-pointer',
-                    embedded ? 'border-b border-slate-200/70 bg-slate-900/30' : 'bg-blue-50/40',
+                    embedded ? 'border-b border-slate-200/15 bg-slate-900/30' : 'bg-blue-50/40',
                     dragAndDrop.dragOverNodeId === dragAndDrop.parentDropKey ? (embedded ? 'bg-blue-950/30' : 'bg-blue-100/70') : '',
                   ].join(' ')}
                   onClick={onNavigateToParent}
@@ -341,7 +341,7 @@ export function FileTable({
                     className={[
                       row.getIsSelected() ? (embedded ? 'bg-blue-950/20' : 'bg-blue-50/50') : '',
                       dragAndDrop.dragOverNodeId === row.original.id ? (embedded ? 'bg-blue-950/30' : 'bg-blue-100/70') : '',
-                      embedded ? 'border-b border-slate-200/70' : '',
+                      embedded ? 'border-b border-slate-200/15' : '',
                     ].join(' ')}
                     draggable={canManage && !isBusy}
                     onDoubleClick={(event) => handleRowDoubleClick(row.original, event)}

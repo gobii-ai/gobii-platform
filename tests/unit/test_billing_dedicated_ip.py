@@ -1,5 +1,6 @@
 from contextlib import ExitStack
 from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import MagicMock, patch
 
 from django.contrib.auth import get_user_model
@@ -51,7 +52,7 @@ class DedicatedIpBillingTests(TestCase):
                 stack.enter_context(patcher)
             resp = self.client.post(url, {"quantity": 2})
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, reverse("billing"))
+        self.assertEqual(resp.url, "/app/billing")
         messages = [m.message for m in get_messages(resp.wsgi_request)]
         self.assertTrue(any("Dedicated IP quantity updated" in msg for msg in messages))
 
@@ -81,7 +82,11 @@ class DedicatedIpBillingTests(TestCase):
             resp = self.client.post(url, {"quantity": 1})
 
         self.assertEqual(resp.status_code, 302)
-        self.assertIn("org_id", resp.url)
+        redirect = urlsplit(resp.url)
+        self.assertEqual(redirect.path, "/app/billing")
+        query = parse_qs(redirect.query)
+        self.assertEqual(query.get("context_type"), ["organization"])
+        self.assertEqual(query.get("context_id"), [str(org.id)])
         messages = [m.message for m in get_messages(resp.wsgi_request)]
         self.assertTrue(any("Dedicated IP quantity updated" in msg for msg in messages))
 
@@ -95,7 +100,7 @@ class DedicatedIpBillingTests(TestCase):
             resp = self.client.post(url, {"proxy_id": "proxy-123"})
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, reverse("billing"))
+        self.assertEqual(resp.url, "/app/billing")
         messages = [m.message for m in get_messages(resp.wsgi_request)]
         self.assertTrue(any("Dedicated IP removed" in msg for msg in messages))
 
@@ -115,6 +120,6 @@ class DedicatedIpBillingTests(TestCase):
             resp = self.client.post(url)
 
         self.assertEqual(resp.status_code, 302)
-        self.assertEqual(resp.url, reverse("billing"))
+        self.assertEqual(resp.url, "/app/billing")
         messages = [m.message for m in get_messages(resp.wsgi_request)]
         self.assertTrue(any("All dedicated IPs removed" in msg for msg in messages))
