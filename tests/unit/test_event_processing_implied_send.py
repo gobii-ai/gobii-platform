@@ -1694,6 +1694,74 @@ class ImpliedSendTests(TestCase):
         )
 
     @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
+    @patch("api.agent.core.event_processing.execute_request_human_input", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
+    @patch("api.agent.core.event_processing.build_prompt_context")
+    @patch("api.agent.core.event_processing._completion_with_failover")
+    def test_explicit_chat_source_request_routes_to_human_input(
+        self,
+        mock_completion,
+        mock_build_prompt,
+        mock_send_chat,
+        mock_request_human_input,
+        _mock_credit,
+    ):
+        mock_build_prompt.return_value = ([{"role": "system", "content": "sys"}], 1000, None)
+
+        start_web_session(self.agent, self.user)
+
+        tool_call = MagicMock()
+        tool_call.id = "call_send_chat"
+        tool_call.function = MagicMock()
+        tool_call.function.name = "send_chat_message"
+        tool_call.function.arguments = json.dumps(
+            {
+                "body": (
+                    "I don't have any project status data available yet. Could you point me to where I "
+                    "can find the latest project status? For example:\n\n"
+                    "- A URL or document with the current status\n"
+                    "- Or just tell me the key status details and who the client is"
+                ),
+            }
+        )
+        msg = MagicMock()
+        msg.tool_calls = [tool_call]
+        msg.function_call = None
+        msg.content = None
+        msg.reasoning_content = None
+        choice = MagicMock()
+        choice.message = msg
+        resp = MagicMock()
+        resp.choices = [choice]
+        mock_completion.return_value = (
+            resp,
+            {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15,
+                "model": "m",
+                "provider": "p",
+            },
+        )
+
+        with patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1):
+            ep._run_agent_loop(self.agent, is_first_run=False)
+
+        self.assertFalse(mock_send_chat.called)
+        mock_request_human_input.assert_called_once()
+        params = mock_request_human_input.call_args[0][1]
+        self.assertEqual(
+            params,
+            {
+                "question": (
+                    "I don't have any project status data available yet. Could you point me to where I "
+                    "can find the latest project status? For example:"
+                ),
+                "will_continue_work": False,
+            },
+        )
+
+    @patch("api.agent.core.event_processing._ensure_credit_for_tool", return_value={"cost": None, "credit": None})
     @patch("api.agent.core.event_processing.execute_send_chat_message", return_value={"status": "ok", "auto_sleep_ok": True})
     @patch("api.agent.core.event_processing.build_prompt_context")
     @patch("api.agent.core.event_processing._completion_with_failover")
