@@ -1046,6 +1046,91 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(ep._user_text_has_durable_config_intent("For this answer, prefer bullets."))
         self.assertTrue(ep._looks_like_one_off_user_task("Tell me the latest funding news for Acme."))
 
+    def test_planning_execute_now_search_tools_first_gets_runtime_correction(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Do not ask questions. Just execute now: research five competitors and email me the findings."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "function": {
+                            "name": "search_tools",
+                            "arguments": json.dumps({"query": "competitor research and email tools"}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertEqual(PersistentAgentToolCall.objects.filter(tool_name="search_tools").count(), 0)
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Skipped search_tools before planning was completed",
+            ).exists()
+        )
+
+    def test_planning_research_can_still_use_search_tools(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Help me plan competitor monitoring; research likely data sources before asking final scope questions."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_search",
+                        "function": {
+                            "name": "search_tools",
+                            "arguments": json.dumps({"query": "competitor monitoring data sources"}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=False,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["search_tools"])
+        self.assertFalse(prepared.followup_required)
+        mock_rate_limit.assert_called_once()
+        mock_credit.assert_called_once()
+
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
         msg.tool_calls = None
