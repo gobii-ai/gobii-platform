@@ -1,10 +1,7 @@
 """Shared attachment guidance for agent tool prompts and results."""
 
 SEND_EMAIL_ATTACHMENTS_DESCRIPTION = (
-    "Optional list of filespace paths or $[/path] variables from the default filespace. "
-    "This is the only way to create an actual email attachment. Pass the exact $[/path] "
-    "value returned by a file tool's `attach` field here. Mentioning a filename or path in "
-    "the email body does not attach anything."
+    "Optional filespace paths or $[/path] variables. To attach generated files, pass the exact file-tool `attach` value; body text never attaches files."
 )
 
 

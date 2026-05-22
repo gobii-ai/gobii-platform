@@ -102,7 +102,7 @@ _MARKDOWN_URL_LINK_RE = re.compile(
     r"\[[^\]]*(?:https?://|www\.|[a-z0-9.-]+\.[a-z]{2,}/)[^\]]*\]\(https?://[^)]+\)",
     re.IGNORECASE,
 )
-_URL_RE = re.compile(r"https?://\S+")
+_URL_RE = re.compile(r"(?:https?://|www\.)\S+")
 
 
 def _normalize_similarity_text(value: str) -> str:

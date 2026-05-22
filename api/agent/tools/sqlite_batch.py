@@ -1038,13 +1038,12 @@ def _apply_tool_results_result_id_compat(sql: str, conn: sqlite3.Connection) -> 
     if not _table_has_column(conn, "__tool_results", "legacy_result_id"):
         return sql
 
+    table_refs = _extract_table_refs(sql)
     aliases = {
         alias
-        for table_name, alias in _extract_table_refs(sql)
+        for table_name, alias in table_refs
         if table_name.lower() == "__tool_results"
     }
-    if not aliases:
-        aliases = {"__tool_results"}
 
     for alias in aliases:
         if alias:
@@ -1053,11 +1052,15 @@ def _apply_tool_results_result_id_compat(sql: str, conn: sqlite3.Connection) -> 
                 column_ref=f"{alias}.result_id",
                 compat_ref=f"{alias}.legacy_result_id",
             )
-    sql = _rewrite_result_id_comparisons(
-        sql,
-        column_ref="result_id",
-        compat_ref="legacy_result_id",
-    )
+    if any(
+        table_name.lower() == "__tool_results" and alias.lower() == "__tool_results"
+        for table_name, alias in table_refs
+    ):
+        sql = _rewrite_result_id_comparisons(
+            sql,
+            column_ref="result_id",
+            compat_ref="legacy_result_id",
+        )
     return sql
 
 
@@ -1838,22 +1841,21 @@ def get_sqlite_batch_tool() -> Dict[str, Any]:
             "description": (
                 "Durable SQLite memory for structured data. "
                 "Query/update structured data you already have. "
-                "For multiple tool outputs, use one shaped query with CTEs/IN/json_extract/json_each/joins/aggregation; persist extracts from __tool_results with CREATE TABLE ... AS SELECT, not hand-entered VALUES. "
+                "For multiple outputs, use one shaped query with CTEs/IN/json_extract/json_each/joins/aggregation; persist extracts from __tool_results with CREATE TABLE ... AS SELECT, not hand-entered VALUES. "
                 "For repetitive imports, API fan-out, or large writes, prefer a custom tool writing to SQLite; query those tables here, no ATTACH. "
-                "Provide `sql` as a single SQL string; separate multiple statements with semicolons. "
-                "ESCAPE single quotes by DOUBLING them: 'O''Brien' (NOT backslash). "
-                "grep_context_all/split_sections return STRING arrays: use json_each(...) then ctx.value directly, NOT json_extract. "
+                "`sql` is one semicolon-separated string. Escape quotes by doubling: 'O''Brien'. "
+                "grep_context_all/split_sections return string arrays: json_each(...), then ctx.value directly, not json_extract. "
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "SQL to execute as a single string. Use semicolons to separate statements.",
+                        "description": "SQL string; use semicolons between statements.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true if another tool or user-facing reply must follow; false only when this query/update completes the turn.",
+                        "description": "REQUIRED. true if another action/reply follows; false if this completes the turn.",
                     },
                 },
                 "required": ["sql", "will_continue_work"],

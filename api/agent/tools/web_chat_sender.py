@@ -52,6 +52,13 @@ _INTERNAL_PROGRESS_RE = re.compile(
     r"already have [^.?!]{0,80}\bdata)\b",
     re.IGNORECASE,
 )
+_RECOVERY_THEN_PROGRESS_RE = re.compile(
+    r"\b(?:query|queries|tool|tools|cte|json_extract|sqlite|auto-correction|correction|schema|path|data)\b.{0,140}"
+    r"\b(?:error|failed|failing|hitting|kept hitting|did not work|spurious|wrong|incorrect)\b.{0,180}"
+    r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
+    r"(?:extract|query|try|inspect|use|build|create|drop|recreate|rerun|report|summari[sz]e)\b",
+    re.IGNORECASE,
+)
 _OPTIONAL_PROGRESS_QUESTION_RE = re.compile(
     r"\b(?:any tweaks|any changes|anything to adjust|otherwise\b|if not\b|unless you want)\b",
     re.IGNORECASE,
@@ -59,6 +66,13 @@ _OPTIONAL_PROGRESS_QUESTION_RE = re.compile(
 _RESULTS_STATUS_PROGRESS_RE = re.compile(
     r"^(?:(?:good|great|okay|ok|alright|sure)[,! ]+)?"
     r"(?:(?:i(?:'ve)?|we)\s+(?:now\s+)?(?:have|found|got)\s+(?:the\s+)?(?:search\s+)?(?:result|results|data|sources?)|all\s+(?:\w+|\d+)\s+(?:sources?|pages?|results?)\s+(?:are|were)\s+(?:fetched|scraped|loaded|processed|done)|the\s+data\s+is\s+in)\b",
+    re.IGNORECASE,
+)
+_RETURNED_DATA_THEN_PROGRESS_RE = re.compile(
+    r"\b(?:site|page|api|browser task|tool|source|result)\b.{0,100}"
+    r"\b(?:returned|found|provided|gave|has)\b.{0,80}\b(?:data|result|results)\b.{0,160}"
+    r"\b(?:let me|i(?:'ll| will| need to| am going to)|next|then)\s+"
+    r"(?:update|set up|configure|report|send|deliver|share|write|summari[sz]e)\b",
     re.IGNORECASE,
 )
 _FORWARD_PROGRESS_ACTION_RE = re.compile(
@@ -146,6 +160,10 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     lower = text.lower()
     if _TOOL_FRUSTRATION_PROGRESS_RE.search(text):
         return True
+    if _RECOVERY_THEN_PROGRESS_RE.search(text):
+        return True
+    if _RETURNED_DATA_THEN_PROGRESS_RE.search(text):
+        return True
     result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
     if result_status and not re.search(r"\bhere(?:'s| is) (?:the )?(?:analysis|answer|recommendation|report)\b", text, re.I) and (
         _FORWARD_PROGRESS_ACTION_RE.search(text)
@@ -192,32 +210,29 @@ def get_send_chat_tool() -> Dict[str, Any]:
             "description": (
                 "Send a user-facing web chat message for non-blocking context, config changes, or findings. "
                 "Do not use this for questions that block the task; use request_human_input so the question is tracked. "
-                "Do not narrate what you will do next after an acknowledgement, and do not send routine progress narration such as "
-                "tool sequencing, plan mechanics, or internal reasoning."
+                "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "body": {
                         "type": "string",
-                        "description": "Actual user-facing chat text. Do not pass schema placeholders like 'body', 'message', or 'text'. Do not pass tool-call syntax; XML like <function_calls> or <invoke> is sent literally, not executed.",
+                        "description": "User-facing chat text. Do not pass placeholders or tool-call/XML syntax; it is sent literally.",
                     },
                     "to_address": {
                         "type": "string",
                         "description": (
-                            "Optional web chat address for the recipient (e.g. 'web://user/123/agent/<agent_id>'). "
-                            "If omitted, the agent will reply to the latest active chat participant or preferred web contact. "
-                            "If no other communication channels are available, it will default to the owner's web address."
+                            "Optional web chat address; omit to reply to the latest active or preferred web contact."
                         ),
                     },
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional filespace paths or $[/path] variables for file deliverables. For create_chart, paste result.inline/inline_html in body instead.",
+                        "description": "Optional filespace paths or $[/path] variables; for create_chart, paste inline/HTML in body.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = continue after this user-facing message; false = stop. Never send a message solely to justify continuing work.",
+                        "description": "REQUIRED. true=continue after message; false=stop. Never send a message solely to justify continuing work.",
                     },
                 },
                 "required": ["body", "will_continue_work"],
@@ -256,7 +271,7 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         body = _strip_trailing_optional_followup(body)
         if not body:
             return {"status": "error", "message": "Message body is required after removing optional follow-up."}
-    if will_continue and _looks_like_routine_progress_message(body):
+    if _looks_like_routine_progress_message(body):
         return {
             "status": "ok",
             "message": "Skipped routine progress-only chat message.",

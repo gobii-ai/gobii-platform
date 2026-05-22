@@ -81,6 +81,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
     tags = ("agent_behavior", "sqlite_tool_results", "tool_results", "agent_processing")
     builtin_tools: tuple[str, ...] = (); eval_synthetic_tools: tuple[str, ...] = (); answer_source_urls: tuple[str, ...] = (); required_terms: tuple[str, ...] = ()
     prompt = ""; mock_kind = ""; verify_task_name = "verify_sqlite_usage"; require_working_table = False; max_relevant_tool_calls = 18; min_sources = 1
+    max_single_result_filters = 1
 
     def run(self, run_id: str, agent_id: str) -> None:
         self._ready_agent(agent_id)
@@ -88,7 +89,7 @@ class SqliteToolResultScenario(EvalScenario, ScenarioExecutionTools):
             if names:
                 self._enable_tools(agent_id, names, synthetic=synthetic)
         inbound = self._inject_and_wait(run_id, agent_id, self.prompt, MOCK_BUILDERS[self.mock_kind](), allowed_tool_names={*self.builtin_tools, *self.eval_synthetic_tools, "sqlite_batch", "update_plan", *MESSAGE_TOOL_NAMES, "search_tools"}, max_relevant_tool_calls=self.max_relevant_tool_calls)
-        self._record_sqlite_usage(run_id, after=inbound.timestamp, task_name=self.verify_task_name, require_working_table=self.require_working_table, max_direct_fetches=0, max_single_result_filters=1)
+        self._record_sqlite_usage(run_id, after=inbound.timestamp, task_name=self.verify_task_name, require_working_table=self.require_working_table, max_direct_fetches=0, max_single_result_filters=self.max_single_result_filters)
         self._record_sourced_answer(run_id, agent_id=agent_id, after=inbound.timestamp, task_name="verify_sourced_answer", source_urls=self.answer_source_urls, required_terms=self.required_terms, min_sources=self.min_sources)
 
     def _ready_agent(self, agent_id: str) -> None:
@@ -189,6 +190,7 @@ class SqliteIntermediateWorkingTableScenario(SqliteToolResultScenario):
     mock_kind = "product"
     verify_task_name = "verify_working_table_sqlite_usage"
     require_working_table = True
+    max_single_result_filters = 3
     answer_source_urls = PRODUCT_URLS
     required_terms = ("CareMesh", "HIPAA", "$720")
 
@@ -205,3 +207,4 @@ class SqliteDedupeRequeryScenario(SqliteToolResultScenario):
     answer_source_urls = SOURCE_URLS
     required_terms = ("HIPAA", "SMB")
     min_sources = 2
+    max_single_result_filters = 2

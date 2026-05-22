@@ -32,18 +32,13 @@ def get_request_contact_permission_tool() -> dict:
         "function": {
             "name": "request_contact_permission",
             "description": (
-                "Request user approval before emailing or texting a specific contact not in your allowlist. "
+                "Request approval before emailing/texting a specific contact not in your allowlist. "
                 "Use this instead of request_human_input for email/SMS contact approval. "
-                "Creates a request that the user must approve before you can contact them. "
-                "Returns a URL that you MUST send to the user so they can approve the contact. "
-                "Check if contact already exists before requesting. If the user just gave you a specific email "
-                "address or phone number and it is not already shown in your allowed contacts, request permission "
-                "before reading files, searching, drafting, or asking non-blocking follow-up questions. "
+                "Returns a URL you MUST send so the user can approve. "
+                "Check allowed contacts first; if the user just gave a specific email/phone not already allowed, request before reading files, searching, drafting, or non-blocking follow-up. "
                 "For setup-only recurring work where the user explicitly says not to send the first email/SMS now, "
-                "do not request contact permission during setup; record the recipient in the charter and request "
-                "permission only when an actual outbound send is needed. "
-                "Only use an email or phone number the user has previously provided to you, or that is publicly available. "
-                "Do not guess or fabricate contact details."
+                "do not request contact permission during setup; record the recipient and request only when an actual outbound send is needed. "
+                "Use only user-provided or public contact details; do not guess."
             ),
             "parameters": {
                 "type": "object",
@@ -56,37 +51,37 @@ def get_request_contact_permission_tool() -> dict:
                                 "channel": {
                                     "type": "string", 
                                     "enum": ["email", "sms"],
-                                    "description": "Communication channel to use"
+                                    "description": "email or sms."
                                 },
                                 "address": {
                                     "type": "string", 
-                                    "description": "Email address or phone number (E.164 format for SMS)"
+                                    "description": "Email or E.164 phone."
                                 },
                                 "name": {
                                     "type": "string", 
-                                    "description": "Contact's name if known (optional)"
+                                    "description": "Optional contact name."
                                 },
                                 "reason": {
                                     "type": "string", 
-                                    "description": "Detailed explanation of why you need to contact this person"
+                                    "description": "Why contact is needed."
                                 },
                                 "purpose": {
                                     "type": "string", 
-                                    "description": "Brief purpose (e.g., 'Schedule meeting', 'Get approval', 'Send report')"
+                                    "description": "Brief purpose."
                                 },
                                 "sms_contact_purpose": {
                                     "type": "string",
                                     "enum": list(SmsContactPurpose.values),
-                                    "description": "Required for SMS contacts when enabled: operational purpose for using SMS instead of email."
+                                    "description": "Required for SMS when enabled: operational purpose."
                                 },
                                 "sms_contact_purpose_details": {
                                     "type": "string",
-                                    "description": "Optional additional operational context for SMS contact approval."
+                                    "description": "Optional SMS approval context."
                                 }
                             },
                             "required": ["channel", "address", "reason", "purpose"]
                         },
-                        "description": "List of contacts to request permission for"
+                        "description": "Contacts to request permission for."
                     }
                 },
                 "required": ["contacts"]

@@ -176,6 +176,7 @@ class CustomToolsTests(TestCase):
             "source_path='/tools/my_tool.py'",
             "source_code",
             "do not pass only `source_path` unless you already wrote that file",
+            "if malformed/rejected retry create_custom_tool, not create_file",
             "Exact final line: `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "db.row_factory = sqlite3.Row",
@@ -200,6 +201,7 @@ class CustomToolsTests(TestCase):
         for text in (
             "exact final line `if __name__ == '__main__': main(run)`",
             "do not pass only source_path unless you already wrote that file",
+            "if malformed/rejected retry create_custom_tool, not create_file",
             "db.row_factory = sqlite3.Row",
             "setting it after fetching does not convert existing tuple rows",
             "not `row.get(...)`",
@@ -597,6 +599,28 @@ def run(params, ctx):
         self.assertIn("undefined f-string name", result["message"])
         self.assertIn("total_runlog_row", result["message"])
         self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_runlog_sync").exists())
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_undefined_name_inside_f_string_expression(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Sheet Sync",
+                "description": "Summarize synced rows.",
+                "source_path": "/tools/sheet_sync.py",
+                "source_code": self._build_runnable_tool_source(
+                    "def run(params, ctx):\n"
+                    "    total_rows = 3\n"
+                    "    return {'summary': f\"Synced {total_rows}. {'Seeded' if seeded else 'Existing'}\"}\n"
+                ),
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("undefined f-string name", result["message"])
+        self.assertIn("seeded", result["message"])
+        self.assertFalse(PersistentAgentCustomTool.objects.filter(agent=self.agent, tool_name="custom_sheet_sync").exists())
 
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_create_custom_tool_allows_defined_f_string_names(self, _mock_sandbox):
@@ -1152,6 +1176,7 @@ def run(params, ctx):
         self.assertIn("direct HTTPS tunneling", description)
         self.assertIn("source_path='/tools/my_tool.py'", description)
         self.assertIn("do not pass only `source_path` unless you already wrote that file", description)
+        self.assertIn("if malformed/rejected retry create_custom_tool, not create_file", description)
         self.assertIn("file_path='/tools/my_tool.py'", description)
         self.assertIn("content=<python source>", description)
         self.assertIn("`/exports/report.txt` are filespace paths", description)
@@ -1160,19 +1185,17 @@ def run(params, ctx):
         self.assertIn("$[/exports/report.txt]", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
         self.assertIn("Small disposable tools are good", description)
-        self.assertIn("Those triggers are not exhaustive", description)
-        self.assertIn("err on the side of creating and using one", description)
-        self.assertIn("Do not manually repeat MCP/tool/API calls", description)
-        self.assertIn("design the tool to be chunkable by default", description)
-        self.assertIn("include `limit`/`batch_size` and status/id filters", description)
-        self.assertIn("remaining counts", description)
-        self.assertIn("patch it to process smaller resumable batches", description)
-        self.assertIn("manual single-action tool loops", description)
+        self.assertIn("err early", description)
+        self.assertIn("Avoid manual MCP/tool/API loops", description)
+        self.assertIn("Slow batches should be chunkable", description)
+        self.assertIn("include `limit`/`batch_size`, filters, progress", description)
+        self.assertIn("remaining work/cursor", description)
+        self.assertIn("patch for smaller resumable batches", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("after the block exits the DB is closed", description)
-        self.assertIn("same durable agent SQLite DB that sqlite_batch reads", description)
-        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", description)
+        self.assertIn("agent SQLite DB that sqlite_batch reads", description)
+        self.assertIn("do not ATTACH sandbox file paths", description)
         self.assertIn("Required filespace path", properties["source_path"]["description"])
         self.assertIn("Still required when source_code is provided", properties["source_path"]["description"])
         self.assertNotIn("entrypoint", properties)

@@ -177,8 +177,9 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Sends an email to a recipient. Write the body as HTML email content. DO NOT include <html>, <head>, or <body> tags—the system will wrap your content. Avoid markdown formatting. If you need tabular data, use real HTML table tags like <table>, <tr>, <th>, and <td>; do NOT use Markdown pipe tables like | Col | Col |. Quote recent parts of the conversation when relevant. "
-                "IMPORTANT: Use single quotes for ALL HTML attributes (e.g., <a href='https://example.com'>link</a>) to keep the JSON arguments valid. Do NOT use double quotes in HTML attributes."
+                "Send HTML email. Exclude <html>, <head>, and <body>; avoid Markdown. "
+                "For tables use <table>, <tr>, <th>, and <td>; do NOT use Markdown pipe tables like | Col | Col |. "
+                "Use single quotes for HTML attributes, e.g. <a href='https://example.com'>link</a>."
             ),
             "parameters": {
                 "type": "object",
@@ -190,18 +191,16 @@ def get_send_email_tool() -> Dict[str, Any]:
                             "type": "string",
                             "format": "email",
                         },
-                        "description": "List of CC email addresses (optional)"
+                        "description": "Optional CC email addresses."
                     },
                     "subject": {"type": "string", "description": "Email subject."},
                     "reply_to_message_id": {
                         "type": "string",
                         "description": (
-                            "Optional internal Gobii message id for replying in an existing email thread. "
-                            "Omit this to start a new thread. Pass the email message id from recent contacts "
-                            "or unified history to reply in that thread."
+                            "Optional internal Gobii message id for replying in-thread; omit to start a new thread."
                         ),
                     },
-                    "mobile_first_html": {"type": "string", "description": "Email content as HTML, excluding <html>, <head>, and <body> tags. Use single quotes for attributes, e.g. <a href='https://news.ycombinator.com'>News</a>. Must be actual email content, NOT tool call syntax. XML like <function_calls> or <invoke> does NOT execute tools—it will be sent as literal text."},
+                    "mobile_first_html": {"type": "string", "description": "Actual HTML email content without <html>/<head>/<body>. Use single-quoted attributes. Tool-call/XML syntax is sent literally."},
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
@@ -209,7 +208,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
+                        "description": "REQUIRED. true=another action follows; false=done.",
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html", "will_continue_work"],

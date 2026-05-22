@@ -301,10 +301,9 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("appears in web chat", description)
         self.assertIn("does not send email/SMS", description)
-        self.assertIn("send the exact question/options there too", description)
+        self.assertIn("send the same question/options there", description)
         self.assertIn("Plain text only", description)
-        self.assertIn("no Markdown/HTML", description)
-        self.assertIn("ask at most three", description)
+        self.assertIn("at most three", description)
         self.assertIn("non-blocking backfill", description)
         self.assertIn("lookback", description)
         self.assertIn("preference surveys", description)
@@ -447,6 +446,31 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(result["omitted_request_count"], 1)
         self.assertIn("allows at most 3 questions", result["message"])
         self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 3)
+
+    def test_execute_request_human_input_accepts_questions_alias_for_batch(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+
+        result = execute_request_human_input(
+            self.agent,
+            {
+                "questions": [
+                    {
+                        "question": "Which competitors should I track?",
+                        "options": [{"title": "Top three", "description": "Track the three main competitors."}],
+                    },
+                    {
+                        "question": "Which updates matter most?",
+                        "options": [{"title": "Pricing", "description": "Focus on pricing changes."}],
+                    },
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(result["requests_count"], 2)
+        self.assertEqual(PersistentAgentHumanInputRequest.objects.filter(agent=self.agent).count(), 2)
 
     def test_execute_request_human_input_rejects_more_than_six_options(self):
         result = execute_request_human_input(

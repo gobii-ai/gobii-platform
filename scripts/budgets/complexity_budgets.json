@@ -1,29 +1,29 @@
 {
-  "baseline_sha": "bfc3e9c29c990535787792ea38c2d89a6e189317",
+  "baseline_sha": "02ca37078fa554eb11efaede6f2c5b087bb0aa4d",
   "generated_by": "uv run python scripts/check_complexity_budgets.py --update-baselines",
   "prompt_size": {
     "description": "Rendered prompt messages plus JSON tool definitions for representative send/planning paths.",
     "limits": {
       "normal_explicit_send": {
-        "fitted_tokens": 4002,
-        "system_bytes": 26908,
-        "tools_bytes": 25181,
-        "total_bytes": 70441,
-        "user_bytes": 18352
+        "fitted_tokens": 3434,
+        "system_bytes": 23900,
+        "tools_bytes": 22550,
+        "total_bytes": 62000,
+        "user_bytes": 15850
       },
       "planning_first_run": {
-        "fitted_tokens": 3924,
-        "system_bytes": 34750,
-        "tools_bytes": 12819,
-        "total_bytes": 65658,
-        "user_bytes": 18089
+        "fitted_tokens": 3379,
+        "system_bytes": 30850,
+        "tools_bytes": 11350,
+        "total_bytes": 57450,
+        "user_bytes": 15600
       },
       "web_chat_implied_send": {
-        "fitted_tokens": 4010,
-        "system_bytes": 27189,
-        "tools_bytes": 26665,
-        "total_bytes": 72209,
-        "user_bytes": 18355
+        "fitted_tokens": 3442,
+        "system_bytes": 24350,
+        "tools_bytes": 23600,
+        "total_bytes": 63300,
+        "user_bytes": 15850
       }
     },
     "scenarios": {
@@ -74,11 +74,18 @@
       "docs/",
       "frontend/node_modules/",
       "gobii_platform.egg-info/",
+      "marketing_events/",
       "mediafiles/",
       "misc/",
+      "pages/",
       "pages/migrations/",
+      "proprietary/",
       "scripts/",
+      "setup/",
+      "static/css/",
       "static/frontend/",
+      "static/js/",
+      "templates/",
       "vendor/"
     ],
     "exclude_test_file_suffixes": [
@@ -100,7 +107,7 @@
       "frontend/src/test/",
       "tests/"
     ],
-    "file_count": 992,
+    "file_count": 826,
     "include_files": [
       "manage.py",
       "pyproject.toml",
@@ -116,16 +123,9 @@
       "constants/",
       "docker/",
       "frontend/src/",
-      "marketing_events/",
       "middleware/",
-      "pages/",
-      "proprietary/",
       "sandbox_server/server/",
-      "setup/",
-      "static/css/",
-      "static/js/",
       "tasks/",
-      "templates/",
       "templatetags/",
       "util/"
     ],
@@ -147,6 +147,6 @@
       ".yml",
       ".zsh"
     ],
-    "limit": 274460
+    "limit": 246850
   }
 }

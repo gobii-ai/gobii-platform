@@ -163,10 +163,11 @@ class CustomToolResultContractEvalTests(TestCase):
         self.assertIn(case.real_world_basis, prompt)
         self.assertIn(case.user_task, prompt)
         self.assertIn(case.custom_tool_job, prompt)
-        self.assertIn("representative sample data", prompt)
+        self.assertIn("explicit representative inputs", prompt)
+        self.assertIn("create any sample SQLite tables outside the custom tool", prompt)
         self.assertIn("do not perform real external writes", prompt)
-        self.assertIn("runtime parameters for source inputs/tables", prompt)
-        self.assertIn("pass concrete representative values", prompt)
+        self.assertIn("source and destination table names as required runtime params", prompt)
+        self.assertIn("do not hide sample rows or seed-data defaults", prompt)
         self.assertNotIn("create_custom_tool", prompt)
         self.assertNotIn("source_code", prompt)
         self.assertNotIn("parameters_schema", prompt)
@@ -182,6 +183,7 @@ class CustomToolResultContractEvalTests(TestCase):
             CustomToolResultContractScenario._custom_tool_name(case),
         )
 
+        self.assertEqual(policy["max_relevant_tool_calls"], 24)
         self.assertNotIn("stop_on_tool_names_after_execution", policy)
         self.assertEqual(
             policy["stop_when_all_seen"][0]["required_params_any"],

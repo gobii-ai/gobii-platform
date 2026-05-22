@@ -8,6 +8,11 @@ from api.models import EvalRunTask, PersistentAgentToolCall, PersistentAgentMess
 
 
 BITCOIN_PRICE_RE = re.compile(r"\b68,?500(?:\.50)?\b")
+URL_RE = re.compile(r"https?://[^\s)>\]]+")
+
+
+def bitcoin_response_has_followup_question(body: str) -> bool:
+    return "?" in URL_RE.sub("", body or "")
 
 
 def is_supported_bitcoin_price_api_url(url: str) -> bool:
@@ -35,6 +40,13 @@ def is_supported_bitcoin_price_api_url(url: str) -> bool:
         }
 
     return False
+
+
+def bitcoin_tool_calls_include_supported_price_api(calls) -> bool:
+    return any(
+        is_supported_bitcoin_price_api_url((getattr(call, "tool_params", None) or {}).get("url", ""))
+        for call in calls
+    )
 
 
 @register_scenario
@@ -195,6 +207,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             step__created_at__gte=btc_msg.timestamp,
             tool_name='http_request'
         )
+        http_request_to_expected_api = bitcoin_tool_calls_include_supported_price_api(http_calls)
 
         if not search_calls.exists():
             if http_calls.exists():
@@ -211,28 +224,37 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
             first_search = search_calls.first()
             first_query = (first_search.tool_params or {}).get('query', '')
 
-            judge_prompt = (
-                f"Analyze the following search query: '{first_query}'. "
-                "Does it indicate an attempt to find an API, data source, or programmatic interface? "
-                "If the query contains words like 'API', 'endpoint', 'JSON', or 'docs', answer 'Yes'."
-            )
-            choice, reasoning = self.llm_judge(
-                question=judge_prompt,
-                context=f"Agent's goal: find Bitcoin price. First search query: '{first_query}'",
-                options=["Yes", "No"]
-            )
-            if choice == "Yes":
+            if http_request_to_expected_api:
                 self.record_task_result(
                     run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
-                    observed_summary=f"Search query indicated API/Data intent. Reasoning: {reasoning}",
+                    observed_summary=(
+                        "Search wording was generic, but the agent converted it into a supported API request."
+                    ),
                     artifacts={"query": first_query}
                 )
             else:
-                self.record_task_result(
-                    run_id, None, EvalRunTask.Status.FAILED, task_name="verify_search_query_pattern",
-                    observed_summary=f"Search query did NOT indicate API/Data intent. Reasoning: {reasoning}",
-                    artifacts={"query": first_query}
+                judge_prompt = (
+                    f"Analyze the following search query: '{first_query}'. "
+                    "Does it indicate an attempt to find an API, data source, or programmatic interface? "
+                    "If the query contains words like 'API', 'endpoint', 'JSON', or 'docs', answer 'Yes'."
                 )
+                choice, reasoning = self.llm_judge(
+                    question=judge_prompt,
+                    context=f"Agent's goal: find Bitcoin price. First search query: '{first_query}'",
+                    options=["Yes", "No"]
+                )
+                if choice == "Yes":
+                    self.record_task_result(
+                        run_id, None, EvalRunTask.Status.PASSED, task_name="verify_search_query_pattern",
+                        observed_summary=f"Search query indicated API/Data intent. Reasoning: {reasoning}",
+                        artifacts={"query": first_query}
+                    )
+                else:
+                    self.record_task_result(
+                        run_id, None, EvalRunTask.Status.FAILED, task_name="verify_search_query_pattern",
+                        observed_summary=f"Search query did NOT indicate API/Data intent. Reasoning: {reasoning}",
+                        artifacts={"query": first_query}
+                    )
 
         # Verify http_request after search
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_http_request_after_search")
@@ -243,11 +265,6 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
                 observed_summary="Agent did not call http_request after finding an API URL via search."
             )
             return
-
-        http_request_to_expected_api = any(
-            is_supported_bitcoin_price_api_url((call.tool_params or {}).get("url", ""))
-            for call in http_calls
-        )
 
         if http_request_to_expected_api:
             self.record_task_result(
@@ -282,7 +299,7 @@ class BitcoinPriceMultiturnScenario(EvalScenario, ScenarioExecutionTools):
         lower_body = body.lower()
         has_asset = "bitcoin" in lower_body or "btc" in lower_body
         has_price = bool(BITCOIN_PRICE_RE.search(body))
-        if last_outbound and has_asset and has_price and "?" not in body:
+        if last_outbound and has_asset and has_price and not bitcoin_response_has_followup_question(body):
             self.record_task_result(
                 run_id, None, EvalRunTask.Status.PASSED, task_name="verify_bitcoin_response",
                 observed_summary=f"Agent replied with Bitcoin price data: {last_outbound.body[:100]}..."

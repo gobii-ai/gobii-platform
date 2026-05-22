@@ -1,3 +1,4 @@
+import json
 from contextlib import nullcontext
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -323,6 +324,7 @@ class GlobalSkillEvalScenarioTests(TestCase):
         enabled_skill,
         relevant_tool_calls,
         judge_result,
+        post_prompt_calls=None,
     ):
         now = timezone.now()
         launch_config = {
@@ -341,15 +343,20 @@ class GlobalSkillEvalScenarioTests(TestCase):
             get_effective_tool_ids=lambda: ["weather"],
         )
 
-        all_post_prompt_calls = relevant_tool_calls or []
+        all_post_prompt_calls = post_prompt_calls if post_prompt_calls is not None else (relevant_tool_calls or [])
         final_response = SimpleNamespace(body="It is 70F and sunny in Boston.")
+        judge_calls = []
+
+        def fake_llm_judge(**kwargs):
+            judge_calls.append(kwargs)
+            return judge_result
 
         with (
             patch.object(scenario, "get_run", return_value=SimpleNamespace(suite_run=SimpleNamespace(launch_config=launch_config))),
             patch.object(scenario, "wait_for_agent_idle", return_value=nullcontext()),
             patch.object(scenario, "inject_message", return_value=SimpleNamespace(timestamp=now)),
             patch.object(scenario, "record_task_result", side_effect=lambda *args, **kwargs: recorded.append({"task_name": kwargs.get("task_name"), "status": args[2], "observed_summary": kwargs.get("observed_summary", "")})),
-            patch.object(scenario, "llm_judge", return_value=judge_result),
+            patch.object(scenario, "llm_judge", side_effect=fake_llm_judge),
             patch("api.evals.scenarios.global_skill_eval.GlobalAgentSkill.objects.filter") as mock_skill_filter,
             patch("api.evals.scenarios.global_skill_eval.PersistentAgentSkill.objects.filter") as mock_enabled_filter,
             patch("api.evals.scenarios.global_skill_eval.PersistentAgentToolCall.objects.filter") as mock_tool_filter,
@@ -365,6 +372,7 @@ class GlobalSkillEvalScenarioTests(TestCase):
 
             scenario.run("run-1", "agent-1")
 
+        self.last_judge_calls = judge_calls
         return recorded
 
     def test_scenario_passes_when_skill_enabled_tool_used_and_judge_passes(self):
@@ -393,6 +401,38 @@ class GlobalSkillEvalScenarioTests(TestCase):
                 "judge_skill_execution": "passed",
             },
         )
+
+    def test_judge_context_separates_allowed_utility_calls_from_skill_calls(self):
+        now = timezone.now()
+        weather_call = SimpleNamespace(
+            tool_name="weather",
+            tool_params={"location": "Boston"},
+            status="complete",
+            step=SimpleNamespace(created_at=now),
+        )
+        post_prompt_calls = [
+            SimpleNamespace(tool_name="search_tools", tool_params={"query": "check-weather"}, status="complete", step=SimpleNamespace(created_at=now)),
+            weather_call,
+            SimpleNamespace(tool_name="sqlite_batch", tool_params={"sql": "SELECT result_text FROM __tool_results"}, status="complete", step=SimpleNamespace(created_at=now)),
+            SimpleNamespace(tool_name="send_chat_message", tool_params={"body": "It is sunny."}, status="complete", step=SimpleNamespace(created_at=now)),
+        ]
+
+        self._run_scenario(
+            enabled_skill=SimpleNamespace(name="check-weather"),
+            relevant_tool_calls=[weather_call],
+            post_prompt_calls=post_prompt_calls,
+            judge_result=("Pass", "Allowed utility calls did not replace the skill tool."),
+        )
+
+        judge_call = self.last_judge_calls[-1]
+        context = json.loads(judge_call["context"])
+        self.assertEqual([call["tool_name"] for call in context["skill_tool_calls"]], ["weather"])
+        self.assertEqual(
+            [call["tool_name"] for call in context["allowed_utility_tool_calls"]],
+            ["search_tools", "sqlite_batch", "send_chat_message"],
+        )
+        self.assertEqual(context["other_non_skill_tool_calls"], [])
+        self.assertIn("allowed utility calls", judge_call["question"])
 
     def test_scenario_uses_default_skill_fixture_for_canonical_suite_runs(self):
         now = timezone.now()

@@ -284,13 +284,26 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
             .select_related("step")
             .order_by("step__created_at")[:20]
         )
-        relevant_call_summaries = [
+        tool_call_summaries = [
             {
                 "tool_name": call.tool_name,
                 "tool_params": call.tool_params,
                 "status": call.status,
             }
             for call in post_prompt_calls
+        ]
+        effective_tool_set = set(effective_tool_ids)
+        allowed_utility_tools = {"search_tools", "sqlite_batch", "send_chat_message"}
+        skill_tool_calls = [call for call in tool_call_summaries if call["tool_name"] in effective_tool_set]
+        utility_tool_calls = [
+            call
+            for call in tool_call_summaries
+            if call["tool_name"] in allowed_utility_tools and call["tool_name"] not in effective_tool_set
+        ]
+        other_tool_calls = [
+            call
+            for call in tool_call_summaries
+            if call["tool_name"] not in effective_tool_set and call["tool_name"] not in allowed_utility_tools
         ]
 
         required_secret_labels = [secret.get("label") or secret.get("name") or "" for secret in required_secret_status]
@@ -303,14 +316,19 @@ class GlobalSkillEvalScenario(EvalScenario, ScenarioExecutionTools):
             "required_secrets": required_secret_labels,
             "enabled_skill_detected": enabled_skill is not None,
             "relevant_tool_call_detected": first_relevant_call is not None,
-            "tool_calls_after_prompt": relevant_call_summaries,
+            "skill_tool_calls": skill_tool_calls,
+            "allowed_utility_tool_calls": utility_tool_calls,
+            "other_non_skill_tool_calls": other_tool_calls,
             "final_response": final_response.body if final_response else "",
         }
         judge_question = (
             "Did the agent correctly execute the selected global skill for this task? "
             "Pass only if the transcript shows the exact named global skill was enabled, "
             "the agent used one of that skill's effective tools, and the final response completed the task using that skill. "
-            "Fail if the task was solved without enabling or using the selected skill."
+            "search_tools for skill enablement, sqlite_batch for recalling the skill tool result, and send_chat_message "
+            "for delivery are allowed utility calls; they do not count against skill usage. "
+            "Fail if substantive task data came from other non-skill tools, or if the task was solved without enabling "
+            "or using the selected skill."
         )
 
         self.record_task_result(
