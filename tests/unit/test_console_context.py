@@ -22,6 +22,7 @@ from api.models import (
     OrganizationInvite,
 )
 from django.utils import timezone
+from constants.grant_types import GrantTypeChoices
 from constants.plans import PlanNamesChoices
 
 
@@ -253,6 +254,43 @@ class CurrentOrganizationAPITests(TestCase):
 
 @tag('batch_console_context')
 class ConsoleContextTests(TestCase):
+    def _ensure_current_month_task_credit(self, *, user=None, organization=None):
+        now = timezone.now()
+        expiration_date = now + timezone.timedelta(days=30)
+        credit = (
+            TaskCredit.objects.filter(
+                user=user,
+                organization=organization,
+                plan=PlanNamesChoices.FREE,
+                grant_type=GrantTypeChoices.PLAN,
+                additional_task=False,
+                voided=False,
+                granted_date__year=now.year,
+                granted_date__month=now.month,
+            )
+            .order_by("-granted_date")
+            .first()
+        )
+        if credit:
+            credit.credits = 10
+            credit.credits_used = 0
+            credit.expiration_date = expiration_date
+            credit.save(update_fields=["credits", "credits_used", "expiration_date"])
+            return credit
+
+        return TaskCredit.objects.create(
+            user=user,
+            organization=organization,
+            credits=10,
+            credits_used=0,
+            granted_date=now,
+            expiration_date=expiration_date,
+            plan=PlanNamesChoices.FREE,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
+
     def setUp(self):
         # Enable organizations feature flag for all requests
         Flag.objects.update_or_create(name="organizations", defaults={"everyone": True})
@@ -298,21 +336,10 @@ class ConsoleContextTests(TestCase):
             browser_use_agent=self.org_browser,
         )
 
-        # Ensure the organization has credits so org tasks can be created
-        TaskCredit.objects.create(
-            organization=self.org,
-            credits=10,
-            credits_used=0,
-            granted_date=timezone.now(),
-            expiration_date=timezone.now() + timezone.timedelta(days=30),
-        )
-        TaskCredit.objects.create(
-            user=self.owner,
-            credits=10,
-            credits_used=0,
-            granted_date=timezone.now(),
-            expiration_date=timezone.now() + timezone.timedelta(days=30),
-        )
+        # Ensure both contexts have credits so task fixtures can be created
+        # regardless of whether signup bootstrap credits are enabled.
+        self._ensure_current_month_task_credit(organization=self.org)
+        self._ensure_current_month_task_credit(user=self.owner)
 
         # Tasks: one personal, one org-owned, one agent-less
         self.personal_task = BrowserUseAgentTask.objects.create(user=self.owner, agent=self.personal_browser)
