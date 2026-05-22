@@ -286,6 +286,21 @@ class AgentJudgeTests(TestCase):
         self.assertIsNotNone(trigger)
         self.assertEqual(trigger.reasons, ["burn_rate_throttled"])
 
+    def test_burn_rate_prompt_does_not_make_cost_control_user_blocker(self):
+        self._add_steps(1)
+
+        trigger = build_judge_trigger(
+            self.agent,
+            tools=[],
+            extra_trigger_reasons=["burn_rate_throttled"],
+        )
+
+        self.assertIsNotNone(trigger)
+        policy_text = "\n".join(trigger.trajectory["policy_excerpts"])
+        self.assertIn("For burn-rate-only evidence, recommend autonomous lower-burn strategies", policy_text)
+        self.assertIn("do not tell the agent to ask the user or stop until a reply", policy_text)
+        self.assertIn("unless a real human decision is needed", policy_text)
+
     def test_judge_tool_does_not_offer_request_human_input_suggestion(self):
         tool = _judge_tool_definition()
 

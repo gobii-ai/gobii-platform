@@ -788,6 +788,11 @@ def _build_trajectory_packet(
                 "scale with that multiplier, so intelligence level usually does not resolve burn rate. Recommend "
                 "lower-burn strategies such as batching, fewer tool calls, cached results, pausing, or narrower scope."
             ),
+            (
+                "For burn-rate-only evidence, recommend autonomous lower-burn strategies; do not tell the "
+                "agent to ask the user or stop until a reply unless a real human decision is needed, such as "
+                "credentials, destructive action, or legal/policy judgment."
+            ),
             "If the current approach is failing, suggest a concrete strategy shift grounded in available tools.",
         ],
         "capability_manifest": _capability_manifest(tools, prompt_limits),
