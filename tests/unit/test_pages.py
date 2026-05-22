@@ -35,6 +35,7 @@ from config.socialaccount_adapter import (
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
+from proprietary.utils_blog import get_all_blog_posts
 from config.redis_client import get_redis_client
 from billing.checkout_metadata import (
     STRIPE_CHECKOUT_CUSTOMER_FP_BOT_META_KEY,
@@ -1269,6 +1270,28 @@ class InstallScriptTests(TestCase):
 
 @tag("batch_pages")
 class CanonicalLinkTests(TestCase):
+    def assert_blog_pages_render_single_canonical_link(self):
+        blog_post = get_all_blog_posts()[0]
+        cases = [
+            (reverse("proprietary:blog_index"), "http://testserver/blog/"),
+            (
+                reverse("proprietary:blog_post", kwargs={"slug": blog_post["slug"]}),
+                f"http://testserver/blog/{blog_post['slug']}/",
+            ),
+        ]
+
+        for path, expected_url in cases:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                canonical_hrefs = [
+                    link.get("href")
+                    for link in soup.find_all("link", rel="canonical")
+                ]
+                self.assertEqual(canonical_hrefs, [expected_url])
+
     @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
     def test_canonical_present_in_production_proprietary(self):
         response = self.client.get("/")
@@ -1283,6 +1306,14 @@ class CanonicalLinkTests(TestCase):
     def test_canonical_absent_when_not_production(self):
         response = self.client.get("/")
         self.assertNotContains(response, 'rel="canonical"')
+
+    @override_settings(GOBII_RELEASE_ENV="prod", GOBII_PROPRIETARY_MODE=True)
+    def test_blog_pages_render_single_canonical_link(self):
+        self.assert_blog_pages_render_single_canonical_link()
+
+    @override_settings(GOBII_RELEASE_ENV="staging", GOBII_PROPRIETARY_MODE=True)
+    def test_blog_pages_keep_canonical_when_global_link_is_disabled(self):
+        self.assert_blog_pages_render_single_canonical_link()
 
 
 @tag("batch_pages")

@@ -80,9 +80,11 @@
     });
   </script>
 
-  {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and canonical_url %}
+  {% block canonical_link %}
+    {% if environment.is_production and settings.GOBII_PROPRIETARY_MODE and canonical_url %}
   <link rel="canonical" href="{{ canonical_url }}">
-  {% endif %}
+    {% endif %}
+  {% endblock %}
 
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <!-- Google tag (gtag.js) -->
