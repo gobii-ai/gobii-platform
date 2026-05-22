@@ -49,6 +49,7 @@ from api.evals.scenarios.behavior_micro import (
     get_planning_mutation_calls_before_end_planning,
     tool_call_is_plan_activity,
 )
+from api.evals.scenarios.effort_calibration import _hierarchical_report_shape
 from api.evals.scenarios.monitor_pollution import (
     _charter_mentions_pollution_monitoring,
     _schedule_is_reasonable_pollution_monitoring,
@@ -366,6 +367,28 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
                 "ignore_sqlite_eval_bookkeeping_reads"
             ]
         )
+
+    def test_effort_report_shape_accepts_bare_source_urls(self):
+        ok, summary = _hierarchical_report_shape(
+            (
+                "## Memo\n\n"
+                "- Source one: northstar.example.test/blog/atlas-launch\n"
+                "- Source two: news.example.test/northstar-series-b\n\n"
+                "| Company | Signal |\n"
+                "|---|---|\n"
+                "| Northstar | Atlas launch |"
+            ),
+            source_urls=(
+                "https://northstar.example.test/blog/atlas-launch",
+                "https://news.example.test/northstar-series-b",
+            ),
+            min_source_count=2,
+            min_chars=50,
+            max_chars=500,
+            required_any_groups=(("Northstar",), ("|",)),
+        )
+
+        self.assertTrue(ok, summary)
 
     def test_eval_synthetic_tools_execute_without_external_integration_handlers(self):
         user = get_user_model().objects.create_user(username="eval-synth")

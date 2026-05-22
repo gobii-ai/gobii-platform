@@ -179,7 +179,7 @@ def _hierarchical_report_shape(
     required_any_groups: Iterable[Iterable[str]] = (),
 ) -> tuple[bool, str]:
     text = body or ""
-    linked_sources = [url for url in source_urls if url in text]
+    linked_sources = [url for url in source_urls if _source_url_mentioned(text, url)]
     missing_groups = []
     text_folded = text.casefold()
     for group in required_any_groups:
@@ -211,6 +211,15 @@ def _hierarchical_report_shape(
     if failures:
         return False, "; ".join(failures)
     return True, f"Structured report with {len(text)} chars and {len(linked_sources)} source link(s)."
+
+
+def _source_url_mentioned(text: str, url: str) -> bool:
+    if not url:
+        return False
+    if url in text:
+        return True
+    bare_url = re.sub(r"^https?://", "", url).rstrip("/")
+    return bool(bare_url and bare_url in text)
 
 
 def _tool_calls_for_run(run_id: str, *, after=None, tool_names: Iterable[str] | None = None):
