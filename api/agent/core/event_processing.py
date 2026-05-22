@@ -261,12 +261,10 @@ ONE_OFF_TASK_RE = re.compile(
     re.IGNORECASE,
 )
 PLANNING_EXECUTE_NOW_RE = re.compile(
-    r"\b(?:do not ask questions|don't ask questions|just execute(?: now)?|execute now|"
-    r"just run(?: it| this)?|run (?:it|this) now|start (?:it|this|the task) now|"
-    r"go ahead and (?:run|execute|start|do)|just do (?:it|this|the task)|"
-    r"do (?:it|this|the task) now)\b",
+    r"\b(?:do not ask questions|don't ask questions|just execute(?: now)?|execute now|just run(?: it| this)?|run (?:it|this) now|start (?:it|this|the task) now|go ahead and (?:run|execute|start|do)|just do (?:it|this|the task)|do (?:it|this|the task) now)\b",
     re.IGNORECASE,
 )
+PLANNING_READY_WITHOUT_GATE_RE = re.compile(r"\b(?:plan(?:'s| is) clear|scope(?:'s| is) clear|task(?:'s| is) clear|lock it in|get (?:this )?rolling)\b", re.IGNORECASE)
 # Canonical phrase the agent should use to signal continuation.
 # Prompts tell the agent to include this exact phrase when it has more work.
 CANONICAL_CONTINUATION_PHRASE = "CONTINUE_WORK_SIGNAL"
@@ -2087,11 +2085,7 @@ def _looks_like_one_off_user_task(text: str) -> bool:
     return bool(normalized and ONE_OFF_TASK_RE.search(normalized) and not _user_text_has_durable_config_intent(normalized))
 
 
-def _should_skip_planning_execute_tool_search(
-    agent: PersistentAgent,
-    tool_name: str,
-    prepared_calls: list[_PreparedToolExecution],
-) -> bool:
+def _should_skip_planning_execute_tool_search(agent: PersistentAgent, tool_name: str, prepared_calls: list[_PreparedToolExecution]) -> bool:
     if tool_name != "search_tools" or agent.planning_state != PersistentAgent.PlanningState.PLANNING:
         return False
     if any(call.tool_name not in {"send_chat_message", "sleep_until_next_trigger"} for call in prepared_calls):
@@ -2457,10 +2451,7 @@ def _prepare_tool_batch(
         _get_tool_call_name(call) == "request_human_input"
         for call in tool_calls
     )
-    batch_has_planning_gate = any(
-        _get_tool_call_name(call) in {"end_planning", "request_human_input"}
-        for call in tool_calls
-    )
+    batch_has_planning_gate = any(_get_tool_call_name(call) in {"end_planning", "request_human_input"} for call in tool_calls)
     batch_has_terminal_message = any(_tool_call_likely_terminal_message(call) for call in tool_calls)
     skipped_plan_requested_sleep = False
 
@@ -2635,6 +2626,13 @@ def _prepare_tool_batch(
 
             if tool_name == "send_chat_message":
                 message_body = str(tool_params.get("body") or "")
+                if not batch_has_planning_gate and agent.planning_state == PersistentAgent.PlanningState.PLANNING and _coerce_optional_bool(tool_params.get("will_continue_work")) is True and PLANNING_READY_WITHOUT_GATE_RE.search(message_body):
+                    step_kwargs = {"agent": agent, "description": "Planning Mode is active and the plan appears clear. Call end_planning(full_plan=...) before ready/start-work chat."}
+                    attach_completion(step_kwargs)
+                    step = PersistentAgentStep.objects.create(**step_kwargs)
+                    attach_prompt_archive(step)
+                    followup_required = True
+                    break
                 if _should_reject_defaultable_setup_question(agent, message_body):
                     _record_defaultable_setup_question_correction(
                         agent,

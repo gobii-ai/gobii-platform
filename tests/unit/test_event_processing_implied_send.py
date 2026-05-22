@@ -1131,6 +1131,105 @@ class ImpliedSendTests(TestCase):
         mock_rate_limit.assert_called_once()
         mock_credit.assert_called_once()
 
+    def test_planning_ready_chat_without_end_planning_gets_runtime_correction(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Set up a daily 9 AM ET SEC enforcement RSS digest in web chat."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True) as mock_rate_limit,
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}) as mock_credit,
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": "The plan's clear. Let's lock it in and get this rolling.",
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual(prepared.prepared_calls, [])
+        self.assertTrue(prepared.followup_required)
+        mock_rate_limit.assert_not_called()
+        mock_credit.assert_not_called()
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__startswith="Planning Mode is active and the plan appears clear",
+            ).exists()
+        )
+
+    def test_planning_ready_chat_with_end_planning_is_allowed(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        self._add_inbound_web_message(
+            "Set up a daily 9 AM ET SEC enforcement RSS digest in web chat."
+        )
+
+        with (
+            patch.object(ep, "_enforce_tool_rate_limit", return_value=True),
+            patch.object(ep, "_ensure_credit_for_tool", return_value={"cost": None, "credit": None}),
+        ):
+            prepared = ep._prepare_tool_batch(
+                self.agent,
+                tool_calls=[
+                    {
+                        "id": "call_chat",
+                        "function": {
+                            "name": "send_chat_message",
+                            "arguments": json.dumps(
+                                {
+                                    "body": "The plan's clear. Let's lock it in and get this rolling.",
+                                    "will_continue_work": True,
+                                }
+                            ),
+                        },
+                    },
+                    {
+                        "id": "call_end",
+                        "function": {
+                            "name": "end_planning",
+                            "arguments": json.dumps({"full_plan": "Send a daily SEC enforcement RSS digest."}),
+                        },
+                    },
+                ],
+                budget_ctx=None,
+                eval_run_id=None,
+                heartbeat=None,
+                lock_extender=None,
+                credit_snapshot={},
+                allow_inferred_message_continue=True,
+                has_non_sleep_calls=True,
+                has_user_facing_message=True,
+                attach_completion=lambda step_kwargs: None,
+                attach_prompt_archive=lambda step: None,
+            )
+
+        self.assertEqual([call.tool_name for call in prepared.prepared_calls], ["send_chat_message", "end_planning"])
+        self.assertFalse(prepared.followup_required)
+
     def _mock_completion(self, content, *, reasoning_content=None):
         msg = MagicMock()
         msg.tool_calls = None
