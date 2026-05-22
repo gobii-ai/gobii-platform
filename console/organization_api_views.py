@@ -362,6 +362,49 @@ class CurrentOrganizationInviteDetailAPIView(LoginRequiredMixin, View):
         return JsonResponse(_serialize_organization(org, membership))
 
 
+class CurrentOrganizationInviteResendAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    @transaction.atomic
+    def post(self, request, token: str):
+        try:
+            org, membership, error = _require_current_org(request)
+        except PermissionDenied as exc:
+            return _json_error(str(exc), status=404)
+        if error:
+            return error
+        if membership.role not in MEMBER_MANAGE_ROLES:
+            return _json_error("You do not have permission to manage members.", status=403)
+
+        invite = get_object_or_404(OrganizationInvite, org=org, token=token)
+        if invite.accepted_at or invite.revoked_at or invite.expires_at < timezone.now():
+            return _json_error("Invite is no longer valid.", status=400)
+
+        invite.sent_at = timezone.now()
+        invite.save(update_fields=["sent_at"])
+        props = Analytics.with_org_properties(
+            {
+                "invite_id": str(invite.id),
+                "invite_token": invite.token,
+                "actor_id": str(request.user.id),
+                "resend": True,
+            },
+            organization=org,
+        )
+        transaction.on_commit(lambda: Analytics.track_event(
+            user_id=request.user.id,
+            event=AnalyticsEvent.ORGANIZATION_INVITE_SENT,
+            source=AnalyticsSource.WEB,
+            properties=props.copy(),
+        ))
+        try:
+            _send_invitation_email(request, org, invite)
+        except (AnymailError, OSError, smtplib.SMTPException) as exc:
+            logger.warning("Failed resending org invite email: %s", exc)
+
+        return JsonResponse(_serialize_organization(org, membership))
+
+
 class CurrentOrganizationMemberAPIView(LoginRequiredMixin, View):
     http_method_names = ["patch", "delete"]
 

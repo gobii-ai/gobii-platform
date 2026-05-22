@@ -141,6 +141,7 @@ class AgentAvatarThumbnailTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_live_chat_payloads_use_thumbnail_urls(self):
         self._save_avatar()
 

@@ -658,6 +658,7 @@ class ConsoleViewsTest(TestCase):
         self.assertIsNotNone(deleted_agent.deleted_at)
 
     @tag("batch_console_agents")
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_deleted_agent_not_accessible_on_agent_detail_for_owner(self):
         from api.models import BrowserUseAgent, PersistentAgent
 

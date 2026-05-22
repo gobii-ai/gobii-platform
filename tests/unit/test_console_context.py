@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlsplit
 
 from django.urls import reverse
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.test import TestCase, override_settings, tag
 
@@ -200,6 +201,47 @@ class CurrentOrganizationAPITests(TestCase):
         membership = OrganizationMembership.objects.get(org=self.org, user=self.member)
         self.assertEqual(membership.role, OrganizationMembership.OrgRole.VIEWER)
 
+    def test_owner_can_invite_solutions_partner_without_available_seats(self):
+        seatless_org = Organization.objects.create(
+            name="Seatless Team",
+            slug="seatless-team",
+            plan="free",
+            created_by=self.owner,
+        )
+        OrganizationMembership.objects.create(
+            org=seatless_org,
+            user=self.owner,
+            role=OrganizationMembership.OrgRole.OWNER,
+            status=OrganizationMembership.OrgStatus.ACTIVE,
+        )
+        self.client.force_login(self.owner)
+        session = self.client.session
+        session["context_type"] = "organization"
+        session["context_id"] = str(seatless_org.id)
+        session["context_name"] = seatless_org.name
+        session.save()
+
+        standard_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "standard@example.com", "role": OrganizationMembership.OrgRole.MEMBER}),
+            content_type="application/json",
+        )
+        partner_resp = self.client.post(
+            reverse("console-current-organization-invites"),
+            data=json.dumps({"email": "partner@example.com", "role": OrganizationMembership.OrgRole.SOLUTIONS_PARTNER}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(standard_resp.status_code, 400)
+        self.assertEqual(partner_resp.status_code, 201)
+        self.assertTrue(
+            OrganizationInvite.objects.filter(
+                org=seatless_org,
+                email="partner@example.com",
+                role=OrganizationMembership.OrgRole.SOLUTIONS_PARTNER,
+            ).exists()
+        )
+
     def test_admin_cannot_modify_owner_role(self):
         self._login_in_org_context(self.admin)
 
@@ -239,6 +281,49 @@ class CurrentOrganizationAPITests(TestCase):
         )
         invite.refresh_from_db()
         self.assertIsNotNone(invite.revoked_at)
+
+    def test_owner_can_resend_invite_from_current_organization_api(self):
+        self._login_in_org_context(self.owner)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-resend-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+        original_sent_at = timezone.now() - timezone.timedelta(days=1)
+        OrganizationInvite.objects.filter(pk=invite.pk).update(sent_at=original_sent_at)
+
+        resp = self.client.post(
+            reverse("console-current-organization-invite-resend", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(mail.outbox), 1)
+        invite.refresh_from_db()
+        self.assertGreater(invite.sent_at, original_sent_at)
+        payload = resp.json()
+        resent_invite = next(item for item in payload["pendingInvites"] if item["token"] == invite.token)
+        self.assertEqual(resent_invite["email"], "pending@example.com")
+
+    def test_member_cannot_resend_invite_from_current_organization_api(self):
+        self._login_in_org_context(self.member)
+        invite = OrganizationInvite.objects.create(
+            org=self.org,
+            email="pending@example.com",
+            role=OrganizationMembership.OrgRole.MEMBER,
+            token="pending-resend-forbidden-token",
+            expires_at=timezone.now() + timezone.timedelta(days=7),
+            invited_by=self.owner,
+        )
+
+        resp = self.client.post(
+            reverse("console-current-organization-invite-resend", kwargs={"token": invite.token}),
+        )
+
+        self.assertEqual(resp.status_code, 403)
+        self.assertEqual(len(mail.outbox), 0)
 
 
 @override_settings(

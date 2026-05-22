@@ -94,6 +94,13 @@ export function revokeOrganizationInvite(token: string): Promise<CurrentOrganiza
   })
 }
 
+export function resendOrganizationInvite(token: string): Promise<CurrentOrganizationPayload> {
+  return jsonRequest<CurrentOrganizationPayload>(`/console/api/organization/invites/${token}/resend/`, {
+    method: 'POST',
+    includeCsrf: true,
+  })
+}
+
 export function acceptOrganizationInvite(token: string): Promise<OrganizationInviteAcceptPayload> {
   return jsonRequest<OrganizationInviteAcceptPayload>(`/console/api/organizations/invites/${token}/accept/`, {
     method: 'POST',

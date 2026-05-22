@@ -278,6 +278,7 @@ from console.organization_api_views import (
     CurrentOrganizationAPIView,
     CurrentOrganizationInviteAPIView,
     CurrentOrganizationInviteDetailAPIView,
+    CurrentOrganizationInviteResendAPIView,
     CurrentOrganizationMemberAPIView,
 )
 from pages.views import PaidPlanLanding
@@ -600,6 +601,7 @@ urlpatterns = [
     path("console/api/organization/", CurrentOrganizationAPIView.as_view(), name="console-current-organization"),
     path("console/api/organization/invites/", CurrentOrganizationInviteAPIView.as_view(), name="console-current-organization-invites"),
     path("console/api/organization/invites/<str:token>/", CurrentOrganizationInviteDetailAPIView.as_view(), name="console-current-organization-invite-detail"),
+    path("console/api/organization/invites/<str:token>/resend/", CurrentOrganizationInviteResendAPIView.as_view(), name="console-current-organization-invite-resend"),
     path("console/api/organization/members/<int:user_id>/", CurrentOrganizationMemberAPIView.as_view(), name="console-current-organization-member-detail"),
     path(
         "console/api/system-skills/<slug:skill_key>/profiles/",

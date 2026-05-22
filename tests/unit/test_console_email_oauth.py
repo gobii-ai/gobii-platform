@@ -320,6 +320,7 @@ class AgentEmailOAuthApiTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "js/agent_email_oauth_callback.js")
 
+    @override_settings(LEGACY_CONSOLE_PAGE_REDIRECTS_ENABLED=True)
     def test_settings_page_mounts_react_email_app(self):
         url = reverse("agent_email_settings", args=[self.agent.pk])
         response = self.client.get(url)

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Building2, Plus, Save, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
+import { Building2, Plus, Save, Send, ShieldAlert, Trash2, UserMinus, Users } from 'lucide-react'
 
 import {
   fetchCurrentOrganization,
   inviteOrganizationMember,
   removeOrganizationMember,
+  resendOrganizationInvite,
   revokeOrganizationInvite,
   updateCurrentOrganizationName,
   updateOrganizationMemberRole,
@@ -24,6 +25,8 @@ type ConfirmAction = {
   kind: 'revoke-invite'
   invite: OrganizationInvite
 }
+
+const SOLUTIONS_PARTNER_ROLE = 'solutions_partner'
 
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   month: 'short',
@@ -176,6 +179,7 @@ function AddMemberModal({
   roles,
   email,
   role,
+  seatsAvailable,
   errors,
   busy,
   onEmailChange,
@@ -186,6 +190,7 @@ function AddMemberModal({
   roles: CurrentOrganizationPayload['roles']
   email: string
   role: string
+  seatsAvailable: number | null
   errors: string[]
   busy: boolean
   onEmailChange: (email: string) => void
@@ -193,13 +198,17 @@ function AddMemberModal({
   onClose: () => void
   onSubmit: (event: FormEvent) => void
 }) {
+  const noSeatsAvailable = seatsAvailable !== null && seatsAvailable <= 0
+  const selectedRoleRequiresSeat = role !== SOLUTIONS_PARTNER_ROLE
+  const submitDisabled = busy || !role || (noSeatsAvailable && selectedRoleRequiresSeat)
+
   const footer = (
     <>
       <button
         type="submit"
         form="organization-add-member-form"
         className="inline-flex w-full justify-center rounded-md border border-transparent bg-blue-600 px-4 py-2 text-base font-medium text-white shadow-sm transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-60 sm:ml-3 sm:w-auto sm:text-sm"
-        disabled={busy || !role}
+        disabled={submitDisabled}
       >
         {busy ? 'Sending...' : 'Send Invite'}
       </button>
@@ -264,6 +273,11 @@ function AddMemberModal({
             ))}
           </select>
         </div>
+        {noSeatsAvailable ? (
+          <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            No standard member seats are available. Select Solutions Partner or add seats first.
+          </p>
+        ) : null}
       </form>
     </Modal>
   )
@@ -285,6 +299,8 @@ export function OrganizationScreen() {
   const [inviteRole, setInviteRole] = useState('')
   const [inviteErrors, setInviteErrors] = useState<string[]>([])
   const [inviting, setInviting] = useState(false)
+  const [inviteBusyToken, setInviteBusyToken] = useState<string | null>(null)
+  const [inviteMessage, setInviteMessage] = useState<string | null>(null)
   const [memberBusyId, setMemberBusyId] = useState<string | null>(null)
   const [memberError, setMemberError] = useState<string | null>(null)
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null)
@@ -332,6 +348,7 @@ export function OrganizationScreen() {
     event.preventDefault()
     setInviting(true)
     setInviteErrors([])
+    setInviteMessage(null)
     try {
       const nextData = await inviteOrganizationMember(inviteEmail.trim(), inviteRole)
       updateCachedData(nextData)
@@ -341,6 +358,21 @@ export function OrganizationScreen() {
       setInviteErrors(formatErrors(err, 'Unable to send invite.'))
     } finally {
       setInviting(false)
+    }
+  }
+
+  const handleResendInvite = async (invite: OrganizationInvite) => {
+    setInviteBusyToken(invite.token)
+    setMemberError(null)
+    setInviteMessage(null)
+    try {
+      const nextData = await resendOrganizationInvite(invite.token)
+      updateCachedData(nextData)
+      setInviteMessage(`Invitation resent to ${invite.email}.`)
+    } catch (err) {
+      setMemberError(formatErrors(err, 'Unable to resend invite.')[0] ?? 'Unable to resend invite.')
+    } finally {
+      setInviteBusyToken(null)
     }
   }
 
@@ -396,8 +428,10 @@ export function OrganizationScreen() {
 
   const canManageMembers = data.viewer.canManageMembers
   const canEditOrganization = data.viewer.canEditOrganization
-  const availableSeats = data.billing?.seatsAvailable ?? 0
-  const addMemberDisabled = availableSeats <= 0
+  const availableSeats = data.billing?.seatsAvailable ?? null
+  const noSeatsAvailable = availableSeats !== null && availableSeats <= 0
+  const canInviteSolutionsPartnerWithoutSeats = data.roles.some((roleOption) => roleOption.value === SOLUTIONS_PARTNER_ROLE)
+  const addMemberDisabled = noSeatsAvailable && !canInviteSolutionsPartnerWithoutSeats
   const addMemberDisabledLabel = addMemberDisabled ? 'No seats available' : undefined
 
   return (
@@ -471,7 +505,7 @@ export function OrganizationScreen() {
               <h2>Members</h2>
               <p>
                 {data.members.length} member{data.members.length === 1 ? '' : 's'}
-                {data.billing ? ` - ${availableSeats} seat${availableSeats === 1 ? '' : 's'} available` : ''}
+                {availableSeats !== null ? ` - ${availableSeats} seat${availableSeats === 1 ? '' : 's'} available` : ''}
               </p>
             </div>
           </div>
@@ -490,8 +524,11 @@ export function OrganizationScreen() {
                 onClick={() => {
                   setInviteEmail('')
                   setInviteErrors([])
-                  if (data.roles[0]) {
-                    setInviteRole(data.roles[0].value)
+                  const defaultRole = noSeatsAvailable && canInviteSolutionsPartnerWithoutSeats
+                    ? SOLUTIONS_PARTNER_ROLE
+                    : data.roles[0]?.value
+                  if (defaultRole) {
+                    setInviteRole(defaultRole)
                   }
                   setAddMemberOpen(true)
                 }}
@@ -505,6 +542,7 @@ export function OrganizationScreen() {
           </div>
         </div>
         {memberError ? <p className="profile-screen__feedback profile-screen__feedback--error">{memberError}</p> : null}
+        {inviteMessage ? <p className="profile-screen__feedback profile-screen__feedback--success">{inviteMessage}</p> : null}
         <div className="organization-screen__table-wrap">
           <table className="organization-screen__table">
             <thead>
@@ -571,14 +609,26 @@ export function OrganizationScreen() {
                   </p>
                 </div>
                 {canManageMembers ? (
-                  <button
-                    type="button"
-                    className="profile-screen__button profile-screen__button--danger"
-                    onClick={() => setConfirmAction({ kind: 'revoke-invite', invite })}
-                  >
-                    <Trash2 className="h-4 w-4" aria-hidden="true" />
-                    Revoke
-                  </button>
+                  <div className="flex flex-wrap justify-end gap-2">
+                    <button
+                      type="button"
+                      className="profile-screen__button profile-screen__button--secondary"
+                      onClick={() => void handleResendInvite(invite)}
+                      disabled={inviteBusyToken === invite.token}
+                    >
+                      <Send className="h-4 w-4" aria-hidden="true" />
+                      {inviteBusyToken === invite.token ? 'Sending...' : 'Resend'}
+                    </button>
+                    <button
+                      type="button"
+                      className="profile-screen__button profile-screen__button--danger"
+                      onClick={() => setConfirmAction({ kind: 'revoke-invite', invite })}
+                      disabled={inviteBusyToken === invite.token}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      Revoke
+                    </button>
+                  </div>
                 ) : null}
               </div>
             ))}
@@ -599,6 +649,7 @@ export function OrganizationScreen() {
           roles={data.roles}
           email={inviteEmail}
           role={inviteRole}
+          seatsAvailable={availableSeats}
           errors={inviteErrors}
           busy={inviting}
           onEmailChange={setInviteEmail}
