@@ -2976,6 +2976,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
+            'pages:solutions',
             'pages:library',
         ]
         # Include pricing only when proprietary mode is enabled
@@ -3227,6 +3228,10 @@ class ClearSignupTrackingView(View):
                 del request.session[key]
 
         return JsonResponse(data)
+
+
+class SolutionsIndexView(TemplateView):
+    template_name = "solutions/index.html"
 
 
 class SolutionView(TemplateView):

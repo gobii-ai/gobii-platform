@@ -1357,6 +1357,15 @@ class SitemapTests(TestCase):
             response.content.decode(),
         )
 
+    def test_solution_urls_included(self):
+        response = self.client.get("/sitemap.xml")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertIn("<loc>http://example.com/solutions/</loc>", content)
+        for slug in ("recruiting", "sales", "health-care", "defense", "engineering"):
+            self.assertIn(f"<loc>http://example.com/solutions/{slug}/</loc>", content)
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_proprietary_sitemap_excludes_redirects_and_checkout_start_urls(self):
         response = self.client.get("/sitemap.xml")
@@ -1864,6 +1873,42 @@ class SolutionCtaCopyTests(TestCase):
             self.assertEqual(preload.get("type"), "image/webp")
             self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
             self.assertEqual(logo.get("srcset"), self._fish_header_logo_srcset())
+
+    def test_solutions_index_links_to_dedicated_solution_pages(self):
+        response = self.client.get("/solutions/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        self.assertEqual(soup.title.get_text(strip=True), "AI Agent Solutions for Teams | Gobii")
+        self.assertIsNotNone(
+            soup.find(
+                "meta",
+                {
+                    "name": "description",
+                    "content": (
+                        "Explore Gobii AI agent solutions for recruiting, sales, healthcare, defense, "
+                        "and developers. Deploy browser agents that research, monitor, and automate work 24/7."
+                    ),
+                },
+            )
+        )
+        for slug in ("recruiting", "sales", "health-care", "defense", "engineering"):
+            self.assertIsNotNone(
+                soup.find("a", {"href": reverse("pages:solution", kwargs={"slug": slug})}),
+                f"Missing link to {slug} solution page",
+            )
+        self.assertEqual(len(soup.find_all("script", {"type": "application/ld+json"})), 3)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_solutions_dropdown_links_to_solutions_index(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        hub_links = soup.find_all("a", {"href": reverse("pages:solutions")})
+        self.assertTrue(
+            any("All Solutions" in link.get_text(" ", strip=True) for link in hub_links)
+        )
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):

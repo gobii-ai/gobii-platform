@@ -50,6 +50,12 @@
                  class="absolute left-1/2 -translate-x-1/2 top-full pt-3 w-56 z-50">
               <div class="bg-white rounded-2xl shadow-xl shadow-violet-500/10 ring-1 ring-violet-100 p-2 overflow-hidden">
                 <div class="flex flex-col gap-0.5">
+                  <a href="{% url 'pages:solutions' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
+                    <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
+                      <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
+                    </div>
+                    <span class="text-sm font-medium text-slate-700 group-hover:text-white">All Solutions</span>
+                  </a>
                   <a href="{% url 'pages:solution' slug='recruiting' %}" class="group flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-violet-500">
                     <div class="flex items-center justify-center w-8 h-8 rounded-lg bg-violet-50 text-violet-600 group-hover:bg-white/20 group-hover:text-white">
                       <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
@@ -306,6 +312,10 @@
                 </svg>
             </button>
             <div x-show="expanded" class="pl-4 space-y-1">
+                <a href="{% url 'pages:solutions' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
+                    <i aria-hidden="true" data-lucide="layout-grid" class="h-4 w-4"></i>
+                    All Solutions
+                </a>
                 <a href="{% url 'pages:solution' slug='recruiting' %}" class="flex items-center gap-2 py-2 px-3 text-slate-600 hover:text-blue-600 rounded-lg">
                     <i aria-hidden="true" data-lucide="users" class="h-4 w-4"></i>
                     Recruiting
