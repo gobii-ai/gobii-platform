@@ -14,8 +14,8 @@ class FbpMiddlewareTests(TestCase):
         self.factory = RequestFactory()
         self.middleware = FbpMiddleware(lambda request: HttpResponse("ok"))
 
-    def _build_request(self, cookies=None):
-        request = self.factory.get("/")
+    def _build_request(self, path="/pricing/", cookies=None):
+        request = self.factory.get(path)
         session_middleware = SessionMiddleware(lambda req: HttpResponse("noop"))
         session_middleware.process_request(request)
         request.session.save()
@@ -60,7 +60,16 @@ class FbpMiddlewareTests(TestCase):
     @tag("batch_fbp_middleware")
     def test_middleware_respects_existing_cookie(self):
         cookie_value = "fb.1.1000.2000"
-        request = self._build_request({settings.FBP_COOKIE_NAME: cookie_value})
+        request = self._build_request(cookies={settings.FBP_COOKIE_NAME: cookie_value})
+
+        response = self.middleware(request)
+
+        self.assertNotIn(settings.FBP_COOKIE_NAME, request.session)
+        self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
+
+    @tag("batch_fbp_middleware")
+    def test_middleware_skips_pristine_homepage(self):
+        request = self._build_request("/")
 
         response = self.middleware(request)
 

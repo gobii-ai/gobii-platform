@@ -17,6 +17,7 @@ from pages.account_info_cache import (
     account_info_cache_key,
     account_info_cache_lock_key,
 )
+from pages.homepage_cache_safety import is_cache_safe_anonymous_homepage_request
 from pages.mini_mode import is_mini_mode_enabled
 from tasks.services import TaskCreditService
 from util.analytics import AnalyticsEvent, AnalyticsCTAs, Analytics
@@ -186,6 +187,14 @@ def show_signup_tracking(request):
     Adds a flag to the context to control whether to show signup tracking.
     This is set in the user_signed_up signal handler.
     """
+    if is_cache_safe_anonymous_homepage_request(request):
+        return {
+            'show_signup_tracking': False,
+            'signup_event_id': None,
+            'signup_user_id': None,
+            'signup_email_hash': None,
+        }
+
     return {
         'show_signup_tracking': request.session.get('show_signup_tracking', False),
         'signup_event_id': request.session.get('signup_event_id'),
@@ -213,6 +222,7 @@ def analytics(request):
     Adds analytics tokens to the context.
     This is used for Google Analytics and other tracking services.
     """
+    cache_safe_anonymous_homepage = is_cache_safe_anonymous_homepage_request(request)
     analyticsContext = {
         'analytics': {
             'tokens': {
@@ -224,7 +234,11 @@ def analytics(request):
                 "email_hash": (
                     sha256_hex(request.user.email)
                     if request.user.is_authenticated
-                    else request.session.get('signup_email_hash', "")
+                    else (
+                        ""
+                        if cache_safe_anonymous_homepage
+                        else request.session.get('signup_email_hash', "")
+                    )
                 ),
                 "id_hash": (
                     sha256_hex(str(request.user.id))

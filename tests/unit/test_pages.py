@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.sites.models import Site
@@ -33,6 +34,7 @@ from config.socialaccount_adapter import (
     build_oauth_charter_stash_cache_key,
 )
 from pages import views as page_views
+from pages.homepage_cache_safety import ANONYMOUS_HOMEPAGE_CACHE_CONTROL
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
 from config.redis_client import get_redis_client
@@ -91,6 +93,32 @@ class HomePageTests(TestCase):
         main_landmarks = soup.find_all("main")
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
+
+    def test_pristine_anonymous_home_page_is_cache_safe(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.headers.get("Cache-Control"),
+            ANONYMOUS_HOMEPAGE_CACHE_CONTROL,
+        )
+        self.assertNotIn("Cookie", response.headers.get("Vary", ""))
+        self.assertNotIn(settings.CSRF_COOKIE_NAME, response.cookies)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies)
+
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        form = soup.find("form", {"id": "create-agent-form"})
+        self.assertIsNotNone(form)
+        self.assertEqual(form.get("data-requires-csrf-warmup"), "true")
+        self.assertIsNone(form.find("input", {"name": "csrfmiddlewaretoken"}))
+
+    def test_csrf_warmup_sets_cookie_for_deferred_homepage_submit(self):
+        response = self.client.get(reverse("pages:csrf_warmup"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Cache-Control"), "no-store, max-age=0")
+        self.assertIn("csrfToken", response.json())
+        self.assertIn(settings.CSRF_COOKIE_NAME, response.cookies)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_includes_stripe_js_in_proprietary_mode(self):

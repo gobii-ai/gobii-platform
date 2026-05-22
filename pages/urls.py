@@ -38,6 +38,7 @@ from .views import (
     SpecialAccessView,
     WebManifestView,
     InstallScriptView,
+    csrf_warmup,
 )
 
 from djstripe import views as djstripe_views
@@ -78,6 +79,7 @@ urlpatterns = [
     path("", HomePage.as_view(), name="home"),
     path("install.sh", InstallScriptView.as_view(), name="install_script"),
     path("manifest.json", WebManifestView.as_view(), name="web_manifest"),
+    path("csrf/", csrf_warmup, name="csrf_warmup"),
     path("libary/", RedirectView.as_view(pattern_name="pages:library", permanent=True)),
     path("library/", LibraryView.as_view(), name="library"),
     path("library/<slug:category_slug>/", LibraryView.as_view(), name="library_category"),

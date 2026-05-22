@@ -47,8 +47,10 @@
       {% endif %}
     </dl>
     <div class="mt-auto pt-6 flex flex-col gap-3">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents">
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents" data-requires-csrf-warmup="{{ homepage_spawn_requires_csrf_warmup|yesno:'true,false' }}" data-csrf-warmup-url="{% url 'pages:csrf_warmup' %}">
+        {% if not homepage_spawn_requires_csrf_warmup %}
         {% csrf_token %}
+        {% endif %}
         <input type="hidden" name="source_page" value="home_pretrained_workers" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />

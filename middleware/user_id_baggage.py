@@ -6,6 +6,8 @@ from django.http import HttpRequest, HttpResponse
 # OpenTelemetry imports
 from opentelemetry import baggage, context
 
+from pages.homepage_cache_safety import is_cache_safe_anonymous_homepage_request
+
 class UserIdBaggageMiddleware:  # pragma: no cover
     """
     Injects the user's primary‑key into OpenTelemetry baggage so it can be
@@ -25,6 +27,9 @@ class UserIdBaggageMiddleware:  # pragma: no cover
 
     # Django calls __call__ once per request
     def __call__(self, request: HttpRequest) -> HttpResponse:
+        if is_cache_safe_anonymous_homepage_request(request):
+            return self.get_response(request)
+
         user = getattr(request, "user", None)
 
         if user is None:

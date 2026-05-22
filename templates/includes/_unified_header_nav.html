@@ -123,12 +123,19 @@
               <i data-lucide="search" class="h-3.5 w-3.5"></i>
               Discover
             </a>
-            {% with request.session.utm_querystring as utm_qs %}
-            <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+            {% if homepage_cache_safe_anonymous %}
+              <a href="{{ account_login_url }}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
+                <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
+                Login
+              </a>
+            {% else %}
+              {% with request.session.utm_querystring as utm_qs %}
+              <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-sm font-medium text-white/90 hover:text-white hover:bg-white/10 transition-all">
               <i data-lucide="log-in" class="h-3.5 w-3.5"></i>
               Login
-            </a>
-            {% endwith %}
+              </a>
+              {% endwith %}
+            {% endif %}
           {% endif %}
         </div>
 
@@ -445,6 +452,14 @@
               <i aria-hidden="true" data-lucide="search" class="h-4 w-4"></i>
               Discover
             </a>
+            {% if homepage_cache_safe_anonymous %}
+            <a href="{{ account_login_url }}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
+            {% if request.resolver_match.url_name != 'home' %}
+            <a href="{{ account_login_url }}" class="block text-center bg-blue-600 text-white hover:bg-blue-700 rounded-lg py-2.5 px-3 transition-colors">
+              Get started
+            </a>
+            {% endif %}
+            {% else %}
             {% with request.session.utm_querystring as utm_qs %}
             <a href="{{ account_login_url }}{% if utm_qs %}{% if '?' in account_login_url %}&{% else %}?{% endif %}{{ utm_qs }}{% endif %}" class="flex items-center py-2.5 px-3 text-slate-700 hover:text-blue-600 hover:bg-blue-50/50 rounded-lg transition-colors">Login</a>
             {% if request.resolver_match.url_name != 'home' %}
@@ -453,6 +468,7 @@
             </a>
             {% endif %}
             {% endwith %}
+            {% endif %}
           </div>
         {% endif %}
         

@@ -7,6 +7,7 @@ from pages.mini_mode import (
     set_mini_mode_cookie,
     set_request_mini_mode,
 )
+from pages.homepage_cache_safety import is_cache_safe_anonymous_homepage_request
 from util.attribution_referrers import (
     clean_acquisition_referrer,
     is_internal_referrer,
@@ -56,7 +57,7 @@ class UTMTrackingMiddleware:
 
     def __call__(self, request):
         should_set_mini_mode_cookie = False
-        if request.method == "GET":
+        if request.method == "GET" and not is_cache_safe_anonymous_homepage_request(request):
             has_attribution_params = self.has_attribution_params(request.GET)
             self.capture_referrer_context(
                 request,

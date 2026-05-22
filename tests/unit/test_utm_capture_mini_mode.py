@@ -144,6 +144,19 @@ class UTMCaptureMiniModeTests(TestCase):
         self.assertEqual(request.session.get("first_path"), "/pricing/")
         self.assertEqual(request.session.get("last_path"), "/pricing/")
 
+    def test_pristine_homepage_referrer_does_not_touch_session(self):
+        request = self._build_request("/")
+        request.META["HTTP_REFERER"] = "https://agentic.ai/"
+        request.session.modified = False
+
+        self.middleware(request)
+
+        self.assertFalse(request.session.modified)
+        self.assertNotIn("first_referrer", request.session)
+        self.assertNotIn("last_referrer", request.session)
+        self.assertNotIn("first_path", request.session)
+        self.assertNotIn("last_path", request.session)
+
     def test_referrer_context_ignores_same_host_referrers(self):
         request = self._build_request("/pricing/")
         request.META["HTTP_HOST"] = "www.gobii.ai"

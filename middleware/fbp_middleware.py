@@ -1,6 +1,8 @@
 import random, time
 from django.conf import settings
 
+from pages.homepage_cache_safety import is_cache_safe_anonymous_homepage_request
+
 def get_or_make_fbp(request):
     """
     Generates or retrieves the Facebook Browser Pixel (fbp) identifier.
@@ -59,6 +61,9 @@ class FbpMiddleware:
                 The modified HTTP response object that includes the necessary 'fbp'
                 cookie settings, if applicable.
         """
+        if is_cache_safe_anonymous_homepage_request(request):
+            return self.get_response(request)
+
         # Check consent before generating/setting
         had_cookie = settings.FBP_COOKIE_NAME in request.COOKIES
 

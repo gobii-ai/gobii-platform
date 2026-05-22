@@ -12,7 +12,11 @@ from django.http import HttpResponse, Http404
 from django.core import signing
 from django.core.mail import send_mail
 from django.contrib import messages
+from django.contrib.auth.models import AnonymousUser
 from django.utils.decorators import method_decorator
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import ensure_csrf_cookie
+from django.views.decorators.http import require_GET
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
 from django.http import HttpResponseRedirect
@@ -142,6 +146,11 @@ from .utils_markdown import (
 from .homepage_cache import (
     get_homepage_integrations_payload,
     get_homepage_pretrained_payload,
+)
+from .homepage_cache_safety import (
+    ANONYMOUS_HOMEPAGE_CACHE_CONTROL,
+    CSRF_WARMUP_CACHE_CONTROL,
+    is_cache_safe_anonymous_homepage_request,
 )
 from .public_template_urls import (
     public_template_category_label,
@@ -473,6 +482,14 @@ def _build_anonymous_cta_auth_response(request, *, next_url: str):
         next=next_url,
         login_url=_cta_auth_url_with_utms(request),
     )
+
+
+@require_GET
+@ensure_csrf_cookie
+def csrf_warmup(request):
+    response = JsonResponse({"csrfToken": get_token(request)})
+    response["Cache-Control"] = CSRF_WARMUP_CACHE_CONTROL
+    return response
 
 
 def _track_web_event_for_request(
@@ -963,9 +980,22 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
+    def dispatch(self, request, *args, **kwargs):
+        cache_safe_anonymous = is_cache_safe_anonymous_homepage_request(request)
+        if cache_safe_anonymous:
+            request.user = AnonymousUser()
+
+        response = super().dispatch(request, *args, **kwargs)
+        if cache_safe_anonymous:
+            response["Cache-Control"] = ANONYMOUS_HOMEPAGE_CACHE_CONTROL
+        return response
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_htmx"] = True
+        cache_safe_anonymous = is_cache_safe_anonymous_homepage_request(self.request)
+        context["homepage_cache_safe_anonymous"] = cache_safe_anonymous
+        context["homepage_spawn_requires_csrf_warmup"] = cache_safe_anonymous
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
@@ -1014,7 +1044,7 @@ class HomePage(TemplateView):
                 # If no valid landing page found, use an empty charter
                 initial['charter'] = ''
                 context['default_charter'] = ''
-        elif 'agent_charter' in self.request.session:
+        elif not cache_safe_anonymous and 'agent_charter' in self.request.session:
             if self.request.session.get('agent_charter_source') != 'template':
                 initial['charter'] = self.request.session['agent_charter'].strip()
                 context['default_charter'] = initial['charter']
@@ -1086,7 +1116,11 @@ class HomePage(TemplateView):
             )
         context["home_spawn_requires_trial"] = home_spawn_requires_trial
 
-        preferred_llm_tier_raw = self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
+        preferred_llm_tier_raw = (
+            None
+            if cache_safe_anonymous
+            else self.request.session.get(PREFERRED_LLM_TIER_SESSION_KEY)
+        )
         # Never plan-clamp in the homepage selector. Clamping happens when the agent is
         # persisted and at runtime.
         preferred_llm_tier = resolve_preferred_tier_for_owner(None, preferred_llm_tier_raw).value
@@ -1128,9 +1162,11 @@ class HomePage(TemplateView):
         ]
         integrations_enabled = bool(integrations_payload.get("enabled"))
 
-        initial_selected_pipedream_app_slugs = normalize_app_slugs(
-            self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
-        )
+        initial_selected_pipedream_app_slugs = []
+        if not cache_safe_anonymous:
+            initial_selected_pipedream_app_slugs = normalize_app_slugs(
+                self.request.session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY) or []
+            )
         if integrations_enabled and self.request.user.is_authenticated:
             owner_scope = (
                 MCPServerConfig.Scope.ORGANIZATION
