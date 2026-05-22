@@ -947,10 +947,6 @@ class ConsoleHome(ConsoleViewMixin, TemplateView):
 
         return context
 
-class ExampleConsolePage(LoginRequiredMixin, TemplateView):
-    """Example console page."""
-    template_name = "example_console_page.html"
-
 class BillingPortalView(StripeFeatureRequiredMixin, LoginRequiredMixin, View):
     """Open the Stripe billing portal for personal subscriptions."""
 
