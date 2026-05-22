@@ -2,32 +2,24 @@ import { useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { parseDate } from '@internationalized/date'
 
+import { InsightGauge } from '../common/InsightGauge'
 import { fetchUsageSummary } from './api'
 import { useUsageStore } from './store'
 import type {
-  MetricCard,
-  MetricDefinition,
   UsageSummaryQueryInput,
   UsageSummaryResponse,
 } from './types'
 
-const metricDefinitions: MetricDefinition[] = [
-  {
-    id: 'credits',
-    label: 'Credits consumed',
-    baseCaption: 'Sum of task credits charged during this billing period.',
-  },
-  {
-    id: 'tasks_per_day',
-    label: 'Average credits per day',
-    baseCaption: 'Average task credits billed per day in the selected billing period.',
-  },
-  {
-    id: 'quota',
-    label: 'Current billing quota',
-    baseCaption: 'Remaining task credits for the active billing cycle (not affected by date filters).',
-  },
-]
+const API_AGENT_ID = 'api'
+
+type MetricCard = {
+  id: 'credits_used' | 'average_credits_per_day' | 'agent_count'
+  label: string
+  value: string
+  caption: string
+  valueClasses: string
+  gaugePct?: number
+}
 
 type UsageMetricsGridProps = {
   queryInput: UsageSummaryQueryInput
@@ -40,6 +32,9 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   const setSummaryData = useUsageStore((state) => state.setSummaryData)
   const setSummaryError = useUsageStore((state) => state.setSummaryError)
   const summary = useUsageStore((state) => state.summary)
+  const agents = useUsageStore((state) => state.agents)
+  const agentsStatus = useUsageStore((state) => state.agentsStatus)
+  const agentsErrorMessage = useUsageStore((state) => state.agentsErrorMessage)
 
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
@@ -75,11 +70,15 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   }, [error, isError, setSummaryError])
 
   const creditFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
     [],
   )
 
   const resolvedSummary = data ?? summary
+  const activeAgentCount = useMemo(
+    () => agents.filter((agent) => agent.id !== API_AGENT_ID && !agent.is_deleted).length,
+    [agents],
+  )
 
   const periodDayCount = useMemo(() => {
     const from = queryInput.from ?? resolvedSummary?.period.start
@@ -102,93 +101,97 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
   }, [queryInput.from, queryInput.to, resolvedSummary])
 
   const cards = useMemo<MetricCard[]>(() => {
-    return metricDefinitions.map((metric) => {
-      let value = '—'
-      let caption = metric.baseCaption
-      let valueClasses = embedded ? 'text-slate-50' : 'text-slate-900'
-      let progressPct: number | undefined
-      let progressClass: string | undefined
+    const defaultValueClasses = embedded ? 'text-slate-50' : 'text-slate-900'
+    const loadingValueClasses = 'text-slate-400 animate-pulse'
+    const errorValueClasses = 'text-slate-500'
 
-      if (isPending) {
-        value = 'Loading…'
-        valueClasses = 'text-slate-400 animate-pulse'
-      } else if (isError) {
-        value = '—'
-        valueClasses = 'text-slate-500'
-        caption = 'Unable to load this metric. Refresh to retry.'
-      } else if (resolvedSummary) {
-        switch (metric.id) {
-          case 'tasks': {
-            const completed = resolvedSummary.metrics.tasks.completed
-            const active = resolvedSummary.metrics.tasks.in_progress + resolvedSummary.metrics.tasks.pending
-            value = creditFormatter.format(resolvedSummary.metrics.tasks.count)
-            caption = `Completed ${creditFormatter.format(completed)} credits · Active ${creditFormatter.format(active)} credits`
-            break
-          }
-          case 'tasks_per_day': {
-            const totalTasks = resolvedSummary.metrics.tasks.count
-            if (periodDayCount && periodDayCount > 0) {
-              const average = totalTasks / periodDayCount
-              value = creditFormatter.format(average)
-              const pluralSuffix = periodDayCount === 1 ? '' : 's'
-              caption = `${creditFormatter.format(totalTasks)} credits across ${periodDayCount} day${pluralSuffix}.`
-            } else {
-              value = '—'
-              caption = 'Unable to determine the period length for this metric.'
-            }
-            break
-          }
-          case 'credits': {
-            value = creditFormatter.format(resolvedSummary.metrics.credits.total)
-            caption = 'Credits billed across all tasks in this billing period.'
-            break
-          }
-          case 'quota': {
-            const available = resolvedSummary.metrics.quota.available
-            const total = resolvedSummary.metrics.quota.total
-            const used = resolvedSummary.metrics.quota.used
-            const usedPctRaw = resolvedSummary.metrics.quota.used_pct
-            const usedPct = Number.isFinite(usedPctRaw) ? Math.round(usedPctRaw) : 0
-            const unlimitedQuota = total < 0 || available < 0
-            const quotaCaptionSuffix = 'Current billing cycle; date filters do not change this value.'
+    const cards: MetricCard[] = [
+      {
+        id: 'credits_used',
+        label: 'Credits Used',
+        value: isPending ? 'Loading…' : '—',
+        caption: 'Current billing cycle; date filters do not change this value.',
+        valueClasses: isPending ? loadingValueClasses : defaultValueClasses,
+      },
+      {
+        id: 'average_credits_per_day',
+        label: 'Average credits/day',
+        value: isPending ? 'Loading…' : '—',
+        caption: 'Average credits billed per day in the selected period.',
+        valueClasses: isPending ? loadingValueClasses : defaultValueClasses,
+      },
+      {
+        id: 'agent_count',
+        label: 'Number of agents',
+        value: agentsStatus === 'loading' && activeAgentCount === 0 ? 'Loading…' : creditFormatter.format(activeAgentCount),
+        caption: 'Active agents in this context, excluding API usage.',
+        valueClasses: agentsStatus === 'loading' && activeAgentCount === 0 ? loadingValueClasses : defaultValueClasses,
+      },
+    ]
 
-            if (unlimitedQuota) {
-              value = '∞'
-              caption = `Unlimited task credits. ${quotaCaptionSuffix}`
-            } else if (total > 0) {
-              value = creditFormatter.format(available)
+    if (isError) {
+      cards[0] = {
+        ...cards[0],
+        value: '—',
+        caption: 'Unable to load this metric. Refresh to retry.',
+        valueClasses: errorValueClasses,
+      }
+      cards[1] = {
+        ...cards[1],
+        value: '—',
+        caption: 'Unable to load this metric. Refresh to retry.',
+        valueClasses: errorValueClasses,
+      }
+    } else if (resolvedSummary) {
+      const available = resolvedSummary.metrics.quota.available
+      const total = resolvedSummary.metrics.quota.total
+      const used = resolvedSummary.metrics.quota.used
+      const usedPctRaw = resolvedSummary.metrics.quota.used_pct
+      const usedPct = Number.isFinite(usedPctRaw) ? Math.round(usedPctRaw) : 0
+      const unlimitedQuota = Boolean(resolvedSummary.metrics.quota.unlimited) || total < 0 || available < 0
 
-              caption = `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits (${usedPct}% used). ${quotaCaptionSuffix}`
-              progressPct = Math.max(0, Math.min(100, usedPct))
-              if (progressPct >= 100) {
-                progressClass = 'bg-gradient-to-r from-red-400 to-red-500'
-              } else if (progressPct >= 90) {
-                progressClass = 'bg-gradient-to-r from-orange-400 to-orange-500'
-              } else {
-                progressClass = 'bg-gradient-to-r from-blue-500 to-sky-500'
-              }
-            } else {
-              value = '0'
-              caption = 'No active quota for this context. Consider upgrading your plan.'
-            }
-            break
-          }
-          default:
-            break
+      cards[0] = {
+        ...cards[0],
+        value: creditFormatter.format(used),
+        caption: unlimitedQuota
+          ? 'Unlimited task credits in the current billing cycle.'
+          : total > 0
+            ? `${creditFormatter.format(used)} used of ${creditFormatter.format(total)} credits.`
+            : 'No active quota for this context. Consider upgrading your plan.',
+        valueClasses: defaultValueClasses,
+        gaugePct: !unlimitedQuota && total > 0 ? Math.max(0, Math.min(100, usedPct)) : undefined,
+      }
+
+      if (periodDayCount && periodDayCount > 0) {
+        const totalCredits = resolvedSummary.metrics.credits.total
+        const average = totalCredits / periodDayCount
+        const pluralSuffix = periodDayCount === 1 ? '' : 's'
+        cards[1] = {
+          ...cards[1],
+          value: creditFormatter.format(average),
+          caption: `${creditFormatter.format(totalCredits)} credits across ${periodDayCount} day${pluralSuffix}.`,
+          valueClasses: defaultValueClasses,
+        }
+      } else {
+        cards[1] = {
+          ...cards[1],
+          caption: 'Unable to determine the period length for this metric.',
+          valueClasses: errorValueClasses,
         }
       }
+    }
 
-      return {
-        id: metric.id,
-        label: metric.label,
-        value,
-        caption,
-        valueClasses,
-        progressPct,
-        progressClass,
+    if (agentsStatus === 'error') {
+      cards[2] = {
+        ...cards[2],
+        value: '—',
+        caption: agentsErrorMessage || 'Unable to load agents right now.',
+        valueClasses: errorValueClasses,
       }
-    })
-  }, [creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
+    }
+
+    return cards
+  }, [activeAgentCount, agentsErrorMessage, agentsStatus, creditFormatter, embedded, isError, isPending, periodDayCount, resolvedSummary])
 
   const cardClassName = embedded
     ? 'settings-card-surface settings-card-surface--embedded flex h-full flex-col justify-between gap-3 rounded-xl border border-slate-200/20 p-5'
@@ -197,31 +200,47 @@ export function UsageMetricsGrid({ queryInput, agentIds, embedded = false }: Usa
     ? 'text-xs font-semibold uppercase tracking-wide text-slate-400'
     : 'text-xs font-semibold uppercase tracking-wide text-slate-500'
   const captionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-500'
-  const progressTrackClassName = embedded ? 'relative h-2 rounded-full bg-slate-900/70' : 'relative h-2 rounded-full bg-white/50'
 
   return (
-    <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <section className="grid gap-4 md:grid-cols-3">
       {cards.map((card) => (
         <article
           key={card.id}
           data-usage-metric={card.id}
           className={cardClassName}
         >
-          <div>
-            <span className={labelClassName}>
-              {card.label}
-            </span>
-            <p className={`mt-2 text-2xl font-semibold ${card.valueClasses}`}>{card.value}</p>
-            {typeof card.progressPct === 'number' ? (
-              <div className="mt-3">
-                <div className={progressTrackClassName}>
-                  <div
-                    className={`absolute inset-y-0 left-0 rounded-full ${card.progressClass ?? ''}`}
-                    style={{ width: `${card.progressPct}%` }}
+          <div className={card.gaugePct == null ? undefined : 'flex items-start justify-between gap-4'}>
+            <div>
+              <span className={labelClassName}>
+                {card.label}
+              </span>
+              <p className={`mt-2 text-2xl font-semibold ${card.valueClasses}`}>{card.value}</p>
+            </div>
+            {typeof card.gaugePct === 'number' ? (
+              <>
+                <div className="relative h-24 w-24 shrink-0" aria-hidden="true">
+                  <InsightGauge
+                    value={card.gaugePct}
+                    max={100}
+                    size={96}
+                    gradientColors={['#AA74CE', '#7C4CA0']}
+                    thickness={8}
+                    radius="94%"
+                    showGlow={false}
+                    animate={false}
+                    trackColor={embedded ? 'rgba(170, 116, 206, 0.18)' : 'rgba(170, 116, 206, 0.16)'}
                   />
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <span className={`text-lg font-semibold ${embedded ? 'text-slate-50' : 'text-slate-900'}`}>
+                      {Math.round(card.gaugePct)}
+                    </span>
+                    <span className={`mt-1 text-[10px] font-semibold ${embedded ? 'text-slate-400' : 'text-slate-500'}`}>
+                      %
+                    </span>
+                  </div>
                 </div>
-                <span className="sr-only">{card.progressPct}% of quota used</span>
-              </div>
+                <span className="sr-only">{card.gaugePct}% of quota used</span>
+              </>
             ) : null}
           </div>
           <p className={captionClassName}>{card.caption}</p>

@@ -89,22 +89,6 @@ export type UsageBurnRateResponse = {
 
 export type UsageBurnRateQueryInput = { tier?: string; window?: number }
 
-export type MetricDefinition = {
-  id: 'tasks' | 'tasks_per_day' | 'credits' | 'quota'
-  label: string
-  baseCaption: string
-}
-
-export type MetricCard = {
-  id: MetricDefinition['id']
-  label: string
-  value: string
-  caption: string
-  valueClasses: string
-  progressPct?: number
-  progressClass?: string
-}
-
 export type UsageTrendMode = 'day' | 'week' | 'month'
 
 export type UsageTrendBucket = {
@@ -132,26 +116,6 @@ export type UsageTrendResponse = {
 
 export type UsageTrendQueryInput = { mode: UsageTrendMode; from?: string; to?: string; agents?: string[] }
 
-export type UsageToolBreakdownTool = {
-  name: string
-  credits: number
-  invocations: number
-}
-
-export type UsageToolBreakdownResponse = {
-  range: {
-    start: string
-    end: string
-  }
-  timezone: string
-  total_count: number
-  total_credits: number
-  total_invocations?: number
-  tools: UsageToolBreakdownTool[]
-}
-
-export type UsageToolBreakdownQueryInput = { from?: string; to?: string; agents?: string[] }
-
 export type PeriodInfo = {
   label: string
   value: string
@@ -159,7 +123,6 @@ export type PeriodInfo = {
 }
 
 export type TrendChartOption = EChartsOption
-export type ToolChartOption = EChartsOption
 
 export type UsageAgent = {
   id: string

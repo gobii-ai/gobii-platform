@@ -147,8 +147,11 @@ export const ChatSidebar = memo(function ChatSidebar({
   useEffect(() => {
     if (showCustomGalleryShellPanel) {
       setDrawerViewMode('gallery')
+      if (isMobile) {
+        setDrawerOpen(true)
+      }
     }
-  }, [showCustomGalleryShellPanel])
+  }, [isMobile, showCustomGalleryShellPanel, galleryShellPage])
 
   const handleStepLeft = useCallback(() => {
     if (showSettingsView) {
@@ -386,6 +389,10 @@ export const ChatSidebar = memo(function ChatSidebar({
             if (showSettingsView) {
               onBackFromEmbeddedSettings?.()
               return
+            }
+            if (showCustomGalleryShellPanel) {
+              onGalleryShellPageChange?.('agents')
+              setDrawerViewMode('list')
             }
             setDrawerOpen(false)
           }}

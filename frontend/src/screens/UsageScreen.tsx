@@ -6,7 +6,6 @@ import {
   UsagePeriodHeader,
   UsageTrendSection,
   UsageMetricsGrid,
-  UsageToolChart,
   UsageAgentLeaderboard,
   useUsageStore,
 } from '../components/usage'
@@ -351,14 +350,6 @@ export function UsageScreen() {
         fallbackRange={boundedSummaryRange}
         timezone={summary?.period.timezone}
         agentIds={selectedAgentArray}
-      />
-
-      <UsageToolChart
-        embedded
-        effectiveRange={boundedEffectiveRange}
-        fallbackRange={boundedSummaryRange}
-        agentIds={selectedAgentArray}
-        timezone={summary?.period.timezone}
       />
 
       <UsageAgentLeaderboard

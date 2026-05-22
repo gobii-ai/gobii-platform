@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import ReactEChartsCore from 'echarts-for-react/lib/core'
 import * as echarts from 'echarts/core'
@@ -16,6 +16,7 @@ import type {
 } from './types'
 import { fetchUsageTrends } from './api'
 import { getRangeLengthInDays } from './utils'
+import { useEchartsSizeSensor } from '../../hooks/useEchartsSizeSensor'
 
 
 echarts.use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
@@ -54,6 +55,7 @@ export function UsageTrendSection({
   embedded = false,
 }: UsageTrendSectionProps) {
   const baseRange = effectiveRange ?? fallbackRange
+  const chartRef = useRef<ReactEChartsCore>(null)
 
   const resolvedMode = useMemo<{ mode: UsageTrendMode; detail: string } | null>(() => {
     if (!baseRange) {
@@ -86,7 +88,7 @@ export function UsageTrendSection({
   const agentKey = agentIds.length ? agentIds.slice().sort().join(',') : 'all'
 
   const creditFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
     [],
   )
 
@@ -247,6 +249,19 @@ export function UsageTrendSection({
     })
   }, [trendData])
 
+  useEchartsSizeSensor(chartRef, Boolean(chartOption))
+
+  useEffect(() => {
+    if (!chartOption) {
+      return
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      chartRef.current?.getEchartsInstance()?.resize()
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [chartOption, hasData])
+
   const isLoading = Boolean(trendQueryInput) && isTrendPending
   const trendErrorMessage = useMemo(() => {
     if (!isTrendError) {
@@ -285,15 +300,22 @@ export function UsageTrendSection({
           <p className={subtitleClassName}>{trendModeDetail} · Total tasks over time.</p>
         </div>
       </div>
-      <div className="h-80 w-full">
+      <div className="h-80 w-full min-w-0 overflow-hidden">
         {isLoading ? (
           <div className={loadingClassName}>Loading trends…</div>
         ) : isTrendError && trendErrorMessage ? (
           <div className={errorClassName}>{trendErrorMessage}</div>
         ) : chartOption ? (
-          <div className="flex h-full flex-col">
-            <div className="flex-1">
-              <ReactEChartsCore echarts={echarts} option={chartOption} notMerge lazyUpdate style={{height: '100%', width: '100%'}} />
+          <div className="flex h-full w-full min-w-0 flex-col">
+            <div className="min-h-0 min-w-0 flex-1">
+              <ReactEChartsCore
+                ref={chartRef}
+                echarts={echarts}
+                option={chartOption}
+                notMerge
+                lazyUpdate
+                style={{height: '100%', width: '100%', minWidth: 0}}
+              />
             </div>
             {!hasData ? (
               <div className={`mt-2 text-center text-xs ${emptyClassName}`}>{emptyMessage}</div>

@@ -18,17 +18,16 @@ import type {
   UsageAgentLeaderboardResponse,
 } from './types'
 import { fetchUsageAgentLeaderboard } from './api'
+import { handleAppAnchorClick } from '../../util/appNavigation'
 
 const API_AGENT_ID = 'api'
+const DEFAULT_VISIBLE_ROWS = 5
 
 type LeaderboardRow = {
   id: string
   name: string
   tasksTotal: number
   tasksPerDay: number
-  successCount: number
-  errorCount: number
-  successRate: number | null
   persistentId: string | null
   isApi: boolean
   isDeleted: boolean
@@ -131,19 +130,43 @@ function SortableHeader({ column, align = 'left', embedded = false, children }: 
   )
 }
 
+function LeaderboardAgentCell({
+  row,
+  rank,
+  embedded = false,
+}: {
+  row: LeaderboardRow
+  rank: number
+  embedded?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <span className={`inline-flex items-center gap-2 text-sm font-medium ${embedded ? 'text-slate-100' : 'text-slate-900'}`}>
+        <span>{row.name}</span>
+        {row.isDeleted ? (
+          <span className={embedded
+            ? 'rounded-full border border-rose-300/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-200'
+            : 'rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700'}
+          >
+            Deleted
+          </span>
+        ) : null}
+      </span>
+      <span className="text-xs text-slate-500">#{rank}</span>
+    </div>
+  )
+}
+
 export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds, embedded = false }: UsageAgentLeaderboardProps) {
   const baseRange = effectiveRange ?? fallbackRange
 
   const creditFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 3 }),
-    [],
-  )
-  const percentFormatter = useMemo(
-    () => new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1, minimumFractionDigits: 0 }),
+    () => new Intl.NumberFormat(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 }),
     [],
   )
 
   const [sorting, setSorting] = useState<SortingState>([{ id: 'tasksTotal', desc: true }])
+  const [showAllRows, setShowAllRows] = useState(false)
 
   const queryInput = useMemo<UsageAgentLeaderboardQueryInput | null>(() => {
     if (!baseRange) {
@@ -181,18 +204,12 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
       .map((agent) => {
         const tasksTotal = Number(agent.tasks_total ?? 0)
         const tasksPerDay = Number(agent.tasks_per_day ?? 0)
-        const successCount = Number(agent.success_count ?? 0)
-        const errorCount = Number(agent.error_count ?? 0)
-        const successRate = tasksTotal > 0 ? successCount / tasksTotal : null
 
         return {
           id: agent.id,
           name: agent.name || 'Unnamed agent',
           tasksTotal,
           tasksPerDay,
-          successCount,
-          errorCount,
-          successRate,
           persistentId: agent.persistent_id ?? null,
           isApi: agent.id === API_AGENT_ID,
           isDeleted: Boolean(agent.is_deleted),
@@ -206,26 +223,13 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         accessorKey: 'name',
         enableSorting: true,
         header: ({ column }) => <SortableHeader column={column} embedded={embedded}>Agent</SortableHeader>,
-        cell: ({ row, getValue }) => {
-          const label = getValue<string>()
-          const isDeleted = row.original.isDeleted
-          return (
-            <div className="flex flex-col gap-0.5">
-              <span className={`inline-flex items-center gap-2 text-sm font-medium ${embedded ? 'text-slate-100' : 'text-slate-900'}`}>
-                <span>{label}</span>
-                {isDeleted ? (
-                  <span className={embedded
-                    ? 'rounded-full border border-rose-300/25 bg-rose-950/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-200'
-                    : 'rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700'}
-                  >
-                    Deleted
-                  </span>
-                ) : null}
-              </span>
-              <span className="text-xs text-slate-500">#{row.index + 1}</span>
-            </div>
-          )
-        },
+        cell: ({ row, table }) => (
+          <LeaderboardAgentCell
+            row={row.original}
+            rank={table.getRowModel().rows.indexOf(row) + 1}
+            embedded={embedded}
+          />
+        ),
       },
       {
         id: 'tasksTotal',
@@ -258,37 +262,6 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
         sortingFn: 'basic',
       },
       {
-        id: 'successRate',
-        accessorFn: (row) => (row.successRate ?? -1),
-        enableSorting: true,
-        header: ({ column }) => (
-          <SortableHeader column={column} align="right" embedded={embedded}>
-            Success / Error
-          </SortableHeader>
-        ),
-        cell: ({ row }) => {
-          const { successCount, errorCount, successRate, tasksTotal } = row.original
-          const totalAttempts = successCount + errorCount
-          if (totalAttempts <= 0) {
-            return <span className="text-sm text-slate-500">—</span>
-          }
-
-          const ratioLabel = `${creditFormatter.format(successCount)} : ${creditFormatter.format(errorCount)}`
-          const successLabel =
-            successRate != null
-              ? `${percentFormatter.format(successRate)} success of ${creditFormatter.format(tasksTotal)} credits`
-              : undefined
-
-          return (
-            <div className="flex flex-col items-end gap-0.5 text-right">
-              <span className={`text-sm font-semibold ${embedded ? 'text-slate-100' : 'text-slate-900'}`}>{ratioLabel}</span>
-              {successLabel ? <span className={embedded ? 'text-xs text-slate-400' : 'text-xs text-slate-500'}>{successLabel}</span> : null}
-            </div>
-          )
-        },
-        sortingFn: 'basic',
-      },
-      {
         id: 'actions',
         accessorFn: () => null,
         enableSorting: false,
@@ -307,17 +280,21 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
             return <span className="text-sm text-slate-500">—</span>
           }
 
-          const configureHref = `/app/agents/${persistentId}`
+          const configureHref = `/app/agents/${persistentId}/settings`
 
           return (
-            <a href={configureHref} className={embedded ? 'text-sm font-semibold text-sky-300 hover:text-sky-200' : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}>
+            <a
+              href={configureHref}
+              onClick={(event) => handleAppAnchorClick(event, configureHref)}
+              className={embedded ? 'text-sm font-semibold text-sky-300 hover:text-sky-200' : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'}
+            >
               Configure
             </a>
           )
         },
       },
     ]
-  }, [creditFormatter, embedded, percentFormatter])
+  }, [creditFormatter, embedded])
 
   const table = useReactTable({
     data: rows,
@@ -328,6 +305,9 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
     getSortedRowModel: getSortedRowModel(),
     getRowId: (row) => row.id,
   })
+  const sortedRows = table.getRowModel().rows
+  const hasOverflowRows = sortedRows.length > DEFAULT_VISIBLE_ROWS
+  const visibleRows = showAllRows ? sortedRows : sortedRows.slice(0, DEFAULT_VISIBLE_ROWS)
 
   const sectionClassName = embedded
     ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
@@ -344,6 +324,9 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
   const errorCellClassName = embedded
     ? 'px-3 md:px-6 py-4 text-center text-sm text-rose-300'
     : 'px-3 md:px-6 py-4 text-center text-sm text-red-600'
+  const toggleClassName = embedded
+    ? 'text-sm font-semibold text-sky-300 hover:text-sky-200'
+    : 'text-sm font-semibold text-indigo-600 hover:text-indigo-500'
 
   return (
     <section className={sectionClassName}>
@@ -404,7 +387,7 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
                 </td>
               </tr>
             ) : (
-              table.getRowModel().rows.map((row) => (
+              visibleRows.map((row) => (
                 <tr key={row.id}>
                   {row.getVisibleCells().map((cell) => (
                     <td
@@ -420,6 +403,13 @@ export function UsageAgentLeaderboard({ effectiveRange, fallbackRange, agentIds,
           </tbody>
         </table>
       </div>
+      {hasOverflowRows ? (
+        <div className={embedded ? 'border-t border-slate-200/10 px-6 py-4' : 'border-t border-white/50 px-6 py-4'}>
+          <button type="button" className={toggleClassName} onClick={() => setShowAllRows((current) => !current)}>
+            {showAllRows ? 'Show less' : `Show more (${sortedRows.length - DEFAULT_VISIBLE_ROWS})`}
+          </button>
+        </div>
+      ) : null}
     </section>
   )
 }

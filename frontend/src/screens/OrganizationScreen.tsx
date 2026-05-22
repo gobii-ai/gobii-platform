@@ -17,6 +17,7 @@ import {
 import { HttpError } from '../api/http'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
 import { Modal } from '../components/common/Modal'
+import { navigateWithinApp } from '../util/appNavigation'
 
 type ConfirmAction = {
   kind: 'remove-member'
@@ -74,16 +75,6 @@ function publishOrganizationContext(data: CurrentOrganizationPayload) {
       name: data.organization.name,
     },
   }))
-}
-
-function navigateWithinApp(path: string): boolean {
-  if (typeof window === 'undefined' || !window.location.pathname.startsWith('/app')) {
-    return false
-  }
-  window.dispatchEvent(new CustomEvent('gobii:app:navigate', {
-    detail: { path },
-  }))
-  return true
 }
 
 function buildBillingPathForCurrentAppRoute(): string {
