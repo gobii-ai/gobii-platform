@@ -1419,23 +1419,26 @@
         }
       }
 
-      // Auto-focus the textarea when page loads
       document.addEventListener('DOMContentLoaded', function() {
         const textarea = document.querySelector('textarea[name="charter"]');
-        if (textarea) {
-          textarea.focus();
-          // Move cursor to the end of the text
-          const length = textarea.value.length;
-          textarea.setSelectionRange(length, length);
-          textareaAutoResize(textarea);
+        if (textarea && textarea.value.trim().length > 0) {
+          const resizeInitialTextarea = function () {
+            textareaAutoResize(textarea);
+          };
+          if (window.requestAnimationFrame) {
+            window.requestAnimationFrame(resizeInitialTextarea);
+          } else {
+            window.setTimeout(resizeInitialTextarea, 0);
+          }
         }
       });
 
       function textareaAutoResize(el) {
         const maxHeight = parseInt(el.dataset.maxHeight || 400);
         el.style.height = 'auto';
-        if (el.scrollHeight <= maxHeight) {
-          el.style.height = el.scrollHeight + 'px';
+        const scrollHeight = el.scrollHeight;
+        if (scrollHeight <= maxHeight) {
+          el.style.height = scrollHeight + 'px';
           el.style.overflowY = 'hidden';
         } else {
           el.style.height = maxHeight + 'px';
