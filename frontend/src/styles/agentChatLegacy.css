@@ -7422,19 +7422,21 @@
 }
 
 .chat-sidebar--collapsed .chat-sidebar-agent-leading {
-  gap: 0.28rem;
+  gap: 0;
 }
 
-.chat-sidebar--collapsed .chat-sidebar-agent-unread-slot {
-  width: 0.54rem;
-  flex-basis: 0.54rem;
-}
-
-.chat-sidebar--collapsed .chat-sidebar-agent-unread-dot {
+.chat-sidebar-agent-unread-badge {
+  position: absolute;
+  top: -0.1rem;
+  right: -0.1rem;
+  z-index: 1;
   display: block;
-  width: 0.52rem;
-  height: 0.52rem;
+  width: 0.62rem;
+  height: 0.62rem;
+  border-radius: 999px;
   border: 2px solid var(--sidebar-bg, #1e1145);
+  background: #2df6f5;
+  box-shadow: 0 0 0 1px rgba(45, 246, 245, 0.35);
 }
 
 .chat-sidebar-agent-avatar {
