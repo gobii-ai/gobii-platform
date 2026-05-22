@@ -6,8 +6,6 @@ import type {
   UsageBurnRateResponse,
   UsageTrendQueryInput,
   UsageTrendResponse,
-  UsageToolBreakdownQueryInput,
-  UsageToolBreakdownResponse,
   UsageAgentLeaderboardQueryInput,
   UsageAgentLeaderboardResponse,
 } from './types'
@@ -81,33 +79,6 @@ export const fetchUsageTrends = async (params: UsageTrendQueryInput, signal: Abo
 
 export const fetchUsageAgents = async (signal: AbortSignal): Promise<UsageAgentsResponse> => {
   return jsonFetch<UsageAgentsResponse>('/console/api/usage/agents/', {
-    method: 'GET',
-    signal,
-  })
-}
-
-export const fetchUsageToolBreakdown = async (
-  params: UsageToolBreakdownQueryInput,
-  signal: AbortSignal,
-): Promise<UsageToolBreakdownResponse> => {
-  const search = new URLSearchParams()
-
-  if (params.from) {
-    search.set('from', params.from)
-  }
-
-  if (params.to) {
-    search.set('to', params.to)
-  }
-
-  if (params.agents?.length) {
-    params.agents.forEach((agentId) => {
-      search.append('agent', agentId)
-    })
-  }
-
-  const suffix = search.toString()
-  return jsonFetch<UsageToolBreakdownResponse>(`/console/api/usage/tools/${suffix ? `?${suffix}` : ''}`, {
     method: 'GET',
     signal,
   })

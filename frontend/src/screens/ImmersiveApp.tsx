@@ -18,6 +18,7 @@ import { ImmersiveSecretsPage } from './secrets/ImmersiveSecretsPage'
 import { ImmersiveUsagePage } from './usage/ImmersiveUsagePage'
 import { type PlanTier, useSubscriptionStore } from '../stores/subscriptionStore'
 import { track } from '../util/analytics'
+import { APP_NAVIGATE_EVENT } from '../util/appNavigation'
 import { appendReturnTo } from '../util/returnTo'
 import '../styles/immersiveApp.css'
 
@@ -25,7 +26,6 @@ const APP_BASE = '/app'
 const RETURN_TO_STORAGE_KEY = 'gobii:immersive:return_to'
 const DEFAULT_CLOSE_PATH = '/app/agents'
 const UPGRADE_MODAL_QUERY_PARAM = 'upgrade'
-const APP_NAVIGATE_EVENT = 'gobii:app:navigate'
 
 type AppRoute =
   | { kind: 'command-center' }
