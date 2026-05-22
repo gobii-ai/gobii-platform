@@ -2010,6 +2010,25 @@ class SolutionCtaCopyTests(TestCase):
                     ],
                 )
 
+    def test_dedicated_solution_pages_use_keyword_explicit_h1(self):
+        expected_headings = {
+            "recruiting": "AI recruiting agents for candidate sourcing",
+            "sales": "AI sales agents for outbound lead generation",
+            "health-care": "Healthcare AI agents for intake and admin automation",
+            "defense": "Open source AI agents for defense",
+            "engineering": "AI agent API for browser automation",
+        }
+
+        for slug, expected_heading in expected_headings.items():
+            with self.subTest(slug=slug):
+                response = self.client.get(reverse("pages:solution", kwargs={"slug": slug}))
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                headings = soup.find_all("h1")
+                self.assertEqual(len(headings), 1)
+                self.assertEqual(headings[0].get_text(" ", strip=True), expected_heading)
+
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
         unauth_recruiting = self.client.get("/solutions/recruiting/")
