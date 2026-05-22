@@ -428,8 +428,8 @@ class ContinuationModePromptContextTests(TestCase):
         system_prompt = self._render_system_prompt(is_first_run=False)
 
         self.assertIn("## Continuation Mode", system_prompt)
-        self.assertIn("You are continuing an existing work thread, not starting a new task.", system_prompt)
-        self.assertIn("Prefer one direct next tool call over broad reassessment.", system_prompt)
+        self.assertIn("Continue the existing work thread", system_prompt)
+        self.assertIn("prefer one direct next tool call", system_prompt)
 
     def test_prompt_omits_continuation_mode_on_first_run(self):
         system_prompt = self._render_system_prompt(is_first_run=True)

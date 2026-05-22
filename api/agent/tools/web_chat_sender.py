@@ -180,6 +180,24 @@ def _looks_like_routine_progress_message(body: str) -> bool:
     return progress_signal
 
 
+def _looks_like_stop_marked_progress_message(body: str) -> bool:
+    text = " ".join((body or "").split())
+    if not text:
+        return False
+    lower = text.lower()
+    if (
+        _TOOL_FRUSTRATION_PROGRESS_RE.search(text)
+        or _RECOVERY_THEN_PROGRESS_RE.search(text)
+        or _RETURNED_DATA_THEN_PROGRESS_RE.search(text)
+    ):
+        return True
+    result_status = bool(_RESULTS_STATUS_PROGRESS_RE.search(text))
+    return result_status and (
+        _FORWARD_PROGRESS_ACTION_RE.search(text)
+        or ("http://" not in lower and "https://" not in lower and len(text) <= 500)
+    )
+
+
 def has_other_contact_channel(agent: PersistentAgent, recipient_user) -> bool:
     if has_verified_email(recipient_user):
         if PersistentAgentCommsEndpoint.objects.filter(
@@ -271,7 +289,9 @@ def execute_send_chat_message(agent: PersistentAgent, params: Dict[str, Any]) ->
         body = _strip_trailing_optional_followup(body)
         if not body:
             return {"status": "error", "message": "Message body is required after removing optional follow-up."}
-    if _looks_like_routine_progress_message(body):
+    if _looks_like_routine_progress_message(body) and (
+        will_continue or _looks_like_stop_marked_progress_message(body)
+    ):
         return {
             "status": "ok",
             "message": "Skipped routine progress-only chat message.",

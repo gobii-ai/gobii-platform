@@ -3074,7 +3074,7 @@ def _finalize_tool_batch(
         elif (
             effective_explicit_continue is not True
             and not allow_auto_sleep
-            and not delivered_terminal_message
+            and not terminal_message_delivery_ok
             and not human_input_request_ok
         ):
             followup_required = True

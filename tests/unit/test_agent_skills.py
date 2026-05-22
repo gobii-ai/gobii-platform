@@ -413,11 +413,11 @@ class AgentSkillsPersistenceTests(TestCase):
 
         self.assertIn("System Skill: Runtime Planning", block)
         self.assertIn("Tools: update_plan", block)
-        self.assertIn("Use `update_plan` to track substantial multi-step work", block)
-        self.assertIn("usually 3-6 active steps", block)
-        self.assertIn("reset it by replacing those stale steps", block)
-        self.assertIn("do not create one plan step per day, hour, or recurrence slot", block)
-        self.assertIn("Represent only the current run with compact reusable phases", block)
+        self.assertIn("Use `update_plan` for substantial multi-step work", block)
+        self.assertIn("usually 3-6 steps", block)
+        self.assertIn("drop stale prior-task or prior-run steps", block)
+        self.assertIn("do not create one step per day, hour, or recurrence slot", block)
+        self.assertIn("represent the current run with compact reusable phases", block)
         self.assertIn("Current plan: none", block)
 
     def test_prompt_block_limit_zero_omits_system_skills(self):
