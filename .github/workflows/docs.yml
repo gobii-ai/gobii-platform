@@ -22,7 +22,6 @@ permissions:
 
 env:
   DOCS_SITE_URL: https://docs.gobii.ai
-  DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
   DOCS_IMAGE: ghcr.io/gobii-ai/gobii-docs
 
 jobs:
@@ -44,9 +43,32 @@ jobs:
         working-directory: docs
         run: npm ci
 
+      - name: Verify analytics secret
+        if: github.event_name != 'pull_request'
+        env:
+          DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DOCS_GTAG_TRACKING_ID:-}" ]; then
+            echo "DOCS_GTAG_TRACKING_ID must be configured on gobii-ai/gobii-platform for production docs builds." >&2
+            exit 1
+          fi
+
       - name: Build static docs
         working-directory: docs
+        env:
+          DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
         run: npm run build
+
+      - name: Verify analytics tag when configured
+        working-directory: docs
+        env:
+          DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${DOCS_GTAG_TRACKING_ID:-}" ]; then
+            grep -q 'googletagmanager.com/gtag/js?id=' build/index.html
+          fi
 
       - name: Verify required routes
         working-directory: docs
@@ -74,6 +96,8 @@ jobs:
 
       - name: Verify nginx routing
         working-directory: docs
+        env:
+          DOCS_GTAG_TRACKING_ID: ${{ secrets.DOCS_GTAG_TRACKING_ID }}
         run: |
           set -euo pipefail
           image="gobii-docs-ci:${GITHUB_SHA}"
@@ -105,6 +129,9 @@ jobs:
 
           test "$(code_for /)" = "200"
           test "$(code_for /healthz)" = "200"
+          if [ -n "${DOCS_GTAG_TRACKING_ID:-}" ]; then
+            curl -fsS http://127.0.0.1:8080/ | grep -q 'googletagmanager.com/gtag/js?id='
+          fi
           test "$(code_for /api-reference/gobii-api)" = "200"
           test "$(code_for /api-reference/list-persistent-agents)" = "200"
           test "$(redirect_for /index.html)" = "301 http://127.0.0.1:8080/"
@@ -195,7 +222,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             DOCS_SITE_URL=${{ env.DOCS_SITE_URL }}
-            DOCS_GTAG_TRACKING_ID=${{ env.DOCS_GTAG_TRACKING_ID }}
+            DOCS_GTAG_TRACKING_ID=${{ secrets.DOCS_GTAG_TRACKING_ID }}
           cache-from: type=gha,scope=gobii-docs
           cache-to: type=gha,mode=max,scope=gobii-docs
           platforms: linux/amd64
