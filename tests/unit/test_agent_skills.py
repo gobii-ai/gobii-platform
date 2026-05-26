@@ -15,6 +15,12 @@ from api.agent.tools.sqlite_skills import (
     refresh_skills_for_tool,
     seed_sqlite_skills,
 )
+from api.agent.system_skills.service import (
+    default_enabled_system_skill_keys,
+    enable_and_refresh_system_skills_for_tool,
+    enable_system_skills,
+)
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.sqlite_state import reset_sqlite_db_path, set_sqlite_db_path
 from api.agent.tools.tool_manager import (
     ToolCatalogEntry,
@@ -26,6 +32,7 @@ from api.models import (
     GlobalAgentSkill,
     GlobalSecret,
     PersistentAgent,
+    PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentSkill,
@@ -419,6 +426,114 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("do not create one step per day, hour, or recurrence slot", block)
         self.assertIn("represent the current run with compact reusable phases", block)
         self.assertIn("Current plan: none", block)
+
+    def test_custom_tool_development_system_skill_is_not_default_enabled(self):
+        self.assertNotIn(CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY, default_enabled_system_skill_keys())
+
+        format_recent_skills_for_prompt(self.agent, limit=3)
+
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+            ).exists()
+        )
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_enable_system_skill_accepts_available_static_create_custom_tool(self, _mock_sandbox):
+        result = enable_system_skills(self.agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["enabled"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        self.assertEqual(result["invalid"], [])
+        self.assertTrue(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+                is_enabled=True,
+            ).exists()
+        )
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name=CREATE_CUSTOM_TOOL_NAME,
+            ).exists()
+        )
+
+    def test_enable_and_refresh_system_skills_for_tool_creates_custom_tool_skill_state(self):
+        refreshed = enable_and_refresh_system_skills_for_tool(self.agent, CREATE_CUSTOM_TOOL_NAME)
+
+        self.assertEqual(refreshed, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        state = PersistentAgentSystemSkillState.objects.get(
+            agent=self.agent,
+            skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+        )
+        self.assertTrue(state.is_enabled)
+        self.assertIsNotNone(state.last_used_at)
+        self.assertEqual(state.usage_count, 1)
+
+        refreshed_again = enable_and_refresh_system_skills_for_tool(self.agent, CREATE_CUSTOM_TOOL_NAME)
+        state.refresh_from_db()
+
+        self.assertEqual(refreshed_again, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        self.assertEqual(state.usage_count, 2)
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_enable_system_skill_rejects_unavailable_static_create_custom_tool(self, _mock_sandbox):
+        result = enable_system_skills(self.agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["enabled"], [])
+        self.assertEqual(result["invalid"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        self.assertFalse(
+            PersistentAgentSystemSkillState.objects.filter(
+                agent=self.agent,
+                skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+            ).exists()
+        )
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_prompt_block_renders_custom_tool_skill_with_dynamic_state(
+        self,
+        _mock_custom_sandbox,
+        _mock_static_sandbox,
+    ):
+        PersistentAgentCustomTool.objects.create(
+            agent=self.agent,
+            name="Alpha",
+            tool_name="custom_alpha",
+            description="Alpha sync tool",
+            source_path="/tools/alpha.py",
+            parameters_schema={"type": "object", "properties": {}},
+        )
+        PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name="custom_alpha")
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+            last_used_at=timezone.now(),
+        )
+
+        block = format_recent_skills_for_prompt(self.agent, limit=2)
+
+        self.assertIn("System Skill: Custom Tool Development", block)
+        self.assertIn(f"Tools: {CREATE_CUSTOM_TOOL_NAME}", block)
+        self.assertIn("Use `create_custom_tool` to create or update sandboxed Python tools", block)
+        self.assertIn("Current custom-tool state:", block)
+        self.assertIn("Custom tools: 1 saved, 1 enabled.", block)
+        self.assertIn("custom_alpha", block)
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_prompt_block_omits_custom_tool_skill_when_static_tool_unavailable(self, _mock_sandbox):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+            is_enabled=True,
+            last_used_at=timezone.now(),
+        )
+
+        block = format_recent_skills_for_prompt(self.agent, limit=3)
+
+        self.assertNotIn("System Skill: Custom Tool Development", block)
 
     def test_prompt_block_limit_zero_omits_system_skills(self):
         block = format_recent_skills_for_prompt(self.agent, limit=0)

@@ -1,5 +1,6 @@
 """Default code-defined system skill definitions."""
 
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
@@ -78,6 +79,102 @@ IMAGE_GENERATION_SYSTEM_SKILL = SystemSkillDefinition(
         "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the prompt instead of adding source images.\n"
         "Source images must be filespace paths such as `$[/Inbox/photo.png]` or `/exports/logo.png`.\n"
         "The tool returns `file`, `inline`, `inline_html`, and `attach` placeholders. Reuse those exact placeholders in user messages and documents; do not invent image URLs or file paths."
+    ),
+)
+
+
+CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+    name="Custom Tool Development",
+    search_summary="Create, patch, and run sandboxed Python custom tools for batch, API, and SQLite workflows.",
+    tool_names=(CREATE_CUSTOM_TOOL_NAME,),
+    enables=(
+        "create or update agent-authored Python tools",
+        "batch repeated MCP, API, scraping, validation, and transform work",
+        "write durable results directly to the shared agent SQLite database",
+        "compose enabled tools from Python with ctx.call_tool",
+        "build resumable chunked workflows for slow network or sync jobs",
+    ),
+    use_when=(
+        "the user asks to create a custom tool",
+        "work involves repeated tool calls, pagination, fan-out, retries, or backoff",
+        "work involves bulk SQLite writes, dedupe, validation, import, export, or sync jobs",
+        "intermediate data would otherwise be processed manually in model context",
+        "a small deterministic Python tool would make the work faster or more reliable",
+    ),
+    query_aliases=(
+        "custom tool",
+        "create custom tool",
+        "sandbox tool",
+        "python tool",
+        "tool development",
+        "batch tool",
+        "bulk tool",
+        "sqlite sync",
+        "mcp fanout",
+        "api fanout",
+    ),
+    prompt_instructions=(
+        "Use `create_custom_tool` to create or update sandboxed Python tools when the work is repetitive, "
+        "deterministic, structured-data oriented, or would otherwise require several similar tool calls. "
+        "A short one-off tool is usually better than manually shuttling rows, JSON, or API responses through context.\n"
+        "Strong triggers: repeated MCP/API calls, pagination/cursors, scraping fan-out, sync/import jobs, "
+        "bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, validation/dedupe, retries/backoff, "
+        "checkpoint/resume flows, exports, and reports derived from shared SQLite data.\n"
+        "Development loop: call `create_custom_tool(source_path='/tools/my_tool.py', source_code=...)` first. "
+        "If the source is malformed or rejected, remember: if malformed/rejected retry create_custom_tool, not create_file. "
+        "Do not pass only `source_path` unless that file already exists. After creation, invoke `custom_*`, inspect "
+        "the result or error, patch the same file with `file_str_replace`, then re-run. Prefer patching the same "
+        "tool over creating near-duplicates. Start with a small sample or limit, verify, then widen scope.\n"
+        "Source format: scripts run via `uv run`. Add PEP 723 metadata for third-party deps, for example "
+        "`# /// script\\n# dependencies = [\"requests[socks]\"]\\n# ///`. Never list stdlib deps. "
+        "Use `from _gobii_ctx import main`, define `def run(params, ctx): ...`, and end with the exact final line "
+        "`if __name__ == '__main__': main(run)`.\n"
+        "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, table names, URLs, "
+        "limits, cursors, or destinations. Never invoke a custom tool with empty params just because defaults exist; "
+        "pass concrete runtime values unless the tool intentionally reads verified config/state and returns the "
+        "resolved targets it used.\n"
+        "For slow network, API, MCP, Google Sheets, backfill, and sync tools, make the tool chunkable by default: "
+        "accept `limit` or `batch_size` plus status/id/date filters, persist progress in SQLite, return remaining "
+        "counts or cursors, and re-run bounded batches. Avoid all-or-nothing full-table batches that can time out; "
+        "if a batch times out, patch it for smaller resumable batches instead of falling back to manual single-action loops.\n"
+        "Write durable data directly to the shared agent SQLite DB. Prefer `with ctx.sqlite() as db:`; keep every "
+        "read, write, and summary query using that connection inside the block because after the block exits the DB "
+        "is closed. Use the cursor returned by `db.execute(...)`/`executemany(...)` or `SELECT changes()` for row "
+        "counts; `sqlite3.Connection` does not have `rowcount`. Set `db.row_factory = sqlite3.Row` before any "
+        "`db.execute(...).fetchall()`/SELECT if you need `dict(row)`; later changes do not convert tuples, and "
+        "`sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Treat `ctx.sqlite_db_path` as an "
+        "advanced escape hatch. Do not ATTACH sandbox file paths in `sqlite_batch`.\n"
+        "Use `ctx.call_tool(name, params)` to call enabled agent tools, MCP tools, builtins, or other `custom_*` "
+        "tools from inside Python. For tool-to-tool calls, do not manage proxy or bridge transport yourself; "
+        "`ctx.call_tool()` handles the internal bridge.\n"
+        "Path rules: `/tools/my_tool.py` and `/exports/report.txt` are filespace paths for Gobii tool arguments. "
+        "Inside custom-tool Python, write real files under `/workspace/...`, for example "
+        "`Path('/workspace/exports/report.txt')`; do not use `open('/exports/report.txt', ...)` in custom-tool code. "
+        "After writing `/workspace/exports/report.txt`, return or reference the user-facing path `$[/exports/report.txt]`.\n"
+        "Secrets are available as env vars via `os.environ`. Never hardcode credentials. If a needed env var is "
+        "missing, request it with `secure_credentials_request` using `secret_type='env_var'`, not a domain-scoped "
+        "credential. Use the exact env var names shown in the secrets/env_var configuration.\n"
+        "All non-proxy network traffic is blocked. The proxy is SOCKS5. For outbound requests, use SOCKS-capable "
+        "libraries such as `requests[socks]` or `httpx[socks]`, declare those deps in PEP 723 metadata, and read "
+        "`ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from `os.environ`. Prefer `ALL_PROXY` as the "
+        "canonical proxy path and do not rely on direct HTTPS tunneling. Prefer `ctx.requests_proxies()` for "
+        "requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. `curl` honors "
+        "proxy env vars automatically.\n"
+        "Return values must be helpful to the downstream agent, especially after writes or syncs. Every success or "
+        "error return dict should include `next_action`. Keep returns concise: status, summary, what changed or "
+        "which outputs are ready, counts, side effects, target resource ids/names, source filters/date ranges, "
+        "skipped/duplicate counts, remaining work or cursor, and verification guidance are usually enough. Name "
+        "ready outputs specifically, such as `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or "
+        "`records_to_sync`. Validator/classifier tools should return accepted ready-to-use values, rejected inputs "
+        "with reasons, the rule used, and whether more inputs are needed. For completed writes, include "
+        "`do_not_repeat_manually=true` and source-code next_action text exactly like "
+        "'Do not repeat manually; verify read-only; do not append/add/update again.'\n"
+        "Useful patterns: fetch or call tools -> normalize -> write SQLite tables -> return a summary; read existing "
+        "SQLite data -> transform/enrich/aggregate -> write a derived table or export; fan out MCP/API calls inside "
+        "Python -> normalize results -> `executemany` inside one transaction; checkpoint progress in SQLite so a "
+        "failed or timed-out run can resume safely. Once stable, save the workflow as a skill referencing the "
+        "canonical `custom_*` tool id."
     ),
 )
 
@@ -440,6 +537,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     IMAGE_GENERATION_SYSTEM_SKILL.skill_key: IMAGE_GENERATION_SYSTEM_SKILL,
+    CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

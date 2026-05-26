@@ -25,9 +25,11 @@ from api.models import (
 from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.system_skills.service import (
     ensure_default_system_skills_enabled,
+    get_available_system_skill_tool_names,
     get_enabled_system_skill_states,
     refresh_system_skills_for_tool,
 )
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.services.skill_analytics import (
     SKILL_ORIGIN_FORKED_FROM_GLOBAL,
     infer_agent_skill_origin,
@@ -530,10 +532,22 @@ def _format_current_plan_state(agent) -> str:
     return "\n".join(lines)
 
 
+def _format_custom_tool_development_state(agent) -> str:
+    from .custom_tools import format_custom_tools_state_for_prompt
+
+    summary = format_custom_tools_state_for_prompt(agent, recent_limit=3)
+    if not summary:
+        return ""
+    return "Current custom-tool state:\n" + summary
+
+
 def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillState) -> str | None:
     definition = get_system_skill_definition(state.skill_key)
     if definition is None or not definition.prompt_instructions:
         return None
+    if definition.skill_key == CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY:
+        if CREATE_CUSTOM_TOOL_NAME not in get_available_system_skill_tool_names(agent):
+            return None
 
     tool_text = ", ".join(definition.tool_names) if definition.tool_names else "(none)"
     lines = [
@@ -545,6 +559,10 @@ def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillStat
     ]
     if definition.skill_key == "runtime_planning":
         lines.extend(["", _format_current_plan_state(agent)])
+    elif definition.skill_key == CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY:
+        state_text = _format_custom_tool_development_state(agent)
+        if state_text:
+            lines.extend(["", state_text])
     return "\n".join(lines)
 
 

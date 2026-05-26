@@ -59,6 +59,7 @@ from api.agent.tools.tool_manager import (
     mark_tool_enabled_without_discovery,
 )
 from api.agent.tools.static_tools import get_static_tool_names
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.agent.tools.search_tools import (
     execute_search_tools,
@@ -2368,6 +2369,87 @@ class MCPToolFunctionsTests(TestCase):
             PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="meta_ads").exists()
         )
         mock_fallback_builtin_selection.assert_not_called()
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_search_tools_enables_custom_tool_development_static_system_skill(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        _mock_sandbox,
+    ):
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the custom tool development skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_system_skills",
+                    "arguments": json.dumps({"skill_keys": [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "create a custom tool for bulk api fanout")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available system skills:", user_message)
+        self.assertIn(f"- {CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY}:", user_message)
+        self.assertEqual(result["system_skills"]["enabled"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        self.assertEqual(result["system_skills"]["invalid"], [])
+        self.assertFalse(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name=CREATE_CUSTOM_TOOL_NAME,
+            ).exists()
+        )
+
+    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_search_tools_omits_custom_tool_development_when_static_tool_unavailable(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        _mock_sandbox,
+    ):
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "create a custom tool for bulk api fanout")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn(CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY, user_message)
 
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')

@@ -7,9 +7,10 @@ from django.db.models import Q
 from api.models import AgentPeerLink, PersistentAgent
 from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.tool_blacklist import get_agent_tool_blacklist
+from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
-    "create_custom_tool",
+    CREATE_CUSTOM_TOOL_NAME,
     "file_str_replace",
     "request_contact_permission",
     "spawn_agent",

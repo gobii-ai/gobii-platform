@@ -30,7 +30,7 @@ from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..system_skills import shortlist_system_skills
-from ..system_skills.service import enable_system_skills
+from ..system_skills.service import enable_system_skills, get_available_system_skill_tool_names
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
@@ -1384,9 +1384,6 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_builtin_tool_entries(agent).values()
     ]
-    hidden_builtin_names = set(
-        get_available_builtin_tool_entries(agent, include_hidden=True).keys()
-    )
     custom_catalog: List[Dict[str, Any]] = [
         {
             "full_name": entry.full_name,
@@ -1407,7 +1404,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     )
     system_skill_catalog = shortlist_system_skills(
         query,
-        available_tool_names=hidden_builtin_names,
+        available_tool_names=get_available_system_skill_tool_names(agent),
     )
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
