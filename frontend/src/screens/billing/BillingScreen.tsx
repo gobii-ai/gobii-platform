@@ -255,8 +255,9 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     track(AnalyticsEvent.CTA_FREE_UPGRADE_PLAN, {
       source: 'billing',
     })
-    const opened = window.open('/pricing/', '_top')
-    if (!opened) {
+    try {
+      window.top?.location.assign('/pricing/')
+    } catch {
       window.location.assign('/pricing/')
     }
   }, [])
