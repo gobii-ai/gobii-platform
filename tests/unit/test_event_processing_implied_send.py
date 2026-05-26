@@ -883,7 +883,7 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, True)
 
-    def test_terminal_chat_marked_continue_is_treated_as_stop(self):
+    def test_terminal_chat_marked_continue_preserves_explicit_continue(self):
         final_chat = ep._ToolExecutionOutcome(
             prepared=ep._PreparedToolExecution(
                 idx=1,
@@ -925,10 +925,10 @@ class ImpliedSendTests(TestCase):
         )
 
         self.assertTrue(finalized.message_delivery_ok)
-        self.assertTrue(finalized.terminal_message_delivery_ok)
-        self.assertFalse(finalized.progress_message_delivery_ok)
+        self.assertFalse(finalized.terminal_message_delivery_ok)
+        self.assertTrue(finalized.progress_message_delivery_ok)
         self.assertFalse(finalized.followup_required)
-        self.assertIs(finalized.last_explicit_continue, False)
+        self.assertIs(finalized.last_explicit_continue, True)
 
     def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
         self._add_inbound_web_message("What's the latest Bitcoin price right now?")
@@ -965,7 +965,7 @@ class ImpliedSendTests(TestCase):
                                         "Bitcoin is trading at $68,500.\n\n"
                                         "Sources:\n- https://example.test/price"
                                     ),
-                                    "will_continue_work": True,
+                                    "will_continue_work": False,
                                 }
                             ),
                         },
