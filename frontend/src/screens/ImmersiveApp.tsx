@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Plus, Zap } from 'lucide-react'
 import type { ConsoleContext } from '../api/context'
 import { jsonFetch } from '../api/http'
@@ -62,7 +62,56 @@ type ImmersiveAppProps = {
 }
 
 type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
+type AgentShellLayout = 'main' | 'sidebar-shell'
+type AgentShellPageRenderContext = {
+  layout: AgentShellLayout
+  refreshKey: number
+  pipedreamAppsSettingsUrl?: string | null
+  pipedreamAppSearchUrl?: string | null
+}
+type AgentShellPageConfig = {
+  path: string
+  render: (context: AgentShellPageRenderContext) => ReactNode
+}
+
 const AGENT_SHELL_PRESERVED_QUERY_KEYS = ['embed', 'return_to'] as const
+const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
+  billing: {
+    path: '/app/billing',
+    render: ({ layout, refreshKey }) => <ImmersiveBillingPage layout={layout} refreshKey={refreshKey} />,
+  },
+  profile: {
+    path: '/app/profile',
+    render: ({ layout, refreshKey }) => <ImmersiveProfilePage layout={layout} refreshKey={refreshKey} />,
+  },
+  organization: {
+    path: '/app/organization',
+    render: ({ layout, refreshKey }) => <ImmersiveOrganizationPage layout={layout} refreshKey={refreshKey} />,
+  },
+  secrets: {
+    path: '/app/secrets',
+    render: ({ layout, refreshKey }) => <ImmersiveSecretsPage layout={layout} refreshKey={refreshKey} />,
+  },
+  usage: {
+    path: '/app/usage',
+    render: ({ layout, refreshKey }) => <ImmersiveUsagePage layout={layout} refreshKey={refreshKey} />,
+  },
+  integrations: {
+    path: '/app/integrations',
+    render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl }) => (
+      <ImmersiveMcpServersPage
+        layout={layout}
+        refreshKey={refreshKey}
+        pipedreamAppsUrl={pipedreamAppsSettingsUrl}
+        pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+      />
+    ),
+  },
+  'api-keys': {
+    path: '/app/api-keys',
+    render: ({ layout, refreshKey }) => <ImmersiveApiKeysPage layout={layout} refreshKey={refreshKey} />,
+  },
+}
 
 function readLocation(): LocationSnapshot {
   return {
@@ -290,7 +339,15 @@ function cleanQueryForTracking(search: string): string {
 
 function parseAgentShellPage(search: string): AgentShellPage | 'agents' {
   const page = new URLSearchParams(search).get('shell')
-  return page === 'billing' || page === 'profile' || page === 'organization' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys' ? page : 'agents'
+  return isAgentShellPage(page) ? page : 'agents'
+}
+
+function isAgentShellPage(value: unknown): value is AgentShellPage {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(AGENT_SHELL_PAGE_CONFIG, value)
+}
+
+function isAgentShellRoute(route: AppRoute): route is Extract<AppRoute, { kind: AgentShellPage }> {
+  return isAgentShellPage(route.kind)
 }
 
 function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentSearch = ''): string {
@@ -303,7 +360,7 @@ function buildAgentShellPath(agentId: string, page: SelectionShellPage, currentS
       nextParams.set(key, value)
     }
   }
-  if (page === 'billing' || page === 'profile' || page === 'organization' || page === 'secrets' || page === 'usage' || page === 'integrations' || page === 'api-keys') {
+  if (isAgentShellPage(page)) {
     nextParams.set('shell', page)
   }
   const query = nextParams.toString()
@@ -541,6 +598,43 @@ function isAppNavigationEvent(event: Event): event is CustomEvent<{ path: string
   return event instanceof CustomEvent && typeof event.detail?.path === 'string'
 }
 
+function getSelectionPageForRoute(
+  route: AppRoute,
+  activeAgentShellPage: AgentShellPage | 'agents',
+): SelectionShellPage {
+  if (route.kind === 'agent-chat') {
+    return activeAgentShellPage
+  }
+  if (isAgentShellRoute(route)) {
+    return route.kind
+  }
+  return 'agents'
+}
+
+function getSelectionPanels({
+  route,
+  selectionPage,
+  renderContext,
+}: {
+  route: AppRoute
+  selectionPage: SelectionShellPage
+  renderContext: Omit<AgentShellPageRenderContext, 'layout'>
+}): {
+  selectionShellPanel: ReactNode
+  selectionMainPanel: ReactNode
+} {
+  if (!isAgentShellPage(selectionPage)) {
+    return { selectionShellPanel: null, selectionMainPanel: null }
+  }
+  const config = AGENT_SHELL_PAGE_CONFIG[selectionPage]
+  return {
+    selectionShellPanel: config.render({ ...renderContext, layout: 'sidebar-shell' }),
+    selectionMainPanel: isAgentShellRoute(route)
+      ? config.render({ ...renderContext, layout: 'main' })
+      : null,
+  }
+}
+
 export function ImmersiveApp({
   maxChatUploadSizeBytes = null,
   pipedreamAppsSettingsUrl = null,
@@ -715,35 +809,19 @@ export function ImmersiveApp({
       navigateTo(buildAgentSelectionPath(location.search))
       return
     }
-    if (route.kind === 'billing') {
-      navigateTo('/app/billing')
-      return
-    }
-    if (route.kind === 'profile') {
-      navigateTo('/app/profile')
-      return
-    }
-    if (route.kind === 'organization') {
-      navigateTo('/app/organization')
-      return
-    }
-    if (route.kind === 'secrets') {
-      navigateTo('/app/secrets')
-      return
-    }
-    if (route.kind === 'usage') {
-      navigateTo('/app/usage')
-      return
-    }
-    if (route.kind === 'integrations') {
-      navigateTo('/app/integrations')
-      return
-    }
-    if (route.kind === 'api-keys') {
-      navigateTo('/app/api-keys')
+    if (isAgentShellRoute(route)) {
+      navigateTo(AGENT_SHELL_PAGE_CONFIG[route.kind].path)
       return
     }
     navigateTo('/app/agents')
+  }, [location.search, route])
+
+  const navigateToShellPage = useCallback((page: AgentShellPage) => {
+    if (route.kind === 'agent-chat' && route.agentId) {
+      navigateTo(buildAgentShellPath(route.agentId, page, location.search))
+      return
+    }
+    navigateTo(AGENT_SHELL_PAGE_CONFIG[page].path)
   }, [location.search, route])
 
   const handleSelectionPageChange = useCallback((page: SelectionShellPage) => {
@@ -751,92 +829,20 @@ export function ImmersiveApp({
       navigateTo(buildAgentShellPath(route.agentId, page, location.search))
       return
     }
-    if (page === 'billing') {
-      navigateTo('/app/billing')
-      return
-    }
-    if (page === 'profile') {
-      navigateTo('/app/profile')
-      return
-    }
-    if (page === 'organization') {
-      navigateTo('/app/organization')
-      return
-    }
-    if (page === 'secrets') {
-      navigateTo('/app/secrets')
-      return
-    }
-    if (page === 'usage') {
-      navigateTo('/app/usage')
-      return
-    }
-    if (page === 'integrations') {
-      navigateTo('/app/integrations')
-      return
-    }
-    if (page === 'api-keys') {
-      navigateTo('/app/api-keys')
+    if (isAgentShellPage(page)) {
+      navigateToShellPage(page)
       return
     }
     navigateTo('/app/agents')
-  }, [location.search, route])
+  }, [location.search, navigateToShellPage, route])
 
-  const handleOpenBilling = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'billing', location.search))
-      return
-    }
-    navigateTo('/app/billing')
-  }, [location.search, route])
-
-  const handleOpenProfile = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'profile', location.search))
-      return
-    }
-    navigateTo('/app/profile')
-  }, [location.search, route])
-
-  const handleOpenOrganization = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'organization', location.search))
-      return
-    }
-    navigateTo('/app/organization')
-  }, [location.search, route])
-
-  const handleOpenSecrets = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'secrets', location.search))
-      return
-    }
-    navigateTo('/app/secrets')
-  }, [location.search, route])
-
-  const handleOpenUsage = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'usage', location.search))
-      return
-    }
-    navigateTo('/app/usage')
-  }, [location.search, route])
-
-  const handleOpenIntegrations = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'integrations', location.search))
-      return
-    }
-    navigateTo('/app/integrations')
-  }, [location.search, route])
-
-  const handleOpenApiKeys = useCallback(() => {
-    if (route.kind === 'agent-chat' && route.agentId) {
-      navigateTo(buildAgentShellPath(route.agentId, 'api-keys', location.search))
-      return
-    }
-    navigateTo('/app/api-keys')
-  }, [location.search, route])
+  const handleOpenBilling = useCallback(() => navigateToShellPage('billing'), [navigateToShellPage])
+  const handleOpenProfile = useCallback(() => navigateToShellPage('profile'), [navigateToShellPage])
+  const handleOpenOrganization = useCallback(() => navigateToShellPage('organization'), [navigateToShellPage])
+  const handleOpenSecrets = useCallback(() => navigateToShellPage('secrets'), [navigateToShellPage])
+  const handleOpenUsage = useCallback(() => navigateToShellPage('usage'), [navigateToShellPage])
+  const handleOpenIntegrations = useCallback(() => navigateToShellPage('integrations'), [navigateToShellPage])
+  const handleOpenApiKeys = useCallback(() => navigateToShellPage('api-keys'), [navigateToShellPage])
 
   const handleUpgradeModalDismiss = useCallback(() => {
     if (!upgradeModalDismissible) {
@@ -870,275 +876,49 @@ export function ImmersiveApp({
     && isUpgradeModalOpen
     && isProprietaryMode
   )
+  const selectionPage = getSelectionPageForRoute(route, activeAgentShellPage)
+  const shellPanelRenderContext = useMemo(() => ({
+    refreshKey: selectionRefreshKey,
+    pipedreamAppsSettingsUrl,
+    pipedreamAppSearchUrl,
+  }), [pipedreamAppSearchUrl, pipedreamAppsSettingsUrl, selectionRefreshKey])
+  const { selectionShellPanel, selectionMainPanel } = useMemo(
+    () => getSelectionPanels({ route, selectionPage, renderContext: shellPanelRenderContext }),
+    [route, selectionPage, shellPanelRenderContext],
+  )
+  const shouldRenderAgentChatPage = route.kind === 'agent-chat' || route.kind === 'agent-select' || isAgentShellRoute(route)
+  const baseAgentChatPageProps = {
+    maxChatUploadSizeBytes,
+    viewerUserId,
+    viewerEmail,
+    pipedreamAppsSettingsUrl,
+    pipedreamAppSearchUrl,
+    onClose: embed ? handleEmbeddedClose : handleClose,
+    onCreateAgent: handleNavigateToNewAgent,
+    onAgentCreated: handleAgentCreated,
+    showContextSwitcher: true,
+    persistContextSession: false,
+    onContextSwitch: handleContextSwitch,
+    selectionPage,
+    selectionShellPanel,
+    selectionMainPanel,
+    onSelectionPageChange: handleSelectionPageChange,
+    onOpenBilling: handleOpenBilling,
+    onOpenUsage: handleOpenUsage,
+    onOpenProfile: handleOpenProfile,
+    onOpenOrganization: handleOpenOrganization,
+    onOpenSecrets: handleOpenSecrets,
+    onOpenIntegrations: handleOpenIntegrations,
+    onOpenApiKeys: handleOpenApiKeys,
+  }
 
   return (
     <div className="immersive-shell">
       <div className="immersive-shell__content">
-        {route.kind === 'agent-chat' ? (
+        {shouldRenderAgentChatPage ? (
           <AgentChatPage
-            agentId={route.agentId}
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage={activeAgentShellPage}
-            selectionShellPanel={
-              activeAgentShellPage === 'billing' ? (
-                <ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : activeAgentShellPage === 'profile' ? (
-                <ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : activeAgentShellPage === 'organization' ? (
-                <ImmersiveOrganizationPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : activeAgentShellPage === 'secrets' ? (
-                <ImmersiveSecretsPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : activeAgentShellPage === 'usage' ? (
-                <ImmersiveUsagePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : activeAgentShellPage === 'integrations' ? (
-                <ImmersiveMcpServersPage
-                  layout="sidebar-shell"
-                  refreshKey={selectionRefreshKey}
-                  pipedreamAppsUrl={pipedreamAppsSettingsUrl}
-                  pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-                />
-              ) : activeAgentShellPage === 'api-keys' ? (
-                <ImmersiveApiKeysPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />
-              ) : null
-            }
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'agent-select' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="agents"
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'billing' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="billing"
-            selectionShellPanel={<ImmersiveBillingPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveBillingPage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'profile' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="profile"
-            selectionShellPanel={<ImmersiveProfilePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveProfilePage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'organization' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="organization"
-            selectionShellPanel={<ImmersiveOrganizationPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveOrganizationPage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'secrets' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="secrets"
-            selectionShellPanel={<ImmersiveSecretsPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveSecretsPage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'usage' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="usage"
-            selectionShellPanel={<ImmersiveUsagePage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveUsagePage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'integrations' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="integrations"
-            selectionShellPanel={(
-              <ImmersiveMcpServersPage
-                layout="sidebar-shell"
-                refreshKey={selectionRefreshKey}
-                pipedreamAppsUrl={pipedreamAppsSettingsUrl}
-                pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-              />
-            )}
-            selectionMainPanel={(
-              <ImmersiveMcpServersPage
-                layout="main"
-                refreshKey={selectionRefreshKey}
-                pipedreamAppsUrl={pipedreamAppsSettingsUrl}
-                pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-              />
-            )}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
-          />
-        ) : null}
-        {route.kind === 'api-keys' ? (
-          <AgentChatPage
-            maxChatUploadSizeBytes={maxChatUploadSizeBytes}
-            viewerUserId={viewerUserId}
-            viewerEmail={viewerEmail}
-            pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
-            pipedreamAppSearchUrl={pipedreamAppSearchUrl}
-            onClose={embed ? handleEmbeddedClose : handleClose}
-            onCreateAgent={handleNavigateToNewAgent}
-            onAgentCreated={handleAgentCreated}
-            showContextSwitcher
-            persistContextSession={false}
-            onContextSwitch={handleContextSwitch}
-            selectionPage="api-keys"
-            selectionShellPanel={<ImmersiveApiKeysPage layout="sidebar-shell" refreshKey={selectionRefreshKey} />}
-            selectionMainPanel={<ImmersiveApiKeysPage layout="main" refreshKey={selectionRefreshKey} />}
-            onSelectionPageChange={handleSelectionPageChange}
-            onOpenBilling={handleOpenBilling}
-            onOpenUsage={handleOpenUsage}
-            onOpenProfile={handleOpenProfile}
-            onOpenOrganization={handleOpenOrganization}
-            onOpenSecrets={handleOpenSecrets}
-            onOpenIntegrations={handleOpenIntegrations}
-            onOpenApiKeys={handleOpenApiKeys}
+            agentId={route.kind === 'agent-chat' ? route.agentId : undefined}
+            {...baseAgentChatPageProps}
           />
         ) : null}
         {route.kind === 'organization-invite-accept' ? (

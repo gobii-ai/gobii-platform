@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import {
   BarChart3,
   Bell,
@@ -183,6 +183,14 @@ export function SidebarSettingsMenu({
   const handleNotificationToggle = useCallback(() => {
     onNotificationsEnabledChange?.(!notificationsEnabled)
   }, [notificationsEnabled, onNotificationsEnabledChange])
+  const handleTriggerPointerDownCapture = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!open) {
+      return
+    }
+    event.preventDefault()
+    event.stopPropagation()
+    handleOpenChange(false)
+  }, [handleOpenChange, open])
 
   return (
     <div
@@ -194,6 +202,7 @@ export function SidebarSettingsMenu({
         className="sidebar-settings__trigger"
         aria-label="Open settings"
         aria-expanded={open}
+        onPointerDownCapture={handleTriggerPointerDownCapture}
         onPress={() => handleOpenChange(!open)}
         data-open={open ? 'true' : 'false'}
       >
@@ -396,7 +405,7 @@ export function SidebarSettingsMenu({
               >
                 <span className="sidebar-settings__credits-title">
                   <ClipboardList className="sidebar-settings__link-icon" aria-hidden="true" />
-                  <span>Task Credits Remaining</span>
+                  <span>Usage</span>
                 </span>
                 <ChevronDown
                   className="sidebar-settings__credits-chevron"
