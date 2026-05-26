@@ -84,7 +84,6 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
-from ..tools.custom_tools import get_custom_tools_prompt_summary
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -1435,15 +1434,6 @@ def _render_prompt_context_once(
             recent_skills_block,
             weight=4,
             non_shrinkable=True,
-        )
-
-    custom_tools_block = get_custom_tools_prompt_summary(agent, recent_limit=3)
-    if custom_tools_block:
-        important_group.section_text(
-            "agent_custom_tools",
-            custom_tools_block,
-            weight=4,
-            shrinker="hmt",
         )
 
     files_snapshot = _build_sqlite_files_snapshot(agent)

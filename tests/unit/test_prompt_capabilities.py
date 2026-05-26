@@ -120,6 +120,24 @@ class AgentCapabilitiesPromptTests(TestCase):
         self.assertIn("Avoid 2FA/MFA unless the user explicitly asks for it", contents)
         self.assertIn("those flows may hit system limitations", contents)
 
+    @patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.core.prompt_context.ensure_steps_compacted")
+    @patch("api.agent.core.prompt_context.ensure_comms_compacted")
+    def test_build_prompt_context_omits_custom_tool_playbook_until_skill_enabled(
+        self,
+        _mock_comms,
+        _mock_steps,
+        _mock_sandbox,
+    ):
+        context, _, _ = build_prompt_context(self.agent)
+        contents = "\n".join(message["content"] for message in context)
+
+        self.assertIn("source_path='/tools/name.py'", contents)
+        self.assertNotIn("System Skill: Custom Tool Development", contents)
+        self.assertNotIn("Current custom-tool state:", contents)
+        self.assertNotIn("PHILOSOPHY:", contents)
+        self.assertNotIn("Default mode for repetitive or bulk work", contents)
+
     @patch("api.agent.core.prompt_context.ensure_steps_compacted")
     @patch("api.agent.core.prompt_context.ensure_comms_compacted")
     def test_build_prompt_context_discourages_internal_progress_narration(self, _mock_comms, _mock_steps):

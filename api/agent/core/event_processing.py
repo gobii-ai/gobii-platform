@@ -129,6 +129,7 @@ from ..tools.sqlite_agent_config import (
 )
 from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for_tool, seed_sqlite_skills
 from ..tools.custom_tools import execute_create_custom_tool
+from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.file_str_replace import execute_file_str_replace
 from ..tools.plan import build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
@@ -2341,7 +2342,7 @@ def _execute_tool_call_runtime(
         result = execute_search_tools(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools
-    if tool_name == "create_custom_tool":
+    if tool_name == CREATE_CUSTOM_TOOL_NAME:
         result = execute_create_custom_tool(agent, exec_params)
         updated_tools = get_agent_tools(agent)
         return result, updated_tools

@@ -5,6 +5,7 @@ from api.services.tool_blacklist import is_tool_blacklisted_for_agent, tool_blac
 
 from .charter_updater import execute_update_charter
 from .custom_tools import execute_create_custom_tool
+from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from .database_enabler import execute_enable_database
 from .email_sender import execute_send_email
 from .file_str_replace import execute_file_str_replace
@@ -82,7 +83,7 @@ def execute_runtime_tool_call(
         result = execute_search_tools(agent, exec_params)
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools
-    if tool_name == "create_custom_tool":
+    if tool_name == CREATE_CUSTOM_TOOL_NAME:
         result = execute_create_custom_tool(agent, exec_params)
         updated_tools = _refresh_agent_tools(agent)
         return result, updated_tools

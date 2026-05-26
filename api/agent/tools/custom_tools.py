@@ -25,6 +25,7 @@ from api.models import (
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
 )
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from api.agent.tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
 from api.agent.tools.runtime_execution_context import get_tool_execution_context
 from api.utils.json_schema import (
@@ -996,7 +997,7 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
     return {
         "type": "function",
         "function": {
-            "name": "create_custom_tool",
+            "name": CREATE_CUSTOM_TOOL_NAME,
             "description": (
                 "Create or update a sandboxed Python custom tool for this agent. "
                 "Small disposable tools are good for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
@@ -1170,6 +1171,10 @@ def execute_create_custom_tool(agent: PersistentAgent, params: Dict[str, Any]) -
 
         enable_result = enable_tools(agent, [tool.tool_name])
 
+    from api.agent.system_skills.service import enable_and_refresh_system_skills_for_tool
+
+    enable_and_refresh_system_skills_for_tool(agent, CREATE_CUSTOM_TOOL_NAME)
+
     action = "Created" if created else "Updated"
     message = f"{action} custom tool `{tool.tool_name}`."
     if enable_tool:
@@ -1328,7 +1333,7 @@ def format_recent_custom_tools_for_prompt(agent: PersistentAgent, limit: int = 3
     return "\n".join(lines)
 
 
-def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int = 3) -> str:
+def format_custom_tools_state_for_prompt(agent: PersistentAgent, *, recent_limit: int = 3) -> str:
     if not is_custom_tools_available_for_agent(agent):
         return ""
 
@@ -1337,143 +1342,13 @@ def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int
         agent=agent,
         tool_full_name__startswith=CUSTOM_TOOL_PREFIX,
     ).count()
-    summary = (
-        f"Custom tools: {total} saved, {enabled} enabled. "
-        "Default mode for repetitive or bulk work: write or patch a custom tool first. "
-        "Discoverable via search_tools; share the enabled-tool limit. "
-        "\nPHILOSOPHY: Never shuttle data through your context when a tool can handle it directly. "
-        "Passing intermediate results back to you for processing wastes tokens, loses fidelity, and adds latency. "
-        "Custom tools run Python at machine speed with full data precision — you decide WHAT to do, the tool DOES it. "
-        "Write a tool that fetches, transforms, and stores data in SQLite, then read back a summary. "
-        "Your job is to orchestrate, not to manually iterate over rows or transform JSON in your context. "
-        "A short one-off tool is usually better than manual repetition. "
-        "Those triggers are not exhaustive: if a small custom tool would make the work materially more efficient or reliable, err on the side of creating and using one. "
-        "Deterministic, repeatable, structured-data oriented work is an especially strong trigger for a small custom tool writing to shared SQLite even if the user never says 'custom tool' or 'SQLite'. "
-        "\nWHEN TO CREATE: Whenever work involves multiple steps, data processing, API calls, loops, or batch operations. "
-        "If you're about to chain 3+ tool calls or handle intermediate data between steps — stop and write a tool instead. "
-        "Immediate triggers: repeated MCP/API calls, pagination/cursors, sync/import jobs, bulk INSERT/UPDATE/UPSERT work, row-by-row transforms, retries/backoff, or checkpoint/resume flows. "
-        "Bias toward creating tools early — they are cheap to write, test, and iterate on. "
-        "\nDEV LOOP: create_custom_tool(source_path='/tools/my_tool.py', source_code=...) first; if malformed/rejected retry create_custom_tool, not create_file. "
-        "Then invoke custom_* -> inspect result/error -> patch the same file -> re-invoke. "
-        "Latest workspace edits sync before registration/execution; do not pass only source_path unless you already wrote that file. "
-        "Prefer patching the same file over creating near-duplicate tools. "
-        "Jump straight in — don't ask, just write the tool and run it. "
-        "Start with a small sample/limit, verify a few rows, then widen scope. "
-        "Design slow network/API/MCP and Google Sheets sync tools to be chunkable by default: accept `limit`/`batch_size` and status/id filters, "
-        "persist progress in SQLite, return remaining counts, and re-run the same patched tool in bounded batches. "
-        "Avoid all-or-nothing full-table batches that can time out. If a batch tool times out, patch it for smaller resumable batches instead of falling back to manual single-action tool loops. "
-        "When using `with ctx.sqlite() as db:`, keep every read, write, and summary query using that connection inside the block; after the block exits the DB is closed. "
-        "Expose useful runtime parameters instead of hardcoding sample data, ids, filters, or destinations. "
-        "Never invoke custom_* with empty params just because the code has defaults; pass concrete sample/default values on the first run. "
-        "For SQLite-backed transforms/syncs, include source/destination table params where appropriate plus date/status filters; for dedupe/format jobs expose input_table, output_table, and run_date or equivalents. "
-        "For URL/list validators, accept the candidate URLs/domains or input_table plus output_table and minimum/limit or destination/default params as required inputs, then pass concrete values when invoking. "
-        "Parse URL paths, fullmatch/anchor regexes, or capture exact path segments; do not accept/reject based on `url[match.end():]` remainders. "
-        "When invoking a custom tool you just created, pass the runtime values you already know; use {} only when the tool intentionally reads verified config/state and returns the resolved targets it used. "
-        "For batch/backfill/sync tools, do not stop after seed/setup/preview; invoke the bounded write/sync mode with batch_size or limit plus filters. "
-        "Return values must be helpful to the downstream agent, especially after writes or syncs. Every success or error return dict should include `next_action`, including validation-only/filtering tools. Keep them concise: status, summary, what changed or which outputs are ready, counts, side_effects_completed or target resource ids/names, source filters/date ranges, skipped/duplicate counts, remaining work/cursor when resumable, and verification guidance are usually enough. "
-        "Name ready outputs for the next tool or step, such as `direct_post_urls`, `scrape_ready_urls`, `rows_written`, or `records_to_sync`; do not rely only on generic names like `kept` when a downstream tool needs the accepted list. "
-        "For validator/classifier tools, return the accepted ready-to-use list, rejected inputs with reasons, the rule used, and whether more inputs are needed. "
-        "For completed writes, include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
-        "\nSOURCE: Scripts are run via `uv run` — any pip package is available. "
-        "Add PEP 723 metadata at the top for third-party deps: "
-        "# /// script\\n# dependencies = [\"requests[socks]\"]\\n# ///\\n"
-        "Structure: `from _gobii_ctx import main` at top, `def run(params, ctx): ...` for logic, "
-        "and the exact final line `if __name__ == '__main__': main(run)`. That's it. "
-        "\nPATHS: `/tools/my_tool.py` and `/exports/report.txt` are filespace paths for Gobii tool arguments. "
-        "Inside custom tool Python code, write real files under `/workspace/...`, for example `Path('/workspace/exports/report.txt')`. "
-        "Do not use `open('/exports/report.txt', ...)` in custom tool code; that writes outside the synced workspace. "
-        "After writing `/workspace/exports/report.txt`, return or reference the user-facing path `$[/exports/report.txt]`. "
-        "\nTEMPLATE:\\n"
-        "```\\n"
-        "# /// script\\n"
-        "# dependencies = [\"some-package\"]\\n"
-        "# ///\\n"
-        "import os, sqlite3\\n"
-        "from pathlib import Path\\n"
-        "from _gobii_ctx import main\\n\\n"
-        "def run(params, ctx):\\n"
-        "    # Use os.environ for secrets (API keys, DB creds, etc.)\\n"
-        "    # Use ctx.call_tool(name, params) to call other agent tools\\n"
-        "    # For exported files, write under /workspace and return a filespace reference:\\n"
-        "    export_path = Path('/workspace/exports/report.txt')\\n"
-        "    export_path.parent.mkdir(parents=True, exist_ok=True)\\n"
-        "    export_path.write_text('hello\\\\n')\\n"
-        "    # Write results to SQLite instead of returning large data:\\n"
-        "    with ctx.sqlite() as db:\\n"
-        "        db.execute('CREATE TABLE IF NOT EXISTS results (key TEXT PRIMARY KEY, value TEXT)')\\n"
-        "        db.executemany('INSERT OR REPLACE INTO results VALUES (?, ?)', rows)\\n"
-        "    return {\\n"
-        "        'status': 'ok',\\n"
-        "        'summary': f'Wrote {len(rows)} rows.',\\n"
-        "        'side_effects': [{'target': 'results', 'rows_written': len(rows)}],\\n"
-        "        'remaining_work': 0,\\n"
-        "        'verification': 'Read results with sqlite_batch; do not repeat the write.',\\n"
-        "        'file': '$[/exports/report.txt]',\\n"
-        "    }\\n\\n"
-        "if __name__ == '__main__': main(run)\\n"
-        "```\\n"
-        "\nSQLITE-FIRST: Write results directly to the shared agent SQLite DB instead of returning large data. "
-        "For normal DB work, use `with ctx.sqlite() as db:`; it auto-commits on success, rolls back on error, and closes the connection for you. "
-        "For SQLite row counts, use the cursor returned by `db.execute(...)` or `SELECT changes()`; `sqlite3.Connection` does not have `rowcount`. "
-        "For SQLite result rows, set `db.row_factory = sqlite3.Row` before any `db.execute(...).fetchall()`/SELECT if you plan to call `dict(row)`; setting it after fetching does not convert existing tuple rows. `sqlite3.Row` supports `row['col']`/`dict(row)`, not `row.get(...)`. Otherwise build dicts from cursor.description. "
-        "For UTC timestamps after `from datetime import datetime`, import `timezone` too and use `datetime.now(timezone.utc)`, not `datetime.timezone`. "
-        "Your custom tool shares the agent's embedded SQLite DB — INSERT/UPDATE/SELECT directly. "
-        "Fetch/normalize/store/query work is an especially strong trigger for this SQLite-backed custom-tool pattern, without waiting for the user to request it explicitly. "
-        "Treat ctx.sqlite_db_path as an internal/advanced escape hatch; most tools should not need it. "
-        "That DB may look sandbox-local during execution, but sqlite_batch already reads that same durable DB directly. "
-        "Do not ATTACH sandbox file paths in sqlite_batch. "
-        "This is far more efficient than passing intermediate results back to the agent for processing. "
-        "Pattern: tool fetches data -> normalizes it -> writes to SQLite tables -> returns a summary. "
-        "\nTOOL ORCHESTRATION: ctx.call_tool(name, params) invokes any agent tool (MCP, builtins, other custom_* tools) "
-        "and returns the result dict. Use this to build pipelines entirely inside a custom tool: "
-        "e.g., call search/scrape tools in a loop, process results, store in SQLite — all in one tool execution. "
-        "\nSECRETS: API keys, DB connection strings, auth tokens, and all sensitive values are available as "
-        "env vars via os.environ. ALWAYS use secrets for credentials — never hardcode them. "
-        "If a needed env var secret is missing, request it with secure_credentials_request using secret_type='env_var' "
-        "rather than a domain-scoped credential. "
-        "Use the exact env var names shown in the secrets/env_var configuration. "
-        "\nPROXY: All non-proxy network traffic is blocked — outbound requests WILL fail without the proxy. "
-        "The proxy is SOCKS5. For direct outbound requests in your own code, "
-        "use SOCKS5-capable libraries (requests[socks], httpx[socks]) and read `ALL_PROXY`, `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` from os.environ. "
-        "If your tool imports `requests` or `httpx` for outbound network access, declare the SOCKS-capable package in PEP 723 metadata by default "
-        "(`requests[socks]` or `httpx[socks]`), not bare `requests`/`httpx`. "
-        "Prefer `ALL_PROXY` as the canonical proxy path: map both `http` and `https` to `ALL_PROXY`, and do not rely on "
-        "`HTTP_PROXY`/`HTTPS_PROXY` for direct HTTPS tunneling. "
-        "In custom tools, prefer `ctx.requests_proxies()` for requests-compatible config or `ctx.proxy_url()` when a library accepts a single proxy URL. "
-        "subprocess curl honors these proxy env vars automatically. "
-        "For tool-to-tool calls, always use ctx.call_tool() — it handles the internal bridge transport for you, so do not manage proxy logic yourself. "
-        "\nANTI-PATTERNS: do not spend a turn manually making dozens of near-identical MCP/API calls, manually pasting rows into sqlite_batch INSERT statements, or using your context to transform large JSON payloads. "
-        "Write a tool and batch the work. "
-        "\nSANDBOX TOOLS: rg, fd, jq, sqlite3, sed, awk, file, tar, unzip, fzf, yq, git are available via subprocess. "
-        "Agent filespace contents are synced into the sandbox before each run. "
-        "\nPATTERNS:"
-        "\n- Data sync to SQLite: fetch data from external sources (APIs, scraping, MCP tools) -> normalize -> "
-        "with ctx.sqlite() as conn: conn.execute('CREATE TABLE IF NOT EXISTS ...'); "
-        "cursor = conn.executemany('INSERT OR REPLACE INTO ...', rows) -> return a helpful dict with status, summary, target table, counts such as `cursor.rowcount`, and verification/follow-up guidance. "
-        "The agent can then query this table via sqlite_batch without re-fetching. "
-        "This is the most common pattern — sync once, query many times."
-        "\n- Bulk read & process from SQLite: read existing agent data from SQLite, transform, enrich, "
-        "aggregate, or export it. conn = sqlite3.connect(ctx.sqlite_db_path); "
-        "rows = conn.execute('SELECT ...').fetchall(); process rows in Python (join, filter, compute) -> "
-        "write results back to new SQLite tables or return a summary. "
-        "Use this to derive insights, build reports, or prepare data for export without manual row-by-row tool calls."
-        "\n- Tool composition: call multiple tools inside one custom tool: "
-        "results = [ctx.call_tool('mcp_brightdata_search_engine', {'query': q}) for q in queries]; "
-        "process all results, write to SQLite, return summary. "
-        "One custom tool call replaces dozens of manual tool calls."
-        "\n- Bulk MCP fan-out: iterate ctx.call_tool(...) for many ids/queries/pages inside Python, normalize the results, "
-        "then use executemany with INSERT OR REPLACE/UPSERT inside one transaction. "
-        "\n- Custom tool chains: custom tools can call other custom tools via ctx.call_tool('custom_other_tool', params). "
-        "Build layered pipelines: one tool syncs data, another transforms, another exports."
-        "\n- Authenticated API sync: read tokens from os.environ -> paginate through API -> "
-        "upsert rows into SQLite -> return status, side-effect/count summary, source scope, and verification/follow-up guidance."
-        "\n- Checkpointed orchestration: loop over items -> call tools -> "
-        "record progress in SQLite -> resume safely after failures or timeouts."
-        "\n- Safe dev loop: start with a small sample -> inspect output -> file_str_replace to patch -> widen scope."
-        "\nOnce stable, save the workflow as a skill referencing the canonical custom_* tool id."
-    )
+    summary = f"Custom tools: {total} saved, {enabled} enabled."
 
     recent = format_recent_custom_tools_for_prompt(agent, limit=recent_limit)
     if recent:
         summary += "\nRecent custom tools:\n" + recent
     return summary
+
+
+def get_custom_tools_prompt_summary(agent: PersistentAgent, *, recent_limit: int = 3) -> str:
+    return format_custom_tools_state_for_prompt(agent, recent_limit=recent_limit)
