@@ -999,11 +999,11 @@ def get_create_custom_tool_tool() -> Dict[str, Any]:
         "function": {
             "name": CREATE_CUSTOM_TOOL_NAME,
             "description": (
-                "Create or update a sandboxed Python custom tool for this agent. "
+                "Create/update a sandboxed Python custom tool. "
                 "Use for 3+ repeated steps, API/MCP fan-out, pagination, sync/import, transforms, validation/dedupe, or bulk SQLite writes; err early. "
-                "Before the first call, verify: Exact final line: `if __name__ == '__main__': main(run)`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`; completed writes return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
-                "Source is a complete `uv run` Python script: PEP 723 deps such as `# dependencies = [\"requests[socks]\"]`, `from _gobii_ctx import main`, and `def run(params, ctx): ...`. Never list stdlib deps. "
-                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' plus source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
+                "Before the first call, verify: Exact import `from _gobii_ctx import main`; exact final line `if __name__ == '__main__': main(run)`; imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`; `parameters_schema.required` requires real source inputs plus destinations/filters/limits/dates; SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`; batch/limit tools return `remaining_work`/`next_cursor`; completed writes return do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only; do not append/add/update again.' "
+                "Use PEP 723 for third-party deps such as `# dependencies = [\"requests[socks]\"]`; never list stdlib deps. "
+                "For one-shot creation call create_custom_tool with source_path='/tools/my_tool.py' + source_code; do not pass only `source_path` unless you already wrote that file; if rejected, fix every listed issue and retry create_custom_tool, not create_file. "
                 "For tool-to-tool calls use ctx.call_tool(name, params). Write durable data to the agent SQLite DB; do not ATTACH sandbox file paths. "
                 "Keep DB work inside the `with ctx.sqlite() as db:` block; after the block exits the DB is closed. Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before SELECT/fetchall because later changes do not convert tuples and rows are not row.get(...). "
                 "For UTC timestamps use datetime.now(timezone.utc), not datetime.timezone. Expose runtime params for tables, filters, URLs, limits, cursors, or destinations; do not invoke custom_* with empty params unless it intentionally reads verified state. "

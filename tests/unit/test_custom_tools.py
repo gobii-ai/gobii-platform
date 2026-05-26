@@ -181,10 +181,12 @@ class CustomToolsTests(TestCase):
             "do not pass only `source_path` unless you already wrote that file",
             "if rejected, fix every listed issue and retry create_custom_tool, not create_file",
             "Before the first call, verify",
+            "Exact import `from _gobii_ctx import main`",
             "`parameters_schema.required` requires real source inputs",
+            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
             "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
             "batch/limit tools return `remaining_work`/`next_cursor`",
-            "Exact final line: `if __name__ == '__main__': main(run)`",
+            "exact final line `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "db.row_factory = sqlite3.Row",
             "after the block exits the DB is closed",
@@ -206,7 +208,9 @@ class CustomToolsTests(TestCase):
             self.assertIn(text, create_tool_description)
 
         for text in (
+            "exact import `from _gobii_ctx import main`",
             "exact final line `if __name__ == '__main__': main(run)`",
+            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
             "`parameters_schema.required` requires real source inputs",
             "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
             "batch/limit tools return `remaining_work`/`next_cursor`",
