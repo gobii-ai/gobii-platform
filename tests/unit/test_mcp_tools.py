@@ -3978,8 +3978,13 @@ class MCPToolIntegrationTests(TestCase):
         with (
             patch.object(manager, "_ensure_runtime_registered", return_value=True),
             patch.object(manager, "_select_agent_proxy_url", return_value=(None, None)),
+            patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()]),
             patch.object(manager, "_get_pipedream_agent_client", return_value=client) as mock_get_client,
-            patch.object(manager, "_execute_async", new=MagicMock(return_value={"result": {"ok": True}})) as mock_execute,
+            patch.object(
+                manager,
+                "_execute_async",
+                new=MagicMock(return_value={"result": {"ok": True}}),
+            ) as mock_execute,
             patch.object(manager, "_run_coroutine_sync", side_effect=lambda value: value),
         ):
             result = manager.execute_mcp_tool(

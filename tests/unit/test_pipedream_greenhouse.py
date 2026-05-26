@@ -94,10 +94,11 @@ class PipedreamGreenhouseConnectTests(TestCase):
         self.assertEqual(session.connect_token, "ctok_gh")
         self.assertIn("pipedream.com/_static/connect.html", session.connect_link_url)
 
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_execute_tool_rewrites_connect_link_greenhouse(self, mock_exec, mock_loop, mock_create):
+    def test_execute_tool_rewrites_connect_link_greenhouse(self, mock_exec, mock_loop, mock_create, _mock_accounts):
         """Connect Link rewrite works for Greenhouse app/tool names."""
         # Arrange agent
         User = get_user_model()

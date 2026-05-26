@@ -18,6 +18,7 @@ from api.models import (
 )
 from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
 from api.integrations.pipedream_connect import create_connect_session
+from api.services.pipedream_connections import PipedreamConnectionError
 from api.webhooks import pipedream_connect_webhook
 
 
@@ -213,10 +214,11 @@ class PipedreamManagerConnectLinkTests(TestCase):
     def setUp(self):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_execute_tool_rewrites_connect_link(self, mock_exec, mock_loop, mock_create):
+    def test_execute_tool_rewrites_connect_link(self, mock_exec, mock_loop, mock_create, _mock_accounts):
         # Arrange agent
         User = get_user_model()
         user = User.objects.create_user(username="p3@example.com")
@@ -251,10 +253,11 @@ class PipedreamManagerConnectLinkTests(TestCase):
         self.assertEqual(res.get("status"), "action_required")
         self.assertIn("example.com/connect", res.get("connect_url"))
 
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_execute_tool_blocks_expired_connect_link(self, mock_exec, mock_loop, mock_create):
+    def test_execute_tool_blocks_expired_connect_link(self, mock_exec, mock_loop, mock_create, _mock_accounts):
         User = get_user_model()
         user = User.objects.create_user(username="p4@example.com")
         with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
@@ -294,10 +297,11 @@ class PipedreamManagerConnectLinkTests(TestCase):
         self.assertIsNone(res.get("connect_url"))
         self.assertIn("expired", res.get("result", "").lower())
 
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_execute_tool_reuses_pending_session(self, mock_exec, mock_loop, mock_create):
+    def test_execute_tool_reuses_pending_session(self, mock_exec, mock_loop, mock_create, _mock_accounts):
         User = get_user_model()
         user = User.objects.create_user(username="reuse@example.com")
         with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
@@ -345,3 +349,195 @@ class PipedreamManagerConnectLinkTests(TestCase):
         mock_create.assert_not_called()
         session.refresh_from_db()
         self.assertEqual(session.status, PipedreamConnectSession.Status.PENDING)
+
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[])
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_execute_tool_returns_connect_link_when_app_has_no_account(
+        self,
+        mock_exec,
+        mock_loop,
+        mock_accounts,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(username="missing-account@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-missing")
+        agent = PersistentAgent.objects.create(user=user, name="agent-missing", charter="c", browser_use_agent=bua)
+
+        mgr = MCPToolManager()
+        _setup_pipedream_tool(mgr, agent)
+
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
+
+        self.assertEqual(res.get("status"), "action_required")
+        connect_url = res.get("connect_url", "")
+        self.assertIn("/connect/pipedream/", connect_url)
+        self.assertIn(str(agent.id), connect_url)
+        self.assertIn("/google_sheets/", connect_url)
+        self.assertIn("Authorization required", res.get("result", ""))
+        mock_accounts.assert_called_once_with(agent, app_slug="google_sheets")
+        mock_exec.assert_not_called()
+        mock_loop.assert_not_called()
+
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_execute_tool_proceeds_when_app_has_account(
+        self,
+        mock_exec,
+        mock_loop,
+        mock_accounts,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(username="connected@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-connected")
+        agent = PersistentAgent.objects.create(user=user, name="agent-connected", charter="c", browser_use_agent=bua)
+
+        mgr = MCPToolManager()
+        _setup_pipedream_tool(mgr, agent)
+
+        response = MagicMock()
+        response.is_error = False
+        response.data = {"ok": True}
+        response.content = []
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: response
+        mock_loop.return_value = loop
+        mock_exec.return_value = response
+
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
+
+        self.assertEqual(res.get("status"), "success")
+        self.assertEqual(res.get("result"), {"ok": True})
+        mock_accounts.assert_called_once_with(agent, app_slug="google_sheets")
+        mock_exec.assert_called_once()
+
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_recent_success_session_refreshes_empty_account_cache(
+        self,
+        mock_exec,
+        mock_loop,
+        mock_accounts,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(username="recent-success@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-recent-success")
+        agent = PersistentAgent.objects.create(user=user, name="agent-recent-success", charter="c", browser_use_agent=bua)
+        PipedreamConnectSession.objects.create(
+            agent=agent,
+            external_user_id=str(agent.id),
+            conversation_id=str(agent.id),
+            app_slug="google_sheets",
+            connect_token="ctok_recent_success",
+            webhook_secret="secret",
+            status=PipedreamConnectSession.Status.SUCCESS,
+            account_id="apn_recent",
+        )
+
+        mgr = MCPToolManager()
+        _setup_pipedream_tool(mgr, agent)
+        mock_accounts.side_effect = [[], [object()]]
+
+        response = MagicMock()
+        response.is_error = False
+        response.data = {"ok": True}
+        response.content = []
+        loop = MagicMock()
+        loop.run_until_complete.side_effect = lambda _: response
+        mock_loop.return_value = loop
+        mock_exec.return_value = response
+
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
+
+        self.assertEqual(res.get("status"), "success")
+        self.assertEqual(res.get("result"), {"ok": True})
+        self.assertEqual(mock_accounts.call_count, 2)
+        mock_accounts.assert_any_call(agent, app_slug="google_sheets")
+        mock_accounts.assert_any_call(agent, app_slug="google_sheets", force_refresh=True)
+        mock_exec.assert_called_once()
+
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[])
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_retrieve_options_preflights_app_from_component_key(
+        self,
+        mock_exec,
+        mock_loop,
+        mock_accounts,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(username="options-missing@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-options")
+        agent = PersistentAgent.objects.create(user=user, name="agent-options", charter="c", browser_use_agent=bua)
+
+        mgr = MCPToolManager()
+        config = _ensure_pipedream_config()
+        tool = MCPToolInfo(
+            str(config.id),
+            "retrieve_options",
+            "pipedream",
+            "retrieve_options",
+            "Retrieve component options",
+            {},
+        )
+        mgr._initialized = True
+        mgr._tools_cache = {str(config.id): [tool]}
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
+        PersistentAgentEnabledTool.objects.create(
+            agent=agent,
+            tool_full_name=tool.full_name,
+            tool_server=tool.server_name,
+            tool_name=tool.tool_name,
+            server_config=config,
+        )
+
+        res = mgr.execute_mcp_tool(
+            agent,
+            "retrieve_options",
+            {
+                "componentKey": "google_sheets-add-single-row",
+                "propName": "spreadsheetId",
+            },
+        )
+
+        self.assertEqual(res.get("status"), "action_required")
+        self.assertIn("/google_sheets/", res.get("connect_url", ""))
+        mock_accounts.assert_called_once_with(agent, app_slug="google_sheets")
+        mock_exec.assert_not_called()
+        mock_loop.assert_not_called()
+
+    @patch(
+        "api.services.pipedream_connections.list_pipedream_connected_accounts",
+        side_effect=PipedreamConnectionError("Pipedream account lookup failed."),
+    )
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
+    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
+    def test_execute_tool_returns_error_when_connection_lookup_fails(
+        self,
+        mock_exec,
+        mock_loop,
+        mock_accounts,
+    ):
+        User = get_user_model()
+        user = User.objects.create_user(username="lookup-error@example.com")
+        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
+            bua = BrowserUseAgent.objects.create(user=user, name="bua-lookup-error")
+        agent = PersistentAgent.objects.create(user=user, name="agent-lookup-error", charter="c", browser_use_agent=bua)
+
+        mgr = MCPToolManager()
+        _setup_pipedream_tool(mgr, agent)
+
+        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
+
+        self.assertEqual(res.get("status"), "error")
+        self.assertIn("Pipedream account lookup failed", res.get("message", ""))
+        self.assertNotIn("connect_url", res)
+        mock_accounts.assert_called_once_with(agent, app_slug="google_sheets")
+        mock_exec.assert_not_called()
+        mock_loop.assert_not_called()
