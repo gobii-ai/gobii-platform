@@ -17,7 +17,12 @@ from django.db.models import F
 
 from util.text_sanitizer import decode_unicode_escapes
 
-from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
+from ...models import (
+    PersistentAgent,
+    PersistentAgentCustomTool,
+    PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
+)
 from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
@@ -236,6 +241,7 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
+        "system_skill_key": "image_generation",
     },
     CREATE_VIDEO_TOOL_NAME: {
         "definition": get_create_video_tool,
@@ -346,6 +352,7 @@ def _build_builtin_catalog_entry(
         tool_server="builtin",
         tool_name=tool_name,
         server_config_id=None,
+        system_skill_key=str(registry_entry.get("system_skill_key") or ""),
     )
 
 
@@ -379,6 +386,7 @@ class ToolCatalogEntry:
     tool_server: str = ""
     tool_name: str = ""
     server_config_id: Optional[str] = None
+    system_skill_key: str = ""
 
 
 def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
@@ -625,6 +633,7 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
         metadata_updates = _apply_tool_metadata(row, entry)
         if metadata_updates:
             row.save(update_fields=metadata_updates)
+        _ensure_system_skill_enabled_for_tool(agent, entry)
 
         if created:
             enabled.append(tool_name)
@@ -692,6 +701,49 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
     return updates
 
 
+def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool_name: str = "") -> Optional[str]:
+    if not skill_key:
+        return None
+
+    from api.agent.system_skills.registry import get_system_skill_definition
+
+    definition = get_system_skill_definition(skill_key)
+    if definition is None:
+        logger.warning("Tool %s references unknown system skill %s", tool_name or "(unknown)", skill_key)
+        return None
+
+    state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
+        agent=agent,
+        skill_key=definition.skill_key,
+        defaults={"is_enabled": True},
+    )
+    if not state.is_enabled:
+        state.is_enabled = True
+        state.save(update_fields=["is_enabled"])
+    return definition.skill_key
+
+
+def _ensure_system_skill_enabled_for_tool(agent: PersistentAgent, entry: Optional[ToolCatalogEntry]) -> Optional[str]:
+    if not entry:
+        return None
+    return _ensure_system_skill_enabled(
+        agent,
+        entry.system_skill_key,
+        tool_name=entry.full_name,
+    )
+
+
+def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, tool_name: str) -> Optional[str]:
+    registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if not registry_entry:
+        return None
+    return _ensure_system_skill_enabled(
+        agent,
+        str(registry_entry.get("system_skill_key") or ""),
+        tool_name=tool_name,
+    )
+
+
 def enable_tools(
     agent: PersistentAgent,
     tool_names: Iterable[str],
@@ -749,11 +801,13 @@ def enable_tools(
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
+            _ensure_system_skill_enabled_for_tool(agent, entry)
             enabled.append(resolved_name)
         else:
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
+            _ensure_system_skill_enabled_for_tool(agent, entry)
             already_enabled.append(resolved_name)
 
     if enabled or already_enabled:
@@ -804,6 +858,7 @@ def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEn
     metadata_updates = _apply_tool_metadata(row, entry)
     if metadata_updates:
         row.save(update_fields=metadata_updates)
+    _ensure_system_skill_enabled_for_tool(agent, entry)
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=get_enabled_tool_limit(agent))
     if created:
@@ -862,6 +917,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         updates = ["last_used_at", "usage_count"]
         updates.extend(_apply_tool_metadata(row, entry))
         row.save(update_fields=list(dict.fromkeys(updates)))
+        _ensure_system_skill_enabled_for_tool(agent, entry)
         return {
             "status": "success",
             "message": f"Tool '{tool_name}' is already enabled",
@@ -881,6 +937,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     metadata_updates = _apply_tool_metadata(row, entry)
     if metadata_updates:
         row.save(update_fields=list(dict.fromkeys(metadata_updates)))
+    _ensure_system_skill_enabled_for_tool(agent, entry)
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=limit)
     disabled_tool = evicted[0] if evicted else None
@@ -923,6 +980,7 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
         row.last_used_at = now
         row.usage_count = (row.usage_count or 0) + 1
         row.save(update_fields=["last_used_at", "usage_count"])
+        _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
         return {
             "status": "success",
             "message": f"Tool '{tool_name}' is already enabled (metadata untouched)",
@@ -942,6 +1000,7 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
         return {"status": "error", "message": str(exc)}
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name])
+    _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
     disabled_tool = evicted[0] if evicted else None
 
     message = f"Marked tool '{tool_name}' enabled without discovery"
@@ -1259,6 +1318,7 @@ def auto_enable_heuristic_tools(
                 metadata_updates = _apply_tool_metadata(row, entry)
                 if metadata_updates:
                     row.save(update_fields=metadata_updates)
+                _ensure_system_skill_enabled_for_tool(agent, entry)
                 enabled.append(tool_name)
                 logger.info(
                     "Autotool heuristic: enabled %s for agent %s",
@@ -1374,6 +1434,7 @@ def execute_enabled_tool(
                     if metadata_updates:
                         update_fields.extend(metadata_updates)
                     row.save(update_fields=list(dict.fromkeys(update_fields)))
+                    _ensure_system_skill_enabled_for_tool(agent, entry)
                 except Exception:
                     logger.exception("Failed to record usage for builtin tool %s", resolved_name)
 

@@ -352,6 +352,28 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("System Skill: Runtime Planning", content)
         self.assertIn("Use `update_plan` for substantial multi-step work", content)
 
+    def test_prompt_includes_enabled_image_generation_system_skill(self):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.agent,
+            skill_key="image_generation",
+            is_enabled=True,
+        )
+
+        with patch("api.agent.core.prompt_context.ensure_steps_compacted"), \
+             patch("api.agent.core.prompt_context.ensure_comms_compacted"), \
+             patch("api.agent.core.prompt_context.get_agent_llm_tier", return_value=AgentLLMTier.STANDARD):
+            context, _, _ = build_prompt_context(self.agent)
+
+        system_message = next((m for m in context if m["role"] == "system"), None)
+        user_message = next((m for m in context if m["role"] == "user"), None)
+        self.assertIsNotNone(system_message)
+        self.assertIsNotNone(user_message)
+
+        self.assertNotIn("# Image generation playbook", system_message["content"])
+        self.assertIn("<agent_skills>", user_message["content"])
+        self.assertIn("System Skill: Image Generation", user_message["content"])
+        self.assertIn("Use `create_image` only for creating new visual assets", user_message["content"])
+
     def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(
             idx=0,

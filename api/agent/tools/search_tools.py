@@ -877,15 +877,6 @@ def _search_with_llm(
         "enable_agent_skills.skill_names: [\"<SAVED_SKILL>\"]; "
         "skill_names: [\"<GLOBAL_SKILL>\"]; skill_keys: [\"<SYSTEM_SKILL>\"]\n"
     )
-    image_generation_rules = ""
-    if CREATE_IMAGE_TOOL_NAME in available_names:
-        image_generation_rules = (
-            f"- If the user asks to generate or design a NEW image asset, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
-            f"- If the user asks to edit, transform, restyle, or preserve details from an existing image, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
-            f"- For edit/transform requests, plan to pass `source_images` so the model can preserve identity, logos, text, or layout.\n"
-            f"- Do not include `{CREATE_IMAGE_TOOL_NAME}` for image analysis, OCR, or extracting information from existing images.\n"
-        )
-
     system_prompt = (
         "Select helpful tools and skills. Be inclusive, but copy exact names/slugs from the lists; never invent them.\n"
         "If nothing matches, call nothing.\n\n"
@@ -894,7 +885,6 @@ def _search_with_llm(
         "Call enable_tools with exact full names from Available tools.\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
-        f"{image_generation_rules}"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
