@@ -3126,7 +3126,7 @@ def _finalize_tool_batch(
         elif is_error_status or tool_had_warning:
             followup_required = True
         elif (
-            effective_explicit_continue is not True
+            effective_explicit_continue is None
             and not allow_auto_sleep
             and not terminal_message_delivery_ok
             and not human_input_request_ok
