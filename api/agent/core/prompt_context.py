@@ -56,7 +56,6 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
-    PersistentAgentEnabledTool,
     PersistentAgentSecret,
     GlobalSecret,
     PersistentAgentStep,
@@ -98,7 +97,6 @@ from ..tools.sqlite_state import (
 from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import (
-    CREATE_IMAGE_TOOL_NAME,
     ensure_default_tools_enabled,
     ensure_skill_tools_enabled,
     get_enabled_tool_definitions,
@@ -3380,30 +3378,6 @@ def _get_system_instruction(
         f"{stop_continue_examples}"
     )
 
-    image_generation_skill = ""
-    if agent is not None:
-        try:
-            image_tool_enabled = PersistentAgentEnabledTool.objects.filter(
-                agent=agent,
-                tool_full_name=CREATE_IMAGE_TOOL_NAME,
-            ).exists()
-        except DatabaseError:
-            image_tool_enabled = False
-            logger.debug("Failed checking create_image enablement for agent %s", agent.id, exc_info=True)
-
-        if image_tool_enabled:
-            image_generation_skill = (
-                "```\n"
-                "# Image generation playbook (only when create_image is enabled)\n"
-                "new_asset_from_scratch → create_image(prompt='...', file_path='...')\n"
-                "preserve_subject_or_logo_or_text → create_image(prompt='...', source_images=['$[/path.png]'], file_path='...')\n"
-                "style_transfer_or_edit_existing_image → use source_images with create_image\n"
-                "just want a different art direction (no preservation needed) → refine prompt, no source_images\n"
-                "if fidelity matters (same person/product/layout) → source_images is required\n"
-                "source_images must be filespace paths: $[/...] or /...\n"
-                "```\n\n"
-            )
-
     if not planning_mode_active:
         charter_and_schedule_intro = (
             "Your charter is durable standing memory for role, scope, stable preferences, communication guidance, and boundaries. "
@@ -3487,8 +3461,6 @@ def _get_system_instruction(
         "# Attachment pre-flight: RIGHT: send_email(..., attachments=[result.attach]). "
         "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count and "
         "__messages.rejected_attachments_json before claiming or resending files.\n\n"
-        f"{image_generation_skill}"
-
         "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
