@@ -2099,6 +2099,28 @@ def _message_tool_body_from_params(tool_name: str, tool_params: Dict[str, Any]) 
     return str(tool_params.get(body_key) or "") if body_key else ""
 
 
+def _message_tool_has_progress_intent(tool_name: str, tool_params: Dict[str, Any]) -> bool:
+    if tool_name not in MESSAGE_TOOL_NAMES:
+        return False
+    explicit_continue = _coerce_optional_bool(tool_params.get("will_continue_work"))
+    if explicit_continue is True:
+        return True
+    if explicit_continue is False:
+        return False
+    return _should_infer_message_tool_continuation(
+        _message_tool_body_from_params(tool_name, tool_params)
+    )
+
+
+def _message_tool_is_terminal(tool_name: str, tool_params: Dict[str, Any]) -> bool:
+    if tool_name not in MESSAGE_TOOL_NAMES:
+        return False
+    body = _message_tool_body_from_params(tool_name, tool_params)
+    if not body or _looks_like_blocking_human_input_request(body):
+        return False
+    return not _message_tool_has_progress_intent(tool_name, tool_params)
+
+
 def _tool_call_likely_terminal_message(call: Any) -> bool:
     tool_name = _get_tool_call_name(call)
     if tool_name not in MESSAGE_TOOL_NAMES:
@@ -2107,10 +2129,7 @@ def _tool_call_likely_terminal_message(call: Any) -> bool:
         _raw_args, tool_params = _parse_tool_call_params(_get_tool_call_arguments(call))
     except (TypeError, ValueError, json.JSONDecodeError):
         return False
-    body = _message_tool_body_from_params(tool_name, tool_params)
-    if not body:
-        return False
-    return not _looks_like_blocking_human_input_request(body) and not _should_infer_message_tool_continuation(body)
+    return _message_tool_is_terminal(tool_name, tool_params)
 
 
 def _should_skip_irrelevant_agent_config_mutation(
@@ -3042,20 +3061,14 @@ def _finalize_tool_batch(
             and result.get("skipped") is True
         )
         effective_explicit_continue = prepared.explicit_continue
-        delivered_terminal_message = False
         if tool_name in MESSAGE_TOOL_NAMES and not message_delivery_skipped:
             status_label = str(status or "").lower()
             if status_label in MESSAGE_SUCCESS_STATUSES:
                 message_delivery_ok = True
-                body_key = MESSAGE_TOOL_BODY_KEYS.get(tool_name)
-                body = str(prepared.tool_params.get(body_key) or "") if body_key else ""
-                if prepared.explicit_continue is True and _should_infer_message_tool_continuation(body):
+                if _message_tool_has_progress_intent(tool_name, prepared.tool_params):
                     progress_message_delivery_ok = True
                 else:
-                    delivered_terminal_message = True
                     terminal_message_delivery_ok = True
-                    if prepared.explicit_continue is True:
-                        effective_explicit_continue = False
 
         is_error_status = _is_error_status(result)
         tool_status = "error" if is_error_status else "complete"

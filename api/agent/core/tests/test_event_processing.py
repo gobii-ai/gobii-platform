@@ -1,5 +1,7 @@
 """Tests for event processing continuation decisions."""
 
+import json
+
 from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -10,15 +12,19 @@ from django.test import SimpleTestCase, TestCase, override_settings, tag
 from django.utils import timezone
 
 from api.agent.core.event_processing import (
+    _finalize_tool_batch,
     _contact_permission_params_from_misrouted_human_input,
     _process_agent_events_locked,
     _is_warning_status,
     _looks_like_blocking_human_input_request,
     _normalize_tool_params,
     _parse_tool_call_params,
+    _PreparedToolExecution,
     _sanitize_tool_name,
     _should_infer_message_tool_continuation,
     _should_imply_continue,
+    _ToolExecutionOutcome,
+    _tool_call_likely_terminal_message,
 )
 from django.urls import reverse
 
@@ -108,6 +114,88 @@ class ImpliedContinuationDecisionTests(SimpleTestCase):
         )
 
         self.assertFalse(result)
+
+
+@tag('batch_event_processing')
+class MessageToolExplicitContinuationTests(TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user(
+            username="message-continuation@example.com",
+            email="message-continuation@example.com",
+            password="secret",
+        )
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="MessageContinuationBA")
+        self.agent = PersistentAgent.objects.create(
+            user=user,
+            name="Message Continuation Agent",
+            charter="Handle user work.",
+            browser_use_agent=browser_agent,
+        )
+
+    def test_explicit_continue_true_is_not_overridden_by_message_heuristic(self):
+        body = (
+            "Sorry Yash! I was getting the searches set up — starting the actual profile discovery "
+            "right now. Will have the Excel sheet to you within a couple of hours!"
+        )
+        self.assertFalse(_should_infer_message_tool_continuation(body))
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="send_chat_message",
+            tool_params={"body": body, "will_continue_work": True},
+            exec_params={"body": body, "will_continue_work": True},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_1",
+            explicit_continue=True,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [
+                _ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={
+                        "status": "ok",
+                        "message": "Web chat message sent.",
+                        "message_id": str(uuid4()),
+                        "auto_sleep_ok": False,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertFalse(finalized.followup_required)
+        self.assertTrue(finalized.message_delivery_ok)
+        self.assertTrue(finalized.progress_message_delivery_ok)
+        self.assertFalse(finalized.terminal_message_delivery_ok)
+        self.assertIs(finalized.last_explicit_continue, True)
+
+    def test_preflight_terminal_message_detection_respects_explicit_continue_true(self):
+        call = {
+            "function": {
+                "name": "send_chat_message",
+                "arguments": json.dumps(
+                    {
+                        "body": (
+                            "Sorry Yash! I was getting the searches set up — starting the actual "
+                            "profile discovery right now."
+                        ),
+                        "will_continue_work": True,
+                    }
+                ),
+            }
+        }
+
+        self.assertFalse(_tool_call_likely_terminal_message(call))
 
 
 @tag('batch_event_processing')
