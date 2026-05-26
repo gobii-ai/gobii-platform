@@ -943,7 +943,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
 
-    def test_daily_credit_state_multi_week_decay_enables_pause(self):
+    def test_daily_credit_state_multi_week_decay_exceeds_burn_rate_threshold(self):
         state = self._build_daily_state_with_inactivity(
             inactive_days=21,
             burn_rate_per_hour=Decimal("6"),
@@ -952,20 +952,14 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertEqual(state["burn_rate_threshold_per_hour"], Decimal("4.000"))
         self.assertEqual(state["burn_rate_per_hour"], Decimal("6"))
         self.assertLess(state["burn_rate_threshold_per_hour"], state["burn_rate_per_hour"])
-
-        with patch(
-            "api.agent.core.burn_control.has_recent_user_message",
-            return_value=False,
-        ), patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
-            should_pause = bc.should_pause_for_burn_rate(
+        self.assertFalse(
+            bc.should_pause_for_burn_rate(
                 self.agent,
                 budget_ctx=None,
                 daily_state=state,
-                redis_client=MagicMock(get=MagicMock(return_value=None)),
+                redis_client=MagicMock(),
             )
-
-        self.assertTrue(should_pause)
-        pause_mock.assert_called_once()
+        )
 
     def test_daily_credit_state_uses_offpeak_threshold_at_night(self):
         now_value = datetime(2026, 3, 10, 3, 0, tzinfo=dt_timezone.utc)
@@ -1150,7 +1144,9 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertIn("2/2", usage_call.args[1])
         self.assertIn("browser_task_usage_warning", names)
 
-    def test_burn_rate_pause_schedules_follow_up_and_exits_loop(self):
+    def test_burn_rate_excess_steps_down_without_follow_up_or_cooldown_and_continues_loop(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
         fake_store: dict[str, str] = {}
 
         class FakeRedis:
@@ -1170,10 +1166,31 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_threshold_per_hour": Decimal("3"),
             "burn_rate_window_minutes": 60,
         }
+        response = MagicMock()
+        response.choices = [
+            MagicMock(message=MagicMock(content="Done for now", tool_calls=[], function_call=None))
+        ]
+        token_usage = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+            "cached_tokens": 0,
+        }
+        observed = {}
 
-        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
+        def capture_failover(*_args, **_kwargs):
+            observed["routing_tier"] = get_agent_llm_tier(self.agent)
+            return [{}]
+
+        with override_settings(GOBII_PROPRIETARY_MODE=True), \
+             patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
+             patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), \
+             patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
-             patch("api.agent.core.event_processing.build_prompt_context") as build_prompt_mock, \
+             patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)) as build_prompt_mock, \
+             patch("api.agent.core.event_processing.get_llm_config_with_failover", side_effect=capture_failover), \
+             patch("tasks.services.TaskCreditService.check_and_consume_credit_for_owner", return_value={"success": True, "credit": None}), \
+             patch("api.agent.core.event_processing._completion_with_failover", return_value=(response, token_usage)), \
              patch(
                  "api.agent.core.event_processing.process_agent_events_task",
                  create=True,
@@ -1189,16 +1206,11 @@ class PersistentAgentToolCreditTests(TestCase):
             )
 
         self.assertEqual(usage["total_tokens"], 0)
-        build_prompt_mock.assert_not_called()
-
-        follow_up_task.apply_async.assert_called_once()
-        _, kwargs = follow_up_task.apply_async.call_args
-        self.assertEqual(kwargs["countdown"], ep.BURN_RATE_COOLDOWN_SECONDS)
-        token = kwargs["kwargs"]["burn_follow_up_token"]
-        self.assertEqual(fake_store.get(bc.burn_follow_up_key(self.agent.id)), token)
-        self.assertTrue(fake_store.get(bc.burn_cooldown_key(self.agent.id)))
-
-        self.assertTrue(
+        build_prompt_mock.assert_called_once()
+        follow_up_task.apply_async.assert_not_called()
+        self.assertEqual(fake_store, {})
+        self.assertEqual(observed["routing_tier"], AgentLLMTier.STANDARD)
+        self.assertFalse(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
@@ -1207,99 +1219,10 @@ class PersistentAgentToolCreditTests(TestCase):
         track_event_mock.assert_called_once()
         track_kwargs = track_event_mock.call_args.kwargs
         self.assertEqual(track_kwargs["user_id"], self.user.id)
-        self.assertEqual(track_kwargs["event"], AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_LIMIT_REACHED)
-
-    def test_burn_rate_pause_schedules_follow_up_when_next_cron_is_within_cooldown(self):
-        fake_store: dict[str, str] = {}
-
-        class FakeRedis:
-            def get(self, key):
-                return fake_store.get(key)
-
-            def set(self, key, value, ex=None):
-                fake_store[key] = value
-                return True
-
-            def delete(self, key):
-                return 1 if fake_store.pop(key, None) is not None else 0
-
-        fake_redis = FakeRedis()
-        burn_state = {
-            "burn_rate_per_hour": Decimal("5"),
-            "burn_rate_threshold_per_hour": Decimal("3"),
-            "burn_rate_window_minutes": 60,
-        }
-
-        self.agent.schedule = "@hourly"
-        self.agent.save(update_fields=["schedule"])
-
-        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
-             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
-             patch("api.agent.core.event_processing.build_prompt_context") as build_prompt_mock, \
-             patch(
-                 "api.agent.core.event_processing.process_agent_events_task",
-                 create=True,
-             ) as follow_up_task:
-            follow_up_task.apply_async = MagicMock()
-
-            usage = ep._run_agent_loop(
-                self.agent,
-                is_first_run=True,
-                credit_snapshot=None,
-                run_sequence_number=1,
-            )
-
-        self.assertEqual(usage["total_tokens"], 0)
-        build_prompt_mock.assert_not_called()
-        follow_up_task.apply_async.assert_called_once()
-        _, kwargs = follow_up_task.apply_async.call_args
-        self.assertEqual(kwargs["countdown"], ep.BURN_RATE_COOLDOWN_SECONDS)
-        token = kwargs["kwargs"]["burn_follow_up_token"]
-        self.assertEqual(fake_store.get(bc.burn_follow_up_key(self.agent.id)), token)
-
-    def test_burn_rate_pause_skips_follow_up_when_next_cron_is_after_cooldown_but_soon(self):
-        fake_store: dict[str, str] = {}
-
-        class FakeRedis:
-            def get(self, key):
-                return fake_store.get(key)
-
-            def set(self, key, value, ex=None):
-                fake_store[key] = value
-                return True
-
-            def delete(self, key):
-                return 1 if fake_store.pop(key, None) is not None else 0
-
-        fake_redis = FakeRedis()
-        burn_state = {
-            "burn_rate_per_hour": Decimal("5"),
-            "burn_rate_threshold_per_hour": Decimal("3"),
-            "burn_rate_window_minutes": 60,
-        }
-        next_run = timezone.now() + timezone.timedelta(minutes=90)
-
-        with patch("api.agent.core.event_processing.get_redis_client", return_value=fake_redis), \
-             patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
-             patch("api.agent.core.event_processing.build_prompt_context") as build_prompt_mock, \
-             patch("api.agent.core.burn_control._next_scheduled_run", return_value=next_run), \
-             patch(
-                 "api.agent.core.event_processing.process_agent_events_task",
-                 create=True,
-             ) as follow_up_task:
-            follow_up_task.apply_async = MagicMock()
-
-            usage = ep._run_agent_loop(
-                self.agent,
-                is_first_run=True,
-                credit_snapshot=None,
-                run_sequence_number=1,
-            )
-
-        self.assertEqual(usage["total_tokens"], 0)
-        build_prompt_mock.assert_not_called()
-        follow_up_task.apply_async.assert_not_called()
-        self.assertIsNone(fake_store.get(bc.burn_follow_up_key(self.agent.id)))
+        self.assertEqual(
+            track_kwargs["event"],
+            AnalyticsEvent.PERSISTENT_AGENT_BURN_RATE_RUNTIME_TIER_STEPPED_DOWN,
+        )
 
     def test_burn_rate_rechecks_fresh_daily_state_each_iteration(self):
         fake_store: dict[str, str] = {}
@@ -1370,16 +1293,16 @@ class PersistentAgentToolCreditTests(TestCase):
 
         self.assertEqual(usage["total_tokens"], 0)
         self.assertEqual(burn_state_fn.call_count, 2)
-        follow_up_task.apply_async.assert_called_once()
-        self.assertTrue(fake_store.get(bc.burn_cooldown_key(self.agent.id)))
-        self.assertTrue(
+        follow_up_task.apply_async.assert_not_called()
+        self.assertEqual(fake_store, {})
+        self.assertFalse(
             PersistentAgentSystemStep.objects.filter(
                 step__agent=self.agent,
                 code=PersistentAgentSystemStep.Code.BURN_RATE_COOLDOWN,
             ).exists()
         )
 
-    def test_runtime_tier_step_down_activates_once_with_recent_user_message(self):
+    def test_runtime_tier_step_down_activates_once_to_standard(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
         self.agent.save(update_fields=["preferred_llm_tier"])
         burn_state = {
@@ -1391,7 +1314,6 @@ class PersistentAgentToolCreditTests(TestCase):
         try:
             with override_settings(GOBII_PROPRIETARY_MODE=True), \
                  patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
-                 patch("api.agent.core.burn_control.has_recent_user_message", return_value=True), \
                  patch("api.agent.core.burn_control.Analytics.track_event") as track_event_mock:
                 stepped = bc.maybe_step_down_runtime_tier_for_burn_rate(
                     self.agent,
@@ -1407,15 +1329,15 @@ class PersistentAgentToolCreditTests(TestCase):
                 self.assertTrue(stepped)
                 self.assertFalse(stepped_again)
                 self.assertEqual(get_agent_baseline_llm_tier(self.agent), AgentLLMTier.ULTRA_MAX)
-                self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.ULTRA)
-                self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.ULTRA)
+                self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
+                self.assertEqual(get_agent_llm_tier(self.agent), AgentLLMTier.STANDARD)
                 self.assertFalse(
                     PersistentAgentSystemStep.objects.filter(step__agent=self.agent).exists()
                 )
                 self.assertFalse(
                     PersistentAgentStep.objects.filter(
                         agent=self.agent,
-                        description__contains="baseline_tier=ultra_max;runtime_tier=ultra",
+                        description__contains="baseline_tier=ultra_max;runtime_tier=standard",
                     ).exists()
                 )
                 track_event_mock.assert_called_once()
@@ -1426,7 +1348,9 @@ class PersistentAgentToolCreditTests(TestCase):
         finally:
             clear_runtime_tier_override(self.agent)
 
-    def test_burn_rate_pause_preserves_hourly_only_when_24h_threshold_disabled(self):
+    def test_burn_rate_step_down_preserves_hourly_only_when_24h_threshold_disabled(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
         burn_state = {
             "burn_rate_per_hour": Decimal("5"),
             "burn_rate_threshold_per_hour": Decimal("3"),
@@ -1435,17 +1359,20 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_threshold_24h": Decimal("0"),
         }
 
-        with patch("api.agent.core.burn_control.has_recent_user_message", return_value=False), \
-             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
-            action = bc.handle_burn_rate_limit(
-                self.agent,
-                budget_ctx=None,
-                daily_state=burn_state,
-                redis_client=MagicMock(get=MagicMock(return_value=None)),
-            )
+        try:
+            with override_settings(GOBII_PROPRIETARY_MODE=True), \
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+                action = bc.handle_burn_rate_limit(
+                    self.agent,
+                    budget_ctx=None,
+                    daily_state=burn_state,
+                    redis_client=MagicMock(),
+                )
 
-        self.assertEqual(action, bc.BurnRateAction.PAUSED)
-        pause_mock.assert_called_once()
+            self.assertEqual(action, bc.BurnRateAction.STEPPED_DOWN)
+            self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
+        finally:
+            clear_runtime_tier_override(self.agent)
 
     def test_burn_rate_gate_skips_action_when_24h_total_below_threshold(self):
         burn_state = {
@@ -1456,20 +1383,19 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_threshold_24h": Decimal("100"),
         }
 
-        with patch("api.agent.core.burn_control.has_recent_user_message") as recent_mock, \
-             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
-            action = bc.handle_burn_rate_limit(
-                self.agent,
-                budget_ctx=None,
-                daily_state=burn_state,
-                redis_client=MagicMock(get=MagicMock(return_value=None)),
-            )
+        action = bc.handle_burn_rate_limit(
+            self.agent,
+            budget_ctx=None,
+            daily_state=burn_state,
+            redis_client=MagicMock(),
+        )
 
         self.assertEqual(action, bc.BurnRateAction.NONE)
-        recent_mock.assert_not_called()
-        pause_mock.assert_not_called()
+        self.assertIsNone(get_runtime_tier_override(self.agent))
 
-    def test_burn_rate_pause_requires_24h_total_above_configured_threshold(self):
+    def test_burn_rate_step_down_requires_24h_total_above_configured_threshold(self):
+        self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
+        self.agent.save(update_fields=["preferred_llm_tier"])
         burn_state = {
             "burn_rate_per_hour": Decimal("5"),
             "burn_rate_threshold_per_hour": Decimal("3"),
@@ -1478,19 +1404,20 @@ class PersistentAgentToolCreditTests(TestCase):
             "burn_rate_threshold_24h": Decimal("100"),
         }
 
-        with patch("api.agent.core.burn_control.has_recent_user_message", return_value=False), \
-             patch("api.agent.core.burn_control.pause_for_burn_rate") as pause_mock:
-            action = bc.handle_burn_rate_limit(
-                self.agent,
-                budget_ctx=None,
-                daily_state=burn_state,
-                redis_client=MagicMock(get=MagicMock(return_value=None)),
-            )
+        try:
+            with override_settings(GOBII_PROPRIETARY_MODE=True), \
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
+                action = bc.handle_burn_rate_limit(
+                    self.agent,
+                    budget_ctx=None,
+                    daily_state=burn_state,
+                    redis_client=MagicMock(),
+                )
 
-        self.assertEqual(action, bc.BurnRateAction.PAUSED)
-        pause_mock.assert_called_once()
-        self.assertEqual(pause_mock.call_args.kwargs["burn_24h_total"], Decimal("101"))
-        self.assertEqual(pause_mock.call_args.kwargs["burn_24h_threshold"], Decimal("100"))
+            self.assertEqual(action, bc.BurnRateAction.STEPPED_DOWN)
+            self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
+        finally:
+            clear_runtime_tier_override(self.agent)
 
     def test_runtime_tier_step_down_requires_24h_total_above_configured_threshold(self):
         self.agent.preferred_llm_tier = get_intelligence_tier("ultra_max")
@@ -1505,8 +1432,7 @@ class PersistentAgentToolCreditTests(TestCase):
 
         try:
             with override_settings(GOBII_PROPRIETARY_MODE=True), \
-                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
-                 patch("api.agent.core.burn_control.has_recent_user_message", return_value=True):
+                 patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}):
                 action = bc.handle_burn_rate_limit(
                     self.agent,
                     budget_ctx=None,
@@ -1514,7 +1440,7 @@ class PersistentAgentToolCreditTests(TestCase):
                 )
 
             self.assertEqual(action, bc.BurnRateAction.STEPPED_DOWN)
-            self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.ULTRA)
+            self.assertEqual(get_runtime_tier_override(self.agent), AgentLLMTier.STANDARD)
         finally:
             clear_runtime_tier_override(self.agent)
 
@@ -1594,7 +1520,6 @@ class PersistentAgentToolCreditTests(TestCase):
 
         with override_settings(GOBII_PROPRIETARY_MODE=True), \
              patch("api.agent.core.llm_config.get_owner_plan", return_value={"id": "pro"}), \
-             patch("api.agent.core.burn_control.has_recent_user_message", return_value=True), \
              patch.object(ep, "MAX_AGENT_LOOP_ITERATIONS", 1), \
              patch("api.agent.core.event_processing.get_agent_daily_credit_state", return_value=burn_state), \
              patch("api.agent.core.event_processing.build_prompt_context", return_value=([], 0, None)), \
@@ -1609,7 +1534,7 @@ class PersistentAgentToolCreditTests(TestCase):
             )
 
         self.assertEqual(usage["total_tokens"], 0)
-        self.assertEqual(observed["routing_tier"], AgentLLMTier.ULTRA)
+        self.assertEqual(observed["routing_tier"], AgentLLMTier.STANDARD)
         self.assertEqual(get_runtime_tier_override(self.agent), None)
         self.assertFalse(
             PersistentAgentSystemStep.objects.filter(step__agent=self.agent).exists()
@@ -1617,7 +1542,7 @@ class PersistentAgentToolCreditTests(TestCase):
         self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
-                description__contains="baseline_tier=ultra_max;runtime_tier=ultra",
+                description__contains="baseline_tier=ultra_max;runtime_tier=standard",
             ).exists()
         )
         self.assertFalse(
