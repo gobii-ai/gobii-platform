@@ -496,3 +496,42 @@ if __name__ == "__main__":
         self.assertEqual(judge_records[-1]["status"], EvalRunTask.Status.SKIPPED)
         self.assertIn("prerequisite local checks failed", judge_records[-1]["observed_summary"])
         self.assertIn("invoke_custom_tool", judge_records[-1]["observed_summary"])
+
+    def test_run_fails_when_create_custom_tool_is_called_more_than_once(self):
+        case = _case("chunked_mcp_fanout")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        first_create = _create_call(case)
+        second_create = _create_call(case)
+        custom_call = _custom_call(case)
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append(
+                {
+                    "task_name": task_name,
+                    "status": status,
+                    "observed_summary": observed_summary,
+                    "artifacts": kwargs.get("artifacts") or {},
+                }
+            )
+
+        def fail_judge(**kwargs):
+            self.fail("LLM judge should not run after repeated create_custom_tool calls.")
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, second_create, custom_call]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = fail_judge
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        proposal = [record for record in records if record["task_name"] == "propose_result_contract"][-1]
+        invoke = [record for record in records if record["task_name"] == "invoke_custom_tool"][-1]
+        judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
+        self.assertEqual(proposal["status"], EvalRunTask.Status.FAILED)
+        self.assertIn("more than once", proposal["observed_summary"])
+        self.assertEqual(proposal["artifacts"]["create_tool_call_count"], 2)
+        self.assertEqual(invoke["status"], EvalRunTask.Status.SKIPPED)
+        self.assertEqual(judge["status"], EvalRunTask.Status.SKIPPED)

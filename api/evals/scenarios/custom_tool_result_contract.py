@@ -287,6 +287,44 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
+        if len(create_calls) > 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="propose_result_contract",
+                observed_summary=(
+                    "Agent called create_custom_tool more than once "
+                    f"({len(create_calls)} calls). Custom tool creation must succeed on the first attempt."
+                ),
+                artifacts={
+                    "create_tool_call_count": len(create_calls),
+                    "create_tool_results": [
+                        {
+                            "status": getattr(call, "status", ""),
+                            "result": call.result,
+                            "tool_params": call.tool_params,
+                        }
+                        for call in create_calls
+                    ],
+                },
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name="invoke_custom_tool",
+                observed_summary="Skipped because create_custom_tool was called more than once.",
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name="judge_result_helpfulness",
+                observed_summary="Skipped because repeated create_custom_tool calls fail the eval.",
+            )
+            return
+
         create_call = create_calls[-1]
         create_source_code = self._source_code_for_create_call(tool_calls, create_call)
         local_pass, local_reason = self._local_create_tool_check(

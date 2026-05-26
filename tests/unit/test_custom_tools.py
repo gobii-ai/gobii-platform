@@ -179,12 +179,16 @@ class CustomToolsTests(TestCase):
             "source_path='/tools/my_tool.py'",
             "source_code",
             "do not pass only `source_path` unless you already wrote that file",
-            "if malformed/rejected retry create_custom_tool, not create_file",
+            "if rejected, fix every listed issue and retry create_custom_tool, not create_file",
+            "Before the first call, verify",
+            "`parameters_schema.required` requires real source inputs",
+            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
+            "batch/limit tools return `remaining_work`/`next_cursor`",
             "Exact final line: `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "db.row_factory = sqlite3.Row",
             "after the block exits the DB is closed",
-            "before any `db.execute(...).fetchall()`/SELECT",
+            "before SELECT/fetchall",
             "datetime.now(timezone.utc)",
             "not datetime.timezone",
             "Every success or error return dict should include `next_action`",
@@ -196,15 +200,18 @@ class CustomToolsTests(TestCase):
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use values",
-            "URL/domain validators require concrete `urls`, `domains`, or `input_table` params",
+            "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
             "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
 
         for text in (
             "exact final line `if __name__ == '__main__': main(run)`",
+            "`parameters_schema.required` requires real source inputs",
+            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
+            "batch/limit tools return `remaining_work`/`next_cursor`",
             "Do not pass only `source_path` unless that file already exists",
-            "if malformed/rejected retry create_custom_tool, not create_file",
+            "If rejected, fix every listed issue and retry create_custom_tool, not create_file",
             "db.row_factory = sqlite3.Row",
             "later changes do not convert tuples",
             "not `row.get(...)`",
@@ -1161,7 +1168,6 @@ def run(params, ctx):
         self.assertIn("from _gobii_ctx import main", description)
         self.assertIn("ctx.call_tool", description)
         self.assertIn("custom_*", description)
-        self.assertIn("ctx.sqlite_db_path", description)
         self.assertIn("os.environ", description)
         self.assertIn("HTTP_PROXY", description)
         self.assertIn("HTTPS_PROXY", description)
@@ -1173,7 +1179,6 @@ def run(params, ctx):
         self.assertIn('dependencies = ["requests[socks]"]', description)
         self.assertIn("ctx.requests_proxies()", description)
         self.assertIn("ctx.proxy_url()", description)
-        self.assertIn("curl", description)
         self.assertIn("tool-to-tool calls", description)
         self.assertIn("secret_type='env_var'", description)
         self.assertIn("domain-scoped credential", description)
@@ -1181,25 +1186,24 @@ def run(params, ctx):
         self.assertIn("direct HTTPS tunneling", description)
         self.assertIn("source_path='/tools/my_tool.py'", description)
         self.assertIn("do not pass only `source_path` unless you already wrote that file", description)
-        self.assertIn("if malformed/rejected retry create_custom_tool, not create_file", description)
+        self.assertIn("if rejected, fix every listed issue and retry create_custom_tool, not create_file", description)
         self.assertIn("file_path='/tools/my_tool.py'", description)
         self.assertIn("content=<python source>", description)
-        self.assertIn("`/exports/report.txt` are filespace paths", description)
+        self.assertIn("`/exports/report.txt` are Gobii tool args", description)
         self.assertIn("Path('/workspace/exports/report.txt')", description)
         self.assertIn("open('/exports/report.txt', ...)", description)
-        self.assertIn("$[/exports/report.txt]", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
-        self.assertIn("Small disposable tools are good", description)
+        self.assertIn("Use for 3+ repeated steps", description)
         self.assertIn("err early", description)
         self.assertIn("Avoid manual MCP/tool/API loops", description)
         self.assertIn("Slow batches should be chunkable", description)
         self.assertIn("include `limit`/`batch_size`, filters, progress", description)
-        self.assertIn("remaining work/cursor", description)
+        self.assertIn("batch/limit tools return `remaining_work`/`next_cursor`", description)
         self.assertIn("patch for smaller resumable batches", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("after the block exits the DB is closed", description)
-        self.assertIn("agent SQLite DB that sqlite_batch reads", description)
+        self.assertIn("agent SQLite DB", description)
         self.assertIn("do not ATTACH sandbox file paths", description)
         self.assertIn("Required filespace path", properties["source_path"]["description"])
         self.assertIn("Still required when source_code is provided", properties["source_path"]["description"])
