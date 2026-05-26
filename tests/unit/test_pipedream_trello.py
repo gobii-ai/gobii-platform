@@ -96,10 +96,11 @@ class PipedreamTrelloManagerTests(TestCase):
         Site.objects.update_or_create(id=1, defaults={"domain": "example.com", "name": "example"})
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
+    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[object()])
     @patch("api.integrations.pipedream_connect.create_connect_session")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_execute_tool_rewrites_connect_link_trello(self, mock_exec, mock_loop, mock_create):
+    def test_execute_tool_rewrites_connect_link_trello(self, mock_exec, mock_loop, mock_create, _mock_accounts):
         """Connect link extraction and rewrite works for Trello tools."""
 
         User = get_user_model()
