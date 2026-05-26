@@ -2437,7 +2437,7 @@
   font-weight: 600;
 }
 
-@container agent-composer (max-width: 480px) {
+@container (max-width: 480px) {
   .composer-working-header-row {
     padding: 0.25rem 0.75rem;
     gap: 0.5rem;
@@ -2559,7 +2559,7 @@
   text-transform: uppercase;
 }
 
-@container agent-composer (max-width: 767px) {
+@container (max-width: 767px) {
   .composer-working-tasks-badge {
     display: none;
   }
@@ -2683,7 +2683,7 @@
   100% { background-position: 0% 50%; }
 }
 
-@container agent-composer (max-width: 700px) {
+@container (max-width: 700px) {
   .composer-working-content {
     height: 8rem;
   }
@@ -2698,7 +2698,7 @@
   }
 }
 
-@container agent-composer (max-width: 480px) {
+@container (max-width: 480px) {
   .composer-working-content {
     height: 7rem;
   }
