@@ -217,7 +217,8 @@ def list_pipedream_connected_accounts(
         page_size=page_size,
         max_pages=max_pages,
     )
-    cache.set(cache_key, _serialize_cached_accounts(accounts), CONNECTED_ACCOUNTS_CACHE_TTL_SECONDS)
+    if accounts:
+        cache.set(cache_key, _serialize_cached_accounts(accounts), CONNECTED_ACCOUNTS_CACHE_TTL_SECONDS)
     return accounts
 
 

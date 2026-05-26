@@ -2364,25 +2364,11 @@ class MCPToolManager:
             if app_slug:
                 try:
                     from ...services.pipedream_connections import (
-                        CONNECTED_ACCOUNTS_CACHE_TTL_SECONDS,
                         PipedreamConnectionError,
                         list_pipedream_connected_accounts,
                     )
 
                     connected_accounts = list_pipedream_connected_accounts(agent, app_slug=app_slug)
-                    if not connected_accounts and PipedreamConnectSession.objects.filter(
-                        agent=agent,
-                        app_slug=app_slug,
-                        status=PipedreamConnectSession.Status.SUCCESS,
-                        updated_at__gte=timezone.now() - timedelta(
-                            seconds=CONNECTED_ACCOUNTS_CACHE_TTL_SECONDS + 5
-                        ),
-                    ).exists():
-                        connected_accounts = list_pipedream_connected_accounts(
-                            agent,
-                            app_slug=app_slug,
-                            force_refresh=True,
-                        )
                 except PipedreamConnectionError as exc:
                     return {"status": "error", "message": str(exc)}
                 if not connected_accounts:

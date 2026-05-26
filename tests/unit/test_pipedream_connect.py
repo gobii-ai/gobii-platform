@@ -414,53 +414,6 @@ class PipedreamManagerConnectLinkTests(TestCase):
         mock_accounts.assert_called_once_with(agent, app_slug="google_sheets")
         mock_exec.assert_called_once()
 
-    @patch("api.services.pipedream_connections.list_pipedream_connected_accounts")
-    @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
-    @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)
-    def test_recent_success_session_refreshes_empty_account_cache(
-        self,
-        mock_exec,
-        mock_loop,
-        mock_accounts,
-    ):
-        User = get_user_model()
-        user = User.objects.create_user(username="recent-success@example.com")
-        with patch.object(BrowserUseAgent, 'select_random_proxy', return_value=None):
-            bua = BrowserUseAgent.objects.create(user=user, name="bua-recent-success")
-        agent = PersistentAgent.objects.create(user=user, name="agent-recent-success", charter="c", browser_use_agent=bua)
-        PipedreamConnectSession.objects.create(
-            agent=agent,
-            external_user_id=str(agent.id),
-            conversation_id=str(agent.id),
-            app_slug="google_sheets",
-            connect_token="ctok_recent_success",
-            webhook_secret="secret",
-            status=PipedreamConnectSession.Status.SUCCESS,
-            account_id="apn_recent",
-        )
-
-        mgr = MCPToolManager()
-        _setup_pipedream_tool(mgr, agent)
-        mock_accounts.side_effect = [[], [object()]]
-
-        response = MagicMock()
-        response.is_error = False
-        response.data = {"ok": True}
-        response.content = []
-        loop = MagicMock()
-        loop.run_until_complete.side_effect = lambda _: response
-        mock_loop.return_value = loop
-        mock_exec.return_value = response
-
-        res = mgr.execute_mcp_tool(agent, "google_sheets-add-single-row", {"sheetId": "sheet", "worksheetId": "1"})
-
-        self.assertEqual(res.get("status"), "success")
-        self.assertEqual(res.get("result"), {"ok": True})
-        self.assertEqual(mock_accounts.call_count, 2)
-        mock_accounts.assert_any_call(agent, app_slug="google_sheets")
-        mock_accounts.assert_any_call(agent, app_slug="google_sheets", force_refresh=True)
-        mock_exec.assert_called_once()
-
     @patch("api.services.pipedream_connections.list_pipedream_connected_accounts", return_value=[])
     @patch("api.agent.tools.mcp_manager.MCPToolManager._ensure_event_loop")
     @patch("api.agent.tools.mcp_manager.MCPToolManager._execute_async", new_callable=MagicMock)

@@ -1025,6 +1025,21 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(refreshed_result, [])
         self.assertEqual(mock_lookup.call_count, 2)
 
+    @patch("api.services.pipedream_connections._list_pipedream_connected_accounts")
+    def test_connected_account_lookup_does_not_cache_empty_results(self, mock_lookup):
+        agent = _create_console_test_agent(user=self.user, name="Uncached Empty Connection Agent")
+        mock_lookup.side_effect = [
+            [],
+            [PipedreamConnectedAccount(id="apn_trello", app_slug="trello")],
+        ]
+
+        first_result = list_pipedream_connected_accounts(agent, app_slug="trello")
+        second_result = list_pipedream_connected_accounts(agent, app_slug="trello")
+
+        self.assertEqual(first_result, [])
+        self.assertEqual([account.id for account in second_result], ["apn_trello"])
+        self.assertEqual(mock_lookup.call_count, 2)
+
     @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     def test_get_returns_user_scope_apps(self, mock_get_apps):
         PipedreamAppSelection.objects.create(
