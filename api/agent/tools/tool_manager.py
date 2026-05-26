@@ -56,9 +56,12 @@ from .create_video import (
     is_video_generation_available_for_agent,
 )
 from .custom_tools import (
+    execute_create_custom_tool,
     execute_custom_tool,
+    get_create_custom_tool_tool,
     is_custom_tools_available_for_agent,
 )
+from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from .eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
@@ -84,7 +87,7 @@ from .meta_gobii import (
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
-from .static_tools import get_static_tool_names
+from .static_tools import get_static_tool_names, planning_mode_disallows_tool
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
@@ -247,6 +250,13 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_create_video,
         "is_available": is_video_generation_available_for_agent,
     },
+    CREATE_CUSTOM_TOOL_NAME: {
+        "definition": get_create_custom_tool_tool,
+        "executor": execute_create_custom_tool,
+        "sandbox_only": True,
+        "search_hidden": True,
+        "system_skill_key": CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+    },
     PYTHON_EXEC_TOOL_NAME: {
         "definition": get_python_exec_tool,
         "sandboxed": True,
@@ -300,6 +310,9 @@ def _is_builtin_tool_available(
         return False
 
     if entry.get("search_hidden") and not include_hidden:
+        return False
+
+    if planning_mode_disallows_tool(agent, tool_name):
         return False
 
     if entry.get("sandbox_only"):

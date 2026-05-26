@@ -100,8 +100,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
         self.agent.save(update_fields=["planning_state", "updated_at"])
 
-        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True):
-            names = _tool_names(get_static_tool_definitions(self.agent))
+        names = _tool_names(get_static_tool_definitions(self.agent))
 
         self.assertIn("end_planning", names)
         self.assertIn("request_human_input", names)
@@ -166,8 +165,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertEqual(self.agent.planning_plan, full_plan)
         self.assertEqual(self.agent.charter, full_plan)
         self.assertIsNotNone(self.agent.planning_completed_at)
-        with patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False):
-            self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
+        self.assertNotIn("end_planning", _tool_names(get_static_tool_definitions(self.agent)))
 
     def test_planning_prompt_is_inserted_before_first_run_welcome(self):
         self._set_email_welcome_target()

@@ -2405,21 +2405,13 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         return ""
 
     return (
-        "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
-        "Default for repetitive, paginated, bulk, or deterministic data work is a small custom tool, especially MCP/API fan-out, data syncs, and bulk SQLite writes. "
-        "For one-step creation, call create_custom_tool with source_path='/tools/name.py' and source_code; if malformed/rejected retry create_custom_tool, not create_file. "
-        "Do not pass only source_path unless you already wrote that file; every script ends with the exact final line `if __name__ == '__main__': main(run)`. "
-        "Expose runtime params; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
-        "For dedupe/format jobs expose input_table, output_table, and run_date; for batch tools do not stop after seed/setup/preview. "
-        "Returns must include status, summary, what changed or which outputs are ready, side_effects_completed or counts, verification guidance, remaining work/cursor when resumable, and next_action. "
-        "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only.' "
-        "Name ready outputs precisely, e.g. direct_post_urls, scrape_ready_urls, rows_written; validators return accepted ready-to-use values and rejected reasons. "
-        "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. "
-        "Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT, because setting it after fetching does not convert existing tuple rows and rows are not `row.get(...)`. "
-        "For UTC timestamps use datetime.now(timezone.utc), not `datetime.timezone`. "
-        "Path rules: Gobii tool arguments such as `read_file.path`, `create_custom_tool.source_path`, and message attachments use filespace paths like `/tools/foo.py`; `run_command.command` is a shell command, so use relative paths from the workspace root such as `tools/foo.py` or absolute shell paths like `/workspace/tools/foo.py`; do not run `/tools/foo.py` directly. For `run_command.cwd`, use `.` or omit it for the root. "
-        "For direct network code, declare `requests[socks]` or `httpx[socks]`, not bare `requests`/`httpx`. Prefer `ALL_PROXY` as the canonical proxy path for direct HTTPS tunneling; use ctx.requests_proxies() or ctx.proxy_url(). "
-        "Only env-var secrets reach sandboxed code via os.environ. If code needs a secret, use `secure_credentials_request` using `secret_type='env_var'`; never hardcode credentials."
+        "Sandbox access is enabled. `python_exec` and `run_command` run inside your sandbox workspace. "
+        "`create_custom_tool` is available through `search_tools` for repetitive, paginated, bulk, deterministic, "
+        "or MCP/API fan-out work where a reusable Python tool would reduce repeated manual tool calls. "
+        "Gobii tool arguments use filespace paths like `/tools/foo.py`; shell commands use workspace paths like "
+        "`tools/foo.py` or `/workspace/tools/foo.py`. "
+        "Only env-var secrets reach sandboxed code via `os.environ`; request them with "
+        "`secure_credentials_request(secret_type='env_var')`."
     )
 
 

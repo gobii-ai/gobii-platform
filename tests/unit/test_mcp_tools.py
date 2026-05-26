@@ -2370,11 +2370,17 @@ class MCPToolFunctionsTests(TestCase):
         )
         mock_fallback_builtin_selection.assert_not_called()
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_is_not_static_by_default(self, _mock_sandbox):
+        names = get_static_tool_names(self.agent)
+
+        self.assertNotIn(CREATE_CUSTOM_TOOL_NAME, names)
+
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.search_tools.run_completion")
     @patch("api.agent.tools.search_tools.get_mcp_manager")
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
-    def test_search_tools_enables_custom_tool_development_static_system_skill(
+    def test_search_tools_enables_custom_tool_development_system_skill(
         self,
         mock_get_config,
         mock_get_manager,
@@ -2412,18 +2418,18 @@ class MCPToolFunctionsTests(TestCase):
         self.assertIn(f"- {CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY}:", user_message)
         self.assertEqual(result["system_skills"]["enabled"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
         self.assertEqual(result["system_skills"]["invalid"], [])
-        self.assertFalse(
+        self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent,
                 tool_full_name=CREATE_CUSTOM_TOOL_NAME,
             ).exists()
         )
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
     @patch("api.agent.tools.search_tools.run_completion")
     @patch("api.agent.tools.search_tools.get_mcp_manager")
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
-    def test_search_tools_omits_custom_tool_development_when_static_tool_unavailable(
+    def test_search_tools_omits_custom_tool_development_when_create_custom_tool_unavailable(
         self,
         mock_get_config,
         mock_get_manager,

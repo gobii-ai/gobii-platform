@@ -439,8 +439,8 @@ class AgentSkillsPersistenceTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
-    def test_enable_system_skill_accepts_available_static_create_custom_tool(self, _mock_sandbox):
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_enable_system_skill_accepts_available_create_custom_tool(self, _mock_sandbox):
         result = enable_system_skills(self.agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
 
         self.assertEqual(result["enabled"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
@@ -452,7 +452,7 @@ class AgentSkillsPersistenceTests(TestCase):
                 is_enabled=True,
             ).exists()
         )
-        self.assertFalse(
+        self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(
                 agent=self.agent,
                 tool_full_name=CREATE_CUSTOM_TOOL_NAME,
@@ -477,8 +477,8 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertEqual(refreshed_again, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
         self.assertEqual(state.usage_count, 2)
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
-    def test_enable_system_skill_rejects_unavailable_static_create_custom_tool(self, _mock_sandbox):
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_enable_system_skill_rejects_unavailable_create_custom_tool(self, _mock_sandbox):
         result = enable_system_skills(self.agent, [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
 
         self.assertEqual(result["enabled"], [])
@@ -490,7 +490,7 @@ class AgentSkillsPersistenceTests(TestCase):
             ).exists()
         )
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_prompt_block_renders_custom_tool_skill_with_dynamic_state(
         self,
@@ -522,8 +522,8 @@ class AgentSkillsPersistenceTests(TestCase):
         self.assertIn("Custom tools: 1 saved, 1 enabled.", block)
         self.assertIn("custom_alpha", block)
 
-    @patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=False)
-    def test_prompt_block_omits_custom_tool_skill_when_static_tool_unavailable(self, _mock_sandbox):
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_prompt_block_omits_custom_tool_skill_when_create_custom_tool_unavailable(self, _mock_sandbox):
         PersistentAgentSystemSkillState.objects.create(
             agent=self.agent,
             skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
