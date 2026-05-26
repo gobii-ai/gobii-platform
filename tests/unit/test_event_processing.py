@@ -4528,42 +4528,6 @@ class OrchestratorHumanInputInterruptTests(TestCase):
     @patch("api.agent.core.event_processing._schedule_agent_follow_up")
     @patch("api.agent.core.event_processing.get_pending_drain_settings")
     @patch("api.agent.core.event_processing.maybe_run_agent_judge")
-    @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value=BurnRateAction.PAUSED)
-    @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
-    @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)
-    @patch("api.agent.core.event_processing.get_agent_tools", return_value=[])
-    @patch("api.agent.core.event_processing.build_prompt_context")
-    def test_burn_rate_pause_triggers_judge_before_exiting_loop(
-        self,
-        mock_build_prompt,
-        _mock_tools,
-        _mock_seed_config,
-        _mock_seed_skills,
-        _mock_burn_control,
-        mock_judge,
-        mock_pending_settings,
-        _mock_follow_up,
-    ):
-        mock_pending_settings.return_value = PendingDrainSettings(
-            pending_set_ttl_seconds=123,
-            pending_drain_delay_seconds=10,
-            pending_drain_limit=50,
-            pending_drain_schedule_ttl_seconds=60,
-        )
-
-        usage = _run_agent_loop(self.agent, is_first_run=False)
-
-        self.assertEqual(usage.get("total_tokens"), 0)
-        mock_build_prompt.assert_not_called()
-        mock_judge.assert_called_once_with(
-            self.agent,
-            tools=[],
-            extra_trigger_reasons=["burn_rate_throttled"],
-        )
-
-    @patch("api.agent.core.event_processing._schedule_agent_follow_up")
-    @patch("api.agent.core.event_processing.get_pending_drain_settings")
-    @patch("api.agent.core.event_processing.maybe_run_agent_judge")
     @patch("api.agent.core.event_processing.handle_burn_rate_limit", return_value=BurnRateAction.STEPPED_DOWN)
     @patch("api.agent.core.event_processing.seed_sqlite_skills", return_value=None)
     @patch("api.agent.core.event_processing.seed_sqlite_agent_config", return_value=None)

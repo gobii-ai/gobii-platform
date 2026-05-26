@@ -20,7 +20,6 @@ from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
 from uuid import UUID
 
-import redis
 import sqlparse
 from opentelemetry import baggage, trace
 from pottery import Redlock
@@ -40,13 +39,8 @@ from .budget import (
     set_current_context as set_budget_context,
 )
 from .burn_control import (
-    BURN_RATE_COOLDOWN_SECONDS,
-    BURN_RATE_USER_INACTIVITY_MINUTES,
     BurnRateAction,
-    burn_cooldown_key,
-    burn_follow_up_key,
     handle_burn_rate_limit,
-    has_recent_user_message,
 )
 from .processing_flags import (
     clear_processing_lock_active,
@@ -4855,74 +4849,11 @@ def process_agent_events(
         clear_processing_queued_flag(persistent_agent_id, client=redis_client)
         return
 
-    follow_up_key = burn_follow_up_key(persistent_agent_id)
-    cooldown_key = burn_cooldown_key(persistent_agent_id)
-
-    # If this invocation is a scheduled burn-rate follow-up, ensure the token matches.
     if burn_follow_up_token:
-        stored_token = redis_client.get(follow_up_key)
-        stored_token_value = (
-            stored_token.decode() if isinstance(stored_token, (bytes, bytearray)) else stored_token
+        logger.info(
+            "Ignoring obsolete burn-rate follow-up token for agent %s.",
+            persistent_agent_id,
         )
-        if not stored_token_value or stored_token_value != burn_follow_up_token:
-            logger.info(
-                "Skipping burn-rate follow-up for agent %s (token missing or mismatched).",
-                persistent_agent_id,
-            )
-            span.add_event("Burn-rate follow-up skipped - token mismatch")
-            return
-        try:
-            redis_client.delete(follow_up_key)
-        except Exception:
-            logger.debug(
-                "Failed to clear burn follow-up token for agent %s", persistent_agent_id, exc_info=True
-            )
-    else:
-        # Respect active burn-rate cooldown unless a recent user message arrived.
-        try:
-            cooldown_value = redis_client.get(cooldown_key)
-            cooldown_active = bool(cooldown_value)
-        except Exception:
-            logger.warning(
-                "Failed to read burn-rate cooldown for agent %s; proceeding as if inactive.",
-                persistent_agent_id,
-                exc_info=True,
-            )
-            cooldown_active = False
-        if cooldown_active:
-            if has_recent_user_message(
-                persistent_agent_id,
-                window_minutes=BURN_RATE_USER_INACTIVITY_MINUTES,
-            ):
-                try:
-                    redis_client.delete(cooldown_key)
-                except Exception:
-                    logger.debug(
-                        "Failed to clear burn cooldown for agent %s after user interaction",
-                        persistent_agent_id,
-                        exc_info=True,
-                    )
-            else:
-                logger.info(
-                    "Skipping event processing for agent %s – burn-rate cooldown active.",
-                    persistent_agent_id,
-                )
-                span.add_event("Processing skipped - burn cooldown active")
-                clear_processing_queued_flag(persistent_agent_id)
-                return
-
-        # A normal run cancels any pending burn follow-up so we don't double-run.
-        try:
-            deleted = redis_client.delete(follow_up_key)
-            if isinstance(deleted, int) and deleted > 0:
-                logger.info(
-                    "Cleared pending burn-rate follow-up token for agent %s due to new processing run.",
-                    persistent_agent_id,
-                )
-        except redis.exceptions.RedisError as e:
-            logger.warning(
-                "Failed to clear burn-rate follow-up token for agent %s: %s", persistent_agent_id, e, exc_info=True
-            )
 
     if _should_skip_processing_for_inactive_or_deleted_agent(
         persistent_agent_id,
@@ -5518,7 +5449,6 @@ def _run_agent_loop(
     # Clear agent variables from any previous processing cycle
     clear_variables()
     clear_runtime_tier_override(agent)
-    span.set_attribute("burn.cooldown_seconds", BURN_RATE_COOLDOWN_SECONDS)
     max_runtime_seconds = int(getattr(settings, "AGENT_EVENT_PROCESSING_MAX_RUNTIME_SECONDS", 0))
     run_started_at = time.monotonic()
     if heartbeat:
@@ -5532,9 +5462,6 @@ def _run_agent_loop(
             exc_info=True,
         )
         redis_client = None
-    burn_follow_up_task = globals().get("process_agent_events_task")
-    span.set_attribute("burn.follow_up_task_present", bool(burn_follow_up_task))
-
     # Heuristic auto-enable: scan recent inbound messages for site keywords
     # and pre-enable relevant tools if there's capacity (no eviction)
     try:
@@ -5697,22 +5624,7 @@ def _run_agent_loop(
                     budget_ctx=budget_ctx,
                     span=iter_span,
                     daily_state=daily_state,
-                    redis_client=redis_client,
-                    follow_up_task=burn_follow_up_task,
                 )
-                if burn_rate_action == BurnRateAction.PAUSED:
-                    maybe_run_agent_judge(
-                        agent,
-                        tools=tools,
-                        extra_trigger_reasons=["burn_rate_throttled"],
-                    )
-                    logger.info(
-                        "Agent %s paused due to burn rate; exiting loop after %d iteration(s).",
-                        agent.id,
-                        i + 1,
-                    )
-                    return cumulative_token_usage
-
                 judge_trigger_reasons = []
                 if burn_rate_action == BurnRateAction.STEPPED_DOWN:
                     judge_trigger_reasons.append("burn_rate_tier_step_down")
