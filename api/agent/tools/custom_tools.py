@@ -50,6 +50,10 @@ CUSTOM_TOOL_RESULT_MARKER = "__GOBII_CUSTOM_TOOL_RESULT__="
 DEFAULT_CUSTOM_TOOL_TIMEOUT_SECONDS = 300
 MAX_CUSTOM_TOOL_TIMEOUT_SECONDS = 900
 MAX_CUSTOM_TOOL_SOURCE_BYTES = 64 * 1024
+CUSTOM_TOOL_RETRY_CHECKLIST = (
+    "Patch all validation issues before retrying: exact import, exact final line, referenced imports, "
+    "required params, remaining_work/next_cursor, and do_not_repeat_manually when writes happen."
+)
 
 _PARAMS_ENV_KEY = "SANDBOX_CUSTOM_TOOL_PARAMS_B64"
 _BRIDGE_URL_ENV_KEY = "SANDBOX_CUSTOM_TOOL_BRIDGE_URL"
@@ -812,7 +816,10 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
         for node in tree.body
     )
     if not imports_main:
-        return "Custom tool source must import `main` with `from _gobii_ctx import main`."
+        return (
+            "Custom tool source must import `main` with `from _gobii_ctx import main`. "
+            f"{CUSTOM_TOOL_RETRY_CHECKLIST}"
+        )
 
     has_main_guard = False
     for node in tree.body:
@@ -843,7 +850,10 @@ def _validate_source_code(source_text: str, source_path: str) -> Optional[str]:
         if has_main_guard:
             break
     if not has_main_guard:
-        return "Custom tool source must end with `if __name__ == '__main__': main(run)`."
+        return (
+            "Custom tool source must end with `if __name__ == '__main__': main(run)`. "
+            f"{CUSTOM_TOOL_RETRY_CHECKLIST}"
+        )
     missing_fstring_names = _find_likely_undefined_fstring_names(tree)
     if missing_fstring_names:
         names = ", ".join(missing_fstring_names)

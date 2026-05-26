@@ -1248,6 +1248,27 @@ def run(params, ctx):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("main(run)", result["message"])
+        self.assertIn("Patch all validation issues before retrying", result["message"])
+        self.assertIn("exact import", result["message"])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_source_without_main_import_with_retry_checklist(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": "def run(params, ctx):\n    return {'message': 'hi'}\n\nif __name__ == '__main__': main(run)\n",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("from _gobii_ctx import main", result["message"])
+        self.assertIn("Patch all validation issues before retrying", result["message"])
+        self.assertIn("exact final line", result["message"])
+        self.assertIn("referenced imports", result["message"])
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)

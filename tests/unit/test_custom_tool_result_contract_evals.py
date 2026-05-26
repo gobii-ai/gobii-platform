@@ -100,6 +100,7 @@ def _custom_call(case, *, params=None):
             "verification": {"mode": "read_only"},
             "remaining_work": {"count": 0, "next_cursor": None},
             "next_action": "Verify read-only.",
+            "do_not_repeat_manually": True,
             "warnings": [],
         },
         step=None,
@@ -322,6 +323,21 @@ if __name__ == "__main__":
 
         self.assertTrue(ok, reason)
 
+    def test_local_create_tool_check_does_not_require_replay_prevention_in_source(self):
+        case = _case("sheets_backlog_sync")
+        source = _source_code().replace(
+            "Use read-only verification; do not replay append/add/update calls.",
+            "Verify completed rows.",
+        )
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_sheets_backlog_sync",
+        )
+
+        self.assertTrue(ok, reason)
+
     def test_local_create_tool_check_accepts_ready_outputs_without_next_action_field(self):
         case = _case("scrape_url_normalization")
         source = """
@@ -430,6 +446,41 @@ if __name__ == "__main__":
 
         self.assertFalse(ok)
         self.assertIn("sandbox failed", reason)
+
+    def test_local_custom_call_check_allows_dry_run_without_replay_prevention(self):
+        case = _case("sheets_final_sync")
+        custom_call = _custom_call(case)
+        custom_call.result = {
+            "status": "ok",
+            "result": {
+                "status": "dry_run_complete",
+                "dry_run": True,
+                "signals_to_sync": 5,
+                "next_action": "Call again with dry_run=false to perform the actual sync",
+            },
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertTrue(ok, reason)
+
+    def test_local_custom_call_check_requires_replay_prevention_for_completed_writes(self):
+        case = _case("sheets_final_sync")
+        custom_call = _custom_call(case)
+        custom_call.result = {
+            "status": "ok",
+            "result": {
+                "status": "sync_complete",
+                "rows_written": 5,
+                "remaining_work": False,
+                "next_action": "Verify destination tables.",
+            },
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertFalse(ok)
+        self.assertIn("manual replay prevention", reason)
 
     def test_agent_judge_context_includes_actual_tool_calls_and_rubric(self):
         case = _case("chunked_mcp_fanout")
