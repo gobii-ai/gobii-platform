@@ -241,7 +241,6 @@ BUILTIN_TOOL_REGISTRY = {
         "definition": get_create_image_tool,
         "executor": execute_create_image,
         "is_available": is_image_generation_available_for_agent,
-        "system_skill_key": "image_generation",
     },
     CREATE_VIDEO_TOOL_NAME: {
         "definition": get_create_video_tool,

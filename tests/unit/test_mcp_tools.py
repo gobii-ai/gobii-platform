@@ -3285,7 +3285,7 @@ class MCPToolFunctionsTests(TestCase):
     @patch('api.agent.tools.search_tools.run_completion')
     @patch('api.agent.tools.search_tools.get_mcp_manager')
     @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
-    def test_search_tools_includes_image_generation_system_skill_when_configured(
+    def test_search_tools_does_not_include_image_generation_system_skill_when_configured(
         self,
         mock_get_config,
         mock_get_manager,
@@ -3313,30 +3313,24 @@ class MCPToolFunctionsTests(TestCase):
 
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
-        self.assertIn("Available system skills:", user_message)
-        self.assertIn("- image_generation:", user_message)
+        self.assertNotIn("Available system skills:", user_message)
+        self.assertNotIn("- image_generation:", user_message)
         self.assertIn("create_image", user_message)
         system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
         self.assertNotIn("If the user asks to generate or design a NEW image asset", system_message)
         mock_enable_tools.assert_not_called()
 
-    def test_enable_create_image_also_enables_image_generation_system_skill(self):
+    def test_enable_create_image_does_not_create_image_generation_system_skill(self):
         self._seed_create_image_tier()
-        PersistentAgentSystemSkillState.objects.create(
-            agent=self.agent,
-            skill_key="image_generation",
-            is_enabled=False,
-        )
 
         result = enable_tools(self.agent, ["create_image"])
 
         self.assertEqual(result["status"], "success")
         self.assertIn("create_image", result["enabled"])
-        state = PersistentAgentSystemSkillState.objects.get(
+        self.assertFalse(PersistentAgentSystemSkillState.objects.filter(
             agent=self.agent,
             skill_key="image_generation",
-        )
-        self.assertTrue(state.is_enabled)
+        ).exists())
 
     @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
     @patch('api.agent.tools.search_tools.enable_tools')

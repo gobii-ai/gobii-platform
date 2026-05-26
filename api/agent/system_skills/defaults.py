@@ -40,49 +40,6 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
 )
 
 
-IMAGE_GENERATION_SYSTEM_SKILL = SystemSkillDefinition(
-    skill_key="image_generation",
-    name="Image Generation",
-    search_summary="Create new image assets or transform existing images with create_image.",
-    tool_names=("create_image",),
-    enables=(
-        "generate original image assets from text prompts",
-        "create logos, illustrations, banners, thumbnails, concept art, and visual assets",
-        "edit, transform, restyle, or preserve details from existing image references",
-        "save generated images to the agent filespace for messages, documents, and follow-up work",
-    ),
-    use_when=(
-        "the user asks to generate or design a new image asset",
-        "the user asks for a logo, illustration, banner, thumbnail, poster, concept art, or artwork",
-        "the user asks to edit, transform, restyle, or preserve details from an existing image",
-        "the user needs image-to-image editing, style transfer, or visual asset creation",
-    ),
-    query_aliases=(
-        "generate image",
-        "create image",
-        "image generation",
-        "image edit",
-        "modify image",
-        "transform image",
-        "image to image",
-        "style transfer",
-        "logo design",
-        "poster design",
-        "thumbnail design",
-        "concept art",
-        "artwork",
-    ),
-    prompt_instructions=(
-        "Use `create_image` only for creating new visual assets or transforming existing images; do not use it for image analysis, OCR, or extracting information from existing images.\n"
-        "Use `create_image(prompt='...', file_path='...')` for a new asset from scratch. Choose a concrete filespace path, usually under `/exports/`, and set an aspect ratio that fits the user's requested use.\n"
-        "Use `source_images` for edits, style transfer, or any request where fidelity matters. If the same person, product, logo, layout, text, or brand element must be preserved, pass filespace image paths in `source_images`; prompt-only generation is not enough.\n"
-        "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the prompt instead of adding source images.\n"
-        "Source images must be filespace paths such as `$[/Inbox/photo.png]` or `/exports/logo.png`.\n"
-        "The tool returns `file`, `inline`, `inline_html`, and `attach` placeholders. Reuse those exact placeholders in user messages and documents; do not invent image URLs or file paths."
-    ),
-)
-
-
 CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
     name="Custom Tool Development",
@@ -536,7 +493,6 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
-    IMAGE_GENERATION_SYSTEM_SKILL.skill_key: IMAGE_GENERATION_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
