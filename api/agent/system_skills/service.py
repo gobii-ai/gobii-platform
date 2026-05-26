@@ -133,15 +133,12 @@ def enable_and_refresh_system_skills_for_tool(agent: PersistentAgent, tool_name:
                 "usage_count": 1,
             },
         )
-        if created:
-            refreshed.append(skill_key)
-            continue
-
-        PersistentAgentSystemSkillState.objects.filter(id=state.id).update(
-            is_enabled=True,
-            last_used_at=used_at,
-            usage_count=F("usage_count") + 1,
-        )
+        if not created:
+            PersistentAgentSystemSkillState.objects.filter(id=state.id).update(
+                is_enabled=True,
+                last_used_at=used_at,
+                usage_count=F("usage_count") + 1,
+            )
         refreshed.append(skill_key)
     return refreshed
 
@@ -257,9 +254,7 @@ def enable_system_skills(
             state.is_enabled = True
             state.save(update_fields=["is_enabled"])
 
-        if not tool_names:
-            enabled.append(skill_key)
-        elif app_enabled or tools_enabled or not state_was_enabled:
+        if not tool_names or app_enabled or tools_enabled or not state_was_enabled:
             enabled.append(skill_key)
         else:
             already_enabled.append(skill_key)

@@ -1433,7 +1433,6 @@ def execute_enabled_tool(
                     if metadata_updates:
                         update_fields.extend(metadata_updates)
                     row.save(update_fields=list(dict.fromkeys(update_fields)))
-                    _ensure_system_skill_enabled_for_tool(agent, entry)
                 except Exception:
                     logger.exception("Failed to record usage for builtin tool %s", resolved_name)
 
