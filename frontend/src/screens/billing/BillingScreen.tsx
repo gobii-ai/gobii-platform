@@ -255,7 +255,11 @@ export function BillingScreen({ initialData }: BillingScreenProps) {
     track(AnalyticsEvent.CTA_FREE_UPGRADE_PLAN, {
       source: 'billing',
     })
-    window.location.assign('/pricing/')
+    try {
+      window.top?.location.assign('/pricing/')
+    } catch {
+      window.location.assign('/pricing/')
+    }
   }, [])
 
   const showPlanAction = !isOrg && isProprietaryMode && initialData.contextType === 'personal'
