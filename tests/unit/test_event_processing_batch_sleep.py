@@ -477,7 +477,7 @@ class TestBatchToolCallsWithSleep(TestCase):
         mock_send_chat.assert_called_once()
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
-    @patch('api.agent.core.event_processing.execute_update_plan', return_value={"status": "ok"})
+    @patch('api.agent.core.event_processing.execute_update_plan', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_enabled_tool', return_value={"status": "ok", "auto_sleep_ok": True})
     @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": False})
     @patch('api.agent.core.event_processing.build_prompt_context')
