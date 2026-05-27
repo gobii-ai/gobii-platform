@@ -19,18 +19,20 @@ from django.urls import reverse
 from django.utils import timezone
 
 from api.agent.files.filespace_service import write_bytes_to_dir
+from api.agent.system_skills.defaults import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL
 from api.agent.tools.custom_tools import (
     CUSTOM_TOOL_RESULT_MARKER,
     _sync_workspace_source,
     build_custom_tool_bridge_token,
     execute_create_custom_tool,
     execute_custom_tool,
+    format_custom_tools_state_for_prompt,
     get_create_custom_tool_tool,
-    get_custom_tools_prompt_summary,
     normalize_custom_tool_name,
     normalize_custom_tool_parameters_schema,
     validate_custom_tool_source_code,
 )
+from api.agent.tools.custom_tool_names import CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.file_str_replace import execute_file_str_replace
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.sqlite_batch import execute_sqlite_batch
@@ -55,6 +57,7 @@ from api.models import (
     PersistentAgentEnabledTool,
     PersistentAgentSecret,
     PersistentAgentStep,
+    PersistentAgentSystemSkillState,
     SystemSkillProfile,
     TaskCredit,
     UserQuota,
@@ -170,18 +173,24 @@ class CustomToolsTests(TestCase):
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
     def test_custom_tool_guidance_requires_helpful_side_effect_results(self, _mock_sandbox):
         create_tool_description = get_create_custom_tool_tool()["function"]["description"]
-        prompt_summary = get_custom_tools_prompt_summary(self.agent)
+        skill_instructions = CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.prompt_instructions
 
         for text in (
             "source_path='/tools/my_tool.py'",
             "source_code",
             "do not pass only `source_path` unless you already wrote that file",
-            "if malformed/rejected retry create_custom_tool, not create_file",
-            "Exact final line: `if __name__ == '__main__': main(run)`",
+            "if rejected, fix every listed issue and retry create_custom_tool, not create_file",
+            "Before the first call, verify",
+            "Exact import `from _gobii_ctx import main`",
+            "`parameters_schema.required` requires real source inputs",
+            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
+            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
+            "batch/limit tools return `remaining_work`/`next_cursor`",
+            "exact final line `if __name__ == '__main__': main(run)`",
             "file_path='/tools/my_tool.py'",
             "db.row_factory = sqlite3.Row",
             "after the block exits the DB is closed",
-            "before any `db.execute(...).fetchall()`/SELECT",
+            "before SELECT/fetchall",
             "datetime.now(timezone.utc)",
             "not datetime.timezone",
             "Every success or error return dict should include `next_action`",
@@ -193,40 +202,40 @@ class CustomToolsTests(TestCase):
             "direct_post_urls",
             "scrape_ready_urls",
             "accepted ready-to-use values",
-            "URL/domain validators require concrete `urls`, `domains`, or `input_table` params",
+            "require source params like `urls`, `domains`, `candidates`, `source_table`, or `input_table`",
             "Do not repeat manually; verify read-only",
         ):
             self.assertIn(text, create_tool_description)
 
         for text in (
+            "exact import `from _gobii_ctx import main`",
             "exact final line `if __name__ == '__main__': main(run)`",
-            "do not pass only source_path unless you already wrote that file",
-            "if malformed/rejected retry create_custom_tool, not create_file",
+            "imports cover referenced modules, e.g. `import sqlite3` before `sqlite3.Row`",
+            "`parameters_schema.required` requires real source inputs",
+            "SQLite: `with ctx.sqlite() as db:`, never `db = ctx.sqlite()`",
+            "batch/limit tools return `remaining_work`/`next_cursor`",
+            "Do not pass only `source_path` unless that file already exists",
+            "If rejected, fix every listed issue and retry create_custom_tool, not create_file",
             "db.row_factory = sqlite3.Row",
-            "setting it after fetching does not convert existing tuple rows",
+            "later changes do not convert tuples",
             "not `row.get(...)`",
-            "datetime.now(timezone.utc)",
-            "not `datetime.timezone`",
             "after the block exits the DB is closed",
             "target resource ids/names",
             "source filters/date ranges",
-            "Never invoke custom_* with empty params",
-            "do not stop after seed/setup/preview",
-            "dedupe/format jobs expose input_table, output_table, and run_date",
-            "URL/list validators, accept the candidate URLs/domains or input_table plus output_table and minimum/limit or destination/default params as required inputs",
-            "do not accept/reject based on `url[match.end():]` remainders",
+            "Never invoke a custom tool with empty params",
+            "validation/dedupe",
             "Every success or error return dict should include `next_action`",
             "do_not_repeat_manually=true",
             "source-code next_action text exactly",
             "what changed or which outputs are ready",
-            "remaining work/cursor",
+            "remaining work or cursor",
             "verification guidance",
             "direct_post_urls",
             "scrape_ready_urls",
-            "accepted ready-to-use list",
+            "accepted ready-to-use values",
             "Do not repeat manually; verify read-only",
         ):
-            self.assertIn(text, prompt_summary)
+            self.assertIn(text, skill_instructions)
 
     def test_side_effect_source_requires_manual_replay_prevention(self):
         source = self._build_runnable_tool_source(
@@ -568,6 +577,13 @@ def run(params, ctx):
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["tool_name"], "custom_greeter")
         mock_enable_tools.assert_called_once_with(self.agent, ["custom_greeter"])
+        skill_state = PersistentAgentSystemSkillState.objects.get(
+            agent=self.agent,
+            skill_key=CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+        )
+        self.assertTrue(skill_state.is_enabled)
+        self.assertIsNotNone(skill_state.last_used_at)
+        self.assertEqual(skill_state.usage_count, 1)
 
         tool = PersistentAgentCustomTool.objects.get(agent=self.agent, tool_name="custom_greeter")
         self.assertEqual(tool.source_path, "/tools/greeter.py")
@@ -1156,7 +1172,6 @@ def run(params, ctx):
         self.assertIn("from _gobii_ctx import main", description)
         self.assertIn("ctx.call_tool", description)
         self.assertIn("custom_*", description)
-        self.assertIn("ctx.sqlite_db_path", description)
         self.assertIn("os.environ", description)
         self.assertIn("HTTP_PROXY", description)
         self.assertIn("HTTPS_PROXY", description)
@@ -1168,7 +1183,6 @@ def run(params, ctx):
         self.assertIn('dependencies = ["requests[socks]"]', description)
         self.assertIn("ctx.requests_proxies()", description)
         self.assertIn("ctx.proxy_url()", description)
-        self.assertIn("curl", description)
         self.assertIn("tool-to-tool calls", description)
         self.assertIn("secret_type='env_var'", description)
         self.assertIn("domain-scoped credential", description)
@@ -1176,25 +1190,24 @@ def run(params, ctx):
         self.assertIn("direct HTTPS tunneling", description)
         self.assertIn("source_path='/tools/my_tool.py'", description)
         self.assertIn("do not pass only `source_path` unless you already wrote that file", description)
-        self.assertIn("if malformed/rejected retry create_custom_tool, not create_file", description)
+        self.assertIn("if rejected, fix every listed issue and retry create_custom_tool, not create_file", description)
         self.assertIn("file_path='/tools/my_tool.py'", description)
         self.assertIn("content=<python source>", description)
-        self.assertIn("`/exports/report.txt` are filespace paths", description)
+        self.assertIn("`/exports/report.txt` are Gobii tool args", description)
         self.assertIn("Path('/workspace/exports/report.txt')", description)
         self.assertIn("open('/exports/report.txt', ...)", description)
-        self.assertIn("$[/exports/report.txt]", description)
         self.assertIn("Latest workspace edits are synced automatically", description)
-        self.assertIn("Small disposable tools are good", description)
+        self.assertIn("Use for 3+ repeated steps", description)
         self.assertIn("err early", description)
         self.assertIn("Avoid manual MCP/tool/API loops", description)
         self.assertIn("Slow batches should be chunkable", description)
         self.assertIn("include `limit`/`batch_size`, filters, progress", description)
-        self.assertIn("remaining work/cursor", description)
+        self.assertIn("batch/limit tools return `remaining_work`/`next_cursor`", description)
         self.assertIn("patch for smaller resumable batches", description)
         self.assertIn("Prefer patching the same file", description)
         self.assertIn("with ctx.sqlite() as db", description)
         self.assertIn("after the block exits the DB is closed", description)
-        self.assertIn("agent SQLite DB that sqlite_batch reads", description)
+        self.assertIn("agent SQLite DB", description)
         self.assertIn("do not ATTACH sandbox file paths", description)
         self.assertIn("Required filespace path", properties["source_path"]["description"])
         self.assertIn("Still required when source_code is provided", properties["source_path"]["description"])
@@ -1235,6 +1248,27 @@ def run(params, ctx):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("main(run)", result["message"])
+        self.assertIn("Patch all validation issues before retrying", result["message"])
+        self.assertIn("exact import", result["message"])
+
+    @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_rejects_source_without_main_import_with_retry_checklist(self, _mock_sandbox):
+        result = execute_create_custom_tool(
+            self.agent,
+            {
+                "name": "Greeter",
+                "description": "Return a greeting.",
+                "source_path": "/tools/greeter.py",
+                "source_code": "def run(params, ctx):\n    return {'message': 'hi'}\n\nif __name__ == '__main__': main(run)\n",
+                "parameters_schema": {"type": "object", "properties": {}},
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("from _gobii_ctx import main", result["message"])
+        self.assertIn("Patch all validation issues before retrying", result["message"])
+        self.assertIn("exact final line", result["message"])
+        self.assertIn("referenced imports", result["message"])
 
     @patch("api.agent.tools.tool_manager.get_enabled_tool_limit", return_value=2)
     @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=True)
@@ -2070,61 +2104,15 @@ def run(params, ctx):
         )
         PersistentAgentEnabledTool.objects.create(agent=self.agent, tool_full_name="custom_beta")
 
-        summary = get_custom_tools_prompt_summary(self.agent, recent_limit=2)
+        summary = format_custom_tools_state_for_prompt(self.agent, recent_limit=2)
 
         self.assertIn("Custom tools: 2 saved, 1 enabled.", summary)
-        self.assertIn("Default mode for repetitive or bulk work", summary)
-        self.assertIn("Those triggers are not exhaustive", summary)
-        self.assertIn("err on the side of creating and using one", summary)
-        self.assertIn("DEV LOOP:", summary)
-        self.assertIn("file_str_replace", summary)
-        self.assertIn("ctx.sqlite_db_path", summary)
-        self.assertIn("os.environ", summary)
-        self.assertIn("HTTP_PROXY", summary)
-        self.assertIn("HTTPS_PROXY", summary)
-        self.assertIn("ALL_PROXY", summary)
-        self.assertIn("NO_PROXY", summary)
-        self.assertIn("SOCKS5", summary)
-        self.assertIn("requests[socks]", summary)
-        self.assertIn("httpx[socks]", summary)
-        self.assertIn('dependencies = ["requests[socks]"]', summary)
-        self.assertIn("ctx.requests_proxies()", summary)
-        self.assertIn("ctx.proxy_url()", summary)
-        self.assertIn("curl", summary)
-        self.assertIn("ctx.call_tool()", summary)
-        self.assertIn("internal bridge transport", summary)
-        self.assertIn("secret_type='env_var'", summary)
-        self.assertIn("domain-scoped credential", summary)
-        self.assertIn("not bare `requests`/`httpx`", summary)
-        self.assertIn("direct HTTPS tunneling", summary)
-        self.assertIn("sqlite3", summary)
-        self.assertIn("create_custom_tool(source_path='/tools/my_tool.py', source_code=...)", summary)
-        self.assertIn("`/exports/report.txt` are filespace paths", summary)
-        self.assertIn("Path('/workspace/exports/report.txt')", summary)
-        self.assertIn("open('/exports/report.txt', ...)", summary)
-        self.assertIn("$[/exports/report.txt]", summary)
-        self.assertIn("export_path.parent.mkdir(parents=True, exist_ok=True)", summary)
-        self.assertIn("Latest workspace edits sync before registration/execution", summary)
-        self.assertIn("A short one-off tool is usually better than manual repetition", summary)
-        self.assertIn("Immediate triggers:", summary)
-        self.assertIn("bulk INSERT/UPDATE/UPSERT work", summary)
-        self.assertIn("with ctx.sqlite() as db", summary)
-        self.assertIn("sqlite_batch already reads that same durable DB directly", summary)
-        self.assertIn("Do not ATTACH sandbox file paths in sqlite_batch", summary)
-        self.assertIn("Prefer patching the same file", summary)
-        self.assertIn("Start with a small sample/limit", summary)
-        self.assertIn("chunkable by default", summary)
-        self.assertIn("accept `limit`/`batch_size` and status/id filters", summary)
-        self.assertIn("persist progress in SQLite", summary)
-        self.assertIn("Avoid all-or-nothing full-table batches", summary)
-        self.assertIn("manual single-action tool loops", summary)
-        self.assertIn("ANTI-PATTERNS:", summary)
-        self.assertIn("Bulk MCP fan-out:", summary)
-        self.assertIn("Data sync to SQLite:", summary)
-        self.assertIn("Checkpointed orchestration:", summary)
-        self.assertIn("Safe dev loop:", summary)
+        self.assertIn("Recent custom tools:", summary)
         self.assertIn("custom_alpha", summary)
         self.assertIn("custom_beta", summary)
+        self.assertNotIn("Default mode for repetitive or bulk work", summary)
+        self.assertNotIn("DEV LOOP:", summary)
+        self.assertNotIn("ANTI-PATTERNS:", summary)
 
     @patch("api.agent.tools.search_tools.get_llm_config_with_failover", return_value=[("openai", "gpt-4o-mini", {})])
     @patch("api.agent.tools.search_tools.run_completion")

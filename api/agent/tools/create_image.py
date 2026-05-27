@@ -429,22 +429,31 @@ def get_create_image_tool() -> Dict[str, Any]:
             "description": (
                 "Generate an image from a text prompt using configured image-generation tiers, "
                 "then save it to the agent filespace. "
-                "Use for logos, illustrations, banners, concept art, and visual assets. "
-                "For transformations of existing images, pass source_images to preserve subject, layout, or brand elements. "
-                "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and documents."
+                "Use only for creating new visual assets or transforming existing images; do not use it for image "
+                "analysis, OCR, or extracting information from existing images. "
+                "Use for logos, illustrations, banners, thumbnails, posters, concept art, artwork, and visual assets. "
+                "For transformations of existing images, pass `source_images` to preserve subject, layout, product, "
+                "person, logo, text, or brand elements; prompt-only generation is not enough when fidelity matters. "
+                "For style or art-direction changes where no subject, logo, or layout needs preservation, refine the "
+                "prompt instead of adding source images. "
+                "Returns `file`, `inline`, `inline_html`, and `attach` placeholders for reuse in messages and "
+                "documents; reuse those exact placeholders and do not invent image URLs or file paths."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prompt": {
                         "type": "string",
-                        "description": "Natural-language image prompt describing the desired output.",
+                        "description": (
+                            "Natural-language image prompt describing the desired output. Include enough concrete "
+                            "visual detail for a new asset, edit, style transfer, or art direction."
+                        ),
                     },
                     "file_path": {
                         "type": "string",
                         "description": (
-                            "Required filespace path for the generated image "
-                            "(recommended: /exports/your-image.png)."
+                            "Required filespace path for the generated image. Use a concrete filespace path, usually "
+                            "under /exports/, such as /exports/your-image.png."
                         ),
                     },
                     "aspect_ratio": {
@@ -455,9 +464,10 @@ def get_create_image_tool() -> Dict[str, Any]:
                         "type": "array",
                         "items": {"type": "string"},
                         "description": (
-                            "Optional filespace image paths to use as references/edit inputs "
-                            "(e.g. $[/Inbox/photo.png], /exports/logo.png). "
-                            "Use this for image-to-image edits and style transfer."
+                            "Optional filespace image paths to use as references or edit inputs, such as "
+                            "$[/Inbox/photo.png] or /exports/logo.png. Use this for image-to-image edits, style "
+                            "transfer, or any request where the same person, product, logo, layout, text, or brand "
+                            "element must be preserved."
                         ),
                     },
                     "overwrite": {

@@ -26,6 +26,7 @@ from api.models import (
     PersistentAgentCustomTool,
     PersistentAgentEnabledTool,
     PersistentAgentSkill,
+    PersistentAgentSystemSkillState,
     MCPServerConfig,
     MCPServerOAuthCredential,
     PersistentAgentMCPServer,
@@ -58,6 +59,7 @@ from api.agent.tools.tool_manager import (
     mark_tool_enabled_without_discovery,
 )
 from api.agent.tools.static_tools import get_static_tool_names
+from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.tool_runtime import execute_runtime_tool_call
 from api.agent.tools.search_tools import (
     execute_search_tools,
@@ -1611,6 +1613,25 @@ class MCPToolFunctionsTests(TestCase):
         config.tool_search_auto_enable_apps = enabled
         config.save()
         invalidate_tool_settings_cache()
+
+    def _seed_create_image_tier(self) -> None:
+        provider = LLMProvider.objects.create(
+            key=f"img-provider-{uuid.uuid4().hex[:6]}",
+            display_name="Image Provider",
+            enabled=True,
+        )
+        endpoint = ImageGenerationModelEndpoint.objects.create(
+            key=f"img-endpoint-{uuid.uuid4().hex[:6]}",
+            provider=provider,
+            enabled=True,
+            litellm_model="google/gemini-2.5-flash-image",
+        )
+        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
+        ImageGenerationTierEndpoint.objects.create(
+            tier=tier,
+            endpoint=endpoint,
+            weight=1.0,
+        )
         
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -2348,6 +2369,93 @@ class MCPToolFunctionsTests(TestCase):
             PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="meta_ads").exists()
         )
         mock_fallback_builtin_selection.assert_not_called()
+
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    def test_create_custom_tool_is_not_static_by_default(self, _mock_sandbox):
+        names = get_static_tool_names(self.agent)
+
+        self.assertNotIn(CREATE_CUSTOM_TOOL_NAME, names)
+
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True)
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_search_tools_enables_custom_tool_development_system_skill(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        _mock_sandbox,
+    ):
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "Enable the custom tool development skill."
+        setattr(msg, "tool_calls", [
+            {
+                "type": "function",
+                "function": {
+                    "name": "enable_system_skills",
+                    "arguments": json.dumps({"skill_keys": [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY]}),
+                },
+            }
+        ])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "create a custom tool for bulk api fanout")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("Available system skills:", user_message)
+        self.assertIn(f"- {CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY}:", user_message)
+        self.assertEqual(result["system_skills"]["enabled"], [CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY])
+        self.assertEqual(result["system_skills"]["invalid"], [])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name=CREATE_CUSTOM_TOOL_NAME,
+            ).exists()
+        )
+
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    def test_search_tools_omits_custom_tool_development_when_create_custom_tool_unavailable(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        _mock_sandbox,
+    ):
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "create a custom tool for bulk api fanout")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn(CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY, user_message)
 
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -3154,23 +3262,7 @@ class MCPToolFunctionsTests(TestCase):
         mock_enable_tools,
     ):
         """search_tools should include create_image once image tiers are configured."""
-        provider = LLMProvider.objects.create(
-            key=f"img-provider-{uuid.uuid4().hex[:6]}",
-            display_name="Image Provider",
-            enabled=True,
-        )
-        endpoint = ImageGenerationModelEndpoint.objects.create(
-            key=f"img-endpoint-{uuid.uuid4().hex[:6]}",
-            provider=provider,
-            enabled=True,
-            litellm_model="google/gemini-2.5-flash-image",
-        )
-        tier = ImageGenerationLLMTier.objects.create(order=1, description="Tier 1")
-        ImageGenerationTierEndpoint.objects.create(
-            tier=tier,
-            endpoint=endpoint,
-            weight=1.0,
-        )
+        self._seed_create_image_tier()
 
         mock_manager = MagicMock()
         mock_manager._initialized = True
@@ -3194,6 +3286,57 @@ class MCPToolFunctionsTests(TestCase):
         user_message = kwargs["messages"][1]["content"]
         self.assertIn("create_image", user_message)
         mock_enable_tools.assert_not_called()
+
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    def test_search_tools_does_not_include_image_generation_system_skill_when_configured(
+        self,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+    ):
+        self._seed_create_image_tier()
+
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = []
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, 'tool_calls', [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "generate a logo image")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("Available system skills:", user_message)
+        self.assertNotIn("- image_generation:", user_message)
+        self.assertIn("create_image", user_message)
+        system_message = mock_run_completion.call_args.kwargs["messages"][0]["content"]
+        self.assertNotIn("If the user asks to generate or design a NEW image asset", system_message)
+        mock_enable_tools.assert_not_called()
+
+    def test_enable_create_image_does_not_create_image_generation_system_skill(self):
+        self._seed_create_image_tier()
+
+        result = enable_tools(self.agent, ["create_image"])
+
+        self.assertEqual(result["status"], "success")
+        self.assertIn("create_image", result["enabled"])
+        self.assertFalse(PersistentAgentSystemSkillState.objects.filter(
+            agent=self.agent,
+            skill_key="image_generation",
+        ).exists())
 
     @patch('api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent', return_value=False)
     @patch('api.agent.tools.search_tools.enable_tools')

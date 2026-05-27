@@ -5,11 +5,11 @@ from typing import Dict, List, Optional, Set
 from django.db.models import Q
 
 from api.models import AgentPeerLink, PersistentAgent
-from api.services.sandbox_compute import sandbox_compute_enabled_for_agent
 from api.services.tool_blacklist import get_agent_tool_blacklist
+from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 
 PLANNING_MODE_DISABLED_TOOL_NAMES = frozenset({
-    "create_custom_tool",
+    CREATE_CUSTOM_TOOL_NAME,
     "file_str_replace",
     "request_contact_permission",
     "spawn_agent",
@@ -66,7 +66,6 @@ def _get_sleep_tool() -> Dict[str, object]:
 
 def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
     """Return static (always-present) tool definitions for an agent."""
-    from .custom_tools import get_create_custom_tool_tool
     from .email_sender import get_send_email_tool
     from .file_str_replace import get_file_str_replace_tool
     from .planning import get_end_planning_tool
@@ -104,9 +103,6 @@ def get_static_tool_definitions(agent: Optional[PersistentAgent]) -> List[dict]:
         static_tools.append(get_end_planning_tool())
 
     static_tools.append(get_file_str_replace_tool())
-
-    if sandbox_compute_enabled_for_agent(agent):
-        static_tools.append(get_create_custom_tool_tool())
 
     if agent.webhooks.exists():
         static_tools.append(get_send_webhook_tool())

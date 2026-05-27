@@ -17,7 +17,14 @@ from django.db.models import F
 
 from util.text_sanitizer import decode_unicode_escapes
 
-from ...models import PersistentAgent, PersistentAgentCustomTool, PersistentAgentEnabledTool
+from api.agent.eval_agents import is_eval_agent
+
+from ...models import (
+    PersistentAgent,
+    PersistentAgentCustomTool,
+    PersistentAgentEnabledTool,
+    PersistentAgentSystemSkillState,
+)
 from ...services.sandbox_compute import (
     SandboxComputeService,
     SandboxComputeUnavailable,
@@ -51,13 +58,17 @@ from .create_video import (
     is_video_generation_available_for_agent,
 )
 from .custom_tools import (
+    execute_create_custom_tool,
     execute_custom_tool,
+    get_create_custom_tool_tool,
     is_custom_tools_available_for_agent,
 )
+from .custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from .eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
     get_eval_synthetic_tool_definition,
+    get_eval_synthetic_tool_fallback_result,
     is_eval_synthetic_tool_name,
 )
 from .python_exec import get_python_exec_tool
@@ -79,7 +90,7 @@ from .meta_gobii import (
 from .meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 from .autotool_heuristics import find_matching_tools
 from .sqlite_skills import get_required_skill_tool_ids
-from .static_tools import get_static_tool_names
+from .static_tools import get_static_tool_names, planning_mode_disallows_tool
 logger = logging.getLogger(__name__)
 
 SQLITE_TOOL_NAME = "sqlite_batch"
@@ -242,6 +253,13 @@ BUILTIN_TOOL_REGISTRY = {
         "executor": execute_create_video,
         "is_available": is_video_generation_available_for_agent,
     },
+    CREATE_CUSTOM_TOOL_NAME: {
+        "definition": get_create_custom_tool_tool,
+        "executor": execute_create_custom_tool,
+        "sandbox_only": True,
+        "search_hidden": True,
+        "system_skill_key": CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY,
+    },
     PYTHON_EXEC_TOOL_NAME: {
         "definition": get_python_exec_tool,
         "sandboxed": True,
@@ -297,6 +315,9 @@ def _is_builtin_tool_available(
     if entry.get("search_hidden") and not include_hidden:
         return False
 
+    if planning_mode_disallows_tool(agent, tool_name):
+        return False
+
     if entry.get("sandbox_only"):
         if agent is None or not sandbox_compute_enabled_for_agent(agent):
             return False
@@ -346,6 +367,7 @@ def _build_builtin_catalog_entry(
         tool_server="builtin",
         tool_name=tool_name,
         server_config_id=None,
+        system_skill_key=str(registry_entry.get("system_skill_key") or ""),
     )
 
 
@@ -379,6 +401,7 @@ class ToolCatalogEntry:
     tool_server: str = ""
     tool_name: str = ""
     server_config_id: Optional[str] = None
+    system_skill_key: str = ""
 
 
 def _custom_tool_parameters_for_llm(parameters_schema: Any) -> Dict[str, Any]:
@@ -486,8 +509,11 @@ def _build_available_tool_index(
     catalog: Dict[str, ToolCatalogEntry] = {}
     blacklisted_tools = get_agent_tool_blacklist(agent)
 
+    hide_pipedream_tools = is_eval_agent(agent)
     for info in manager.get_tools_for_agent(agent):
         if info.full_name in blacklisted_tools:
+            continue
+        if hide_pipedream_tools and info.server_name == PIPEDREAM_TOOL_SERVER_NAME:
             continue
         catalog[info.full_name] = ToolCatalogEntry(
             provider="mcp",
@@ -625,6 +651,7 @@ def ensure_skill_tools_enabled(agent: PersistentAgent) -> Dict[str, Any]:
         metadata_updates = _apply_tool_metadata(row, entry)
         if metadata_updates:
             row.save(update_fields=metadata_updates)
+        _ensure_system_skill_enabled_for_tool(agent, entry)
 
         if created:
             enabled.append(tool_name)
@@ -692,6 +719,49 @@ def _apply_tool_metadata(row: PersistentAgentEnabledTool, entry: Optional[ToolCa
     return updates
 
 
+def _ensure_system_skill_enabled(agent: PersistentAgent, skill_key: str, *, tool_name: str = "") -> Optional[str]:
+    if not skill_key:
+        return None
+
+    from api.agent.system_skills.registry import get_system_skill_definition
+
+    definition = get_system_skill_definition(skill_key)
+    if definition is None:
+        logger.warning("Tool %s references unknown system skill %s", tool_name or "(unknown)", skill_key)
+        return None
+
+    state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
+        agent=agent,
+        skill_key=definition.skill_key,
+        defaults={"is_enabled": True},
+    )
+    if not state.is_enabled:
+        state.is_enabled = True
+        state.save(update_fields=["is_enabled"])
+    return definition.skill_key
+
+
+def _ensure_system_skill_enabled_for_tool(agent: PersistentAgent, entry: Optional[ToolCatalogEntry]) -> Optional[str]:
+    if not entry:
+        return None
+    return _ensure_system_skill_enabled(
+        agent,
+        entry.system_skill_key,
+        tool_name=entry.full_name,
+    )
+
+
+def _ensure_system_skill_enabled_for_builtin_tool_name(agent: PersistentAgent, tool_name: str) -> Optional[str]:
+    registry_entry = BUILTIN_TOOL_REGISTRY.get(tool_name)
+    if not registry_entry:
+        return None
+    return _ensure_system_skill_enabled(
+        agent,
+        str(registry_entry.get("system_skill_key") or ""),
+        tool_name=tool_name,
+    )
+
+
 def enable_tools(
     agent: PersistentAgent,
     tool_names: Iterable[str],
@@ -749,11 +819,13 @@ def enable_tools(
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
+            _ensure_system_skill_enabled_for_tool(agent, entry)
             enabled.append(resolved_name)
         else:
             metadata_updates = _apply_tool_metadata(row, entry)
             if metadata_updates:
                 row.save(update_fields=metadata_updates)
+            _ensure_system_skill_enabled_for_tool(agent, entry)
             already_enabled.append(resolved_name)
 
     if enabled or already_enabled:
@@ -804,6 +876,7 @@ def _auto_enable_tool_for_execution(agent: PersistentAgent, entry: ToolCatalogEn
     metadata_updates = _apply_tool_metadata(row, entry)
     if metadata_updates:
         row.save(update_fields=metadata_updates)
+    _ensure_system_skill_enabled_for_tool(agent, entry)
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=get_enabled_tool_limit(agent))
     if created:
@@ -862,6 +935,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
         updates = ["last_used_at", "usage_count"]
         updates.extend(_apply_tool_metadata(row, entry))
         row.save(update_fields=list(dict.fromkeys(updates)))
+        _ensure_system_skill_enabled_for_tool(agent, entry)
         return {
             "status": "success",
             "message": f"Tool '{tool_name}' is already enabled",
@@ -881,6 +955,7 @@ def enable_mcp_tool(agent: PersistentAgent, tool_name: str) -> Dict[str, Any]:
     metadata_updates = _apply_tool_metadata(row, entry)
     if metadata_updates:
         row.save(update_fields=list(dict.fromkeys(metadata_updates)))
+    _ensure_system_skill_enabled_for_tool(agent, entry)
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name], limit=limit)
     disabled_tool = evicted[0] if evicted else None
@@ -923,6 +998,7 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
         row.last_used_at = now
         row.usage_count = (row.usage_count or 0) + 1
         row.save(update_fields=["last_used_at", "usage_count"])
+        _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
         return {
             "status": "success",
             "message": f"Tool '{tool_name}' is already enabled (metadata untouched)",
@@ -942,6 +1018,7 @@ def mark_tool_enabled_without_discovery(agent: PersistentAgent, tool_name: str) 
         return {"status": "error", "message": str(exc)}
 
     evicted = _evict_surplus_tools(agent, exclude=[tool_name])
+    _ensure_system_skill_enabled_for_builtin_tool_name(agent, tool_name)
     disabled_tool = evicted[0] if evicted else None
 
     message = f"Marked tool '{tool_name}' enabled without discovery"
@@ -1020,11 +1097,19 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         .values_list("tool_full_name", flat=True)
     )
     eval_tool_name_set = set(enabled_eval_tool_names)
+    hidden_eval_mcp_tool_names = set()
+    if is_eval_agent(agent):
+        hidden_eval_mcp_tool_names = set(
+            PersistentAgentEnabledTool.objects
+            .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
+            .values_list("tool_full_name", flat=True)
+        )
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
         for definition in manager.get_enabled_tools_definitions(agent)
         if _tool_definition_name(definition) not in blacklisted_tools
         and _tool_definition_name(definition) not in eval_tool_name_set
+        and _tool_definition_name(definition) not in hidden_eval_mcp_tool_names
     ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)
@@ -1259,6 +1344,7 @@ def auto_enable_heuristic_tools(
                 metadata_updates = _apply_tool_metadata(row, entry)
                 if metadata_updates:
                     row.save(update_fields=metadata_updates)
+                _ensure_system_skill_enabled_for_tool(agent, entry)
                 enabled.append(tool_name)
                 logger.info(
                     "Autotool heuristic: enabled %s for agent %s",
@@ -1345,12 +1431,7 @@ def execute_enabled_tool(
             except DatabaseError:
                 logger.exception("Failed to record usage for eval tool %s", resolved_name)
 
-        return {
-            "status": "ok",
-            "tool": resolved_name,
-            "message": f"Mocked {resolved_name} result for deterministic eval execution.",
-            "content": {"ok": True},
-        }
+        return get_eval_synthetic_tool_fallback_result(resolved_name, params)
 
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)

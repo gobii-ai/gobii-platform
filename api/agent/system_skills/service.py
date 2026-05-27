@@ -58,6 +58,32 @@ def get_enabled_system_skill_states(agent: PersistentAgent):
     return PersistentAgentSystemSkillState.objects.filter(agent=agent, is_enabled=True)
 
 
+def _system_skill_keys_for_tool(tool_name: str) -> list[str]:
+    normalized_tool = str(tool_name or "").strip()
+    if not normalized_tool:
+        return []
+    return [
+        definition.skill_key
+        for definition in DEFAULT_SYSTEM_SKILL_DEFINITIONS.values()
+        if normalized_tool in definition.tool_names
+    ]
+
+
+def _static_system_skill_tool_names(agent: PersistentAgent) -> set[str]:
+    from api.agent.tools.static_tools import get_static_tool_names
+
+    return get_static_tool_names(agent)
+
+
+def get_available_system_skill_tool_names(agent: PersistentAgent) -> set[str]:
+    from api.agent.tools.tool_manager import get_available_builtin_tool_entries
+
+    return (
+        set(get_available_builtin_tool_entries(agent, include_hidden=True).keys())
+        | _static_system_skill_tool_names(agent)
+    )
+
+
 def refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, used_at=None) -> list[str]:
     normalized_tool = str(tool_name or "").strip()
     if not normalized_tool:
@@ -65,11 +91,7 @@ def refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, us
 
     used_at = used_at or timezone.now()
     ensure_default_system_skills_enabled(agent)
-    matching_keys = [
-        definition.skill_key
-        for definition in DEFAULT_SYSTEM_SKILL_DEFINITIONS.values()
-        if normalized_tool in definition.tool_names
-    ]
+    matching_keys = _system_skill_keys_for_tool(normalized_tool)
     if not matching_keys:
         return []
     state_keys = []
@@ -87,6 +109,38 @@ def refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, us
     if not updated:
         return []
     return matching_keys
+
+
+def enable_and_refresh_system_skills_for_tool(agent: PersistentAgent, tool_name: str, *, used_at=None) -> list[str]:
+    normalized_tool = str(tool_name or "").strip()
+    if not normalized_tool:
+        return []
+
+    used_at = used_at or timezone.now()
+    ensure_default_system_skills_enabled(agent)
+    matching_keys = _system_skill_keys_for_tool(normalized_tool)
+    if not matching_keys:
+        return []
+
+    refreshed: list[str] = []
+    for skill_key in matching_keys:
+        state, created = PersistentAgentSystemSkillState.objects.get_or_create(
+            agent=agent,
+            skill_key=skill_key,
+            defaults={
+                "is_enabled": True,
+                "last_used_at": used_at,
+                "usage_count": 1,
+            },
+        )
+        if not created:
+            PersistentAgentSystemSkillState.objects.filter(id=state.id).update(
+                is_enabled=True,
+                last_used_at=used_at,
+                usage_count=F("usage_count") + 1,
+            )
+        refreshed.append(skill_key)
+    return refreshed
 
 
 def enable_system_skills(
@@ -136,16 +190,8 @@ def enable_system_skills(
 
         tool_names = list(definition.tool_names)
         app_slugs = list(definition.pipedream_app_slugs)
-        state, _created = PersistentAgentSystemSkillState.objects.get_or_create(
-            agent=agent,
-            skill_key=skill_key,
-            defaults={"is_enabled": True},
-        )
-        if not state.is_enabled:
-            state.is_enabled = True
-            state.save(update_fields=["is_enabled"])
-
         app_enabled = False
+        tools_enabled = False
         if app_slugs:
             app_result = enable_pipedream_apps_for_agent(
                 agent,
@@ -161,32 +207,57 @@ def enable_system_skills(
             pipedream_effective_apps = list(app_result.get("effective_apps", []))
             app_enabled = bool(app_result.get("enabled"))
 
-        if not tool_names:
-            enabled.append(skill_key)
-            continue
+        static_tool_names: set[str] = set()
+        if tool_names:
+            available_tool_names = get_available_system_skill_tool_names(agent)
+            if not set(tool_names).issubset(available_tool_names):
+                invalid.append(skill_key)
+                continue
 
-        enabled_qs = PersistentAgentEnabledTool.objects.filter(
+            static_tool_names = _static_system_skill_tool_names(agent)
+
+            dynamic_tool_names = [tool_name for tool_name in tool_names if tool_name not in static_tool_names]
+            enabled_qs = PersistentAgentEnabledTool.objects.filter(
+                agent=agent,
+                tool_full_name__in=dynamic_tool_names,
+            ).values_list("tool_full_name", flat=True)
+            enabled_tool_names = set(enabled_qs)
+            missing_tool_names = [
+                tool_name for tool_name in dynamic_tool_names if tool_name not in enabled_tool_names
+            ]
+            if missing_tool_names:
+                from api.agent.tools.tool_manager import enable_tools
+
+                result = enable_tools(agent, missing_tool_names, include_hidden_builtin=True)
+                if result.get("status") != "success" or result.get("invalid"):
+                    invalid.append(skill_key)
+                    continue
+
+                if result.get("evicted"):
+                    evicted.extend(result.get("evicted", []))
+                tools_enabled = bool(result.get("enabled"))
+                enabled_tool_names.update(result.get("enabled", []))
+                enabled_tool_names.update(result.get("already_enabled", []))
+
+            ready_tool_names = enabled_tool_names | static_tool_names
+            if not set(tool_names).issubset(ready_tool_names):
+                invalid.append(skill_key)
+                continue
+
+        state, created = PersistentAgentSystemSkillState.objects.get_or_create(
             agent=agent,
-            tool_full_name__in=tool_names,
-        ).values_list("tool_full_name", flat=True)
-        enabled_tool_names = set(enabled_qs)
-        if enabled_tool_names.issuperset(tool_names):
-            if app_enabled:
-                enabled.append(skill_key)
-            else:
-                already_enabled.append(skill_key)
-            continue
+            skill_key=skill_key,
+            defaults={"is_enabled": True},
+        )
+        state_was_enabled = (not created) and state.is_enabled
+        if not state.is_enabled:
+            state.is_enabled = True
+            state.save(update_fields=["is_enabled"])
 
-        from api.agent.tools.tool_manager import enable_tools
-
-        result = enable_tools(agent, tool_names, include_hidden_builtin=True)
-        if result.get("status") != "success":
-            invalid.append(skill_key)
-            continue
-
-        if result.get("evicted"):
-            evicted.extend(result.get("evicted", []))
-        enabled.append(skill_key)
+        if not tool_names or app_enabled or tools_enabled or not state_was_enabled:
+            enabled.append(skill_key)
+        else:
+            already_enabled.append(skill_key)
 
     return {
         "status": "success",

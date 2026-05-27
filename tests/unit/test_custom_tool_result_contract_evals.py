@@ -100,6 +100,7 @@ def _custom_call(case, *, params=None):
             "verification": {"mode": "read_only"},
             "remaining_work": {"count": 0, "next_cursor": None},
             "next_action": "Verify read-only.",
+            "do_not_repeat_manually": True,
             "warnings": [],
         },
         step=None,
@@ -322,6 +323,21 @@ if __name__ == "__main__":
 
         self.assertTrue(ok, reason)
 
+    def test_local_create_tool_check_does_not_require_replay_prevention_in_source(self):
+        case = _case("sheets_backlog_sync")
+        source = _source_code().replace(
+            "Use read-only verification; do not replay append/add/update calls.",
+            "Verify completed rows.",
+        )
+
+        ok, reason = CustomToolResultContractScenario._local_create_tool_check(
+            case,
+            _create_call(case, source_code=source),
+            "custom_sheets_backlog_sync",
+        )
+
+        self.assertTrue(ok, reason)
+
     def test_local_create_tool_check_accepts_ready_outputs_without_next_action_field(self):
         case = _case("scrape_url_normalization")
         source = """
@@ -431,6 +447,41 @@ if __name__ == "__main__":
         self.assertFalse(ok)
         self.assertIn("sandbox failed", reason)
 
+    def test_local_custom_call_check_allows_dry_run_without_replay_prevention(self):
+        case = _case("sheets_final_sync")
+        custom_call = _custom_call(case)
+        custom_call.result = {
+            "status": "ok",
+            "result": {
+                "status": "dry_run_complete",
+                "dry_run": True,
+                "signals_to_sync": 5,
+                "next_action": "Call again with dry_run=false to perform the actual sync",
+            },
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertTrue(ok, reason)
+
+    def test_local_custom_call_check_requires_replay_prevention_for_completed_writes(self):
+        case = _case("sheets_final_sync")
+        custom_call = _custom_call(case)
+        custom_call.result = {
+            "status": "ok",
+            "result": {
+                "status": "sync_complete",
+                "rows_written": 5,
+                "remaining_work": False,
+                "next_action": "Verify destination tables.",
+            },
+        }
+
+        ok, reason = CustomToolResultContractScenario._local_custom_call_check(case, custom_call)
+
+        self.assertFalse(ok)
+        self.assertIn("manual replay prevention", reason)
+
     def test_agent_judge_context_includes_actual_tool_calls_and_rubric(self):
         case = _case("chunked_mcp_fanout")
         context = CustomToolResultContractScenario._agent_judge_context(
@@ -496,3 +547,42 @@ if __name__ == "__main__":
         self.assertEqual(judge_records[-1]["status"], EvalRunTask.Status.SKIPPED)
         self.assertIn("prerequisite local checks failed", judge_records[-1]["observed_summary"])
         self.assertIn("invoke_custom_tool", judge_records[-1]["observed_summary"])
+
+    def test_run_fails_when_create_custom_tool_is_called_more_than_once(self):
+        case = _case("chunked_mcp_fanout")
+        scenario = CustomToolResultContractScenario()
+        scenario.case = case
+        first_create = _create_call(case)
+        second_create = _create_call(case)
+        custom_call = _custom_call(case)
+        records = []
+
+        def record_task_result(run_id, step, status, *, task_name, observed_summary="", **kwargs):
+            records.append(
+                {
+                    "task_name": task_name,
+                    "status": status,
+                    "observed_summary": observed_summary,
+                    "artifacts": kwargs.get("artifacts") or {},
+                }
+            )
+
+        def fail_judge(**kwargs):
+            self.fail("LLM judge should not run after repeated create_custom_tool calls.")
+
+        scenario.wait_for_agent_idle = lambda *args, **kwargs: nullcontext()
+        scenario.inject_message = lambda *args, **kwargs: SimpleNamespace(timestamp=timezone.now())
+        scenario._tool_calls_for_run = lambda *args, **kwargs: [first_create, second_create, custom_call]
+        scenario.record_task_result = record_task_result
+        scenario.llm_judge = fail_judge
+
+        scenario.run(str(uuid.uuid4()), str(uuid.uuid4()))
+
+        proposal = [record for record in records if record["task_name"] == "propose_result_contract"][-1]
+        invoke = [record for record in records if record["task_name"] == "invoke_custom_tool"][-1]
+        judge = [record for record in records if record["task_name"] == "judge_result_helpfulness"][-1]
+        self.assertEqual(proposal["status"], EvalRunTask.Status.FAILED)
+        self.assertIn("more than once", proposal["observed_summary"])
+        self.assertEqual(proposal["artifacts"]["create_tool_call_count"], 2)
+        self.assertEqual(invoke["status"], EvalRunTask.Status.SKIPPED)
+        self.assertEqual(judge["status"], EvalRunTask.Status.SKIPPED)

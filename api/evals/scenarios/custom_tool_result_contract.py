@@ -287,6 +287,44 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
             )
             return
 
+        if len(create_calls) > 1:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="propose_result_contract",
+                observed_summary=(
+                    "Agent called create_custom_tool more than once "
+                    f"({len(create_calls)} calls). Custom tool creation must succeed on the first attempt."
+                ),
+                artifacts={
+                    "create_tool_call_count": len(create_calls),
+                    "create_tool_results": [
+                        {
+                            "status": getattr(call, "status", ""),
+                            "result": call.result,
+                            "tool_params": call.tool_params,
+                        }
+                        for call in create_calls
+                    ],
+                },
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name="invoke_custom_tool",
+                observed_summary="Skipped because create_custom_tool was called more than once.",
+            )
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.SKIPPED,
+                task_name="judge_result_helpfulness",
+                observed_summary="Skipped because repeated create_custom_tool calls fail the eval.",
+            )
+            return
+
         create_call = create_calls[-1]
         create_source_code = self._source_code_for_create_call(tool_calls, create_call)
         local_pass, local_reason = self._local_create_tool_check(
@@ -667,22 +705,6 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
                 f"{missing_categories}."
             )
 
-        if case.requires_manual_replay_prevention:
-            replay_prevention_terms = (
-                "do_not_repeat_manually",
-                "read-only",
-                "read only",
-                "do not repeat",
-                "do not replay",
-                "do not manually",
-                "not another append",
-                "not replay",
-            )
-            if not any(term in source_text for term in replay_prevention_terms):
-                return False, (
-                    "completed side-effect tool source must make manual replay prevention clear."
-                )
-
         if case.requires_batching:
             if "batch_size" not in source_text and "limit" not in source_text:
                 return False, "batching-required tool source must include batch_size or limit handling."
@@ -729,7 +751,68 @@ class CustomToolResultContractScenario(EvalScenario, ScenarioExecutionTools):
         ):
             return False, "batching-required custom tool invocation must include batch_size or limit."
 
+        payload = CustomToolResultContractScenario._custom_result_payload(result)
+        if (
+            case.requires_manual_replay_prevention
+            and CustomToolResultContractScenario._observed_completed_side_effect(payload)
+            and not CustomToolResultContractScenario._has_manual_replay_prevention(payload)
+        ):
+            return False, "completed side-effect result must make manual replay prevention clear."
+
         return True, "Agent invoked the custom tool with useful runtime params."
+
+    @staticmethod
+    def _custom_result_payload(result: dict[str, Any]) -> dict[str, Any]:
+        nested = result.get("result")
+        return nested if isinstance(nested, dict) else result
+
+    @staticmethod
+    def _observed_completed_side_effect(payload: dict[str, Any]) -> bool:
+        status = str(payload.get("status") or "").lower()
+        if payload.get("dry_run") is True or "dry_run" in status:
+            return False
+
+        if payload.get("side_effects_completed") is True:
+            return True
+
+        text = json.dumps(payload, sort_keys=True).lower()
+        if not any(
+            marker in text
+            for marker in (
+                "append",
+                "sync",
+                "synced",
+                "written",
+                "write",
+                "updated",
+                "inserted",
+                "rows_appended",
+                "records_synced",
+            )
+        ):
+            return False
+
+        remaining_work = payload.get("remaining_work")
+        if remaining_work in (False, 0, "0", "false", "False"):
+            return True
+
+        return "complete" in status or "success" in status
+
+    @staticmethod
+    def _has_manual_replay_prevention(payload: dict[str, Any]) -> bool:
+        if payload.get("do_not_repeat_manually") is True:
+            return True
+        text = json.dumps(payload, sort_keys=True).lower()
+        return any(
+            term in text
+            for term in (
+                "do not repeat",
+                "do not replay",
+                "do not manually",
+                "not another append",
+                "not replay",
+            )
+        )
 
     @classmethod
     def _agent_judge_context(

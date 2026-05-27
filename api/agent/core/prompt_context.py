@@ -56,7 +56,6 @@ from ...models import (
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
     PersistentAgentPromptArchive,
-    PersistentAgentEnabledTool,
     PersistentAgentSecret,
     GlobalSecret,
     PersistentAgentStep,
@@ -85,7 +84,6 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
-from ..tools.custom_tools import get_custom_tools_prompt_summary
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -98,7 +96,6 @@ from ..tools.sqlite_state import (
 from ..tools.sqlite_query_quality import summarize_sqlite_tool_result_sql
 from ..tools.sqlite_skills import format_recent_skills_for_prompt
 from ..tools.tool_manager import (
-    CREATE_IMAGE_TOOL_NAME,
     ensure_default_tools_enabled,
     ensure_skill_tools_enabled,
     get_enabled_tool_definitions,
@@ -1439,15 +1436,6 @@ def _render_prompt_context_once(
             non_shrinkable=True,
         )
 
-    custom_tools_block = get_custom_tools_prompt_summary(agent, recent_limit=3)
-    if custom_tools_block:
-        important_group.section_text(
-            "agent_custom_tools",
-            custom_tools_block,
-            weight=4,
-            shrinker="hmt",
-        )
-
     files_snapshot = _build_sqlite_files_snapshot(agent)
     store_files_for_prompt(files_snapshot.records)
 
@@ -2417,21 +2405,13 @@ def _get_sandbox_prompt_summary(agent: PersistentAgent) -> str:
         return ""
 
     return (
-        "Sandbox access is enabled. `python_exec`, `run_command`, and sandboxed custom tools run inside your sandbox workspace. "
-        "Default for repetitive, paginated, bulk, or deterministic data work is a small custom tool, especially MCP/API fan-out, data syncs, and bulk SQLite writes. "
-        "For one-step creation, call create_custom_tool with source_path='/tools/name.py' and source_code; if malformed/rejected retry create_custom_tool, not create_file. "
-        "Do not pass only source_path unless you already wrote that file; every script ends with the exact final line `if __name__ == '__main__': main(run)`. "
-        "Expose runtime params; do not invoke custom_* with empty params unless the tool intentionally reads verified state. "
-        "For dedupe/format jobs expose input_table, output_table, and run_date; for batch tools do not stop after seed/setup/preview. "
-        "Returns must include status, summary, what changed or which outputs are ready, side_effects_completed or counts, verification guidance, remaining work/cursor when resumable, and next_action. "
-        "For completed writes include do_not_repeat_manually=true and source-code next_action text exactly like 'Do not repeat manually; verify read-only.' "
-        "Name ready outputs precisely, e.g. direct_post_urls, scrape_ready_urls, rows_written; validators return accepted ready-to-use values and rejected reasons. "
-        "With `with ctx.sqlite() as db:`, keep DB work inside the block; after the block exits the DB is closed. "
-        "Use cursor.rowcount/SELECT changes(); set db.row_factory = sqlite3.Row before any `db.execute(...).fetchall()`/SELECT, because setting it after fetching does not convert existing tuple rows and rows are not `row.get(...)`. "
-        "For UTC timestamps use datetime.now(timezone.utc), not `datetime.timezone`. "
-        "Path rules: Gobii tool arguments such as `read_file.path`, `create_custom_tool.source_path`, and message attachments use filespace paths like `/tools/foo.py`; `run_command.command` is a shell command, so use relative paths from the workspace root such as `tools/foo.py` or absolute shell paths like `/workspace/tools/foo.py`; do not run `/tools/foo.py` directly. For `run_command.cwd`, use `.` or omit it for the root. "
-        "For direct network code, declare `requests[socks]` or `httpx[socks]`, not bare `requests`/`httpx`. Prefer `ALL_PROXY` as the canonical proxy path for direct HTTPS tunneling; use ctx.requests_proxies() or ctx.proxy_url(). "
-        "Only env-var secrets reach sandboxed code via os.environ. If code needs a secret, use `secure_credentials_request` using `secret_type='env_var'`; never hardcode credentials."
+        "Sandbox access is enabled. `python_exec` and `run_command` run inside your sandbox workspace. "
+        "`create_custom_tool` is available through `search_tools` for repetitive, paginated, bulk, deterministic, "
+        "or MCP/API fan-out work where a reusable Python tool would reduce repeated manual tool calls. "
+        "Gobii tool arguments use filespace paths like `/tools/foo.py`; shell commands use workspace paths like "
+        "`tools/foo.py` or `/workspace/tools/foo.py`. "
+        "Only env-var secrets reach sandboxed code via `os.environ`; request them with "
+        "`secure_credentials_request(secret_type='env_var')`."
     )
 
 
@@ -3380,30 +3360,6 @@ def _get_system_instruction(
         f"{stop_continue_examples}"
     )
 
-    image_generation_skill = ""
-    if agent is not None:
-        try:
-            image_tool_enabled = PersistentAgentEnabledTool.objects.filter(
-                agent=agent,
-                tool_full_name=CREATE_IMAGE_TOOL_NAME,
-            ).exists()
-        except DatabaseError:
-            image_tool_enabled = False
-            logger.debug("Failed checking create_image enablement for agent %s", agent.id, exc_info=True)
-
-        if image_tool_enabled:
-            image_generation_skill = (
-                "```\n"
-                "# Image generation playbook (only when create_image is enabled)\n"
-                "new_asset_from_scratch → create_image(prompt='...', file_path='...')\n"
-                "preserve_subject_or_logo_or_text → create_image(prompt='...', source_images=['$[/path.png]'], file_path='...')\n"
-                "style_transfer_or_edit_existing_image → use source_images with create_image\n"
-                "just want a different art direction (no preservation needed) → refine prompt, no source_images\n"
-                "if fidelity matters (same person/product/layout) → source_images is required\n"
-                "source_images must be filespace paths: $[/...] or /...\n"
-                "```\n\n"
-            )
-
     if not planning_mode_active:
         charter_and_schedule_intro = (
             "Your charter is durable standing memory for role, scope, stable preferences, communication guidance, and boundaries. "
@@ -3487,8 +3443,6 @@ def _get_system_instruction(
         "# Attachment pre-flight: RIGHT: send_email(..., attachments=[result.attach]). "
         "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count and "
         "__messages.rejected_attachments_json before claiming or resending files.\n\n"
-        f"{image_generation_skill}"
-
         "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "
@@ -3533,7 +3487,7 @@ def _get_system_instruction(
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs in a compact Sources section. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research, collect usually 4-8 strong sources, then synthesize. Start with one broad discovery search, or two only if the first misses a requested angle; scrape strongest pages instead of running separate search queries for every company or competitor. Do not send progress messages or chase extra names once sources cover requested angles. If sources support the memo, write final next with full copied URLs. In chat, keep deep memos dense and under about 5,000 characters unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scraped sources support the memo, write final next with copied URLs. In chat, keep deep memos dense and under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
         "__agent_config is for durable operating instructions; updating it is not normal task execution.\n"

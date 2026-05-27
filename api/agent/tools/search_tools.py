@@ -19,6 +19,8 @@ from django.utils import timezone
 from litellm import drop_params
 from opentelemetry import trace
 
+from api.agent.eval_agents import is_eval_agent
+
 from ...models import MCPServerConfig, PersistentAgent, PersistentAgentCompletion, PersistentAgentSkill
 from ...services.pipedream_apps import (
     PipedreamCatalogError,
@@ -30,7 +32,7 @@ from ...services.tool_blacklist import get_agent_tool_blacklist
 from ...services.tool_settings import get_tool_settings_for_owner
 from ...evals.execution import get_current_eval_routing_profile
 from ..system_skills import shortlist_system_skills
-from ..system_skills.service import enable_system_skills
+from ..system_skills.service import enable_system_skills, get_available_system_skill_tool_names
 from ..core.llm_config import LLMNotConfiguredError, get_llm_config_with_failover
 from ..core.llm_utils import run_completion
 from ..core.token_usage import log_agent_completion, set_usage_span_attributes
@@ -43,6 +45,7 @@ from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
+    PIPEDREAM_TOOL_SERVER_NAME,
     get_available_builtin_tool_entries,
     get_available_custom_tool_entries,
     get_enabled_tool_limit,
@@ -877,15 +880,6 @@ def _search_with_llm(
         "enable_agent_skills.skill_names: [\"<SAVED_SKILL>\"]; "
         "skill_names: [\"<GLOBAL_SKILL>\"]; skill_keys: [\"<SYSTEM_SKILL>\"]\n"
     )
-    image_generation_rules = ""
-    if CREATE_IMAGE_TOOL_NAME in available_names:
-        image_generation_rules = (
-            f"- If the user asks to generate or design a NEW image asset, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
-            f"- If the user asks to edit, transform, restyle, or preserve details from an existing image, include `{CREATE_IMAGE_TOOL_NAME}`.\n"
-            f"- For edit/transform requests, plan to pass `source_images` so the model can preserve identity, logos, text, or layout.\n"
-            f"- Do not include `{CREATE_IMAGE_TOOL_NAME}` for image analysis, OCR, or extracting information from existing images.\n"
-        )
-
     system_prompt = (
         "Select helpful tools and skills. Be inclusive, but copy exact names/slugs from the lists; never invent them.\n"
         "If nothing matches, call nothing.\n\n"
@@ -894,7 +888,6 @@ def _search_with_llm(
         "Call enable_tools with exact full names from Available tools.\n"
         "## Rules\n"
         "- Only include tools that appear in Available tools.\n"
-        f"{image_generation_rules}"
         "- external_resources: include direct API endpoints when you know them\n"
         "- Format: Name | Brief description | Full URL"
     )
@@ -1381,9 +1374,11 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         manager.initialize()
 
     blacklisted_tools = get_agent_tool_blacklist(agent)
+    hide_pipedream_tools = is_eval_agent(agent)
     mcp_tools = [
         tool for tool in manager.get_tools_for_agent(agent)
         if tool.full_name not in blacklisted_tools
+        and not (hide_pipedream_tools and tool.server_name == PIPEDREAM_TOOL_SERVER_NAME)
     ]
 
     builtin_catalog: List[Dict[str, Any]] = [
@@ -1394,9 +1389,6 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         }
         for entry in get_available_builtin_tool_entries(agent).values()
     ]
-    hidden_builtin_names = set(
-        get_available_builtin_tool_entries(agent, include_hidden=True).keys()
-    )
     custom_catalog: List[Dict[str, Any]] = [
         {
             "full_name": entry.full_name,
@@ -1417,7 +1409,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     )
     system_skill_catalog = shortlist_system_skills(
         query,
-        available_tool_names=hidden_builtin_names,
+        available_tool_names=get_available_system_skill_tool_names(agent),
     )
 
     combined_catalog: List[Any] = list(mcp_tools) + builtin_catalog + custom_catalog + eval_synthetic_catalog
@@ -1427,7 +1419,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     auto_enable_apps = True
     if owner is not None:
         auto_enable_apps = get_tool_settings_for_owner(owner).tool_search_auto_enable_apps
-    if _has_active_pipedream_runtime():
+    if not hide_pipedream_tools and _has_active_pipedream_runtime():
         try:
             pipedream_app_catalog = PipedreamCatalogService().search_apps(query, limit=20)
             enabled_app_slugs = get_effective_pipedream_app_slugs_for_agent(agent)

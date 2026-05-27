@@ -390,7 +390,7 @@ def measure_prompt_sizes() -> dict[str, dict[str, int]]:
                     patch("billing.addons.AddonEntitlementService.get_uplift", return_value=zero_addons),
                     patch("api.agent.core.prompt_context.DedicatedProxyService.allocated_count", return_value=0),
                     patch("api.agent.core.prompt_context.sandbox_compute_enabled_for_agent", return_value=True),
-                    patch("api.agent.tools.static_tools.sandbox_compute_enabled_for_agent", return_value=True),
+                    patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=True),
                     patch("api.agent.core.prompt_context.datetime", FixedDateTime),
                     patch("api.agent.core.prompt_context.dj_timezone.now", return_value=FIXED_PROMPT_NOW),
                     patch("api.models.PersistentAgent._sync_celery_beat_task", return_value=None),

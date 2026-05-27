@@ -9,6 +9,7 @@ from django.utils import timezone
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
 from api.agent.core import event_processing as ep
 from api.agent.tools.eval_synthetic_tools import EVAL_SYNTHETIC_TOOL_DEFINITIONS, EVAL_SYNTHETIC_TOOL_SERVER
+from api.agent.tools.mcp_manager import MCPToolInfo
 from api.agent.tools.search_tools import search_tools
 from api.agent.tools.tool_manager import execute_enabled_tool, get_enabled_tool_definitions
 from api.evals.registry import ScenarioRegistry
@@ -410,6 +411,54 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["tool"], "mcp_brightdata_search_engine")
+        self.assertEqual(result["content"]["results"], [])
+        self.assertEqual(result["content"]["match_count"], 0)
+        self.assertFalse(result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", result["next_action"])
+
+    def test_eval_synthetic_tool_fallbacks_are_empty_not_positive_placeholders(self):
+        user = get_user_model().objects.create_user(username="eval-synth-fallback")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            browser_use_agent=browser_agent,
+            name="Eval agent",
+            execution_environment="eval",
+        )
+        for tool_name in ("google_sheets-get-spreadsheet-info", "apollo_io-people-enrichment"):
+            PersistentAgentEnabledTool.objects.create(
+                agent=agent,
+                tool_full_name=tool_name,
+                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+                tool_name=tool_name,
+            )
+
+        sheets_result = execute_enabled_tool(
+            agent,
+            "google_sheets-get-spreadsheet-info",
+            {"spreadsheet_id": "sheet-123"},
+        )
+        apollo_result = execute_enabled_tool(
+            agent,
+            "apollo_io-people-enrichment",
+            {"email": "client@example.test"},
+        )
+
+        self.assertEqual(sheets_result["status"], "ok")
+        self.assertNotEqual(sheets_result["content"], {"ok": True})
+        self.assertEqual(sheets_result["content"]["spreadsheet_id"], "sheet-123")
+        self.assertEqual(sheets_result["content"]["rows"], [])
+        self.assertEqual(sheets_result["content"]["match_count"], 0)
+        self.assertFalse(sheets_result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", sheets_result["next_action"])
+
+        self.assertEqual(apollo_result["status"], "ok")
+        self.assertNotEqual(apollo_result["content"], {"ok": True})
+        self.assertEqual(apollo_result["content"]["people"], [])
+        self.assertEqual(apollo_result["content"]["contacts"], [])
+        self.assertEqual(apollo_result["content"]["match_count"], 0)
+        self.assertFalse(apollo_result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", apollo_result["next_action"])
 
     def test_weather_request_validation_is_deterministic(self):
         valid, reason = _is_free_weather_request({"url": "https://wttr.in/Frederick,MD?format=j1"})
@@ -712,6 +761,45 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(matching[0]["parameters"].get("required", []), [])
         self.assertEqual(matching[0]["parameters"]["properties"]["worksheetId"]["type"], "string")
 
+    @patch("api.agent.tools.tool_manager._get_manager")
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_eval_agents_do_not_render_or_execute_real_pipedream_tools(
+        self,
+        _mock_sandbox_compute_enabled,
+        mock_get_manager,
+    ):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        tool_name = "google_sheets-list-spreadsheets"
+        PersistentAgentEnabledTool.objects.create(
+            agent=self.agent,
+            tool_full_name=tool_name,
+            tool_server="pipedream",
+            tool_name=tool_name,
+        )
+        mock_manager = MagicMock()
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo("pd-config", tool_name, "pipedream", tool_name, "Real Pipedream Sheets tool", {})
+        ]
+        mock_manager.get_enabled_tools_definitions.return_value = [
+            {
+                "type": "function",
+                "function": {
+                    "name": tool_name,
+                    "description": "Real Pipedream Sheets tool",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
+        mock_get_manager.return_value = mock_manager
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        result = execute_enabled_tool(self.agent, tool_name, {})
+
+        self.assertNotIn(tool_name, {definition["function"]["name"] for definition in definitions})
+        self.assertEqual(result["status"], "error")
+        self.assertIn("not available", result["message"])
+
     def test_seed_completed_process_run_disables_first_run_once(self):
         scenario = ScenarioRegistry.get("common_use_case_046_sheets_read_range")
 
@@ -762,6 +850,61 @@ class BehaviorMicroHelperTests(TestCase):
         self.assertEqual(result["status"], "success")
         user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
         self.assertIn("apollo_io-search-accounts", user_message)
+        mock_enable_tools.assert_not_called()
+
+    @patch("api.agent.tools.search_tools._has_active_pipedream_runtime", return_value=True)
+    @patch("api.agent.tools.search_tools.enable_tools")
+    @patch("api.agent.tools.search_tools.run_completion")
+    @patch("api.agent.tools.search_tools.get_mcp_manager")
+    @patch("api.agent.tools.search_tools.get_llm_config_with_failover")
+    @patch("api.agent.tools.search_tools.PipedreamCatalogService.search_apps")
+    @patch("api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent")
+    @patch("api.agent.tools.tool_manager.sandbox_compute_enabled_for_agent", return_value=False)
+    def test_search_tools_excludes_real_pipedream_tools_for_eval_agents(
+        self,
+        _mock_sandbox_compute_enabled,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_search_apps,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        _mock_has_active_pipedream_runtime,
+    ):
+        self.agent.execution_environment = "eval"
+        self.agent.save(update_fields=["execution_environment"])
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = [
+            MCPToolInfo(
+                "pd-config",
+                "google_sheets-list-spreadsheets",
+                "pipedream",
+                "google_sheets-list-spreadsheets",
+                "Real Pipedream Sheets tool",
+                {},
+            )
+        ]
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        mock_response = MagicMock()
+        message = MagicMock()
+        message.content = "No relevant tools."
+        message.tool_calls = []
+        choice = MagicMock()
+        choice.message = message
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+        result = search_tools(self.agent, "Google Sheets project status")
+
+        self.assertEqual(result["status"], "success")
+        user_message = mock_run_completion.call_args.kwargs["messages"][1]["content"]
+        self.assertNotIn("google_sheets-list-spreadsheets", user_message)
+        self.assertIn("google_sheets-read-rows", user_message)
+        mock_search_apps.assert_not_called()
+        mock_get_effective_pipedream_app_slugs_for_agent.assert_not_called()
         mock_enable_tools.assert_not_called()
 
     def test_first_relevant_tool_call_skips_ignored_tools(self):
