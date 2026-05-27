@@ -58,15 +58,14 @@ class AttachmentGuidanceTests(SimpleTestCase):
         html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("include the file in attachments", tool_description)
-        self.assertIn("<img src='cid:exact filename'>", tool_description)
-        self.assertIn("also pass that file in attachments", html_description)
-        self.assertIn("<img src='cid:exact filename'>", html_description)
-        self.assertIn("filespace paths or $[/path] variables", description)
+        self.assertIn("Use HTML tables, not Markdown pipe tables", tool_description)
+        self.assertIn("Inline images need attachments", html_description)
+        self.assertIn("<img src='cid:filename'>", html_description)
+        self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
-        self.assertIn("inline email image", description)
-        self.assertIn("<img src='cid:exact filename'>", description)
+        self.assertIn("Inline images", description)
+        self.assertIn("<img src='cid:filename'>", description)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()
@@ -110,8 +109,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertEqual(result["attach"], "$[/exports/report.txt]")
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.txt]", result["message"])
-        self.assertIn("does not attach anything", result["message"])
-        self.assertIn("<img src='cid:exact filename'>", result["message"])
+        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",
@@ -151,8 +150,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertEqual(result["attach"], "$[/exports/report.csv]")
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.csv]", result["message"])
-        self.assertIn("does not attach anything", result["message"])
-        self.assertIn("<img src='cid:exact filename'>", result["message"])
+        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",

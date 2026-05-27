@@ -177,10 +177,8 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Send HTML email. Exclude <html>, <head>, and <body>; avoid Markdown. "
-                "For tables use <table>, <tr>, <th>, and <td>; do NOT use Markdown pipe tables like | Col | Col |. "
-                "Use single quotes for HTML attributes, e.g. <a href='https://example.com'>link</a>. "
-                "For inline images, include the file in attachments and use <img src='cid:exact filename'> in the HTML."
+                "Send HTML email without <html>/<head>/<body>; avoid Markdown. "
+                "Use HTML tables, not Markdown pipe tables. Use single-quoted attributes."
             ),
             "parameters": {
                 "type": "object",
@@ -204,9 +202,8 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "mobile_first_html": {
                         "type": "string",
                         "description": (
-                            "Actual HTML email content without <html>/<head>/<body>. Use single-quoted attributes. "
-                            "Tool-call/XML syntax is sent literally. For inline images, use <img src='cid:exact filename'> "
-                            "and also pass that file in attachments."
+                            "HTML body only; no <html>/<head>/<body>. Single-quoted attributes. "
+                            "Tool-call/XML syntax is literal. Inline images need attachments plus <img src='cid:filename'>."
                         ),
                     },
                     "attachments": {
