@@ -106,6 +106,17 @@ SYSTEM_SETTING_DEFINITIONS = (
         min_value=1,
     ),
     SystemSettingDefinition(
+        key="LITELLM_FIRST_DATA_TIMEOUT_SECONDS",
+        label="LiteLLM first data timeout",
+        description="Timeout for streamed LiteLLM requests to produce their first chunk.",
+        value_type=VALUE_TYPE_INT,
+        env_var="LITELLM_FIRST_DATA_TIMEOUT_SECONDS",
+        default_getter=lambda: settings.LITELLM_FIRST_DATA_TIMEOUT_SECONDS,
+        category="LLM",
+        unit="seconds",
+        min_value=1,
+    ),
+    SystemSettingDefinition(
         key="MAX_PARALLEL_TOOL_CALLS",
         label="Max parallel tool calls",
         description="Maximum number of safe tool calls that can run concurrently in one batch.",
@@ -463,6 +474,10 @@ def get_mcp_stdio_timeout_seconds() -> float:
 
 def get_litellm_timeout_seconds() -> int:
     return int(get_setting_value("LITELLM_TIMEOUT_SECONDS"))
+
+
+def get_litellm_first_data_timeout_seconds() -> int:
+    return int(get_setting_value("LITELLM_FIRST_DATA_TIMEOUT_SECONDS"))
 
 
 def get_max_parallel_tool_calls() -> int:

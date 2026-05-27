@@ -1,13 +1,20 @@
 """Shared helpers for constructing LiteLLM completion calls."""
 import json
 import logging
+import queue
+import threading
 import time
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
+
+from asgiref.sync import async_to_sync
 
 from django.conf import settings
 import litellm
 
-from api.services.system_settings import get_litellm_timeout_seconds
+from api.services.system_settings import (
+    get_litellm_first_data_timeout_seconds,
+    get_litellm_timeout_seconds,
+)
 from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
@@ -58,6 +65,118 @@ _RETRYABLE_ERRORS = (
 )
 
 
+class _FirstDataTimeoutStream:
+    class _StreamError:
+        def __init__(self, exc: Exception) -> None:
+            self.exc = exc
+
+    def __init__(
+        self,
+        stream: Any,
+        *,
+        create_stream: Callable[[], Any],
+        timeout_seconds: int,
+        model: str,
+        provider: str | None,
+        initial_attempt: int,
+        max_attempts: int,
+        backoff_seconds: float,
+    ) -> None:
+        self._stream = stream
+        self._create_stream = create_stream
+        self._timeout_seconds = timeout_seconds
+        self._model = model
+        self._provider = provider
+        self._attempt = initial_attempt
+        self._max_attempts = max_attempts
+        self._backoff_seconds = backoff_seconds
+        self._received_first_chunk = False
+        self._timed_out = False
+
+    def __iter__(self) -> "_FirstDataTimeoutStream":
+        return self
+
+    def __next__(self) -> Any:
+        if self._timed_out:
+            raise StopIteration
+        if self._received_first_chunk:
+            return next(self._stream)
+
+        while True:
+            try:
+                result = self._read_first_chunk()
+            except _RETRYABLE_ERRORS as exc:
+                self._retry_or_raise(exc)
+                continue
+            self._received_first_chunk = True
+            return result
+
+    def _retry_or_raise(self, exc: Exception) -> None:
+        while True:
+            if self._attempt >= self._max_attempts:
+                raise exc
+            self.close()
+            logger.warning(
+                "LiteLLM request failed with %s; retrying (%d/%d)",
+                type(exc).__name__,
+                self._attempt,
+                self._max_attempts,
+            )
+            if self._backoff_seconds > 0:
+                time.sleep(self._backoff_seconds * (2 ** (self._attempt - 1)))
+            self._attempt += 1
+            try:
+                self._stream = self._create_stream()
+                return
+            except _RETRYABLE_ERRORS as retry_exc:
+                exc = retry_exc
+
+    def _read_first_chunk(self) -> Any:
+        result_queue: queue.Queue[Any] = queue.Queue(maxsize=1)
+
+        def _read_first_chunk() -> None:
+            try:
+                result_queue.put(next(self._stream))
+            except Exception as exc:
+                result_queue.put(self._StreamError(exc))
+
+        thread = threading.Thread(target=_read_first_chunk, daemon=True)
+        thread.start()
+        try:
+            result = result_queue.get(timeout=self._timeout_seconds)
+        except queue.Empty:
+            self._timed_out = True
+            self.close()
+            raise litellm.Timeout(
+                message=f"LiteLLM stream produced no data within {self._timeout_seconds} seconds",
+                model=self._model,
+                llm_provider=self._provider or "unknown",
+            )
+
+        if isinstance(result, self._StreamError):
+            raise result.exc
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+    def close(self) -> None:
+        aclose = getattr(self._stream, "aclose", None)
+        if callable(aclose):
+            try:
+                async_to_sync(aclose)()
+            except Exception:
+                logger.debug("Failed to async-close LiteLLM stream", exc_info=True)
+            return
+
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                logger.debug("Failed to close LiteLLM stream", exc_info=True)
+
+
 def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
     if response is None or duration_ms is None:
         return
@@ -70,6 +189,28 @@ def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
         model_extra = getattr(response, "model_extra", None)
         if isinstance(model_extra, dict):
             model_extra["request_duration_ms"] = duration_ms
+
+
+def _wrap_stream_with_first_data_timeout(
+    stream: Any,
+    *,
+    create_stream: Callable[[], Any],
+    model: str,
+    provider: str | None,
+    initial_attempt: int,
+    max_attempts: int,
+    backoff_seconds: float,
+) -> _FirstDataTimeoutStream:
+    return _FirstDataTimeoutStream(
+        stream,
+        create_stream=create_stream,
+        timeout_seconds=get_litellm_first_data_timeout_seconds(),
+        model=model,
+        provider=provider,
+        initial_attempt=initial_attempt,
+        max_attempts=max_attempts,
+        backoff_seconds=backoff_seconds,
+    )
 
 
 def _first_message_from_response(response: Any) -> Any:
@@ -369,6 +510,15 @@ def run_completion(
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
             else:
                 response = litellm.completion(**kwargs)
+                response = _wrap_stream_with_first_data_timeout(
+                    response,
+                    create_stream=lambda: litellm.completion(**kwargs),
+                    model=model,
+                    provider=provider_hint,
+                    initial_attempt=attempt,
+                    max_attempts=max_attempts,
+                    backoff_seconds=backoff_seconds,
+                )
             if not kwargs.get("stream"):
                 raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
                 raise_if_invalid_litellm_response(response, model=model, provider=provider_hint)

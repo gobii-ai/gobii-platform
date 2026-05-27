@@ -175,6 +175,11 @@ SOLUTIONS_PARTNER_BILLING_ACCESS = env.bool("SOLUTIONS_PARTNER_BILLING_ACCESS", 
 MAX_PREFERRED_PROVIDER_STREAK = env.int("MAX_PREFERRED_PROVIDER_STREAK", default=3)
 # Default timeout (seconds) for LiteLLM requests
 LITELLM_TIMEOUT_SECONDS = env.int("LITELLM_TIMEOUT_SECONDS", default=300)
+# Timeout (seconds) for streamed LiteLLM requests to produce their first chunk
+LITELLM_FIRST_DATA_TIMEOUT_SECONDS = env.int(
+    "LITELLM_FIRST_DATA_TIMEOUT_SECONDS",
+    default=30,
+)
 # Default timeout (seconds) for MCP tool execution over HTTP
 MCP_HTTP_REQUEST_TIMEOUT_SECONDS = env.float(
     "MCP_HTTP_REQUEST_TIMEOUT_SECONDS",
