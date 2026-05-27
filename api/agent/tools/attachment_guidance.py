@@ -1,8 +1,8 @@
 """Shared attachment guidance for agent tool prompts and results."""
 
 SEND_EMAIL_ATTACHMENTS_DESCRIPTION = (
-    "Optional filespace paths or $[/path] variables. To attach generated files, pass the exact file-tool `attach` value; body text never attaches files. "
-    "For an inline email image, also include the file here and reference it in mobile_first_html with <img src='cid:exact filename'>, where exact filename is the attached file's basename such as report.png."
+    "Optional filespace paths or $[/path]. Use exact file-tool `attach` value; body text never attaches files. "
+    "Inline images: also use <img src='cid:filename'>."
 )
 
 
