@@ -1947,7 +1947,7 @@ class _ConfigAuthorityResolver:
             can_configure = user_id == self.agent.user_id
         else:
             can_configure = OrganizationMembership.objects.filter(
-                org=self.agent.organization,
+                org_id=self.agent.organization_id,
                 user_id=user_id,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
                 role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
@@ -1982,7 +1982,7 @@ class _ConfigAuthorityResolver:
                 if normalized_address == owner_email:
                     return True
             elif OrganizationMembership.objects.filter(
-                org=self.agent.organization,
+                org_id=self.agent.organization_id,
                 user__email__iexact=normalized_address,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
                 role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
@@ -1998,7 +1998,7 @@ class _ConfigAuthorityResolver:
                 ).exists():
                     return True
             elif UserPhoneNumber.objects.filter(
-                user__organizationmembership__org=self.agent.organization,
+                user__organizationmembership__org_id=self.agent.organization_id,
                 user__organizationmembership__status=OrganizationMembership.OrgStatus.ACTIVE,
                 user__organizationmembership__role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
                 phone_number__iexact=normalized_address,
@@ -2381,7 +2381,7 @@ def _build_contacts_block(
     if agent.organization_id:
         manager_memberships = (
             OrganizationMembership.objects.filter(
-                org=agent.organization,
+                org_id=agent.organization_id,
                 status=OrganizationMembership.OrgStatus.ACTIVE,
                 role__in=ORG_AGENT_CONFIG_AUTHORITY_ROLES,
                 user__email__isnull=False,
