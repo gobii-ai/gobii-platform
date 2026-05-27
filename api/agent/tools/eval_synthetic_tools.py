@@ -234,3 +234,53 @@ def get_available_eval_synthetic_tool_catalog(agent: PersistentAgent) -> list[Di
         }
         for tool_name, metadata in EVAL_SYNTHETIC_TOOL_DEFINITIONS.items()
     ]
+
+
+def get_eval_synthetic_tool_fallback_result(tool_name: str, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Return empty eval data when a scenario did not provide a fixture."""
+    params = params or {}
+    content: Dict[str, Any] = {"fixture_configured": False}
+
+    if tool_name.startswith("google_sheets-"):
+        content.update(
+            {
+                "spreadsheet_id": params.get("spreadsheet_id") or params.get("spreadsheetId"),
+                "worksheet": params.get("worksheet") or params.get("worksheetId"),
+                "range": params.get("range"),
+                "rows": [],
+                "values": [],
+                "worksheets": [],
+                "match_count": 0,
+            }
+        )
+        message = "No deterministic Google Sheets eval fixture returned data."
+    elif tool_name.startswith("apollo_io-"):
+        content.update(
+            {
+                "people": [],
+                "contacts": [],
+                "accounts": [],
+                "match_count": 0,
+            }
+        )
+        message = "No deterministic Apollo eval fixture returned data."
+    elif tool_name == "mcp_brightdata_search_engine":
+        content.update({"results": [], "match_count": 0})
+        message = "No deterministic web-search eval fixture returned data."
+    elif tool_name == "mcp_brightdata_scrape_as_markdown":
+        content.update({"url": params.get("url"), "markdown": ""})
+        message = "No deterministic scrape eval fixture returned data."
+    elif tool_name.startswith("mcp_brightdata_web_data_"):
+        content.update({"items": [], "results": [], "match_count": 0})
+        message = "No deterministic web-data eval fixture returned data."
+    else:
+        content.update({"items": [], "match_count": 0})
+        message = f"No deterministic eval fixture returned data for {tool_name}."
+
+    return {
+        "status": "ok",
+        "tool": tool_name,
+        "message": message,
+        "content": content,
+        "next_action": "Treat this as no data found; ask for missing required details instead of inferring them.",
+    }

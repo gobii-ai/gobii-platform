@@ -68,6 +68,7 @@ from .eval_synthetic_tools import (
     EVAL_SYNTHETIC_TOOL_DEFINITIONS,
     EVAL_SYNTHETIC_TOOL_SERVER,
     get_eval_synthetic_tool_definition,
+    get_eval_synthetic_tool_fallback_result,
     is_eval_synthetic_tool_name,
 )
 from .python_exec import get_python_exec_tool
@@ -1430,12 +1431,7 @@ def execute_enabled_tool(
             except DatabaseError:
                 logger.exception("Failed to record usage for eval tool %s", resolved_name)
 
-        return {
-            "status": "ok",
-            "tool": resolved_name,
-            "message": f"Mocked {resolved_name} result for deterministic eval execution.",
-            "content": {"ok": True},
-        }
+        return get_eval_synthetic_tool_fallback_result(resolved_name, params)
 
     if entry.provider == "builtin":
         registry_entry = BUILTIN_TOOL_REGISTRY.get(resolved_name)

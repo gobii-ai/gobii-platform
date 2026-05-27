@@ -411,6 +411,54 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["tool"], "mcp_brightdata_search_engine")
+        self.assertEqual(result["content"]["results"], [])
+        self.assertEqual(result["content"]["match_count"], 0)
+        self.assertFalse(result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", result["next_action"])
+
+    def test_eval_synthetic_tool_fallbacks_are_empty_not_positive_placeholders(self):
+        user = get_user_model().objects.create_user(username="eval-synth-fallback")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Eval browser")
+        agent = PersistentAgent.objects.create(
+            user=user,
+            browser_use_agent=browser_agent,
+            name="Eval agent",
+            execution_environment="eval",
+        )
+        for tool_name in ("google_sheets-get-spreadsheet-info", "apollo_io-people-enrichment"):
+            PersistentAgentEnabledTool.objects.create(
+                agent=agent,
+                tool_full_name=tool_name,
+                tool_server=EVAL_SYNTHETIC_TOOL_SERVER,
+                tool_name=tool_name,
+            )
+
+        sheets_result = execute_enabled_tool(
+            agent,
+            "google_sheets-get-spreadsheet-info",
+            {"spreadsheet_id": "sheet-123"},
+        )
+        apollo_result = execute_enabled_tool(
+            agent,
+            "apollo_io-people-enrichment",
+            {"email": "client@example.test"},
+        )
+
+        self.assertEqual(sheets_result["status"], "ok")
+        self.assertNotEqual(sheets_result["content"], {"ok": True})
+        self.assertEqual(sheets_result["content"]["spreadsheet_id"], "sheet-123")
+        self.assertEqual(sheets_result["content"]["rows"], [])
+        self.assertEqual(sheets_result["content"]["match_count"], 0)
+        self.assertFalse(sheets_result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", sheets_result["next_action"])
+
+        self.assertEqual(apollo_result["status"], "ok")
+        self.assertNotEqual(apollo_result["content"], {"ok": True})
+        self.assertEqual(apollo_result["content"]["people"], [])
+        self.assertEqual(apollo_result["content"]["contacts"], [])
+        self.assertEqual(apollo_result["content"]["match_count"], 0)
+        self.assertFalse(apollo_result["content"]["fixture_configured"])
+        self.assertIn("ask for missing required details", apollo_result["next_action"])
 
     def test_weather_request_validation_is_deterministic(self):
         valid, reason = _is_free_weather_request({"url": "https://wttr.in/Frederick,MD?format=j1"})
