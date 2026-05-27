@@ -2,10 +2,33 @@
 {% load vite_tags %}
 {% load waffle_tags %}
 {% load cta_tags %}
-{% block title %}AI Coworkers for Teams With Real Work to Do | Gobii{% endblock %}
+{% block title %}{{ PUBLIC_BRAND_NAME|default:"Gobii" }} — AI Coworkers for Teams With Real Work to Do{% endblock %}
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Gobii agents are virtual coworkers with their own identity, memory, and tools. Email them, text them — they browse the web, collect data, and deliver reports 24/7.">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "{{ PUBLIC_BRAND_NAME|default:'Gobii' }}",
+      "url": "{{ PUBLIC_SITE_URL|default:'https://gobii.ai' }}",
+      "logo": "{{ PUBLIC_SITE_URL|default:'https://gobii.ai' }}/static/images/gobii_fish_icon_512.png",
+      "sameAs": [
+        "{{ PUBLIC_GITHUB_URL|default:'https://github.com/gobii-ai/gobii-platform' }}",
+        "https://www.linkedin.com/company/gobii-ai",
+        "{{ PUBLIC_X_URL|default:'https://x.com/gobii_ai' }}",
+        "{{ PUBLIC_DISCORD_URL|default:'https://discord.gg/yyDB8GwxtE' }}"
+      ]
+    }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    "name": "{{ PUBLIC_BRAND_NAME|default:'Gobii' }}",
+    "url": "{{ PUBLIC_SITE_URL|default:'https://gobii.ai' }}"
+  }
+  </script>
   {% if immersive_app_assets %}
     {% for href in immersive_app_assets.styles %}
       <link rel="preload" as="style" href="{{ href }}">
