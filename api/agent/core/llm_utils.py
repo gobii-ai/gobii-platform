@@ -1,13 +1,18 @@
 """Shared helpers for constructing LiteLLM completion calls."""
 import json
 import logging
+import queue
+import threading
 import time
 from typing import Any, Iterable
 
 from django.conf import settings
 import litellm
 
-from api.services.system_settings import get_litellm_timeout_seconds
+from api.services.system_settings import (
+    get_litellm_first_data_timeout_seconds,
+    get_litellm_timeout_seconds,
+)
 from api.utils.json_schema import sanitize_tool_parameters_schema_for_llm
 from .token_usage import extract_reasoning_content
 _HINT_KEYS = (
@@ -58,6 +63,70 @@ _RETRYABLE_ERRORS = (
 )
 
 
+class _FirstDataTimeoutStream:
+    class _StreamError:
+        def __init__(self, exc: Exception) -> None:
+            self.exc = exc
+
+    def __init__(
+        self,
+        stream: Any,
+        *,
+        timeout_seconds: int,
+        model: str,
+        provider: str | None,
+    ) -> None:
+        self._stream = stream
+        self._timeout_seconds = timeout_seconds
+        self._model = model
+        self._provider = provider
+        self._received_first_chunk = False
+        self._timed_out = False
+
+    def __iter__(self) -> "_FirstDataTimeoutStream":
+        return self
+
+    def __next__(self) -> Any:
+        if self._timed_out:
+            raise StopIteration
+        if self._received_first_chunk:
+            return next(self._stream)
+
+        result_queue: queue.Queue[Any | _FirstDataTimeoutStream._StreamError] = queue.Queue(maxsize=1)
+
+        def _read_first_chunk() -> None:
+            try:
+                result_queue.put(next(self._stream))
+            except Exception as exc:
+                result_queue.put(self._StreamError(exc))
+
+        thread = threading.Thread(target=_read_first_chunk, daemon=True)
+        thread.start()
+        try:
+            result = result_queue.get(timeout=self._timeout_seconds)
+        except queue.Empty:
+            self._timed_out = True
+            self.close()
+            raise litellm.Timeout(
+                message=f"LiteLLM stream produced no data within {self._timeout_seconds} seconds",
+                model=self._model,
+                llm_provider=self._provider or "unknown",
+            )
+
+        if isinstance(result, self._StreamError):
+            raise result.exc
+        self._received_first_chunk = True
+        return result
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+    def close(self) -> None:
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            close()
+
+
 def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
     if response is None or duration_ms is None:
         return
@@ -70,6 +139,20 @@ def _attach_response_duration(response: Any, duration_ms: int | None) -> None:
         model_extra = getattr(response, "model_extra", None)
         if isinstance(model_extra, dict):
             model_extra["request_duration_ms"] = duration_ms
+
+
+def _wrap_stream_with_first_data_timeout(
+    stream: Any,
+    *,
+    model: str,
+    provider: str | None,
+) -> _FirstDataTimeoutStream:
+    return _FirstDataTimeoutStream(
+        stream,
+        timeout_seconds=get_litellm_first_data_timeout_seconds(),
+        model=model,
+        provider=provider,
+    )
 
 
 def _first_message_from_response(response: Any) -> Any:
@@ -369,6 +452,11 @@ def run_completion(
                 duration_ms = int(round((time.monotonic() - start_time) * 1000))
             else:
                 response = litellm.completion(**kwargs)
+                response = _wrap_stream_with_first_data_timeout(
+                    response,
+                    model=model,
+                    provider=provider_hint,
+                )
             if not kwargs.get("stream"):
                 raise_if_empty_litellm_response(response, model=model, provider=provider_hint)
                 raise_if_invalid_litellm_response(response, model=model, provider=provider_hint)
