@@ -11,7 +11,7 @@ from api.models import (
     AgentEmailAccount,
     AgentEmailOAuthCredential,
 )
-from api.agent.comms.smtp_transport import SmtpTransport
+from api.agent.comms.smtp_transport import EmailAttachmentPayload, SmtpTransport
 
 
 User = get_user_model()
@@ -142,3 +142,72 @@ class TestSmtpTransport(TestCase):
         self.assertEqual(sent_message["Message-ID"], "<explicit@example.com>")
         self.assertEqual(sent_message["In-Reply-To"], "<parent@example.com>")
         self.assertEqual(sent_message["References"], "<older@example.com> <parent@example.com>")
+
+    @patch("smtplib.SMTP")
+    def test_send_attaches_regular_files(self, mock_smtp):
+        acct = self._create_acct()
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        SmtpTransport.send(
+            account=acct,
+            from_addr=self.from_ep.address,
+            to_addrs=[self.to_addr],
+            subject="With attachment",
+            plaintext_body="See attached",
+            html_body="<p>See attached</p>",
+            attempt_id="attempt-5",
+            attachments=[
+                EmailAttachmentPayload(
+                    filename="report.txt",
+                    content=b"report-body",
+                    content_type="text/plain",
+                )
+            ],
+        )
+
+        sent_message = client.send_message.call_args.args[0]
+        attachments = list(sent_message.iter_attachments())
+        self.assertEqual(len(attachments), 1)
+        self.assertEqual(attachments[0].get_filename(), "report.txt")
+        self.assertEqual(attachments[0].get_content_disposition(), "attachment")
+        self.assertEqual(attachments[0].get_content_type(), "text/plain")
+        self.assertEqual(attachments[0].get_payload(decode=True), b"report-body")
+
+    @patch("smtplib.SMTP")
+    def test_send_attaches_inline_cid_files_to_html_part(self, mock_smtp):
+        acct = self._create_acct()
+        client = MagicMock()
+        mock_smtp.return_value = client
+
+        SmtpTransport.send(
+            account=acct,
+            from_addr=self.from_ep.address,
+            to_addrs=[self.to_addr],
+            subject="With inline image",
+            plaintext_body="See image",
+            html_body='<p><img src="cid:inline-1-photo.png" /></p>',
+            attempt_id="attempt-6",
+            attachments=[
+                EmailAttachmentPayload(
+                    filename="photo.png",
+                    content=b"png-bytes",
+                    content_type="image/png",
+                    content_id="inline-1-photo.png",
+                    disposition="inline",
+                )
+            ],
+        )
+
+        sent_message = client.send_message.call_args.args[0]
+        inline_parts = [
+            part
+            for part in sent_message.walk()
+            if part.get_content_type() == "image/png"
+            and part.get_content_disposition() == "inline"
+        ]
+        self.assertEqual(len(inline_parts), 1)
+        self.assertEqual(inline_parts[0]["Content-ID"], "<inline-1-photo.png>")
+        self.assertEqual(inline_parts[0].get_filename(), "photo.png")
+        self.assertEqual(inline_parts[0].get_payload(decode=True), b"png-bytes")
+        self.assertEqual(sent_message.get_body(preferencelist=("html",)).get_content_type(), "text/html")
