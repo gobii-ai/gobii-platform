@@ -175,7 +175,7 @@ class TestSmtpTransport(TestCase):
         self.assertEqual(attachments[0].get_payload(decode=True), b"report-body")
 
     @patch("smtplib.SMTP")
-    def test_send_attaches_inline_cid_files_to_html_part(self, mock_smtp):
+    def test_send_attaches_inline_cid_files_to_single_related_part(self, mock_smtp):
         acct = self._create_acct()
         client = MagicMock()
         mock_smtp.return_value = client
@@ -186,7 +186,7 @@ class TestSmtpTransport(TestCase):
             to_addrs=[self.to_addr],
             subject="With inline image",
             plaintext_body="See image",
-            html_body='<p><img src="cid:inline-1-photo.png" /></p>',
+            html_body='<p><img src="cid:inline-1-photo.png" /><img src="cid:inline-2-chart.png" /></p>',
             attempt_id="attempt-6",
             attachments=[
                 EmailAttachmentPayload(
@@ -195,19 +195,37 @@ class TestSmtpTransport(TestCase):
                     content_type="image/png",
                     content_id="inline-1-photo.png",
                     disposition="inline",
-                )
+                ),
+                EmailAttachmentPayload(
+                    filename="chart.png",
+                    content=b"chart-bytes",
+                    content_type="image/png",
+                    content_id="inline-2-chart.png",
+                    disposition="inline",
+                ),
             ],
         )
 
         sent_message = client.send_message.call_args.args[0]
+        related_parts = [
+            part
+            for part in sent_message.walk()
+            if part.get_content_type() == "multipart/related"
+        ]
         inline_parts = [
             part
             for part in sent_message.walk()
             if part.get_content_type() == "image/png"
             and part.get_content_disposition() == "inline"
         ]
-        self.assertEqual(len(inline_parts), 1)
-        self.assertEqual(inline_parts[0]["Content-ID"], "<inline-1-photo.png>")
-        self.assertEqual(inline_parts[0].get_filename(), "photo.png")
-        self.assertEqual(inline_parts[0].get_payload(decode=True), b"png-bytes")
+        self.assertEqual(len(related_parts), 1)
+        self.assertEqual(len(inline_parts), 2)
+        self.assertEqual(
+            {part["Content-ID"] for part in inline_parts},
+            {"<inline-1-photo.png>", "<inline-2-chart.png>"},
+        )
+        self.assertEqual(
+            {part.get_filename() for part in inline_parts},
+            {"photo.png", "chart.png"},
+        )
         self.assertEqual(sent_message.get_body(preferencelist=("html",)).get_content_type(), "text/html")

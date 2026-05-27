@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import smtplib
 from dataclasses import dataclass
-from email.message import EmailMessage
+from email.message import EmailMessage, MIMEPart
 from email.utils import make_msgid
-from typing import Sequence
+from typing import Any, Sequence
 from opentelemetry import trace
 import logging
 
@@ -24,6 +24,9 @@ class EmailAttachmentPayload:
     content_type: str
     content_id: str | None = None
     disposition: str = "attachment"
+    source_node: Any | None = None
+    source_path: str | None = None
+    size_bytes: int | None = None
 
     @property
     def is_inline(self) -> bool:
@@ -42,6 +45,11 @@ def _attach_payloads(msg: EmailMessage, attachments: Sequence[EmailAttachmentPay
     for attachment in attachments:
         maintype, subtype = _to_mime_type_parts(attachment.content_type)
         if attachment.is_inline:
+            related_part = _find_related_part(msg)
+            if related_part is not None:
+                _attach_inline_payload_to_related(related_part, attachment, maintype, subtype)
+                continue
+
             html_part = msg.get_body(preferencelist=("html",))
             if html_part is not None:
                 html_part.add_related(
@@ -60,6 +68,31 @@ def _attach_payloads(msg: EmailMessage, attachments: Sequence[EmailAttachmentPay
             subtype=subtype,
             filename=attachment.filename,
         )
+
+
+def _find_related_part(msg: EmailMessage) -> EmailMessage | None:
+    for part in msg.walk():
+        if part.get_content_type() == "multipart/related":
+            return part
+    return None
+
+
+def _attach_inline_payload_to_related(
+    related_part: EmailMessage,
+    attachment: EmailAttachmentPayload,
+    maintype: str,
+    subtype: str,
+) -> None:
+    inline_part = MIMEPart()
+    inline_part.set_content(
+        attachment.content,
+        maintype=maintype,
+        subtype=subtype,
+        disposition="inline",
+        filename=attachment.filename,
+    )
+    inline_part["Content-ID"] = f"<{attachment.content_id}>"
+    related_part.attach(inline_part)
 
 
 class SmtpTransport:
