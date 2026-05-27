@@ -17,6 +17,8 @@ from django.db.models import F
 
 from util.text_sanitizer import decode_unicode_escapes
 
+from api.agent.eval_agents import is_eval_agent
+
 from ...models import (
     PersistentAgent,
     PersistentAgentCustomTool,
@@ -506,8 +508,11 @@ def _build_available_tool_index(
     catalog: Dict[str, ToolCatalogEntry] = {}
     blacklisted_tools = get_agent_tool_blacklist(agent)
 
+    hide_pipedream_tools = is_eval_agent(agent)
     for info in manager.get_tools_for_agent(agent):
         if info.full_name in blacklisted_tools:
+            continue
+        if hide_pipedream_tools and info.server_name == PIPEDREAM_TOOL_SERVER_NAME:
             continue
         catalog[info.full_name] = ToolCatalogEntry(
             provider="mcp",
@@ -1091,11 +1096,19 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         .values_list("tool_full_name", flat=True)
     )
     eval_tool_name_set = set(enabled_eval_tool_names)
+    hidden_eval_mcp_tool_names = set()
+    if is_eval_agent(agent):
+        hidden_eval_mcp_tool_names = set(
+            PersistentAgentEnabledTool.objects
+            .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
+            .values_list("tool_full_name", flat=True)
+        )
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
         for definition in manager.get_enabled_tools_definitions(agent)
         if _tool_definition_name(definition) not in blacklisted_tools
         and _tool_definition_name(definition) not in eval_tool_name_set
+        and _tool_definition_name(definition) not in hidden_eval_mcp_tool_names
     ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)

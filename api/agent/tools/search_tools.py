@@ -19,6 +19,8 @@ from django.utils import timezone
 from litellm import drop_params
 from opentelemetry import trace
 
+from api.agent.eval_agents import is_eval_agent
+
 from ...models import MCPServerConfig, PersistentAgent, PersistentAgentCompletion, PersistentAgentSkill
 from ...services.pipedream_apps import (
     PipedreamCatalogError,
@@ -43,6 +45,7 @@ from .tool_manager import (
     enable_tools,
     CREATE_IMAGE_TOOL_NAME,
     HTTP_REQUEST_TOOL_NAME,
+    PIPEDREAM_TOOL_SERVER_NAME,
     get_available_builtin_tool_entries,
     get_available_custom_tool_entries,
     get_enabled_tool_limit,
@@ -1371,9 +1374,11 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         manager.initialize()
 
     blacklisted_tools = get_agent_tool_blacklist(agent)
+    hide_pipedream_tools = is_eval_agent(agent)
     mcp_tools = [
         tool for tool in manager.get_tools_for_agent(agent)
         if tool.full_name not in blacklisted_tools
+        and not (hide_pipedream_tools and tool.server_name == PIPEDREAM_TOOL_SERVER_NAME)
     ]
 
     builtin_catalog: List[Dict[str, Any]] = [
@@ -1414,7 +1419,7 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     auto_enable_apps = True
     if owner is not None:
         auto_enable_apps = get_tool_settings_for_owner(owner).tool_search_auto_enable_apps
-    if _has_active_pipedream_runtime():
+    if not hide_pipedream_tools and _has_active_pipedream_runtime():
         try:
             pipedream_app_catalog = PipedreamCatalogService().search_apps(query, limit=20)
             enabled_app_slugs = get_effective_pipedream_app_slugs_for_agent(agent)
