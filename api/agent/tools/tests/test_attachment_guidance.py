@@ -58,7 +58,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
         html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("Use HTML tables, not Markdown pipe tables", tool_description)
+        self.assertIn("do NOT use Markdown pipe tables", tool_description)
         self.assertIn("Inline images", html_description)
         self.assertIn("attach file", html_description)
         self.assertIn("<img src='cid:filename'>", html_description)

@@ -178,7 +178,7 @@ def get_send_email_tool() -> Dict[str, Any]:
             "name": "send_email",
             "description": (
                 "Send HTML email without <html>/<head>/<body>; avoid Markdown. "
-                "Use HTML tables, not Markdown pipe tables. Use single-quoted attributes."
+                "Use <table>/<tr>/<th>/<td>; do NOT use Markdown pipe tables. Single-quoted attrs."
             ),
             "parameters": {
                 "type": "object",
