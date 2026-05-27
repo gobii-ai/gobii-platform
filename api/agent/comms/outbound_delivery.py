@@ -37,7 +37,7 @@ from .cid_references import CID_SRC_REFERENCE_RE
 from .email_content import convert_body_to_html_and_plaintext
 from .email_footer_service import append_footer_if_needed
 from .email_threading import build_reply_headers, get_message_raw_payload, get_message_rfc_message_id
-from .smtp_transport import SmtpTransport
+from .smtp_transport import EmailAttachmentPayload, SmtpTransport
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -470,10 +470,38 @@ def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
     return maintype or "application", subtype or "octet-stream"
 
 
-def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage, html_body: str) -> tuple[int, str]:
+def _has_invalid_mime_header_value(*values: str | None) -> bool:
+    return any("\r" in value or "\n" in value for value in values if value)
+
+
+def _track_prepared_attachment_failure(
+    message: PersistentAgentMessage,
+    attachment: EmailAttachmentPayload,
+    *,
+    reason_code: str = "validation_failed",
+) -> None:
+    agent = getattr(message, "owner_agent", None)
+    channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
+    message_id = str(getattr(message, "id", "")) if getattr(message, "id", None) else None
+    user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
+    track_file_send_failed(
+        agent,
+        node=attachment.source_node,
+        path=attachment.source_path,
+        filename=attachment.filename,
+        size_bytes=attachment.size_bytes,
+        mime_type=attachment.content_type,
+        channel=channel,
+        message_id=message_id,
+        reason_code=reason_code,
+        user_initiated=user_initiated,
+    )
+
+
+def _prepare_email_attachments(message: PersistentAgentMessage, html_body: str) -> tuple[list[EmailAttachmentPayload], str]:
     attachments = list(message.attachments.select_related("filespace_node"))
     if not attachments:
-        return 0, html_body
+        return [], html_body
 
     cid_references = _extract_cid_references(html_body)
     cid_lookup, basename_cid_lookup = _build_cid_reference_lookup(cid_references)
@@ -482,7 +510,7 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
     channel = getattr(getattr(message, "from_endpoint", None), "channel", None)
     user_initiated = bool(getattr(agent, "user_id", None)) if agent else None
     max_bytes = get_max_file_size()
-    attached = 0
+    prepared_attachments: list[EmailAttachmentPayload] = []
     used_reference_indexes: set[int] = set()
     cid_replacements: dict[int, str] = {}
     for att in attachments:
@@ -581,6 +609,22 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
         try:
             with storage.open(name, "rb") as handle:
                 content = handle.read()
+            if _has_invalid_mime_header_value(filename, content_type):
+                logger.warning("Skipping attachment %s for message %s (invalid MIME metadata)", att.id, message.id)
+                track_file_send_failed(
+                    agent,
+                    node=getattr(att, "filespace_node", None),
+                    path=getattr(getattr(att, "filespace_node", None), "path", None),
+                    filename=filename,
+                    size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                    mime_type=content_type,
+                    channel=channel,
+                    message_id=message_id,
+                    reason_code="validation_failed",
+                    user_initiated=user_initiated,
+                )
+                continue
+
             matched_reference_index = None
             normalized_filename = filename.strip().lower()
             if normalized_filename:
@@ -597,17 +641,18 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
             if matched_reference_index is not None:
                 raw_cid = str(cid_references[matched_reference_index]["raw_cid"])
                 canonical_cid = _canonicalize_inline_cid(raw_cid, filename, matched_reference_index)
-                maintype, subtype = _to_mime_type_parts(content_type)
-                inline_part = MIMEPart()
-                inline_part.set_content(
-                    content,
-                    maintype=maintype,
-                    subtype=subtype,
-                    disposition="inline",
-                    filename=filename,
+                prepared_attachments.append(
+                    EmailAttachmentPayload(
+                        filename=filename,
+                        content=content,
+                        content_type=content_type,
+                        content_id=canonical_cid,
+                        disposition="inline",
+                        source_node=getattr(att, "filespace_node", None),
+                        source_path=getattr(getattr(att, "filespace_node", None), "path", None),
+                        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                    )
                 )
-                inline_part["Content-ID"] = f"<{canonical_cid}>"
-                msg.attach(inline_part)
                 # A repeated CID token in HTML should resolve to the same inline attachment everywhere.
                 matched_indexes = {matched_reference_index}
                 for cid_variant in _build_cid_variants(raw_cid):
@@ -622,8 +667,16 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
                     used_reference_indexes.add(matched_index)
                     cid_replacements[matched_index] = canonical_cid
             else:
-                msg.attach(filename, content, content_type)
-            attached += 1
+                prepared_attachments.append(
+                    EmailAttachmentPayload(
+                        filename=filename,
+                        content=content,
+                        content_type=content_type,
+                        source_node=getattr(att, "filespace_node", None),
+                        source_path=getattr(getattr(att, "filespace_node", None), "path", None),
+                        size_bytes=size_bytes if isinstance(size_bytes, int) else None,
+                    )
+                )
         except Exception:
             logger.exception("Failed attaching file %s to message %s", att.id, message.id)
             track_file_send_failed(
@@ -640,6 +693,32 @@ def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessa
             )
 
     rewritten_html_body = _rewrite_inline_cid_references(html_body, cid_references, cid_replacements)
+    return prepared_attachments, rewritten_html_body
+
+
+def _attach_email_attachments(message: PersistentAgentMessage, msg: AnymailMessage, html_body: str) -> tuple[int, str]:
+    prepared_attachments, rewritten_html_body = _prepare_email_attachments(message, html_body)
+    attached = 0
+    for attachment in prepared_attachments:
+        try:
+            if attachment.is_inline:
+                maintype, subtype = _to_mime_type_parts(attachment.content_type)
+                inline_part = MIMEPart()
+                inline_part.set_content(
+                    attachment.content,
+                    maintype=maintype,
+                    subtype=subtype,
+                    disposition="inline",
+                    filename=attachment.filename,
+                )
+                inline_part["Content-ID"] = f"<{attachment.content_id}>"
+                msg.attach(inline_part)
+            else:
+                msg.attach(attachment.filename, attachment.content, attachment.content_type)
+            attached += 1
+        except (TypeError, ValueError):
+            logger.exception("Failed attaching prepared file %s to message %s", attachment.filename, message.id)
+            _track_prepared_attachment_failure(message, attachment)
     return attached, rewritten_html_body
 
 
@@ -706,6 +785,13 @@ def deliver_agent_email(message: PersistentAgentMessage):
                 "emails/persistent_agent_email.html",
                 {"body": html_snippet},
             )
+            prepared_attachments, html_body = _prepare_email_attachments(message, html_body)
+            if prepared_attachments:
+                logger.info(
+                    "Attached %d file(s) to SMTP email message %s",
+                    len(prepared_attachments),
+                    message.id,
+                )
 
             # Collect all recipients (To + CC)
             recipient_list = [to_address] if to_address else []
@@ -732,6 +818,7 @@ def deliver_agent_email(message: PersistentAgentMessage):
                     message_id=message_rfc_id,
                     in_reply_to=reply_headers.get("In-Reply-To"),
                     references=reply_headers.get("References"),
+                    attachments=prepared_attachments,
                 )
 
             now = timezone.now()

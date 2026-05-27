@@ -22,6 +22,7 @@ from api.models import (
     CommsChannel,
     DeliveryStatus,
     BrowserUseAgent,
+    AgentEmailAccount,
 )
 from api.agent.comms.outbound_delivery import deliver_agent_email, deliver_agent_sms, _convert_sms_body_to_plaintext
 from api.agent.comms.email_content import convert_body_to_html_and_plaintext
@@ -147,6 +148,20 @@ class EmailDeliveryTests(TestCase):
             channel=CommsChannel.EMAIL,
             address="user@example.com"
         )
+
+    def _create_smtp_account(self) -> AgentEmailAccount:
+        account = AgentEmailAccount.objects.create(
+            endpoint=self.from_endpoint,
+            smtp_host="smtp.example.com",
+            smtp_port=587,
+            smtp_security=AgentEmailAccount.SmtpSecurity.STARTTLS,
+            smtp_auth=AgentEmailAccount.AuthMode.LOGIN,
+            smtp_username=self.from_endpoint.address,
+            is_outbound_enabled=True,
+        )
+        account.set_smtp_password("secret")
+        account.save()
+        return account
 
     def test_non_email_message_skipped(self):
         """Test that non-email messages are skipped."""
@@ -788,6 +803,172 @@ class EmailDeliveryTests(TestCase):
 
         mock_msg.attach.assert_called_once_with("photo.png", b"abc", "image/png")
         mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @override_settings(GOBII_RELEASE_ENV="prod", POSTMARK_ENABLED=True)
+    @patch.dict(os.environ, {"POSTMARK_SERVER_TOKEN": "test-token"}, clear=False)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>No inline image in this message.</p>", "No inline image in this message."),
+    )
+    @patch("api.agent.comms.outbound_delivery.track_file_send_failed")
+    @patch("api.agent.comms.outbound_delivery.AnymailMessage")
+    def test_production_email_delivery_skips_attachment_mime_failures_per_file(
+        self,
+        mock_anymail,
+        mock_track,
+        _mock_prepare,
+    ):
+        mock_msg = MagicMock()
+        mock_anymail.return_value = mock_msg
+        mock_msg.anymail_status.message_id = "test-message-id"
+        mock_msg.attach.side_effect = [ValueError("bad header"), None]
+
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "Attachment Failure"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"bad", name="bad.txt"),
+            content_type="text/plain",
+            file_size=3,
+            filename="bad.txt",
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"good", name="good.txt"),
+            content_type="text/plain",
+            file_size=4,
+            filename="good.txt",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><p>No cid refs</p></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        self.assertEqual(mock_msg.attach.call_count, 2)
+        mock_track.assert_called_once()
+        self.assertEqual(mock_track.call_args.kwargs["filename"], "bad.txt")
+        self.assertEqual(mock_track.call_args.kwargs["reason_code"], "validation_failed")
+        mock_msg.send.assert_called_once_with(fail_silently=False)
+
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>No inline image in this message.</p>", "No inline image in this message."),
+    )
+    @patch("api.agent.comms.outbound_delivery.SmtpTransport.send", return_value="")
+    def test_smtp_delivery_passes_regular_attachments_to_transport(self, mock_send, _mock_prepare):
+        self._create_smtp_account()
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "SMTP Regular Attachment"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><p>No cid refs</p></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        sent_attachments = mock_send.call_args.kwargs["attachments"]
+        self.assertEqual(len(sent_attachments), 1)
+        self.assertEqual(sent_attachments[0].filename, "photo.png")
+        self.assertEqual(sent_attachments[0].content, b"abc")
+        self.assertEqual(sent_attachments[0].content_type, "image/png")
+        self.assertFalse(sent_attachments[0].is_inline)
+
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p><img src='cid:photo.png' /></p>", "inline image"),
+    )
+    @patch("api.agent.comms.outbound_delivery.SmtpTransport.send", return_value="")
+    def test_smtp_delivery_rewrites_cid_html_and_passes_inline_attachment(self, mock_send, _mock_prepare):
+        self._create_smtp_account()
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "SMTP Inline Attachment"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><img src='cid:photo.png' /></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        sent_html = mock_send.call_args.kwargs["html_body"]
+        sent_attachments = mock_send.call_args.kwargs["attachments"]
+        self.assertEqual(len(sent_attachments), 1)
+        self.assertTrue(sent_attachments[0].is_inline)
+        self.assertEqual(sent_attachments[0].content_id, "inline-1-photo.png")
+        self.assertIn("cid:inline-1-photo.png", sent_html)
+        self.assertNotIn("cid:photo.png", sent_html)
+
+    @override_settings(MAX_FILE_SIZE=2)
+    @patch(
+        "api.agent.comms.outbound_delivery._prepare_email_content",
+        return_value=("<p>No inline image in this message.</p>", "No inline image in this message."),
+    )
+    @patch("api.agent.comms.outbound_delivery.track_file_unsupported")
+    @patch("api.agent.comms.outbound_delivery.SmtpTransport.send", return_value="")
+    def test_smtp_delivery_skips_oversize_attachments(self, mock_send, mock_track, _mock_prepare):
+        self._create_smtp_account()
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.from_endpoint,
+            to_endpoint=self.to_endpoint,
+            is_outbound=True,
+            body="<p>Body</p>",
+            raw_payload={"subject": "SMTP Oversize Attachment"},
+            latest_status=DeliveryStatus.QUEUED,
+        )
+        PersistentAgentMessageAttachment.objects.create(
+            message=message,
+            file=ContentFile(b"abc", name="photo.png"),
+            content_type="image/png",
+            file_size=3,
+            filename="photo.png",
+        )
+
+        with patch(
+            "api.agent.comms.outbound_delivery.render_to_string",
+            return_value="<html><body><p>No cid refs</p></body></html>",
+        ):
+            deliver_agent_email(message)
+
+        self.assertEqual(mock_send.call_args.kwargs["attachments"], [])
+        mock_track.assert_called_once()
+        self.assertEqual(mock_track.call_args.kwargs["reason_code"], "too_large")
 
 
 @tag("batch_outbound_delivery")

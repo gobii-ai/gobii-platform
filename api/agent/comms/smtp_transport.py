@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import smtplib
-from email.message import EmailMessage
+from dataclasses import dataclass
+from email.message import EmailMessage, MIMEPart
 from email.utils import make_msgid
-from typing import Sequence
+from typing import Any, Sequence
 from opentelemetry import trace
 import logging
 
@@ -14,6 +15,84 @@ from api.agent.comms.email_oauth import build_xoauth2_string, resolve_oauth_iden
 
 tracer = trace.get_tracer("gobii.utils")
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class EmailAttachmentPayload:
+    filename: str
+    content: bytes
+    content_type: str
+    content_id: str | None = None
+    disposition: str = "attachment"
+    source_node: Any | None = None
+    source_path: str | None = None
+    size_bytes: int | None = None
+
+    @property
+    def is_inline(self) -> bool:
+        return self.disposition == "inline" and bool(self.content_id)
+
+
+def _to_mime_type_parts(content_type: str) -> tuple[str, str]:
+    base_content_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if "/" not in base_content_type:
+        return "application", "octet-stream"
+    maintype, subtype = base_content_type.split("/", 1)
+    return maintype or "application", subtype or "octet-stream"
+
+
+def _attach_payloads(msg: EmailMessage, attachments: Sequence[EmailAttachmentPayload]) -> None:
+    for attachment in attachments:
+        maintype, subtype = _to_mime_type_parts(attachment.content_type)
+        if attachment.is_inline:
+            related_part = _find_related_part(msg)
+            if related_part is not None:
+                _attach_inline_payload_to_related(related_part, attachment, maintype, subtype)
+                continue
+
+            html_part = msg.get_body(preferencelist=("html",))
+            if html_part is not None:
+                html_part.add_related(
+                    attachment.content,
+                    maintype=maintype,
+                    subtype=subtype,
+                    cid=f"<{attachment.content_id}>",
+                    filename=attachment.filename,
+                    disposition="inline",
+                )
+                continue
+
+        msg.add_attachment(
+            attachment.content,
+            maintype=maintype,
+            subtype=subtype,
+            filename=attachment.filename,
+        )
+
+
+def _find_related_part(msg: EmailMessage) -> EmailMessage | None:
+    for part in msg.walk():
+        if part.get_content_type() == "multipart/related":
+            return part
+    return None
+
+
+def _attach_inline_payload_to_related(
+    related_part: EmailMessage,
+    attachment: EmailAttachmentPayload,
+    maintype: str,
+    subtype: str,
+) -> None:
+    inline_part = MIMEPart()
+    inline_part.set_content(
+        attachment.content,
+        maintype=maintype,
+        subtype=subtype,
+        disposition="inline",
+        filename=attachment.filename,
+    )
+    inline_part["Content-ID"] = f"<{attachment.content_id}>"
+    related_part.attach(inline_part)
 
 
 class SmtpTransport:
@@ -38,6 +117,7 @@ class SmtpTransport:
         message_id: str | None = None,
         in_reply_to: str | None = None,
         references: str | None = None,
+        attachments: Sequence[EmailAttachmentPayload] | None = None,
     ) -> str:
         """Send email using the provided account.
 
@@ -54,14 +134,16 @@ class SmtpTransport:
         span.set_attribute("to_count", to_count)
         span.set_attribute("cc_count", cc_count)
 
+        recipient_list = list(to_addrs or [])
+
         # Build message
         msg = EmailMessage()
         msg["Subject"] = subject or ""
         msg["From"] = from_addr
-        msg["To"] = ", ".join(list(to_addrs or [])[:1]) if to_addrs else ""
+        msg["To"] = ", ".join(recipient_list[:1]) if recipient_list else ""
         # If there are more than 1 recipients, put the rest in Cc
-        if to_addrs and len(to_addrs) > 1:
-            msg["Cc"] = ", ".join(list(to_addrs)[1:])
+        if len(recipient_list) > 1:
+            msg["Cc"] = ", ".join(recipient_list[1:])
         msg["Message-ID"] = message_id or make_msgid()
         msg["X-Gobii-Message-ID"] = str(attempt_id)
         if in_reply_to:
@@ -73,6 +155,8 @@ class SmtpTransport:
         msg.set_content(plaintext_body or "")
         if html_body:
             msg.add_alternative(html_body, subtype="html")
+        if attachments:
+            _attach_payloads(msg, attachments)
 
         # Connect and send
         if account.smtp_security == AgentEmailAccount.SmtpSecurity.SSL:
@@ -98,8 +182,7 @@ class SmtpTransport:
                 client.login(account.smtp_username or "", account.get_smtp_password() or "")
 
             # Envelope sender should match From/header address typically
-            all_rcpts = list(to_addrs or [])
-            client.send_message(msg, from_addr=from_addr, to_addrs=all_rcpts)
+            client.send_message(msg, from_addr=from_addr, to_addrs=recipient_list)
             return ""
         finally:
             try:

@@ -54,9 +54,15 @@ class AttachmentGuidanceTests(SimpleTestCase):
     def test_send_email_tool_requires_exact_attachment_value(self):
         tool = get_send_email_tool()
 
+        tool_description = tool["function"]["description"]
+        html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("filespace paths or $[/path] variables", description)
+        self.assertIn("do NOT use Markdown pipe tables", tool_description)
+        self.assertIn("Inline images", html_description)
+        self.assertIn("attach file", html_description)
+        self.assertIn("<img src='cid:filename'>", html_description)
+        self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
 
@@ -102,7 +108,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertEqual(result["attach"], "$[/exports/report.txt]")
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.txt]", result["message"])
-        self.assertIn("does not attach anything", result["message"])
+        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",
@@ -142,7 +149,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertEqual(result["attach"], "$[/exports/report.csv]")
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.csv]", result["message"])
-        self.assertIn("does not attach anything", result["message"])
+        self.assertIn("Body text does not attach files", result["message"])
+        self.assertIn("<img src='cid:filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",
