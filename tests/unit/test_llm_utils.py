@@ -45,6 +45,12 @@ class _BlockingFirstChunkStream:
         self.released.set()
 
 
+class _AsyncClosableBlockingFirstChunkStream(_BlockingFirstChunkStream):
+    async def aclose(self):
+        self.closed = True
+        self.released.set()
+
+
 class RunCompletionReasoningTests(TestCase):
     @tag("batch_event_llm")
     @patch("api.agent.core.llm_utils.litellm.completion")
@@ -208,6 +214,7 @@ class RunCompletionReasoningTests(TestCase):
         self.assertFalse(stream.closed)
 
     @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1)
     @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_streaming_first_chunk_timeout_raises_litellm_timeout(
@@ -230,6 +237,59 @@ class RunCompletionReasoningTests(TestCase):
         self.assertTrue(stream.started.wait(timeout=1))
 
     @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=2, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_streaming_first_chunk_timeout_uses_retry_budget(
+        self,
+        mock_completion,
+        _mock_first_data_timeout,
+    ):
+        stalled_stream = _BlockingFirstChunkStream()
+        retry_stream = _ClosableStream(["retry-chunk"])
+        mock_completion.side_effect = [stalled_stream, retry_stream]
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            stream=True,
+        )
+
+        self.assertEqual(next(result), "retry-chunk")
+        self.assertTrue(stalled_stream.closed)
+        self.assertEqual(mock_completion.call_count, 2)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=3, LITELLM_RETRY_BACKOFF_SECONDS=0)
+    @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_streaming_retry_budget_covers_replacement_stream_creation(
+        self,
+        mock_completion,
+        _mock_first_data_timeout,
+    ):
+        stalled_stream = _BlockingFirstChunkStream()
+        retry_stream = _ClosableStream(["retry-chunk"])
+        mock_completion.side_effect = [
+            stalled_stream,
+            litellm.Timeout("timeout", model="mock-model", llm_provider="mock"),
+            retry_stream,
+        ]
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            stream=True,
+        )
+
+        self.assertEqual(next(result), "retry-chunk")
+        self.assertTrue(stalled_stream.closed)
+        self.assertEqual(mock_completion.call_count, 3)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1)
     @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_streaming_first_chunk_timeout_closes_underlying_stream(
@@ -238,6 +298,29 @@ class RunCompletionReasoningTests(TestCase):
         _mock_first_data_timeout,
     ):
         stream = _BlockingFirstChunkStream()
+        mock_completion.return_value = stream
+
+        result = run_completion(
+            model="mock-model",
+            messages=[],
+            params={},
+            stream=True,
+        )
+
+        with self.assertRaises(litellm.Timeout):
+            next(result)
+        self.assertTrue(stream.closed)
+
+    @tag("batch_event_llm")
+    @override_settings(LITELLM_MAX_RETRIES=1)
+    @patch("api.agent.core.llm_utils.get_litellm_first_data_timeout_seconds", return_value=0.01)
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_streaming_first_chunk_timeout_async_closes_underlying_stream(
+        self,
+        mock_completion,
+        _mock_first_data_timeout,
+    ):
+        stream = _AsyncClosableBlockingFirstChunkStream()
         mock_completion.return_value = stream
 
         result = run_completion(
