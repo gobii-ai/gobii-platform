@@ -59,13 +59,12 @@ class AttachmentGuidanceTests(SimpleTestCase):
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
         self.assertIn("Use HTML tables, not Markdown pipe tables", tool_description)
-        self.assertIn("Inline images need attachments", html_description)
+        self.assertIn("Inline images", html_description)
+        self.assertIn("attach file", html_description)
         self.assertIn("<img src='cid:filename'>", html_description)
         self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
-        self.assertIn("Inline images", description)
-        self.assertIn("<img src='cid:filename'>", description)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

@@ -202,8 +202,8 @@ def get_send_email_tool() -> Dict[str, Any]:
                     "mobile_first_html": {
                         "type": "string",
                         "description": (
-                            "HTML body only; no <html>/<head>/<body>. Single-quoted attributes. "
-                            "Tool-call/XML syntax is literal. Inline images need attachments plus <img src='cid:filename'>."
+                            "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
+                            "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
                     "attachments": {
