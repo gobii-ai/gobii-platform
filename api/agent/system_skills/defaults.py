@@ -283,6 +283,7 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
         "Do not request Discord server IDs or channel IDs as secrets.\n"
         "Use `discord_send_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
         "To upload files, pass filespace paths or $[/path] variables in `attachments`; do not paste attachment paths into `message`. "
+        "For inline email images, the file must still be in `attachments`, and the HTML img src must use `cid:` plus the attached file's exact basename. "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
         "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."

@@ -54,11 +54,19 @@ class AttachmentGuidanceTests(SimpleTestCase):
     def test_send_email_tool_requires_exact_attachment_value(self):
         tool = get_send_email_tool()
 
+        tool_description = tool["function"]["description"]
+        html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
+        self.assertIn("include the file in attachments", tool_description)
+        self.assertIn("<img src='cid:exact filename'>", tool_description)
+        self.assertIn("also pass that file in attachments", html_description)
+        self.assertIn("<img src='cid:exact filename'>", html_description)
         self.assertIn("filespace paths or $[/path] variables", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
+        self.assertIn("inline email image", description)
+        self.assertIn("<img src='cid:exact filename'>", description)
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()
@@ -103,6 +111,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.txt]", result["message"])
         self.assertIn("does not attach anything", result["message"])
+        self.assertIn("<img src='cid:exact filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",
@@ -143,6 +152,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("send_email.attachments", result["message"])
         self.assertIn("$[/exports/report.csv]", result["message"])
         self.assertIn("does not attach anything", result["message"])
+        self.assertIn("<img src='cid:exact filename'>", result["message"])
         write_bytes_to_dir_mock.assert_called_once()
         build_signed_url_mock.assert_called_once_with(
             agent_id="agent-123",

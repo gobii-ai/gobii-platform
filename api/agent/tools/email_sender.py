@@ -179,7 +179,8 @@ def get_send_email_tool() -> Dict[str, Any]:
             "description": (
                 "Send HTML email. Exclude <html>, <head>, and <body>; avoid Markdown. "
                 "For tables use <table>, <tr>, <th>, and <td>; do NOT use Markdown pipe tables like | Col | Col |. "
-                "Use single quotes for HTML attributes, e.g. <a href='https://example.com'>link</a>."
+                "Use single quotes for HTML attributes, e.g. <a href='https://example.com'>link</a>. "
+                "For inline images, include the file in attachments and use <img src='cid:exact filename'> in the HTML."
             ),
             "parameters": {
                 "type": "object",
@@ -200,7 +201,14 @@ def get_send_email_tool() -> Dict[str, Any]:
                             "Optional internal Gobii message id for replying in-thread; omit to start a new thread."
                         ),
                     },
-                    "mobile_first_html": {"type": "string", "description": "Actual HTML email content without <html>/<head>/<body>. Use single-quoted attributes. Tool-call/XML syntax is sent literally."},
+                    "mobile_first_html": {
+                        "type": "string",
+                        "description": (
+                            "Actual HTML email content without <html>/<head>/<body>. Use single-quoted attributes. "
+                            "Tool-call/XML syntax is sent literally. For inline images, use <img src='cid:exact filename'> "
+                            "and also pass that file in attachments."
+                        ),
+                    },
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
