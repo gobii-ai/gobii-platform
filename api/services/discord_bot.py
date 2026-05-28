@@ -55,6 +55,7 @@ DISCORD_MANAGE_GUILD_PERMISSION = 0x20
 DISCORD_ADMINISTRATOR_PERMISSION = 0x8
 DISCORD_TEXT_CHANNEL_TYPES = {0, 5}
 DISCORD_WEBHOOK_MAX_FILES = 10
+DISCORD_WEBHOOK_MAX_EMBEDS = 10
 DISCORD_OAUTH_USER_SCOPES = ("identify", "guilds")
 DISCORD_OAUTH_BOT_INSTALL_SCOPES = ("bot", "applications.commands")
 
@@ -766,11 +767,13 @@ def _own_webhook_echo_agent_ids(
             agent_id__in=agent_ids,
             discord_webhook_id=message.webhook_id,
             channel_id=message.channel_id,
-            signature_hash=_gateway_webhook_echo_signature(message),
             expires_at__gt=now,
             matched_at__isnull=True,
         )
-        .filter(Q(discord_message_id="") | Q(discord_message_id=message.message_id))
+        .filter(
+            Q(discord_message_id=message.message_id)
+            | Q(discord_message_id="", signature_hash=_gateway_webhook_echo_signature(message))
+        )
         .values_list("id", "agent_id")
     )
     for marker_id, agent_id in markers:
@@ -890,17 +893,34 @@ def _discord_multipart_files(
     return files
 
 
+def _normalize_discord_embeds(embeds: object) -> list[dict[str, Any]]:
+    if embeds in (None, ""):
+        return []
+    if not isinstance(embeds, list):
+        raise ValueError("embeds must be an array of Discord embed objects.")
+    if len(embeds) > DISCORD_WEBHOOK_MAX_EMBEDS:
+        raise ValueError(f"Discord supports at most {DISCORD_WEBHOOK_MAX_EMBEDS} embeds per message.")
+    normalized = []
+    for embed in embeds:
+        if not isinstance(embed, Mapping):
+            raise ValueError("Each Discord embed must be an object.")
+        normalized.append(dict(embed))
+    return normalized
+
+
 def send_channel_message(
     agent: PersistentAgent,
     *,
     channel_id: str,
     body: str,
     attachments: Iterable[ResolvedAttachment] | None = None,
+    embeds: object = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
+    normalized_embeds = _normalize_discord_embeds(embeds)
     body = decode_unicode_character_escapes(body)
-    if not body and not resolved_attachments:
-        raise ValueError("message is required when attachments is empty.")
+    if not body and not resolved_attachments and not normalized_embeds:
+        raise ValueError("message, attachments, or embeds is required.")
     if len(resolved_attachments) > DISCORD_WEBHOOK_MAX_FILES:
         raise ValueError(f"Discord supports at most {DISCORD_WEBHOOK_MAX_FILES} attachments per message.")
     total_attachment_bytes = sum(max(0, int(attachment.size_bytes or 0)) for attachment in resolved_attachments)
@@ -923,10 +943,13 @@ def send_channel_message(
         "content": body,
         "username": username,
     }
+    if normalized_embeds:
+        payload["embeds"] = normalized_embeds
     avatar_url = _agent_avatar_url(agent)
     if avatar_url:
         payload["avatar_url"] = avatar_url
     webhook_url = f"{DISCORD_API_BASE}/webhooks/{webhook.webhook_id}/{webhook.webhook_token}"
+    request_params = {"wait": "true"}
     sent_attachments = [
         {
             "path": attachment.path,
@@ -956,14 +979,14 @@ def send_channel_message(
                     webhook_url,
                     data={"payload_json": json.dumps(payload)},
                     files=_discord_multipart_files(resolved_attachments, stack),
-                    params={"wait": "true"},
+                    params=request_params,
                     timeout=60,
                 )
         else:
             response = requests.post(
                 webhook_url,
                 json=payload,
-                params={"wait": "true"},
+                params=request_params,
                 timeout=20,
             )
         _raise_for_discord_status(response, action="webhook send")
@@ -989,6 +1012,7 @@ def send_channel_message(
         "webhook_echo_signature": echo_signature,
         "source_label": discord_channel_source_label(subscription.channel_id, subscription.channel_name),
         "discord_sent_attachments": sent_attachments,
+        "discord_sent_embeds": normalized_embeds,
         "discord_response": response_payload if isinstance(response_payload, Mapping) else {},
     }
     message = create_discord_outbound_message(

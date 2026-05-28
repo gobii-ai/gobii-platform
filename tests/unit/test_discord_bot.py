@@ -599,6 +599,55 @@ class NativeDiscordBotTests(TestCase):
         schedule_mock.assert_called_once_with(str(second_agent.id), typing_channel_id="10")
 
     @tag("batch_agent_webhooks")
+    @patch("api.services.discord_bot.schedule_discord_inbound_processing")
+    def test_inbound_gateway_echo_prefers_discord_message_id_over_embed_signature(self, schedule_mock):
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        webhook = PersistentAgentDiscordWebhook.objects.create(
+            guild=guild,
+            channel_id="10",
+            webhook_id="wh",
+            name="Gobii",
+        )
+        marker = PersistentAgentDiscordWebhookEcho.objects.create(
+            agent=self.agent,
+            webhook=webhook,
+            channel_id="10",
+            discord_webhook_id="wh",
+            discord_message_id="502",
+            signature_hash="stale-signature-from-pre-normalized-embed",
+            expires_at=timezone.now() + timedelta(minutes=10),
+        )
+        webhook_message = DiscordGatewayMessage(
+            message_id="502",
+            channel_id="10",
+            channel_name="general",
+            guild_id="100",
+            guild_name="Guild",
+            author_id="webhook",
+            author_name="Discord Agent",
+            content="Here is a status card",
+            attachments=[],
+            embeds=[{"title": "Status", "type": "rich", "flags": 0}],
+            author_is_bot=True,
+            webhook_id="wh",
+        )
+
+        result = ingest_gateway_message(webhook_message)
+
+        self.assertTrue(result["ignored"])
+        self.assertEqual(result["reason"], "own_webhook_echo")
+        marker.refresh_from_db()
+        self.assertIsNotNone(marker.matched_at)
+        self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=self.agent, is_outbound=False).exists())
+        schedule_mock.assert_not_called()
+
+    @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")
@@ -652,6 +701,87 @@ class NativeDiscordBotTests(TestCase):
         self.assertEqual(send_call.kwargs["json"]["username"], "Discord Agent")
         self.assertEqual(send_call.kwargs["json"]["content"], "hello discord")
         self.assertEqual(send_call.kwargs["params"], {"wait": "true"})
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_outbound_send_accepts_embed_only_message(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        embed = {"title": "Deploy status", "description": "All systems nominal", "color": 0x00FF00}
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        message = send_channel_message(self.agent, channel_id="10", body="", embeds=[embed])
+
+        self.assertEqual(message.body, "")
+        self.assertEqual(message.raw_payload["discord_sent_embeds"], [embed])
+        send_call = post_mock.call_args_list[1]
+        self.assertEqual(send_call.kwargs["json"]["content"], "")
+        self.assertEqual(send_call.kwargs["json"]["embeds"], [embed])
+        self.assertEqual(send_call.kwargs["params"], {"wait": "true"})
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.broadcast_message_attachment_update")
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_outbound_send_embeds_with_files_uses_payload_json(
+        self,
+        post_mock,
+        get_mock,
+        broadcast_mock,
+    ):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        write_result = write_bytes_to_dir(
+            self.agent,
+            b"hello file",
+            "/exports/report.txt",
+            "text/plain",
+            overwrite=True,
+        )
+        self.assertEqual(write_result["status"], "ok")
+        embed = {"title": "Report ready"}
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        result = execute_discord_send_message(
+            self.agent,
+            {
+                "channel_id": "10",
+                "attachments": ["$[/exports/report.txt]"],
+                "embeds": [embed],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["embed_count"], 1)
+        message = PersistentAgentMessage.objects.get(id=result["message_id"])
+        self.assertEqual(message.raw_payload["discord_sent_embeds"], [embed])
+        send_call = post_mock.call_args_list[1]
+        payload = json.loads(send_call.kwargs["data"]["payload_json"])
+        self.assertEqual(payload["embeds"], [embed])
+        self.assertNotIn("json", send_call.kwargs)
+        broadcast_mock.assert_called_once_with(str(message.id))
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
@@ -806,6 +936,37 @@ class NativeDiscordBotTests(TestCase):
 
         with self.assertRaisesRegex(ValueError, "configured total upload limit"):
             send_channel_message(self.agent, channel_id="10", body="", attachments=[attachment])
+
+    @tag("batch_agent_webhooks")
+    def test_send_message_tool_validates_embed_inputs(self):
+        invalid_embed_container = execute_discord_send_message(
+            self.agent,
+            {"channel_id": "10", "message": "hello", "embeds": {"title": "bad"}, "will_continue_work": True},
+        )
+        invalid_embed = execute_discord_send_message(
+            self.agent,
+            {"channel_id": "10", "message": "hello", "embeds": ["bad"], "will_continue_work": True},
+        )
+        too_many_embeds = execute_discord_send_message(
+            self.agent,
+            {
+                "channel_id": "10",
+                "embeds": [{"title": str(index)} for index in range(11)],
+                "will_continue_work": True,
+            },
+        )
+        empty = execute_discord_send_message(
+            self.agent,
+            {"channel_id": "10", "will_continue_work": True},
+        )
+        self.assertEqual(invalid_embed_container["status"], "error")
+        self.assertIn("embeds must be an array", invalid_embed_container["message"])
+        self.assertEqual(invalid_embed["status"], "error")
+        self.assertIn("Each Discord embed must be an object", invalid_embed["message"])
+        self.assertEqual(too_many_embeds["status"], "error")
+        self.assertIn("at most 10 embeds", too_many_embeds["message"])
+        self.assertEqual(empty["status"], "error")
+        self.assertIn("message, attachments, or embeds is required", empty["message"])
 
     @tag("batch_agent_webhooks")
     def test_subscription_tool_returns_action_required_connect_url_without_claimed_guild(self):

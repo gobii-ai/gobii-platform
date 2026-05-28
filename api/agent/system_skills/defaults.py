@@ -373,6 +373,7 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
         "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
         "Do not request Discord server IDs or channel IDs as secrets.\n"
         "Use `discord_send_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
+        "For rich Discord status cards, pass raw Discord embed objects in `embeds`. "
         f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"

@@ -32,12 +32,18 @@ def get_discord_send_message_tool() -> Dict[str, Any]:
                     },
                     "message": {
                         "type": "string",
-                        "description": "Message body to send. Optional when attachments are provided.",
+                        "description": "Message body to send. Optional when attachments or embeds are provided.",
                     },
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
+                    },
+                    "embeds": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "maxItems": 10,
+                        "description": "Raw Discord embed objects to send as rich embeds/status cards.",
                     },
                     "will_continue_work": {
                         "type": "boolean",
@@ -54,27 +60,33 @@ def execute_discord_send_message(agent: PersistentAgent, params: Dict[str, Any])
     channel_id = str(params.get("channel_id") or "").strip()
     body = str(params.get("message") or "").strip()
     attachment_paths = params.get("attachments")
+    embeds = params.get("embeds")
     if not channel_id:
         return {"status": "error", "message": "channel_id is required."}
     try:
         resolved_attachments = resolve_filespace_attachments(agent, attachment_paths)
     except AttachmentResolutionError as exc:
         return {"status": "error", "message": str(exc)}
-    if not body and not resolved_attachments:
-        return {"status": "error", "message": "message is required when attachments is empty."}
+    embeds_missing = embeds in (None, "", [])
+    if not body and not resolved_attachments and embeds_missing:
+        return {"status": "error", "message": "message, attachments, or embeds is required."}
     try:
         message = send_channel_message(
             agent,
             channel_id=channel_id,
             body=body,
             attachments=resolved_attachments,
+            embeds=embeds,
         )
+        raw_payload = message.raw_payload or {}
         result: dict[str, Any] = {
             "status": "success",
             "message_id": str(message.id),
-            "discord_message_id": str((message.raw_payload or {}).get("discord_message_id") or ""),
+            "discord_message_id": str(raw_payload.get("discord_message_id") or ""),
             "channel_id": channel_id,
+            "discord_channel_id": str(raw_payload.get("discord_channel_id") or channel_id),
             "attachment_count": len(resolved_attachments),
+            "embed_count": len(raw_payload.get("discord_sent_embeds") or []),
         }
         if params.get("will_continue_work") is False:
             result["auto_sleep_ok"] = True
