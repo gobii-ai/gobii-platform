@@ -235,7 +235,10 @@ def get_send_chat_tool() -> Dict[str, Any]:
                 "properties": {
                     "body": {
                         "type": "string",
-                        "description": "User-facing chat text. Do not pass placeholders or tool-call/XML syntax; it is sent literally.",
+                        "description": (
+                            "User-facing chat text. For reports, use Markdown sections, bullets/tables, status labels, "
+                            "and tasteful emoji labels. Do not pass placeholders or tool-call/XML syntax; it is sent literally."
+                        ),
                     },
                     "to_address": {
                         "type": "string",

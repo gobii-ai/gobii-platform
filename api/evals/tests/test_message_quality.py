@@ -6,6 +6,8 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_CASES,
     MESSAGE_QUALITY_SCENARIO_SLUGS,
     MESSAGE_QUALITY_SUITE_SLUG,
+    REPORT_MESSAGE_QUALITY_CASES,
+    SIMPLE_EMAIL_QUALITY_CASES,
     MessageQualityScenario,
 )
 from api.evals.suites import SuiteRegistry
@@ -18,16 +20,24 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), MESSAGE_QUALITY_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 10)
+        self.assertEqual(len(suite.scenario_slugs), 12)
 
     def test_generated_cases_cover_email_and_chat_for_each_real_world_domain(self):
         channels_by_brief = {}
-        for case in MESSAGE_QUALITY_CASES:
+        for case in REPORT_MESSAGE_QUALITY_CASES:
             channels_by_brief.setdefault(case.brief, set()).add(case.channel)
             self.assertTrue(case.source_example_ids)
 
         self.assertEqual(len(channels_by_brief), 5)
         self.assertTrue(all(channels == {"email", "chat"} for channels in channels_by_brief.values()))
+
+    def test_simple_email_cases_are_restrained_outreach_counterexamples(self):
+        self.assertEqual(len(SIMPLE_EMAIL_QUALITY_CASES), 2)
+
+        for case in SIMPLE_EMAIL_QUALITY_CASES:
+            self.assertEqual(case.channel, "email")
+            self.assertEqual(case.quality_target, "simple_email")
+            self.assertIn("cold_outreach", case.slug)
 
     def test_generated_scenarios_have_message_quality_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -39,6 +49,26 @@ class MessageQualityScenarioTests(SimpleTestCase):
             self.assertEqual(metadata.cost_class, "high")
             self.assertIn("llm_judge", metadata.tags)
             self.assertIn("response_quality", metadata.tags)
+
+    def test_simple_email_prompt_does_not_specify_formatting_style(self):
+        case = SIMPLE_EMAIL_QUALITY_CASES[0]
+        scenario = MessageQualityScenario()
+        prompt = scenario._prompt(case)
+
+        self.assertIn("Send a cold outreach email", prompt)
+        self.assertNotIn("rich", prompt.lower())
+        self.assertNotIn("emoji", prompt.lower())
+        self.assertNotIn("color", prompt.lower())
+        self.assertNotIn("table", prompt.lower())
+
+    def test_simple_email_judge_rejects_overformatted_report_style(self):
+        case = SIMPLE_EMAIL_QUALITY_CASES[0]
+        question = MessageQualityScenario._judge_question(case)
+
+        self.assertIn("restrained", question)
+        self.assertIn("Fail if it looks like a report", question)
+        self.assertIn("tables", question)
+        self.assertIn("emoji section labels", question)
 
     def test_email_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")

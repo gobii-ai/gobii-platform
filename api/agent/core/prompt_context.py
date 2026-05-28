@@ -2951,7 +2951,7 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Use Markdown. Start with the answer/main finding, then add only needed structure: bullets, compact table, links, or titled sections. "
+        "Use Markdown. Start with the answer/main finding; for reports add titled sections, bullets or compact tables, and tasteful emoji/status labels. "
         "Use whitespace, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
         "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
     )
@@ -2971,7 +2971,7 @@ def _get_email_formatting_guidance() -> str:
 
     return (
         "Email formatting (rich, expressive HTML):\n"
-        "Use HTML, not Markdown: <h2>/<h3>, <p>, <ul>/<ol>, <table>, <strong>, and descriptive <a> links when useful. "
+        "Use body-only HTML, not Markdown. For reports, avoid bare HTML: include visible inline color/spacing, status badges, tasteful emoji section labels, and tables or metric blocks. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs."
     )
 

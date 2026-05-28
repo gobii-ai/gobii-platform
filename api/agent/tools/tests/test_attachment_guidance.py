@@ -6,6 +6,11 @@ from django.test import SimpleTestCase, tag
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file, get_create_file_tool
 from api.agent.tools.email_sender import get_send_email_tool
+from api.agent.tools.web_chat_sender import get_send_chat_tool
+from api.agent.core.prompt_context import (
+    _get_email_formatting_guidance,
+    _get_web_chat_formatting_guidance,
+)
 
 
 @tag("batch_attachment_guidance")
@@ -65,6 +70,18 @@ class AttachmentGuidanceTests(SimpleTestCase):
         self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
+
+    def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
+        email_tool = get_send_email_tool()
+        chat_tool = get_send_chat_tool()
+        email_guidance = _get_email_formatting_guidance()
+        chat_guidance = _get_web_chat_formatting_guidance()
+
+        self.assertIn("avoid bare HTML", email_guidance)
+        self.assertIn("visible inline color/spacing", email_guidance)
+        self.assertIn("visible status colors", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("emoji/status labels", chat_guidance)
+        self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

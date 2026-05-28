@@ -88,7 +88,7 @@ register_builtin_suites(
         ),
         EvalSuite(
             slug=MESSAGE_QUALITY_SUITE_SLUG,
-            description="Rich report formatting evals for send_email and send_chat_message.",
+            description="Message formatting evals for rich reports and restrained simple emails.",
             scenario_slugs=MESSAGE_QUALITY_SCENARIO_SLUGS,
         ),
     ]

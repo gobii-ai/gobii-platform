@@ -177,8 +177,8 @@ def get_send_email_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_email",
             "description": (
-                "Send HTML email without <html>/<head>/<body>; avoid Markdown. "
-                "Use <table>/<tr>/<th>/<td>; do NOT use Markdown pipe tables. Single-quoted attrs."
+                "Send rich body-only HTML email without <html>/<head>/<body>; avoid Markdown. "
+                "For reports, avoid bare HTML: use visible inline color/spacing; do NOT use Markdown pipe tables."
             ),
             "parameters": {
                 "type": "object",
@@ -203,6 +203,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                         "type": "string",
                         "description": (
                             "HTML body only; no <html>/<head>/<body>. Single-quoted attrs. "
+                            "Reports should use styled tables/metric blocks, visible status colors, and emoji section labels. "
                             "Tool-call/XML is literal. Inline images: attach file + <img src='cid:filename'>."
                         ),
                     },
