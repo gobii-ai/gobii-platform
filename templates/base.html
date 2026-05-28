@@ -55,7 +55,9 @@
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link rel="preconnect" href="https://static.gobii.ai">
   {% if settings.GOBII_PROPRIETARY_MODE %}
+    {% if not suppress_stripe_js %}
   <link rel="preconnect" href="https://js.stripe.com">
+    {% endif %}
   {% endif %}
   {% if settings.GA_MEASUREMENT_ID and not debug %}
   <link rel="preconnect" href="https://www.googletagmanager.com">
@@ -618,6 +620,6 @@
 
   {# Allow pages to inject additional scripts after the global includes. #}
   {% block extra_js %}{% endblock %}
-  {% if settings.GOBII_PROPRIETARY_MODE %}<script async src="https://js.stripe.com/dahlia/stripe.js"></script>{% endif %}
+  {% if settings.GOBII_PROPRIETARY_MODE and not suppress_stripe_js %}<script async src="https://js.stripe.com/dahlia/stripe.js"></script>{% endif %}
 </body>
 </html>

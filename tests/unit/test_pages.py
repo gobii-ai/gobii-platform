@@ -9,6 +9,7 @@ from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
+from django.core.cache import cache
 from django.contrib.sites.models import Site
 from django.core import signing
 from django.template.loader import render_to_string
@@ -94,10 +95,38 @@ class HomePageTests(TestCase):
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_includes_stripe_js_in_proprietary_mode(self):
+    def test_home_page_omits_stripe_js_without_checkout_cta(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        self.assertNotContains(response, "https://js.stripe.com")
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_home_page_includes_stripe_js_when_upgrade_checkout_cta_is_present(self):
+        cache.clear()
+        User = get_user_model()
+        user = User.objects.create_user(
+            username="home-at-capacity@example.com",
+            email="home-at-capacity@example.com",
+            password="password123",
+        )
+        for index in range(5):
+            browser = BrowserUseAgent.objects.create(user=user, name=f"Browser {index}")
+            PersistentAgent.objects.create(
+                user=user,
+                name=f"Agent {index}",
+                charter="Test charter",
+                browser_use_agent=browser,
+            )
+        self.client.force_login(user)
+
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("proprietary:startup_checkout"))
+        self.assertContains(response, "Upgrade Your Plan")
+        self.assertContains(response, '<link rel="preconnect" href="https://js.stripe.com">')
         self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)

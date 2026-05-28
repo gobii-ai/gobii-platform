@@ -118,6 +118,7 @@ from util.urls import (
     build_immersive_chat_url,
     normalize_return_to,
 )
+from pages.context_processors import account_info as build_account_info_context
 from util.attribution_referrers import (
     ATTRIBUTION_REFERRER_SESSION_KEYS,
     clean_acquisition_referrer,
@@ -963,9 +964,23 @@ def _create_checkout_session_with_customer_context(
 class HomePage(TemplateView):
     template_name = "home.html"
 
+    def _has_direct_checkout_cta(self) -> bool:
+        if not settings.GOBII_PROPRIETARY_MODE or not self.request.user.is_authenticated:
+            return False
+
+        account = build_account_info_context(self.request).get("account") or {}
+        usage = account.get("usage") or {}
+        agents_available = usage.get("agents_available")
+        return (
+            usage.get("agents_unlimited") is not True
+            and agents_available is not None
+            and agents_available <= 0
+        )
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_htmx"] = True
+        context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
 
