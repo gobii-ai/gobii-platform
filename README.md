@@ -2,11 +2,16 @@
   <img src="assets/logo/gobii-fish.png" alt="Gobii fish mascot" width="190" />
 </p>
 
-<h1 align="center">Gobii Platform</h1>
+<h1 align="center">Gobii</h1>
 
 <p align="center">
-  <strong>Always-on AI employees for teams.</strong><br/>
-  Built on <a href="https://github.com/browser-use/browser-use">browser-use</a>. Designed for secure, cloud-native operations.
+  <strong>AI coworkers for teams with real work to do.</strong><br/>
+  This repository contains the open-source Gobii Platform for self-hosting and development.
+</p>
+
+<p align="center">
+  <strong>Looking for the hosted product?</strong>
+  Start at <a href="https://gobii.ai/">Gobii AI coworkers</a>.
 </p>
 
 <p align="center">
@@ -16,16 +21,17 @@
 </p>
 
 <p align="center">
-  <a href="https://gobii.ai">Website</a>
+  <a href="https://gobii.ai/">Official Website</a>
   ·
   <a href="https://docs.gobii.ai/">Docs</a>
   ·
   <a href="https://discord.gg/yyDB8GwxtE">Discord</a>
   ·
-  <a href="https://gobii.ai/pricing">Cloud</a>
+  <a href="https://gobii.ai/pricing">Gobii Cloud</a>
 </p>
 
-Gobii is the open-source platform for running durable autonomous agents in production.
+Gobii is an AI coworker platform for running durable autonomous agents in production.
+The hosted Gobii product is available at [gobii.ai](https://gobii.ai/); this repository contains the open-source platform for self-hosted deployments and development.
 Each agent can run continuously, wake from schedules and events, use real browsers, call external systems, and coordinate with other agents.
 Each agent can also be contacted like an AI coworker: assign it an identity, email or text it, and it keeps working 24/7.
 
@@ -49,6 +55,9 @@ Gobii is optimized for a different problem: reliable, secure, always-on agent op
 </div>
 
 ## Quick Install
+
+Most users looking for Gobii Cloud should start at [gobii.ai](https://gobii.ai/).
+Use this install path when you want to self-host or develop against the open-source Gobii Platform.
 
 1. **Prerequisites**: Docker Desktop (or compatible engine) with at least 12 GB RAM allocated.
 2. **Run the hosted installer**.
