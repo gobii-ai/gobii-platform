@@ -3419,7 +3419,7 @@ def _get_system_instruction(
             "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input for blocking answers; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
-        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** Text + tools in one response is only for real user-facing content, never status narration. "
+        tool_calls_note = "Text + tools in one response is only for real user-facing content, never status narration. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3436,7 +3436,7 @@ def _get_system_instruction(
             "Response structure: tools while working; empty response sleeps; message + send tool only for FINDINGS, blockers, config changes, or final output. "
             "Note: Text-only output is never delivered. Always use send tools for communication."
         )
-        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** "
+        tool_calls_note = ""
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates.
