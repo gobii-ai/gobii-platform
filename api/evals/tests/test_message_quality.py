@@ -40,15 +40,13 @@ class MessageQualityScenarioTests(SimpleTestCase):
             self.assertIn("llm_judge", metadata.tags)
             self.assertIn("response_quality", metadata.tags)
 
-    def test_email_formatting_basics_require_inline_color(self):
+    def test_email_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
         scenario = MessageQualityScenario()
         body = (
-            "<h2>📊 Summary</h2>"
-            "<table style='border-collapse:collapse; width:100%;'>"
-            "<tr><th style='padding:8px;'>Metric</th></tr>"
-            "<tr><td style='padding:8px;'>Value</td></tr>"
-            "</table>"
+            "<h2>Summary</h2>"
+            "<p>This plain email has enough structure for delivery inspection, "
+            "but the judge owns whether it is visually polished.</p>"
         )
 
         failures = scenario._formatting_failures(
@@ -61,23 +59,12 @@ class MessageQualityScenarioTests(SimpleTestCase):
             body,
         )
 
-        self.assertIn("Email body needs visible inline color styling.", failures)
+        self.assertEqual(failures, [])
 
-    def test_chat_formatting_basics_accept_rich_markdown_report(self):
+    def test_chat_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
         scenario = MessageQualityScenario()
-        body = (
-            "## 📊 Executive Snapshot\n\n"
-            "| Metric | Value |\n"
-            "| --- | --- |\n"
-            "| Total | 142 |\n"
-            "| Verified | 2 |\n\n"
-            "### 🎯 Recommendation\n\n"
-            "- Shift to higher-yield parks unless Apollo.io is connected.\n"
-            "- Keep the two verified leads ready for outreach.\n\n"
-            "### 🔍 Detail\n\n"
-            + ("This section keeps the report substantial and readable. " * 12)
-        )
+        body = "Here is the report in plain prose. The judge decides whether that is rich enough."
 
         failures = scenario._formatting_failures(
             case,
@@ -86,6 +73,18 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertEqual(failures, [])
+
+    def test_delivery_basics_reject_empty_message_body(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
+        scenario = MessageQualityScenario()
+
+        failures = scenario._formatting_failures(
+            case,
+            {"body": "", "will_continue_work": False},
+            "",
+        )
+
+        self.assertEqual(failures, ["Message body was empty."])
 
     def test_chat_delivery_is_not_mocked_so_auditor_can_show_message(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")

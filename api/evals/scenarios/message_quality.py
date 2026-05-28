@@ -147,11 +147,6 @@ MESSAGE_QUALITY_SCENARIO_SLUGS = tuple(case.slug for case in MESSAGE_QUALITY_CAS
 
 
 MESSAGE_TOOL_NAMES = {"send_email", "send_chat_message", "send_sms", "send_agent_message"}
-EMOJI_RE = re.compile(
-    "[\U0001f300-\U0001f6ff\U0001f700-\U0001f77f\U0001f780-\U0001f7ff\U0001f900-\U0001f9ff\u2600-\u27bf]"
-)
-
-
 class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "message_quality"
@@ -219,9 +214,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             return
 
         body = self._message_body(case, send_call)
-        basics_ok = self._record_formatting_basics(run_id, case, send_call, body)
-        if not basics_ok:
-            return
+        self._record_formatting_basics(run_id, case, send_call, body)
         self._record_quality_judgment(run_id, case, send_call, body)
 
     def _case(self) -> MessageQualityCase:
@@ -336,7 +329,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_formatting_basics",
-                observed_summary="Message passed deterministic formatting basics.",
+                observed_summary="Message passed deterministic delivery basics.",
                 artifacts={
                     **self._task_artifacts(send_call, sent_message),
                     "body_preview": body[:1200],
@@ -550,26 +543,8 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 failures.append("send_email.subject is missing.")
             if re.search(r"</?(?:html|head|body)\b", body, re.IGNORECASE):
                 failures.append("Email body should not include html/head/body wrapper tags.")
-            if not re.search(r"<h[1-3]\b", body, re.IGNORECASE):
-                failures.append("Email body needs heading tags.")
-            if not re.search(r"<(?:table|ul|ol)\b", body, re.IGNORECASE):
-                failures.append("Email body needs a table or list structure.")
-            if "style=" not in body:
-                failures.append("Email body needs inline CSS styling.")
-            if not re.search(r"(?:color|background-color|border(?:-left)?):\s*#[0-9a-fA-F]{3,6}", body):
-                failures.append("Email body needs visible inline color styling.")
             if re.search(r"^\s*\|.+\|\s*$", body, re.MULTILINE):
                 failures.append("Email body should use HTML tables, not Markdown pipe tables.")
-        else:
-            if not re.search(r"^#{2,3}\s+", body, re.MULTILINE):
-                failures.append("Chat report needs Markdown section headings.")
-            if "|" not in body and not re.search(r"^\s*[-*]\s+", body, re.MULTILINE):
-                failures.append("Chat report needs a table or bullet structure.")
-            if len(body) < 600:
-                failures.append("Chat report is too short to be a substantial rich report.")
-
-        if not EMOJI_RE.search(body):
-            failures.append("Message needs tasteful emoji section labels or status markers.")
         return failures
 
 
