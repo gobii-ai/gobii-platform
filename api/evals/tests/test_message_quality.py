@@ -70,6 +70,22 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("tables", question)
         self.assertIn("emoji section labels", question)
 
+    def test_rich_email_judge_rewards_status_encoding_without_mandating_emoji(self):
+        case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "email")
+        question = MessageQualityScenario._judge_question(case)
+
+        self.assertIn("visually distinct", question)
+        self.assertIn("status/value encoding", question)
+        self.assertIn("Prefer tasteful emoji", question)
+        self.assertNotIn("emoji used tastefully", question)
+
+    def test_chat_judge_does_not_require_recommendation(self):
+        case = next(case for case in REPORT_MESSAGE_QUALITY_CASES if case.channel == "chat")
+        question = MessageQualityScenario._judge_question(case)
+
+        self.assertIn("status labels", question)
+        self.assertNotIn("recommendation", question)
+
     def test_email_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
         scenario = MessageQualityScenario()

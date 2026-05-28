@@ -77,8 +77,8 @@ class AttachmentGuidanceTests(SimpleTestCase):
         email_guidance = _get_email_formatting_guidance()
         chat_guidance = _get_web_chat_formatting_guidance()
 
-        self.assertIn("avoid bare HTML", email_guidance)
-        self.assertIn("visible inline color/spacing", email_guidance)
+        self.assertIn("reports/dashboards", email_guidance)
+        self.assertIn("color-coded status/value changes", email_guidance)
         self.assertIn("visible status colors", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("emoji/status labels", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])

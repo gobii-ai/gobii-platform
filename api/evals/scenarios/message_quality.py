@@ -458,15 +458,17 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if case.channel == "email":
             return (
                 "Does this email meet a high bar for formatting quality? Pass only if it is body-only HTML "
-                "that would look polished in an inbox: clear hierarchy, good spacing, emoji used tastefully, "
-                "readable report sections, tables or metric blocks where useful, and visible inline color "
-                "for accents/status/table styling. Fail if it is plain, cramped, Markdown-like, lacks color, "
-                "or does not feel like a rich report."
+                "that would look polished in an inbox: clear hierarchy, good spacing, visually distinct "
+                "report sections, tables or metric blocks where useful, and visible inline color for "
+                "accents/status/table styling. Prefer tasteful emoji, icons, badges, or other status markers "
+                "for section labels and important values. Fail if it is plain, cramped, Markdown-like, "
+                "mostly generic headings/lists, lacks visual status/value encoding, or does not feel like a "
+                "rich report."
             )
         return (
             "Does this web chat message meet a high bar for report formatting quality? Pass only if it has "
-            "clear Markdown hierarchy, emoji used tastefully, useful tables or metric blocks, bullets, spacing, "
-            "and a concise recommendation. Fail if it is plain prose, cramped, hard to scan, or not report-like."
+            "clear Markdown hierarchy, tasteful emoji or status labels, useful tables or metric blocks, bullets, "
+            "and good spacing. Fail if it is plain prose, cramped, hard to scan, or not report-like."
         )
 
     @staticmethod
