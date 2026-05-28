@@ -2971,7 +2971,7 @@ def _get_email_formatting_guidance() -> str:
 
     return (
         "Email formatting (rich, expressive HTML):\n"
-        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: use styled section headers, tables or metric blocks, and visually highlight key numbers, statuses, and value changes with color, badges, or icons. Plain headings/lists are not enough for report emails. "
+        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: put inline style attrs on section headers, tables/cells, and key-value spans so important numbers, statuses, and value changes are visibly highlighted with color, badges, or icons. Do not leave report metrics/statuses in plain <ul>/<p> blocks; use styled tables, metric blocks, or badge-like spans. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs."
     )
 

@@ -78,11 +78,13 @@ class AttachmentGuidanceTests(SimpleTestCase):
         chat_guidance = _get_web_chat_formatting_guidance()
 
         self.assertIn("reports/dashboards", email_guidance)
-        self.assertIn("visually highlight key numbers", email_guidance)
-        self.assertIn("statuses, and value changes", email_guidance)
-        self.assertIn("Plain headings/lists are not enough", email_guidance)
-        self.assertIn("plain headings/lists are not enough", email_tool["function"]["description"])
-        self.assertIn("badges/icons for key numbers", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("inline style attrs", email_guidance)
+        self.assertIn("key-value spans", email_guidance)
+        self.assertIn("Do not leave report metrics/statuses in plain <ul>/<p> blocks", email_guidance)
+        self.assertIn("inline style attrs", email_tool["function"]["description"])
+        self.assertIn("Do NOT leave report metrics in plain lists", email_tool["function"]["description"])
+        self.assertIn("style section headers, tables/cells, and spans", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("instead of plain lists", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("emoji/status labels", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
