@@ -1770,21 +1770,70 @@ class SolutionCtaCopyTests(TestCase):
             segment for segment in button.stripped_strings if segment and segment != "→"
         ).strip()
 
-    def _mini_header_logo_src(self) -> str | None:
+    def _mini_header_logo(self):
         request = self.request_factory.get("/solutions/recruiting/")
         request.user = AnonymousUser()
         rendered = render_to_string("includes/_unified_header_nav_mini.html", {"request": request})
         soup = BeautifulSoup(rendered, "html.parser")
-        logo = soup.select_one('header.hs-header a[href="/"] img')
-        return logo.get("src") if logo else None
+        return soup.select_one('header.hs-header a[href="/"] img')
+
+    @staticmethod
+    def _fish_header_logo_srcset() -> str:
+        return (
+            f"{static('images/gobii_fish_with_text_purple_nav_1x.webp')} 1x, "
+            f"{static('images/gobii_fish_with_text_purple_nav_2x.webp')} 2x, "
+            f"{static('images/gobii_fish_with_text_purple_nav_3x.webp')} 3x"
+        )
+
+    def _solution_recruiting_soup(self):
+        response = self.client.get("/solutions/recruiting/")
+        self.assertEqual(response.status_code, 200)
+        return BeautifulSoup(response.content, "html.parser")
 
     def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
         with override_flag("fish_upper_left", active=False):
-            self.assertEqual(self._mini_header_logo_src(), "/static/images/noBgIndigo600.png")
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
+            self.assertIsNone(logo.get("srcset"))
+            self.assertEqual(logo.get("fetchpriority"), "high")
 
     def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
         with override_flag("fish_upper_left", active=True):
-            self.assertEqual(self._mini_header_logo_src(), "/static/images/gobii_fish_with_text_purple_nav.png")
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(
+                logo.get("srcset"),
+                self._fish_header_logo_srcset(),
+            )
+            self.assertEqual(logo.get("width"), "108")
+            self.assertEqual(logo.get("height"), "40")
+            self.assertEqual(logo.get("fetchpriority"), "high")
+
+    def test_solution_page_preloads_standard_logo_when_fish_upper_left_is_off(self):
+        with override_flag("fish_upper_left", active=False):
+            soup = self._solution_recruiting_soup()
+            preload = soup.select_one('link[rel="preload"][as="image"]')
+            logo = soup.select_one('header.hs-header a[href="/"] img')
+            self.assertIsNotNone(preload)
+            self.assertIsNotNone(logo)
+            self.assertEqual(preload.get("href"), static("images/noBgIndigo600.png"))
+            self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
+            self.assertIsNone(preload.get("imagesrcset"))
+
+    def test_solution_page_preloads_fish_logo_when_fish_upper_left_is_on(self):
+        with override_flag("fish_upper_left", active=True):
+            soup = self._solution_recruiting_soup()
+            preload = soup.select_one('link[rel="preload"][as="image"]')
+            logo = soup.select_one('header.hs-header a[href="/"] img')
+            self.assertIsNotNone(preload)
+            self.assertIsNotNone(logo)
+            self.assertEqual(preload.get("href"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(preload.get("imagesrcset"), self._fish_header_logo_srcset())
+            self.assertEqual(preload.get("type"), "image/webp")
+            self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(logo.get("srcset"), self._fish_header_logo_srcset())
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):
