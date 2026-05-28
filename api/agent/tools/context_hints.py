@@ -626,6 +626,8 @@ def hint_from_serp(payload: dict, max_items: int = 5) -> Optional[str]:
     """Extract context hint from SERP (search engine results page)."""
     # Check for skeleton format first
     items = payload.get('items', [])
+    if not items:
+        items = _serp_items_from_results(payload.get('results', []), max_items)
     if items and isinstance(items, list):
         items = items[:max_items]
     else:
@@ -662,6 +664,21 @@ def hint_from_serp(payload: dict, max_items: int = 5) -> Optional[str]:
         lines.append(f"→ {url}")
 
     return _enforce_limit('\n'.join(lines))
+
+
+def _serp_items_from_results(results: Any, max_items: int) -> list[dict]:
+    if not isinstance(results, list):
+        return []
+    items = []
+    for index, item in enumerate(results[:max_items]):
+        if not isinstance(item, dict):
+            continue
+        url = item.get('url') or item.get('link') or item.get('href') or ''
+        title = item.get('title') or item.get('name') or ''
+        if not isinstance(url, str) or not url.startswith('http'):
+            continue
+        items.append({'t': str(title)[:60], 'u': url[:200], 'p': index + 1})
+    return items
 
 
 def _extract_serp_items(text: str, max_items: int) -> list[dict]:
@@ -743,6 +760,7 @@ def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Opt
     items = payload.get('items', [])
     excerpt = payload.get('excerpt', '')
     markdown = payload.get('result', '')
+    url = payload.get('url', '')
 
     if not title and not items and not excerpt:
         if not markdown:
@@ -758,11 +776,18 @@ def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Opt
         if prices:
             unique_prices = list(dict.fromkeys(prices))[:3]
             if title:
-                return _enforce_limit(f"📄 {title}\n💰 {', '.join(unique_prices)}")
+                parts = [f"📄 {title}"]
+                if isinstance(url, str) and url.startswith('http'):
+                    parts.append(f"→ {url}")
+                parts.append(f"💰 {', '.join(unique_prices)}")
+                return _enforce_limit("\n".join(parts))
             return _enforce_limit(f"💰 Prices: {', '.join(unique_prices)}")
 
         if title:
-            return _enforce_limit(f"📄 {title}")
+            parts = [f"📄 {title}"]
+            if isinstance(url, str) and url.startswith('http'):
+                parts.append(f"→ {url}")
+            return _enforce_limit("\n".join(parts))
         if allow_barbell:
             return hint_from_unstructured_text(markdown)
         return None
@@ -770,6 +795,8 @@ def hint_from_scraped_page(payload: dict, *, allow_barbell: bool = False) -> Opt
     parts = []
     if title:
         parts.append(f"📄 {title[:80]}")
+    if isinstance(url, str) and url.startswith('http'):
+        parts.append(f"→ {url}")
 
     if excerpt:
         prices = _PRICE_PATTERN.findall(excerpt)

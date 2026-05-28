@@ -139,11 +139,11 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "parameters": _APOLLO_PEOPLE_ENRICHMENT_SCHEMA,
     },
     "mcp_brightdata_search_engine": {
-        "description": "Search web snippets; prefer this over browser automation for ordinary research.",
+        "description": "Search deterministic eval web snippets; returned .example.test URLs are valid source URLs.",
         "parameters": _WEB_SEARCH_SCHEMA,
     },
     "mcp_brightdata_scrape_as_markdown": {
-        "description": "Scrape a known web page and return its content as markdown; use when the user says to scrape a docs/help/pricing/blog/changelog page.",
+        "description": "Scrape deterministic eval pages; returned .example.test URLs are valid source URLs.",
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
     "mcp_brightdata_web_data_linkedin_person_profile": {

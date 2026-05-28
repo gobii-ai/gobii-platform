@@ -89,10 +89,12 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_eval_synthetic_search_tool_matches_production_query_shape(self):
         parameters = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["parameters"]
+        description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["description"]
 
         self.assertEqual(set(parameters["properties"]), {"query"})
         self.assertEqual(parameters["required"], ["query"])
         self.assertFalse(parameters["additionalProperties"])
+        self.assertIn(".example.test URLs are valid source URLs", description)
 
     def test_sqlite_result_text_read_detector_finds_retrieval_loops(self):
         reads = _sqlite_result_text_reads(

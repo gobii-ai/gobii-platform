@@ -194,6 +194,23 @@ class SerpHintTests(SimpleTestCase):
         self.assertIn('bhphotovideo.com', hint)
         self.assertIn('nvidia.com', hint)
 
+    def test_serp_results_format(self):
+        """Test eval/simple search results with title/url keys."""
+        payload = {
+            'status': 'ok',
+            'results': [
+                {
+                    'title': 'Northstar Robotics launches Atlas',
+                    'url': 'https://northstar.example.test/blog/atlas-launch',
+                },
+            ],
+        }
+        hint = hint_from_serp(payload)
+
+        self.assertIsNotNone(hint)
+        self.assertIn('northstar.example.test', hint)
+        self.assertIn('https://northstar.example.test/blog/atlas-launch', hint)
+
     def test_serp_raw_markdown(self):
         """Test extraction from raw markdown."""
         payload = {
@@ -242,6 +259,7 @@ class ScrapedPageHintTests(SimpleTestCase):
     def test_page_raw_markdown(self):
         """Test extraction from raw markdown."""
         payload = {
+            'url': 'https://northstar.example.test/blog/atlas-launch',
             'result': '''# Product Page
 
 The price is $299.99 for the basic model.
@@ -251,6 +269,7 @@ The price is $299.99 for the basic model.
 
         self.assertIsNotNone(hint)
         self.assertIn('Product Page', hint)
+        self.assertIn('https://northstar.example.test/blog/atlas-launch', hint)
         self.assertIn('$299.99', hint)
 
 
