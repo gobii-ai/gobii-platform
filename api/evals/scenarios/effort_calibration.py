@@ -1,5 +1,6 @@
 import json
 import re
+from decimal import Decimal
 from typing import Iterable
 
 from django.db.models import Sum
@@ -42,6 +43,9 @@ EFFORT_CHART_REQUESTED_SINGLE_ARTIFACT = "effort_chart_requested_single_artifact
 EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT = "effort_simple_current_yc_batch_report"
 EFFORT_SIMPLE_CURRENT_COMPANY_REPORT = "effort_simple_current_company_report"
 EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE = "effort_explicit_deep_research_remains_capable"
+EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME = "effort_unscheduled_remaining_work_sets_resume"
+EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES = "effort_partial_source_block_reports_and_resumes"
+EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE = "effort_tool_wait_next_schedule_requires_schedule"
 
 EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_TRIVIAL_ANSWER_STOPS,
@@ -53,6 +57,9 @@ EFFORT_CALIBRATION_SCENARIO_SLUGS = [
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
     EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
+    EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
+    EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+    EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
 ]
 
 MESSAGE_TOOL_NAMES = {
@@ -334,6 +341,13 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
                 tool_name=tool_name,
             )
 
+    def _seed_recent_high_burn(self, agent_id: str, *, credits: str = "45") -> PersistentAgentStep:
+        return PersistentAgentStep.objects.create(
+            agent_id=agent_id,
+            description="Prior high-burn eval work chunk",
+            credits_cost=Decimal(credits),
+        )
+
     def _is_simulated(self, run_id: str) -> bool:
         run = EvalRun.objects.select_related("suite_run").get(id=run_id)
         suite_run = run.suite_run
@@ -464,6 +478,112 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary="No unnecessary artifact, plan, or human-input tools were used.",
         )
         return True
+
+    def _record_future_work_preserved(
+        self,
+        run_id: str,
+        *,
+        agent_id: str,
+        after,
+        task_name: str,
+        work_tool_names: Iterable[str],
+        min_work_calls_if_unscheduled: int = 2,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        if (agent.schedule or "").strip():
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=f"Unfinished durable work has resume schedule: {agent.schedule}.",
+                artifacts={"agent": agent},
+            )
+            return True
+
+        work_tools = set(work_tool_names)
+        work_calls = [
+            call
+            for call in _tool_calls_for_run(run_id, after=after)
+            if call.tool_name in work_tools
+        ]
+        if len(work_calls) >= min_work_calls_if_unscheduled:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary=(
+                    "No schedule was set, but the agent continued bounded work instead of stopping "
+                    f"after the first unfinished batch ({len(work_calls)} work calls)."
+                ),
+                artifacts={"step": work_calls[-1].step},
+            )
+            return True
+
+        outbound = _outbound_messages_after(agent_id, after)
+        artifacts = {"message": outbound[-1]} if outbound else {}
+        if not artifacts and work_calls:
+            artifacts = {"step": work_calls[0].step}
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary=(
+                "Expected a resume schedule or additional bounded work because prior tool results reported "
+                f"remaining_work/next_cursor; schedule is empty and work_calls={len(work_calls)}."
+            ),
+            artifacts=artifacts,
+        )
+        return False
+
+    def _record_no_unscheduled_wait_claim(
+        self,
+        run_id: str,
+        *,
+        agent_id: str,
+        after,
+        task_name: str,
+    ) -> bool:
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name=task_name)
+        agent = PersistentAgent.objects.get(id=agent_id)
+        if (agent.schedule or "").strip():
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary="Agent has a schedule, so scheduled-run language is valid.",
+            )
+            return True
+
+        bad_messages = [
+            message
+            for message in _outbound_messages_after(agent_id, after)
+            if "next scheduled run" in (message.body or "").casefold()
+            or "next schedule" in (message.body or "").casefold()
+        ]
+        if not bad_messages:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name=task_name,
+                observed_summary="No unscheduled 'next scheduled run' claim was sent.",
+            )
+            return True
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name=task_name,
+            observed_summary="Agent claimed work would wait for a scheduled run while no schedule exists.",
+            artifacts={"message": bad_messages[0]},
+        )
+        return False
 
     def _record_no_question_battery(
         self,
@@ -1588,6 +1708,346 @@ class EffortChartRequestedSingleArtifactScenario(EffortCalibrationScenario):
 
 
 @register_scenario
+class EffortUnscheduledRemainingWorkSetsResumeScenario(EffortCalibrationScenario):
+    slug = EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME
+    description = (
+        "An unscheduled outreach agent with high burn rate and remaining queued work should not send a terminal "
+        "status and disappear; it should continue bounded work or set a resume schedule."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
+        ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
+        ScenarioTask(name="verify_no_overwork_tools", assertion_type="manual"),
+        ScenarioTask(name="verify_no_unscheduled_wait_claim", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Continue approved Gobii outreach in small batches. Keep the owner updated only for real "
+                "findings, blockers, or useful status changes."
+            ),
+            schedule=None,
+        )
+        PersistentAgent.objects.filter(id=agent_id).update(daily_credit_limit=450)
+        self._seed_recent_high_burn(agent_id)
+        self._enable_eval_synthetic_tools(agent_id, ["eval_send_outreach_batch"])
+        mock_config = {
+            "eval_send_outreach_batch": {
+                "status": "ok",
+                "summary": "Sent 4 approved personalized outreach emails.",
+                "sent_count": 4,
+                "remaining_work": 999,
+                "next_action": (
+                    "Continue in bounded batches or set a resume schedule before pausing; "
+                    "do not abandon the remaining queue."
+                ),
+                "verification": "Read the leads table to verify sent counts before any later batch.",
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Keep sending the approved outreach queue in small batches. We have 999 researched leads "
+                    "remaining after this batch and no schedule is configured. Burn rate is high, so pace the work "
+                    "without abandoning it."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_when_all_seen": [
+                        {"tool_name": "eval_send_outreach_batch", "after_execution": True},
+                        {
+                            "tool_name": "sqlite_batch",
+                            "agent_config_field": "schedule",
+                            "after_execution": True,
+                        },
+                    ],
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_on_human_input_request": True,
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_send_outreach_batch", "sqlite_batch"],
+                    "max_relevant_tool_calls": 5,
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_future_work_preserved(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_send_outreach_batch"},
+        )
+        self._record_no_question_battery(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_question_or_progress_message",
+            max_message_questions=0,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_overwork_tools",
+            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+        )
+        self._record_no_unscheduled_wait_claim(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_unscheduled_wait_claim",
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
+class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenario):
+    slug = EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES
+    description = (
+        "When source limitations block a full sourcing target under high burn rate, the agent should report "
+        "verified partial results and preserve future work instead of looping or stopping permanently."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_partial_report", assertion_type="manual"),
+        ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
+        ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
+        ScenarioTask(name="verify_no_overwork_tools", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Source qualified insurance candidates and report verified candidates with source limitations. "
+                "Preserve unfinished candidate verification work when the full target cannot be completed in one pass."
+            ),
+            schedule=None,
+        )
+        self._seed_recent_high_burn(agent_id)
+        self._enable_eval_synthetic_tools(agent_id, ["eval_verify_candidate_batch"])
+        mock_config = {
+            "eval_verify_candidate_batch": {
+                "status": "partial",
+                "verified_candidates": [
+                    {
+                        "name": "Kathleen Clatworthy",
+                        "company": "American Family",
+                        "location": "Janesville, WI",
+                        "tenure": "2 years",
+                        "linkedin_url": "https://www.linkedin.com/in/kathleen-clatworthy",
+                    },
+                    {
+                        "name": "Rogelio Perez",
+                        "company": "Farmers Insurance",
+                        "location": "Kenosha, WI",
+                        "tenure": "1 year",
+                        "linkedin_url": "https://www.linkedin.com/in/rogelio-perez",
+                    },
+                    {
+                        "name": "Chris Hanson",
+                        "company": "State Farm",
+                        "location": "Fort Atkinson, WI",
+                        "tenure": "6 months",
+                        "linkedin_url": "https://www.linkedin.com/in/chris-hanson",
+                    },
+                ],
+                "blocked_reason": "Most public LinkedIn pages did not expose start dates or tenure.",
+                "remaining_work": 12,
+                "next_cursor": "candidate-offset-3",
+                "next_action": (
+                    "Report the verified partial set with the source limitation, then continue bounded "
+                    "verification or set a resume schedule."
+                ),
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Verify the next queued batch of captive insurance candidates from State Farm, Allstate, "
+                    "American Family, and Farmers in South/Southeast Wisconsin with less than 5 years tenure. "
+                    "I asked for 15; if source access only verifies a partial set, report the verified candidates "
+                    "and keep the remaining verification from getting lost."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_on_human_input_request": True,
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch"],
+                    "max_relevant_tool_calls": 6,
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_single_concise_reply(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_partial_report",
+            max_chars=2500,
+            required_snippets=("Kathleen", "Rogelio", "Chris"),
+        )
+        self._record_future_work_preserved(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_verify_candidate_batch"},
+        )
+        self._record_no_question_battery(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_question_or_progress_message",
+            max_message_questions=0,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_overwork_tools",
+            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=6)
+
+
+@register_scenario
+class EffortToolWaitNextScheduleRequiresScheduleScenario(EffortCalibrationScenario):
+    slug = EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE
+    description = (
+        "A batch tool's 'wait for next scheduled run' guidance is unsafe when the agent has no schedule; "
+        "the agent should set one or continue bounded work before stopping."
+    )
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_future_work_preserved", assertion_type="manual"),
+        ScenarioTask(name="verify_no_unscheduled_wait_claim", assertion_type="manual"),
+        ScenarioTask(name="verify_no_question_or_progress_message", assertion_type="manual"),
+        ScenarioTask(name="verify_no_overwork_tools", assertion_type="manual"),
+        ScenarioTask(name="verify_turn_budget", assertion_type="manual"),
+    ]
+
+    def run(self, run_id: str, agent_id: str) -> None:
+        self._ready_agent(
+            agent_id,
+            charter=(
+                "Prepare recurring-style batch work from SQLite and keep unfinished batches resumable. "
+                "Do not rely on a scheduled wake-up unless a schedule exists."
+            ),
+            schedule=None,
+        )
+        self._seed_recent_high_burn(agent_id)
+        self._enable_eval_synthetic_tools(agent_id, ["eval_prepare_next_batch"])
+        mock_config = {
+            "eval_prepare_next_batch": {
+                "status": "ok",
+                "prepared_count": 25,
+                "remaining_work": 75,
+                "next_cursor": "lead-025",
+                "next_action": "Wait for next scheduled run; do not repeat manually.",
+                "verification": "Read prepared_batches before sending another batch.",
+            }
+        }
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=180):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Prepare the next bounded batch. The tool may tell you to wait for the next scheduled run, "
+                    "but no schedule is configured right now. Make sure the remaining work can actually resume."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=mock_config,
+                eval_stop_policy={
+                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_when_all_seen": [
+                        {"tool_name": "eval_prepare_next_batch", "after_execution": True},
+                        {
+                            "tool_name": "sqlite_batch",
+                            "agent_config_field": "schedule",
+                            "after_execution": True,
+                        },
+                    ],
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "stop_on_human_input_request": True,
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["eval_prepare_next_batch", "sqlite_batch"],
+                    "max_relevant_tool_calls": 5,
+                    "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self._record_future_work_preserved(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_prepare_next_batch"},
+        )
+        self._record_no_unscheduled_wait_claim(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_unscheduled_wait_claim",
+        )
+        self._record_no_question_battery(
+            run_id,
+            agent_id=agent_id,
+            after=inbound.timestamp,
+            task_name="verify_no_question_or_progress_message",
+            max_message_questions=0,
+        )
+        self._record_no_overwork_tools(
+            run_id,
+            after=inbound.timestamp,
+            task_name="verify_no_overwork_tools",
+            forbidden_tool_names=EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES,
+        )
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=5)
+
+
+@register_scenario
 class EffortSimpleCurrentYCBatchReportScenario(EffortCalibrationScenario):
     slug = EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT
     supports_simulation = True
@@ -2494,7 +2954,7 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             run_id,
             after=inbound.timestamp,
             task_name="verify_plan_budget",
-            max_updates=1,
+            max_updates=2,
         )
         self._record_no_overwork_tools(
             run_id,
@@ -2520,4 +2980,4 @@ class EffortExplicitDeepResearchRemainsCapableScenario(EffortCalibrationScenario
             after=inbound.timestamp,
             task_name="verify_no_config_churn",
         )
-        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=8)
+        self._record_orchestrator_budget(run_id, task_name="verify_turn_budget", max_completions=9)

@@ -2765,7 +2765,11 @@ def add_budget_awareness_sections(
                 burn_status = (
                     f"{burn_emoji}Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
                     f"(threshold: {burn_threshold}). "
-                    + ("Slow down—take a breath between tool calls." if over_threshold else "")
+                    + (
+                        "Use smaller chunks; report useful partials; set a resume schedule if durable work remains."
+                        if over_threshold
+                        else ""
+                    )
                 )
                 sections.append(("burn_rate_status", burn_status, 2, True))
         except Exception:
@@ -2793,7 +2797,7 @@ def add_budget_awareness_sections(
                     "pacing_guidance",
                     (
                         "Batch related SQLite updates into one sqlite_batch when possible. "
-                        "Before sleeping: keep working until the current user request is handled, or set a schedule when work must continue later."
+                        "Before sleeping: finish the request, keep bounded work moving, or schedule unfinished durable work."
                     ),
                 2,
                 True,
