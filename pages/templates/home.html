@@ -404,7 +404,7 @@
                 <div id="charter-ghost" class="pointer-events-none absolute inset-0 flex px-5 py-4 text-base leading-relaxed text-slate-500 transition-opacity duration-200">
                   <div>
                     <span>I want my Gobii to</span>
-                    <span id="charter-ghost-text"> find 200 ideal customers and their emails.</span>
+                    <span id="charter-ghost-text" class="transition-opacity duration-300"> find 200 ideal customers and their emails.</span>
                   </div>
                 </div>
 
@@ -932,7 +932,7 @@
 
       let scenarioQueue = [];
       let currentScenario = '';
-      let lastScenario = '';
+      let lastScenario = ghostText.textContent;
 
       function refillQueue() {
         scenarioQueue = shuffle(baseScenarios);
@@ -950,12 +950,6 @@
       }
 
       refillQueue();
-      pickNextScenario();
-
-      let charIndex = 0;
-      let isDeleting = false;
-
-      ghostText.textContent = '';
 
       function toggleGhostVisibility() {
         const hasValue = textarea.value.trim().length > 0;
@@ -970,42 +964,41 @@
 
       toggleGhostVisibility();
 
-      function typeLoop() {
+      const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const visibleDuration = 3200;
+      const transitionDuration = 300;
+
+      function rotateScenario() {
         const hasValue = textarea.value.trim().length > 0;
         if (hasValue) {
-          setTimeout(typeLoop, 400);
+          setTimeout(rotateScenario, 600);
           return;
         }
 
-        if (!isDeleting && charIndex <= currentScenario.length) {
-          ghostText.textContent = currentScenario.slice(0, charIndex);
-          charIndex += 1;
-          setTimeout(typeLoop, 30 + Math.random() * 15);
-          return;
-        }
+        ghostText.classList.add('opacity-0');
+        setTimeout(function () {
+          if (textarea.value.trim().length > 0) {
+            ghostText.classList.remove('opacity-0');
+            setTimeout(rotateScenario, 600);
+            return;
+          }
 
-        if (!isDeleting && charIndex > currentScenario.length) {
-          isDeleting = true;
-          setTimeout(typeLoop, 1500);
-          return;
-        }
-
-        if (isDeleting && charIndex > 0) {
-          charIndex -= 1;
-          ghostText.textContent = currentScenario.slice(0, charIndex);
-          setTimeout(typeLoop, 18 + Math.random() * 10);
-          return;
-        }
-
-        if (isDeleting && charIndex === 0) {
-          isDeleting = false;
           pickNextScenario();
-          setTimeout(typeLoop, 300);
-          return;
-        }
+          ghostText.style.visibility = 'hidden';
+          ghostText.textContent = currentScenario;
+
+          window.requestAnimationFrame(function () {
+            ghostText.style.visibility = '';
+            ghostText.classList.remove('opacity-0');
+          });
+
+          setTimeout(rotateScenario, visibleDuration);
+        }, transitionDuration);
       }
 
-      setTimeout(typeLoop, 400);
+      if (!prefersReducedMotion) {
+        setTimeout(rotateScenario, visibleDuration);
+      }
     });
   </script>
 
