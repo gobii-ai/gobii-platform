@@ -1770,21 +1770,36 @@ class SolutionCtaCopyTests(TestCase):
             segment for segment in button.stripped_strings if segment and segment != "→"
         ).strip()
 
-    def _mini_header_logo_src(self) -> str | None:
+    def _mini_header_logo(self):
         request = self.request_factory.get("/solutions/recruiting/")
         request.user = AnonymousUser()
         rendered = render_to_string("includes/_unified_header_nav_mini.html", {"request": request})
         soup = BeautifulSoup(rendered, "html.parser")
-        logo = soup.select_one('header.hs-header a[href="/"] img')
-        return logo.get("src") if logo else None
+        return soup.select_one('header.hs-header a[href="/"] img')
 
     def test_solution_header_uses_standard_logo_when_fish_upper_left_is_off(self):
         with override_flag("fish_upper_left", active=False):
-            self.assertEqual(self._mini_header_logo_src(), "/static/images/noBgIndigo600.png")
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
+            self.assertIsNone(logo.get("srcset"))
 
     def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
         with override_flag("fish_upper_left", active=True):
-            self.assertEqual(self._mini_header_logo_src(), "/static/images/gobii_fish_with_text_purple_nav.png")
+            logo = self._mini_header_logo()
+            self.assertIsNotNone(logo)
+            self.assertEqual(logo.get("src"), static("images/gobii_fish_with_text_purple_nav_2x.webp"))
+            self.assertEqual(
+                logo.get("srcset"),
+                (
+                    f"{static('images/gobii_fish_with_text_purple_nav_1x.webp')} 1x, "
+                    f"{static('images/gobii_fish_with_text_purple_nav_2x.webp')} 2x, "
+                    f"{static('images/gobii_fish_with_text_purple_nav_3x.webp')} 3x"
+                ),
+            )
+            self.assertEqual(logo.get("width"), "108")
+            self.assertEqual(logo.get("height"), "40")
+            self.assertEqual(logo.get("fetchpriority"), "high")
 
     @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
     def test_solution_cta_text_changes_for_authenticated_users(self):

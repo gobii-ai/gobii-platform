@@ -274,7 +274,11 @@
   {% endif %}
   <!-- Preload logo to prevent flicker -->
   {% if fish_collateral_enabled %}
-    <link rel="preload" as="image" href="{% static 'images/gobii_fish_with_text_purple_nav.png' %}" />
+    <link rel="preload"
+          as="image"
+          type="image/webp"
+          href="{% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %}"
+          imagesrcset="{% static 'images/gobii_fish_with_text_purple_nav_1x.webp' %} 1x, {% static 'images/gobii_fish_with_text_purple_nav_2x.webp' %} 2x, {% static 'images/gobii_fish_with_text_purple_nav_3x.webp' %} 3x">
   {% else %}
     <link rel="preload" as="image" href="{% static 'images/noBgBlue.png' %}" />
   {% endif %}
