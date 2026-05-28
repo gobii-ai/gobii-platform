@@ -290,7 +290,7 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
         self.assertIn("category example choices", description)
         self.assertIn("which vendor/company", description)
-        self.assertIn("choose and disclose afterward", description)
+        self.assertIn("choose and disclose", description)
         self.assertIn("explicitly asks you to ask for targets/scope before setup", description)
         self.assertIn("missing targets/scope block a recurring monitor", description)
 

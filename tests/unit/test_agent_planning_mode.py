@@ -148,7 +148,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         function = tool["function"]
 
         self.assertIn("In Planning Mode, planning questions must use this tool", function["description"])
-        self.assertIn("questions sent only by chat, email, or SMS are not tracked", function["description"])
+        self.assertIn("chat/email/SMS-only questions are not tracked", function["description"])
 
     def test_end_planning_replaces_charter_and_removes_planning_tool(self):
         self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
