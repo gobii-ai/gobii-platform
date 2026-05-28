@@ -19,5 +19,5 @@
 }
 
 body {
-  font-family: 'Inter Variable', sans-serif;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }

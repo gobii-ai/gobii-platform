@@ -63,6 +63,12 @@
   <link rel="preconnect" href="https://www.googletagmanager.com">
   {% endif %}
 
+  <link rel="preload"
+        href="{% static 'fonts/InterVariable.woff2' %}"
+        as="font"
+        type="font/woff2"
+        crossorigin>
+
   <!-- Critical CSS: discover render-blocking styles before analytics scripts. -->
   <link rel="stylesheet" href="{% static 'css/tailwind.css' %}">
   <link rel="stylesheet" href="{% static 'css/custom_fonts.css' %}">
