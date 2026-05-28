@@ -369,7 +369,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     ) -> bool:
         self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_formatting_basics")
         params = self._tool_params(send_call)
-        failures = self._formatting_failures(case, params, body)
+        failures = self._formatting_failures(case, params, body, send_call=send_call)
         sent_message = self._sent_message_for_call(send_call)
         if not failures:
             self.record_task_result(
@@ -418,6 +418,20 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             ),
             options=["Pass", "Fail"],
         )
+        if self._judge_reasoning_is_unusable(reasoning):
+            choice, reasoning = self.llm_judge(
+                question=(
+                    f"{self._judge_question(case)} Your reasoning must cite concrete formatting evidence "
+                    "from the message body."
+                ),
+                context=(
+                    f"Delivery channel: {case.channel}\n"
+                    f"Source facts:\n{case.source_facts}\n\n"
+                    f"Tool params:\n{json.dumps(params, indent=2, ensure_ascii=False, default=str)}\n\n"
+                    f"Message body:\n{body}"
+                ),
+                options=["Pass", "Fail"],
+            )
 
         status = EvalRunTask.Status.PASSED if choice == "Pass" else EvalRunTask.Status.FAILED
         self.record_task_result(
@@ -444,6 +458,10 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if case.quality_target == "simple_email":
             return "Judge should pass only restrained, professional outreach email formatting."
         return "Judge should pass only polished, rich, readable report formatting."
+
+    @staticmethod
+    def _judge_reasoning_is_unusable(reasoning: str) -> bool:
+        return len((reasoning or "").strip()) < 40
 
     @staticmethod
     def _judge_question(case: MessageQualityCase) -> str:
@@ -479,6 +497,19 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
         if isinstance(params, str):
             try:
                 parsed = json.loads(params)
+            except json.JSONDecodeError:
+                return {}
+            return parsed if isinstance(parsed, dict) else {}
+        return {}
+
+    @staticmethod
+    def _tool_result(send_call: PersistentAgentToolCall) -> dict[str, Any]:
+        result = send_call.result
+        if isinstance(result, dict):
+            return result
+        if isinstance(result, str):
+            try:
+                parsed = json.loads(result)
             except json.JSONDecodeError:
                 return {}
             return parsed if isinstance(parsed, dict) else {}
@@ -599,11 +630,19 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             artifacts["message"] = sent_message
         return artifacts
 
-    def _formatting_failures(self, case: MessageQualityCase, params: dict[str, Any], body: str) -> list[str]:
+    def _formatting_failures(
+        self,
+        case: MessageQualityCase,
+        params: dict[str, Any],
+        body: str,
+        *,
+        send_call: PersistentAgentToolCall | None = None,
+    ) -> list[str]:
         failures = []
         if not body.strip():
             failures.append("Message body was empty.")
-        if params.get("will_continue_work") is not False:
+        result = self._tool_result(send_call) if send_call is not None else {}
+        if params.get("will_continue_work") is not False and result.get("auto_sleep_ok") is not True:
             failures.append("will_continue_work should be false for final report delivery.")
 
         if case.channel == "email":

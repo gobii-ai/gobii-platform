@@ -63,7 +63,7 @@ class AttachmentGuidanceTests(SimpleTestCase):
         html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("do NOT use Markdown pipe tables", tool_description)
+        self.assertIn("Do NOT use Markdown pipe tables", tool_description)
         self.assertIn("Inline images", html_description)
         self.assertIn("attach file", html_description)
         self.assertIn("<img src='cid:filename'>", html_description)
@@ -78,8 +78,11 @@ class AttachmentGuidanceTests(SimpleTestCase):
         chat_guidance = _get_web_chat_formatting_guidance()
 
         self.assertIn("reports/dashboards", email_guidance)
-        self.assertIn("color-coded status/value changes", email_guidance)
-        self.assertIn("visible status colors", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("visually highlight key numbers", email_guidance)
+        self.assertIn("statuses, and value changes", email_guidance)
+        self.assertIn("Plain headings/lists are not enough", email_guidance)
+        self.assertIn("plain headings/lists are not enough", email_tool["function"]["description"])
+        self.assertIn("badges/icons for key numbers", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
         self.assertIn("emoji/status labels", chat_guidance)
         self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 

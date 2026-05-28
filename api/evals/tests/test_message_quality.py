@@ -86,6 +86,14 @@ class MessageQualityScenarioTests(SimpleTestCase):
         self.assertIn("status labels", question)
         self.assertNotIn("recommendation", question)
 
+    def test_short_judge_reasoning_is_retried(self):
+        self.assertTrue(MessageQualityScenario._judge_reasoning_is_unusable("hello?!"))
+        self.assertFalse(
+            MessageQualityScenario._judge_reasoning_is_unusable(
+                "The message has section headings, status labels, bullets, and enough spacing."
+            )
+        )
+
     def test_email_visual_formatting_quality_is_deferred_to_judge(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
         scenario = MessageQualityScenario()
@@ -131,6 +139,26 @@ class MessageQualityScenarioTests(SimpleTestCase):
         )
 
         self.assertEqual(failures, ["Message body was empty."])
+
+    def test_delivery_basics_accept_terminal_tool_result_when_continue_flag_omitted(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
+        scenario = MessageQualityScenario()
+        call = type(
+            "Call",
+            (),
+            {
+                "result": '{"status":"ok","message_id":"00000000-0000-0000-0000-000000000000","auto_sleep_ok":true}',
+            },
+        )
+
+        failures = scenario._formatting_failures(
+            case,
+            {"body": "## Report\n\n- Complete"},
+            "## Report\n\n- Complete",
+            send_call=call,
+        )
+
+        self.assertEqual(failures, [])
 
     def test_chat_delivery_is_not_mocked_so_auditor_can_show_message(self):
         case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "chat")
