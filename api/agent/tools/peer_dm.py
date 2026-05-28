@@ -6,6 +6,7 @@ from typing import Any, Dict
 from uuid import UUID
 
 from ..files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
+from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ..peer_comm import (
     PeerMessagingDuplicateError,
     PeerMessagingError,
@@ -54,7 +55,7 @@ def get_send_agent_message_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables from your default filespace to hand off to the peer agent.",
+                        "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
                     },
                     "will_continue_work": {
                         "type": "boolean",

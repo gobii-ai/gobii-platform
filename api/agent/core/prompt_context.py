@@ -87,6 +87,7 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
+from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -3411,8 +3412,6 @@ def _get_system_instruction(
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
-            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
-            "Body text never attaches files.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
@@ -3428,8 +3427,6 @@ def _get_system_instruction(
             "Use request_human_input, not plain chat/email/SMS, when the next step depends on a human answer, including requested monitoring target/scope questions before setup. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
-            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
-            "Body text never attaches files. "
             "Focus on tool calls—text alone is not delivered.\n\n"
         )
         response_structure = (
@@ -3583,10 +3580,9 @@ def _get_system_instruction(
         "## Output Rules\n\n"
         "Use the lightest clear structure: labeled fact, short list, compact table, or sectioned report. Ground facts, numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Present returned data directly, omit unavailable extras, summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
         "Charts: create only when requested/materially useful. "
-        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact value to send-tool attachments and never say a file is attached when attachments are empty. Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
-        "# Attachment pre-flight: RIGHT: send_email(..., attachments=[result.attach]). "
-        "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count and "
-        "__messages.rejected_attachments_json before claiming or resending files.\n\n"
+        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
+        "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
+        f"{SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE}\n\n"
         "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "

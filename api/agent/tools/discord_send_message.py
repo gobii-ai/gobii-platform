@@ -7,6 +7,7 @@ import requests
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 
 from api.agent.files.attachment_helpers import AttachmentResolutionError, resolve_filespace_attachments
+from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.models import PersistentAgent
 from api.services.discord_bot import DiscordBotIntegrationError, send_channel_message
 
@@ -36,10 +37,7 @@ def get_discord_send_message_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": (
-                            "Optional list of filespace paths or $[/path] variables to upload to Discord. "
-                            "Pass files here; do not paste file paths into the message body unless you want them shown as text."
-                        ),
+                        "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
                     },
                     "will_continue_work": {
                         "type": "boolean",

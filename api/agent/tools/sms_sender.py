@@ -36,6 +36,7 @@ from ...models import (
 from opentelemetry import trace
 from urlextract import URLExtract
 from api.services.email_verification import require_verified_email, EmailVerificationError
+from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 
 logger = logging.getLogger(__name__)
 tracer = trace.get_tracer('gobii.utils')
@@ -71,7 +72,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional list of filespace paths or $[/path] variables to include as download links. Pass attachments here; do not include file paths in the SMS body unless you want them shown as text.",
+                        "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
                     },
                     "will_continue_work": {
                         "type": "boolean",

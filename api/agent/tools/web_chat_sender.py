@@ -16,6 +16,7 @@ from ..files.attachment_helpers import (
 from ..files.filespace_service import broadcast_message_attachment_update
 from util.text_sanitizer import normalize_llm_output
 from .agent_variables import substitute_variables_with_filespace
+from .attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from ...models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
@@ -249,7 +250,7 @@ def get_send_chat_tool() -> Dict[str, Any]:
                     "attachments": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Optional filespace paths or $[/path] variables; for create_chart, paste inline/HTML in body.",
+                        "description": SEND_TOOL_ATTACHMENTS_DESCRIPTION,
                     },
                     "will_continue_work": {
                         "type": "boolean",

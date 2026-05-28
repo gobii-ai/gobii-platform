@@ -35,6 +35,8 @@ import re
 from contextvars import ContextVar
 from typing import Dict, Optional
 
+from .attachment_guidance import AGENT_VARIABLES_ATTACHMENT_NOTE
+
 logger = logging.getLogger(__name__)
 
 # Store for agent variables - persists across tool calls within a session
@@ -241,9 +243,7 @@ def format_variables_for_prompt() -> str:
     if not variables:
         return ""
 
-    lines = [
-        "Available file variables (use $[name] in messages; attach files only via a send tool's attachments param with the exact $[name]):"
-    ]
+    lines = [AGENT_VARIABLES_ATTACHMENT_NOTE]
     for name in variables.keys():
         # Don't show value - just the variable name. This prevents LLM from copying URLs.
         lines.append(f"  $[{name}]")

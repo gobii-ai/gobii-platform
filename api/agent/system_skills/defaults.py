@@ -1,6 +1,7 @@
 """Default code-defined system skill definitions."""
 
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
+from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
@@ -372,7 +373,7 @@ CONNECTED_APP_CHANNELS_SYSTEM_SKILL = SystemSkillDefinition(
         "Only ask the user for raw server or channel IDs if discovery fails or returns no useful choices. "
         "Do not request Discord server IDs or channel IDs as secrets.\n"
         "Use `discord_send_message` for outbound Discord replies to subscribed channels. Pass `channel_id`, `message`, and the correct `will_continue_work` value. "
-        "To upload files, pass filespace paths or $[/path] variables in `attachments`; do not paste attachment paths into `message`. "
+        f"To upload files: {SEND_TOOL_ATTACHMENTS_DESCRIPTION} "
         "The backend sends through a channel webhook using the agent's name and avatar.\n"
         "Use `list` before creating duplicates when the current subscription state is unclear. Use `disable` only when the user asks to stop receiving messages from a subscribed channel.\n"
         "If channel discovery says the Gobii bot cannot list channels, send the returned `bot_invite_url` as a fallback repair link and ask the user to install the bot in the target server before retrying discovery."
