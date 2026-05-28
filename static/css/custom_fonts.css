@@ -1,5 +1,5 @@
 @font-face {
-  font-family: 'Inter Variable Latin';
+  font-family: 'Inter Variable';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
@@ -8,7 +8,7 @@
 }
 
 @font-face {
-  font-family: 'Inter Variable Latin';
+  font-family: 'Inter Variable';
   font-style: italic;
   font-weight: 100 900;
   font-display: swap;
@@ -41,5 +41,5 @@
 }
 
 body {
-  font-family: 'Inter Variable Latin', 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
