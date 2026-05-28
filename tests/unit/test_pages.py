@@ -94,11 +94,12 @@ class HomePageTests(TestCase):
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_home_page_includes_stripe_js_in_proprietary_mode(self):
+    def test_home_page_omits_stripe_js_in_proprietary_mode(self):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        self.assertNotContains(response, "https://js.stripe.com/dahlia/stripe.js")
+        self.assertNotContains(response, "https://js.stripe.com")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
     def test_home_page_omits_stripe_js_in_community_mode(self):
