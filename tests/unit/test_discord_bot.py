@@ -821,7 +821,9 @@ class NativeDiscordBotTests(TestCase):
         self.assertIn("Never invent Discord setup links", skill.prompt_instructions)
         self.assertIn("single setup link", skill.prompt_instructions)
         self.assertIn("fallback repair link", skill.prompt_instructions)
-        self.assertIn("attachments", skill.prompt_instructions)
+        self.assertIn("To upload files", skill.prompt_instructions)
+        self.assertIn("filespace paths or $[/path]", skill.prompt_instructions)
+        self.assertIn("Body text never attaches files", skill.prompt_instructions)
 
     @tag("batch_agent_webhooks")
     @patch("api.services.discord_bot.requests.get")
