@@ -710,7 +710,7 @@ class BehaviorMicroHelperTests(TestCase):
         maps_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_google_maps_reviews"]["description"]
         reddit_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_web_data_reddit_posts"]["description"]
 
-        self.assertIn("ordinary research", search_description)
+        self.assertIn(".example.test URLs are valid source URLs", search_description)
         self.assertIn("representative market", maps_description)
         self.assertIn("instead of asking which city", maps_description)
         self.assertIn("Reddit mentions", reddit_description)

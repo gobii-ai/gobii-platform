@@ -110,5 +110,6 @@ class PromptContextSqliteGuidanceTests(SimpleTestCase):
             )
         )
 
-        self.assertIn("call the welcome send tool and end_planning in the same response", guidance)
+        self.assertIn("call end_planning in the same response as any welcome", guidance)
+        self.assertIn("never send a welcome-only", guidance)
         self.assertIn("Do not call http_request", guidance)
