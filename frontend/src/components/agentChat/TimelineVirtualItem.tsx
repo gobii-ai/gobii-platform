@@ -4,6 +4,7 @@ import { ToolClusterCard } from './ToolClusterCard'
 import { CollapsedActivityCard } from './CollapsedActivityCard'
 import { InlineScheduleCard } from './InlineStatusCard'
 import type { SimplifiedTimelineItem } from '../../hooks/useSimplifiedTimeline'
+import type { AgentMessage } from '../../types/agentChat'
 import { buildThinkingCluster, flattenTimelineEventsToEntries } from './activityEntryUtils'
 import type { StatusExpansionTargets } from './statusExpansion'
 
@@ -20,6 +21,8 @@ type TimelineVirtualItemProps = {
   animateIncoming?: boolean
   onIncomingAnimationConsumed?: (cursor: string) => void
   onMessageLinkClick?: (href: string) => boolean | void
+  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
+  onReportMessage?: (message: AgentMessage) => void
 }
 
 export const TimelineVirtualItem = memo(function TimelineVirtualItem({
@@ -35,6 +38,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
   animateIncoming = false,
   onIncomingAnimationConsumed,
   onMessageLinkClick,
+  onMessageCopied,
+  onReportMessage,
 }: TimelineVirtualItemProps) {
   const collapsedEntries = useMemo(() => {
     if (event.kind !== 'collapsed-group') {
@@ -60,6 +65,8 @@ export const TimelineVirtualItem = memo(function TimelineVirtualItem({
         viewerUserId={viewerUserId ?? null}
         viewerEmail={viewerEmail ?? null}
         onMessageLinkClick={onMessageLinkClick}
+        onMessageCopied={onMessageCopied}
+        onReportMessage={onReportMessage}
       />
     )
   }

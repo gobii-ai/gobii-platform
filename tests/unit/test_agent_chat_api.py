@@ -44,6 +44,7 @@ from api.models import (
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
+    PersistentAgentMessageReport,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -1933,6 +1934,129 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("agent_id"), str(self.agent.id))
         self.assertIn("message_id", props)
         self.assertEqual(props.get("message_length"), len("Hello agent"))
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_copy_records_analytics(self, mock_track_event):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Copyable agent reply",
+        )
+
+        response = self.client.post(f"/console/api/agents/{self.agent.id}/messages/{message.id}/copy/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {"ok": True})
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.AGENT_MESSAGE_COPIED)
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props.get("agent_id"), str(self.agent.id))
+        self.assertEqual(props.get("message_id"), str(message.id))
+        self.assertNotIn("body", props)
+        self.assertNotIn("comment", props)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_report_stores_report_tracks_analytics_and_runs_judge(self, mock_track_event, mock_judge):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="This answer should be reviewed.",
+        )
+        long_comment = f"  {'x' * 2010}  "
+        mock_judge.return_value = {"ran": True, "status": "completed", "suggestion": None}
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
+            data=json.dumps({"comment": long_comment}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        report = PersistentAgentMessageReport.objects.get(id=payload["report_id"])
+        self.assertEqual(report.agent, self.agent)
+        self.assertEqual(report.message, message)
+        self.assertEqual(report.reporter, self.user)
+        self.assertEqual(len(report.comment), 2000)
+        self.assertEqual(report.status, PersistentAgentMessageReport.Status.JUDGE_COMPLETED)
+        self.assertTrue(report.metadata["comment_truncated"])
+        mock_judge.assert_called_once_with(
+            self.agent,
+            reported_message=message,
+            user_comment="x" * 2000,
+        )
+
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED)
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props.get("agent_id"), str(self.agent.id))
+        self.assertEqual(props.get("message_id"), str(message.id))
+        self.assertEqual(props.get("report_id"), str(report.id))
+        self.assertEqual(props.get("comment_length"), 2000)
+        self.assertNotIn("body", props)
+        self.assertNotIn("comment", props)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_report_rejects_inbound_and_non_owned_messages(self, mock_track_event, mock_judge):
+        inbound = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.user_endpoint,
+            to_endpoint=self.agent_endpoint,
+            is_outbound=False,
+            body="User message",
+        )
+        other_user = get_user_model().objects.create_user(
+            username="other-agent-owner",
+            email="other-owner@example.com",
+            password="password123",
+        )
+        other_browser_agent = BrowserUseAgent.objects.create(user=other_user, name="Other Browser Agent")
+        other_agent = PersistentAgent.objects.create(
+            user=other_user,
+            name="Other Agent",
+            charter="Other work",
+            browser_use_agent=other_browser_agent,
+        )
+        other_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=other_agent,
+            channel=CommsChannel.WEB,
+            address=build_web_agent_address(other_agent.id),
+            is_primary=True,
+        )
+        other_message = PersistentAgentMessage.objects.create(
+            owner_agent=other_agent,
+            from_endpoint=other_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="Other agent reply",
+        )
+
+        inbound_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{inbound.id}/report-issue/",
+            data=json.dumps({"comment": "bad"}),
+            content_type="application/json",
+        )
+        non_owned_response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{other_message.id}/report-issue/",
+            data=json.dumps({"comment": "bad"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(inbound_response.status_code, 404)
+        self.assertEqual(non_owned_response.status_code, 404)
+        self.assertFalse(PersistentAgentMessageReport.objects.exists())
+        mock_track_event.assert_not_called()
+        mock_judge.assert_not_called()
 
     @tag("batch_agent_chat")
     @patch("api.agent.comms.message_service.emit_configured_custom_capi_event")

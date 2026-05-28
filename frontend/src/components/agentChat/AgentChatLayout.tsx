@@ -21,6 +21,8 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
+import { ReportAgentMessageDialog } from './ReportAgentMessageDialog'
+import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
@@ -31,6 +33,7 @@ import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
   PendingActionRequest,
+  AgentMessage,
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
@@ -547,6 +550,9 @@ export function AgentChatLayout({
   const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
   const [planHoverPreviewVisible, setPlanHoverPreviewVisible] = useState(false)
   const [planHoverPreviewExiting, setPlanHoverPreviewExiting] = useState(false)
+  const [reportMessage, setReportMessage] = useState<AgentMessage | null>(null)
+  const [reportSubmitting, setReportSubmitting] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
   const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'hidden' : defaultPlanPanelMode
   const hasStoredPlanPanelMode = agentId
     ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
@@ -628,6 +634,44 @@ export function AgentChatLayout({
   const handleAddonsClose = useCallback(() => {
     setAddonsMode(null)
   }, [])
+
+  const handleMessageCopied = useCallback((message: AgentMessage) => {
+    if (!agentId) {
+      return
+    }
+    void trackAgentMessageCopy(agentId, message.id).catch(() => {
+      // Copying is already complete; tracking should not interrupt the UI.
+    })
+  }, [agentId])
+
+  const handleReportMessage = useCallback((message: AgentMessage) => {
+    setReportMessage(message)
+    setReportError(null)
+  }, [])
+
+  const handleReportDialogClose = useCallback(() => {
+    if (reportSubmitting) {
+      return
+    }
+    setReportMessage(null)
+    setReportError(null)
+  }, [reportSubmitting])
+
+  const handleReportSubmit = useCallback(async (comment: string) => {
+    if (!agentId || !reportMessage) {
+      return
+    }
+    setReportSubmitting(true)
+    setReportError(null)
+    try {
+      await reportAgentMessageIssue(agentId, reportMessage.id, comment)
+      setReportMessage(null)
+    } catch {
+      setReportError('Unable to submit the report. Please try again.')
+    } finally {
+      setReportSubmitting(false)
+    }
+  }, [agentId, reportMessage])
 
   useEffect(() => {
     const checkMobile = () => {
@@ -1558,6 +1602,8 @@ export function AgentChatLayout({
                     animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
                     onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
                     onMessageLinkClick={handleMessageLinkClick}
+                    onMessageCopied={handleMessageCopied}
+                    onReportMessage={handleReportMessage}
                   />
                 ))}
                 {showScheduledResumeEvent ? (
@@ -1816,6 +1862,13 @@ export function AgentChatLayout({
           isAgentWorking={isWorkingNow}
         />
       </AgentChatMobileSheet>
+      <ReportAgentMessageDialog
+        message={reportMessage}
+        busy={reportSubmitting}
+        error={reportError}
+        onClose={handleReportDialogClose}
+        onSubmit={handleReportSubmit}
+      />
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (
           <AgentChatMobileSheet

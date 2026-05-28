@@ -19,9 +19,11 @@ from api.agent.core.agent_judge import (
     approve_judge_suggestion,
     build_manual_judge_trigger,
     build_judge_trigger,
+    build_reported_judge_trigger,
     is_agent_judge_enabled_for_agent,
     maybe_run_agent_judge,
     run_manual_agent_judge,
+    run_reported_agent_judge,
 )
 from api.agent.core.llm_config import get_agent_llm_tier
 from api.services.prompt_settings import invalidate_prompt_settings_cache
@@ -740,6 +742,62 @@ class AgentJudgeTests(TestCase):
         approve_judge_suggestion(suggestion)
         suggestion.refresh_from_db()
         self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        self.assertIsNotNone(suggestion.system_message)
+        self.assertTrue(suggestion.system_message.is_active)
+
+    def test_reported_message_judge_context_and_auto_applies_suggestion(self):
+        self._add_failed_tool_trigger()
+        reported_message = self._add_message(
+            99,
+            outbound=True,
+            body="The prior answer gave the wrong conclusion.",
+        )
+        trigger = build_reported_judge_trigger(
+            self.agent,
+            reported_message=reported_message,
+            user_comment="It ignored the spreadsheet total.",
+            tools=[],
+        )
+
+        self.assertEqual(trigger.reasons, ["user_reported_agent_message"])
+        self.assertEqual(
+            trigger.trajectory["user_report"]["reported_message"]["id"],
+            str(reported_message.id),
+        )
+        self.assertEqual(
+            trigger.trajectory["user_report"]["reported_message"]["body"],
+            "The prior answer gave the wrong conclusion.",
+        )
+        self.assertEqual(trigger.trajectory["user_report"]["user_comment"], "It ignored the spreadsheet total.")
+
+        response = _judge_response(
+            {
+                "suggestion_type": "strategy_shift",
+                "message": "Recheck the provided spreadsheet total before answering.",
+                "agent_directive": "Reopen the spreadsheet evidence and correct the conclusion before proceeding.",
+            }
+        )
+        with patch(
+            "api.agent.core.agent_judge.get_agent_judge_llm_config",
+            return_value=("test-provider", "test-model", {}),
+        ), patch(
+            "api.agent.core.agent_judge.run_completion",
+            return_value=response,
+        ), patch(
+            "api.agent.core.agent_judge.Analytics.track_event",
+        ):
+            result = run_reported_agent_judge(
+                self.agent,
+                reported_message=reported_message,
+                user_comment="It ignored the spreadsheet total.",
+                tools=[],
+            )
+
+        self.assertTrue(result["ran"])
+        self.assertEqual(result["suggestion"]["status"], PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        suggestion = PersistentAgentJudgeSuggestion.objects.get(agent=self.agent)
+        self.assertEqual(suggestion.status, PersistentAgentJudgeSuggestion.Status.ACTIVE)
+        self.assertEqual(suggestion.trigger_reasons, ["user_reported_agent_message"])
         self.assertIsNotNone(suggestion.system_message)
         self.assertTrue(suggestion.system_message.is_active)
 

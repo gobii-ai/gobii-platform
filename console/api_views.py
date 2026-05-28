@@ -57,7 +57,12 @@ from api.agent.core.processing_flags import (
     clear_processing_work_state,
     set_processing_stop_requested,
 )
-from api.agent.core.agent_judge import approve_judge_suggestion, dismiss_judge_suggestion, run_manual_agent_judge
+from api.agent.core.agent_judge import (
+    approve_judge_suggestion,
+    dismiss_judge_suggestion,
+    run_manual_agent_judge,
+    run_reported_agent_judge,
+)
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
@@ -96,9 +101,12 @@ from api.models import (
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
     PersistentAgent,
+    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
+    PersistentAgentMessage,
+    PersistentAgentMessageReport,
     PersistentAgentSecret,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
@@ -4486,6 +4494,161 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH = 2000
+
+
+def _resolve_reportable_agent_message(agent: PersistentAgent, message_id: str) -> PersistentAgentMessage:
+    message = (
+        PersistentAgentMessage.objects.filter(
+            id=message_id,
+            owner_agent=agent,
+            is_outbound=True,
+            peer_agent__isnull=True,
+        )
+        .select_related("conversation", "from_endpoint", "owner_agent")
+        .first()
+    )
+    if message is None:
+        raise Http404("Message not found.")
+    return message
+
+
+def _agent_message_action_properties(
+    agent: PersistentAgent,
+    message: PersistentAgentMessage,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "message_id": str(message.id),
+        "message_channel": (
+            message.conversation.channel
+            if message.conversation_id
+            else message.from_endpoint.channel if message.from_endpoint_id else ""
+        ),
+        "message_timestamp": message.timestamp.isoformat() if message.timestamp else "",
+    }
+    if extra:
+        properties.update(extra)
+    return _web_chat_properties(agent, properties)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageCopyAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        message = _resolve_reportable_agent_message(agent, message_id)
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.AGENT_MESSAGE_COPIED,
+            source=AnalyticsSource.WEB,
+            properties=_agent_message_action_properties(agent, message),
+        )
+        return JsonResponse({"ok": True})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        message = _resolve_reportable_agent_message(agent, message_id)
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        raw_comment = payload.get("comment", "")
+        if raw_comment is None:
+            raw_comment = ""
+        if not isinstance(raw_comment, str):
+            return HttpResponseBadRequest("comment must be a string")
+        comment = raw_comment.strip()[:AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH]
+
+        report = PersistentAgentMessageReport.objects.create(
+            agent=agent,
+            message=message,
+            reporter=request.user,
+            comment=comment,
+            metadata={"comment_truncated": len(raw_comment.strip()) > AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH},
+        )
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED,
+            source=AnalyticsSource.WEB,
+            properties=_agent_message_action_properties(
+                agent,
+                message,
+                {
+                    "report_id": str(report.id),
+                    "comment_length": len(comment),
+                    "comment_provided": bool(comment),
+                },
+            ),
+        )
+
+        try:
+            judge_result = run_reported_agent_judge(agent, reported_message=message, user_comment=comment)
+        except Exception as exc:  # pragma: no cover - defensive; reports should persist even if advisory judging fails.
+            logger.exception("Failed to run reported-message judge for agent %s message %s", agent.id, message.id)
+            report.status = PersistentAgentMessageReport.Status.JUDGE_FAILED
+            report.metadata = {
+                **report.metadata,
+                "judge_error": exc.__class__.__name__,
+            }
+            report.save(update_fields=["status", "metadata", "updated_at"])
+            return JsonResponse(
+                {
+                    "ok": True,
+                    "report_id": str(report.id),
+                    "judge": {"ran": False, "status": "failed"},
+                },
+                status=202,
+            )
+
+        suggestion_payload = judge_result.get("suggestion") if isinstance(judge_result, dict) else None
+        completion_id = judge_result.get("completion_id") if isinstance(judge_result, dict) else None
+        if not completion_id and isinstance(suggestion_payload, dict):
+            completion_id = suggestion_payload.get("completionId")
+        suggestion_id = suggestion_payload.get("suggestionId") if isinstance(suggestion_payload, dict) else None
+        if completion_id:
+            report.judge_completion = (
+                PersistentAgentCompletion.objects.filter(agent=agent, id=completion_id).first()
+            )
+        if suggestion_id:
+            report.judge_suggestion = (
+                PersistentAgentJudgeSuggestion.objects.filter(agent=agent, id=suggestion_id).first()
+            )
+        report.status = PersistentAgentMessageReport.Status.JUDGE_COMPLETED
+        report.metadata = {
+            **report.metadata,
+            "judge_status": judge_result.get("status") if isinstance(judge_result, dict) else "",
+            "judge_ran": bool(judge_result.get("ran")) if isinstance(judge_result, dict) else False,
+        }
+        report.save(
+            update_fields=[
+                "status",
+                "judge_completion",
+                "judge_suggestion",
+                "metadata",
+                "updated_at",
+            ]
+        )
+        return JsonResponse({"ok": True, "report_id": str(report.id), "judge": judge_result})
 
 
 @method_decorator(csrf_exempt, name="dispatch")

@@ -108,6 +108,8 @@ class AnalyticsEvent(StrEnum):
     WEB_CHAT_SESSION_STARTED = 'Web Chat Session Started'
     WEB_CHAT_SESSION_ENDED = 'Web Chat Session Ended'
     WEB_CHAT_MESSAGE_SENT = 'Web Chat Message Sent'
+    AGENT_MESSAGE_COPIED = 'Agent Message Copied'
+    AGENT_MESSAGE_ISSUE_REPORTED = 'Agent Message Issue Reported'
     SIGNUP_PREVIEW_ENTERED = 'Signup Preview Entered'
     SIGNUP_PREVIEW_AGENT_CREATED = 'Signup Preview Agent Created'
     SIGNUP_PREVIEW_PAUSED_AFTER_FIRST_REPLY = 'Signup Preview Paused After First Reply'
