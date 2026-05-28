@@ -81,10 +81,10 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "function": {
             "name": "request_human_input",
             "description": (
-                "Create tracked human-input only for real blockers or planning questions; it appears in web chat and does not send email/SMS. "
-                "If also notifying by chat/email/SMS, send the same question/options there; questions sent only by chat, email, or SMS are not tracked. "
+                "Create tracked human input for blockers/planning questions; it appears in web chat and does not send email/SMS. "
+                "If notifying by chat/email/SMS, send the same question/options there; chat/email/SMS-only questions are not tracked. "
                 "In Planning Mode, planning questions must use this tool with options, at most three. "
-                "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose afterward. "
+                "Outside Planning Mode, do not use for preference surveys, timezone/channel choices, optional formatting, category example choices such as which vendor/company, non-blocking backfill/lookback, or reversible defaults you can choose and disclose. "
                 "Use it when the user explicitly asks you to ask for targets/scope before setup or missing targets/scope block a recurring monitor. "
                 f"Plain text only; max {MAX_HUMAN_INPUT_QUESTION_LENGTH} chars."
             ),

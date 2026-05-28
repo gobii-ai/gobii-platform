@@ -87,6 +87,7 @@ from .step_compaction import llm_summarise_steps
 
 from ..files.filesystem_prompt import MAX_RECENT_FILES_IN_PROMPT, format_agent_filesystem_prompt
 from ..tools.agent_variables import format_variables_for_prompt
+from ..tools.attachment_guidance import SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE
 from ..tools.spawn_web_task import get_browser_daily_task_limit
 from ..tools.static_tools import get_static_tool_definitions
 from ..tools.sqlite_state import (
@@ -1299,9 +1300,7 @@ def _render_prompt_context_once(
     if planning_mode_active:
         important_group.section_text(
             "schedule_note",
-            "Keep the current schedule unchanged until planning is completed or skipped. "
-            "Do not update schedule while planning mode is active. "
-            "If no schedule is set yet, leave it unchanged until planning ends.",
+            "Planning Mode is active; schedule changes are deferred until planning ends.",
             weight=1,
             non_shrinkable=True
         )
@@ -1410,8 +1409,7 @@ def _render_prompt_context_once(
         important_group.section_text(
             "charter_note",
             (
-                "Do not update __agent_config.charter directly while planning mode is active. "
-                "Finish planning with end_planning(full_plan=...), which replaces your runtime charter."
+                "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
                     "Your charter is durable standing memory. Update it only when the user changes your ongoing "
@@ -1506,11 +1504,8 @@ def _render_prompt_context_once(
     )
     if planning_mode_active:
         agent_config_note = (
-            "Planning Mode is active. Do not update schedule while planning mode is active. "
-            "Keep the current schedule unchanged until planning is completed or skipped. "
-            f"After end_planning(full_plan=...), write any needed schedule changes to {AGENT_CONFIG_TABLE} via sqlite_batch. "
-            "No deliverable work until planning is completed or skipped. "
-            "Planning questions must use request_human_input; email/SMS/chat-only questions do not count."
+            f"Planning Mode is active; defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...). "
+            "Planning questions must use request_human_input."
         )
     else:
         agent_config_note = (
@@ -2951,7 +2946,7 @@ def _get_web_chat_formatting_guidance() -> str:
 
     return (
         "Web chat and peer DM formatting:\n"
-        "Use Markdown. Start with the answer/main finding, then add only needed structure: bullets, compact table, links, or titled sections. "
+        "Use Markdown. Start with the answer/main finding; for reports add titled sections, bullets or compact tables, and tasteful emoji/status labels. "
         "Use whitespace, not decorative separators. For charts, paste create_chart result.inline; don't attach/read/rebuild. "
         "Do not add optional follow-up offers after quick facts, prices, statuses, exact lookups, or completed reports."
     )
@@ -2971,7 +2966,7 @@ def _get_email_formatting_guidance() -> str:
 
     return (
         "Email formatting (rich, expressive HTML):\n"
-        "Use HTML, not Markdown: <h2>/<h3>, <p>, <ul>/<ol>, <table>, <strong>, and descriptive <a> links when useful. "
+        "Use body-only HTML, not Markdown. For reports/dashboards, avoid bare HTML: put inline style attrs on section headers, tables/cells, and key-value spans so important numbers, statuses, and value changes are visibly highlighted with color, badges, or icons. Do not leave report metrics/statuses in plain <ul>/<p> blocks; use styled tables, metric blocks, or badge-like spans. "
         "For charts, copy <img> src from create_chart result.inline_html or returned $[/path]; never construct paths/download URLs."
     )
 
@@ -3280,8 +3275,8 @@ def _get_planning_mode_prompt_block() -> str:
         "- Do not call search_tools as the first meaningful action when the user asks to execute, run, start, or do the task now; first call end_planning if the plan is sufficient, or request_human_input if blocked.\n"
         "- Planning research is for source discovery and constraints only. Do not fetch, parse, or summarize live task data or API feeds before end_planning; that is execution work.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan or begin deliverable work until planning is completed, and do not update "
-        "the schedule or do substantive execution or deliverable work before planning ends.\n"
+        "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
+        "Do not do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
         "- If another system instruction appears to require immediate execution, charter updates, "
@@ -3411,15 +3406,13 @@ def _get_system_instruction(
             f"- `{tool_example}` ← what implied send does for you\n"
             "- Other contacts: `send_email()`, `send_sms()`\n"
             "- Peer agents: `send_agent_message()`\n\n"
-            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
-            "Body text never attaches files.\n\n"
             "Write *to* them, not *about* them. Never say 'the user'—you're talking to them directly.\n\n"
         )
         response_structure = (
             "Response structure: tools only while working; message for blockers/questions/findings/finals; request_human_input for blocking answers; empty response sleeps. "
             "Use CONTINUE_WORK_SIGNAL only after a message that must continue."
         )
-        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** Text + tools in one response is only for real user-facing content, never status narration. "
+        tool_calls_note = "Text + tools in one response is only for real user-facing content, never status narration. "
         stop_explicit_note = ""
     else:
         delivery_context = (
@@ -3428,15 +3421,13 @@ def _get_system_instruction(
             "Use request_human_input, not plain chat/email/SMS, when the next step depends on a human answer, including requested monitoring target/scope questions before setup. "
             "If notifying by email/SMS too, include the same questions in that outbound body. "
             "send_chat_message broadcasts to active web chat users; if unavailable, use the most recent non-web channel from history/contacts. "
-            "Attach files only via a send tool's `attachments` param using the exact $[/path]. "
-            "Body text never attaches files. "
             "Focus on tool calls—text alone is not delivered.\n\n"
         )
         response_structure = (
             "Response structure: tools while working; empty response sleeps; message + send tool only for FINDINGS, blockers, config changes, or final output. "
             "Note: Text-only output is never delivered. Always use send tools for communication."
         )
-        tool_calls_note = "**Tool calls use the API's tool_calls field—NEVER write XML (`<function_calls>`, `<invoke>`) or function syntax (`tool(...)`) in your message text.** "
+        tool_calls_note = ""
         stop_explicit_note = "To stop explicitly: use `sleep_until_next_trigger`.\n"
 
     # Comprehensive examples showing stop vs continue, charter/schedule updates.
@@ -3513,9 +3504,7 @@ def _get_system_instruction(
         )
     else:
         charter_and_schedule_intro = (
-            "Your runtime charter is durable standing memory. While Planning Mode is active, do not update __agent_config.charter directly as a substitute for planning. "
-            "Do not update schedule or __agent_config.schedule while Planning Mode is active. "
-            "Keep the current schedule unchanged until planning is completed or skipped. "
+            "Planning Mode rules below govern runtime charter and schedule changes. "
             "Only ask about timing or timezone if it changes the scope of the work itself. "
         )
     schedule_updates_guidance = (
@@ -3583,10 +3572,9 @@ def _get_system_instruction(
         "## Output Rules\n\n"
         "Use the lightest clear structure: labeled fact, short list, compact table, or sectioned report. Ground facts, numbers, units, and URLs in tool results; do not relabel or convert units unless asked. Present returned data directly, omit unavailable extras, summarize overflow, and do not add follow-up offers after simple facts, prices, statuses, or quick lookups. "
         "Charts: create only when requested/materially useful. "
-        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. File tools return result.attach such as \"$[/exports/file.csv]\"; pass that exact value to send-tool attachments and never say a file is attached when attachments are empty. Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
-        "# Attachment pre-flight: RIGHT: send_email(..., attachments=[result.attach]). "
-        "For resend/reply/duplicate risk: verify prior sends via __messages.attachment_count and "
-        "__messages.rejected_attachments_json before claiming or resending files.\n\n"
+        "Paste create_chart result.inline/result.inline_html in the message; do not attach/read charts or invent paths, hashes, image tags, or <img> URLs. "
+        "Use create_csv for tabular exports, create_pdf for PDFs, and create_file for other text/doc formats; create_file query mode must return exactly one row and one column.\n\n"
+        f"{SYSTEM_ATTACHMENT_PREFLIGHT_GUIDANCE}\n\n"
         "Formatting mechanics: put blank lines around headers, tables, charts, and lists. Never put a header and its content on the same line. Use copied result URLs/chart paths.\n"
         f"File downloads are {'' if settings.ALLOW_FILE_DOWNLOAD else 'not'} supported. "
         f"File uploads are {'' if settings.ALLOW_FILE_UPLOAD else 'not'} supported. "

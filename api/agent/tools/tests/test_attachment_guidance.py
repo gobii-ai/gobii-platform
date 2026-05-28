@@ -6,6 +6,11 @@ from django.test import SimpleTestCase, tag
 from api.agent.tools.create_csv import execute_create_csv
 from api.agent.tools.create_file import execute_create_file, get_create_file_tool
 from api.agent.tools.email_sender import get_send_email_tool
+from api.agent.tools.web_chat_sender import get_send_chat_tool
+from api.agent.core.prompt_context import (
+    _get_email_formatting_guidance,
+    _get_web_chat_formatting_guidance,
+)
 
 
 @tag("batch_attachment_guidance")
@@ -58,13 +63,30 @@ class AttachmentGuidanceTests(SimpleTestCase):
         html_description = tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"]
         description = tool["function"]["parameters"]["properties"]["attachments"]["description"]
 
-        self.assertIn("do NOT use Markdown pipe tables", tool_description)
+        self.assertIn("Do NOT use Markdown pipe tables", tool_description)
         self.assertIn("Inline images", html_description)
         self.assertIn("attach file", html_description)
         self.assertIn("<img src='cid:filename'>", html_description)
         self.assertIn("filespace paths or $[/path]", description)
         self.assertIn("exact file-tool `attach` value", description)
         self.assertIn("body text never attaches files", description)
+
+    def test_report_message_guidance_names_visual_quality_without_eval_prompting(self):
+        email_tool = get_send_email_tool()
+        chat_tool = get_send_chat_tool()
+        email_guidance = _get_email_formatting_guidance()
+        chat_guidance = _get_web_chat_formatting_guidance()
+
+        self.assertIn("reports/dashboards", email_guidance)
+        self.assertIn("inline style attrs", email_guidance)
+        self.assertIn("key-value spans", email_guidance)
+        self.assertIn("Do not leave report metrics/statuses in plain <ul>/<p> blocks", email_guidance)
+        self.assertIn("inline style attrs", email_tool["function"]["description"])
+        self.assertIn("Do NOT leave report metrics in plain lists", email_tool["function"]["description"])
+        self.assertIn("style section headers, tables/cells, and spans", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("instead of plain lists", email_tool["function"]["parameters"]["properties"]["mobile_first_html"]["description"])
+        self.assertIn("emoji/status labels", chat_guidance)
+        self.assertIn("emoji labels", chat_tool["function"]["parameters"]["properties"]["body"]["description"])
 
     def test_create_file_tool_schema_requires_content_or_query(self):
         tool = get_create_file_tool()

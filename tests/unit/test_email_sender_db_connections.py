@@ -103,16 +103,16 @@ class EmailSenderDbConnectionTests(TransactionTestCase):
             },
         )
 
-    def test_send_email_tool_requires_html_tables(self):
+    def test_send_email_tool_requires_rich_report_html_formatting(self):
         tool = get_send_email_tool()
         description = tool["function"]["description"]
         properties = tool["function"]["parameters"]["properties"]
 
-        self.assertIn("<table>", description)
-        self.assertIn("<tr>", description)
-        self.assertIn("<th>", description)
-        self.assertIn("<td>", description)
-        self.assertIn("do NOT use Markdown pipe tables", description)
+        self.assertIn("body-only HTML", description)
+        self.assertIn("inline style attrs", description)
+        self.assertIn("tables/cells", description)
+        self.assertIn("Do NOT leave report metrics in plain lists", description)
+        self.assertIn("Do NOT use Markdown pipe tables", description)
         self.assertIn("reply_to_message_id", properties)
 
     def test_execute_send_email_retries_on_operational_error(self):
