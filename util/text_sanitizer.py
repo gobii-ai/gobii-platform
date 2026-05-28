@@ -8,6 +8,7 @@ __all__ = [
     "strip_control_chars",
     "strip_markdown_for_sms",
     "normalize_whitespace",
+    "decode_unicode_character_escapes",
     "decode_unicode_escapes",
     "strip_llm_artifacts",
     "strip_redundant_blockquote_quotes",
@@ -146,6 +147,13 @@ def _decode_unicode_character_escapes(value: str) -> str:
         i += 1
 
     return "".join(result)
+
+
+def decode_unicode_character_escapes(value: str | None) -> str:
+    """Decode only Unicode character escape sequences, preserving ordinary backslash escapes."""
+    if not isinstance(value, str):
+        return ""
+    return _decode_unicode_character_escapes(value)
 
 
 def sanitize_notification_preview_text(value: str | None) -> str:

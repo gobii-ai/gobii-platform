@@ -655,6 +655,34 @@ class NativeDiscordBotTests(TestCase):
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
+    @patch("api.services.discord_bot.requests.get")
+    @patch("api.services.discord_bot.requests.post")
+    def test_webhook_outbound_send_decodes_literal_unicode_escapes(self, post_mock, get_mock):
+        get_mock.return_value = _response([{"id": "10", "name": "general", "type": 0}])
+        guild = self._guild()
+        PersistentAgentDiscordChannelSubscription.objects.create(
+            agent=self.agent,
+            guild=guild,
+            channel_id="10",
+            channel_name="general",
+        )
+        post_mock.side_effect = [
+            _response({"id": "wh1", "token": "token1", "name": "Gobii"}),
+            _response({"id": "discord-message-1", "channel_id": "10"}),
+        ]
+
+        message = send_channel_message(
+            self.agent,
+            channel_id="10",
+            body=r"Company \u2500 Approach \u2500 Weakness\nUse \n literally",
+        )
+
+        self.assertEqual(message.body, "Company ─ Approach ─ Weakness\\nUse \\n literally")
+        send_call = post_mock.call_args_list[1]
+        self.assertEqual(send_call.kwargs["json"]["content"], "Company ─ Approach ─ Weakness\\nUse \\n literally")
+
+    @tag("batch_agent_webhooks")
+    @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
     @patch("api.services.discord_bot.build_public_agent_avatar_thumbnail_url", return_value="https://app.example.test/public/agents/avatar.png")
     @patch("api.services.discord_bot.requests.get")
     @patch("api.services.discord_bot.requests.post")

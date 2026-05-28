@@ -4,6 +4,7 @@ from util.text_sanitizer import (
     strip_control_chars,
     strip_markdown_for_sms,
     normalize_whitespace,
+    decode_unicode_character_escapes,
     decode_unicode_escapes,
     strip_llm_artifacts,
     strip_redundant_blockquote_quotes,
@@ -50,6 +51,13 @@ class TextSanitizationTests(TestCase):
 @tag("batch_text_sanitization")
 class DecodeUnicodeEscapesTests(TestCase):
     """Tests for decoding JSON/Python-style unicode escape sequences."""
+
+    def test_decode_unicode_character_escapes_preserves_common_backslash_sequences(self):
+        text = r"Divider \u2500 newline \n tab \t quote \" hex \x41"
+
+        result = decode_unicode_character_escapes(text)
+
+        self.assertEqual(result, "Divider ─ newline \\n tab \\t quote \\\" hex \\x41")
 
     def test_decode_em_dash(self):
         """\\u2014 should decode to em dash."""
