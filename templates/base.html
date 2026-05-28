@@ -288,6 +288,15 @@
   
   <style>
     [x-cloak] { display: none !important; }
+
+    /* Reserve icon geometry before Lucide swaps placeholders for SVGs. */
+    :where(i[data-lucide]) {
+      display: inline-block;
+      width: 1em;
+      height: 1em;
+      flex-shrink: 0;
+      vertical-align: -0.125em;
+    }
     
     /* Reserve space for logo to prevent layout shift */
     a[href="{% url 'pages:home' %}"] img {
