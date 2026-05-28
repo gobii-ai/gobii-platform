@@ -1300,9 +1300,7 @@ def _render_prompt_context_once(
     if planning_mode_active:
         important_group.section_text(
             "schedule_note",
-            "Keep the current schedule unchanged until planning is completed or skipped. "
-            "Do not update schedule while planning mode is active. "
-            "If no schedule is set yet, leave it unchanged until planning ends.",
+            "Planning Mode is active; schedule changes are deferred until planning ends.",
             weight=1,
             non_shrinkable=True
         )
@@ -1411,8 +1409,7 @@ def _render_prompt_context_once(
         important_group.section_text(
             "charter_note",
             (
-                "Do not update __agent_config.charter directly while planning mode is active. "
-                "Finish planning with end_planning(full_plan=...), which replaces your runtime charter."
+                "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
                     "Your charter is durable standing memory. Update it only when the user changes your ongoing "
@@ -1507,11 +1504,8 @@ def _render_prompt_context_once(
     )
     if planning_mode_active:
         agent_config_note = (
-            "Planning Mode is active. Do not update schedule while planning mode is active. "
-            "Keep the current schedule unchanged until planning is completed or skipped. "
-            f"After end_planning(full_plan=...), write any needed schedule changes to {AGENT_CONFIG_TABLE} via sqlite_batch. "
-            "No deliverable work until planning is completed or skipped. "
-            "Planning questions must use request_human_input; email/SMS/chat-only questions do not count."
+            f"Planning Mode is active; defer {AGENT_CONFIG_TABLE} mutations until after end_planning(full_plan=...). "
+            "Planning questions must use request_human_input."
         )
     else:
         agent_config_note = (
@@ -3281,8 +3275,8 @@ def _get_planning_mode_prompt_block() -> str:
         "- Do not call search_tools as the first meaningful action when the user asks to execute, run, start, or do the task now; first call end_planning if the plan is sufficient, or request_human_input if blocked.\n"
         "- Planning research is for source discovery and constraints only. Do not fetch, parse, or summarize live task data or API feeds before end_planning; that is execution work.\n"
         "- Do not do substantive task execution before planning ends: no drafting the final deliverable, no implementation, no outbound task execution, no third-party follow-through, and no results meant to satisfy the task itself.\n"
-        "- Do not update the runtime plan or begin deliverable work until planning is completed, and do not update "
-        "the schedule or do substantive execution or deliverable work before planning ends.\n"
+        "- Do not update the runtime plan, schedule/__agent_config.schedule, or begin deliverable work until planning is completed. "
+        "Do not do substantive execution or deliverable work before planning ends.\n"
         "- Do not update __agent_config.charter directly as a substitute for completing planning. Calling "
         "end_planning(full_plan=...) is how the final plan replaces your runtime charter.\n"
         "- If another system instruction appears to require immediate execution, charter updates, "
@@ -3510,9 +3504,7 @@ def _get_system_instruction(
         )
     else:
         charter_and_schedule_intro = (
-            "Your runtime charter is durable standing memory. While Planning Mode is active, do not update __agent_config.charter directly as a substitute for planning. "
-            "Do not update schedule or __agent_config.schedule while Planning Mode is active. "
-            "Keep the current schedule unchanged until planning is completed or skipped. "
+            "Planning Mode rules below govern runtime charter and schedule changes. "
             "Only ask about timing or timezone if it changes the scope of the work itself. "
         )
     schedule_updates_guidance = (
