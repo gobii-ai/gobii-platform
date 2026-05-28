@@ -89,6 +89,7 @@ class HomePageTests(TestCase):
         """Basic smoke test for home page."""
         response = self.client.get("/")
         self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "preline.min.js")
         soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
         main_landmarks = soup.find_all("main")
         self.assertEqual(len(main_landmarks), 1)

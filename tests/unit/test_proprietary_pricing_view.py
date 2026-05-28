@@ -79,6 +79,7 @@ class PricingPageCtaCopyTests(TestCase):
         response = self.client.get(reverse("proprietary:pricing"))
 
         self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "preline.min.js")
         self.assertContains(response, "https://js.stripe.com/dahlia/stripe.js")
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)

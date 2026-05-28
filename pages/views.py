@@ -980,6 +980,7 @@ class HomePage(TemplateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["suppress_htmx"] = True
+        context["suppress_preline"] = True
         context["suppress_stripe_js"] = not self._has_direct_checkout_cta()
         # Add agent charter form for the home page spawn functionality
         from console.forms import PersistentAgentCharterForm
