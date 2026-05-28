@@ -21,6 +21,10 @@ from api.evals.scenarios.sqlite_tool_results import (
     SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
     SQLITE_TOOL_RESULT_SUITE_SLUG,
 )
+from api.evals.scenarios.message_quality import (
+    MESSAGE_QUALITY_SCENARIO_SLUGS,
+    MESSAGE_QUALITY_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -81,6 +85,11 @@ register_builtin_suites(
             slug=SQLITE_TOOL_RESULT_SUITE_SLUG,
             description="SQLite/tool-result synthesis evals for aggregate queries and working tables.",
             scenario_slugs=SQLITE_TOOL_RESULT_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=MESSAGE_QUALITY_SUITE_SLUG,
+            description="Rich report formatting evals for send_email and send_chat_message.",
+            scenario_slugs=MESSAGE_QUALITY_SCENARIO_SLUGS,
         ),
     ]
 )
