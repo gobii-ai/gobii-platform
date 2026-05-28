@@ -44,7 +44,7 @@ from api.services.discord_messages import (
     ensure_discord_agent_endpoint,
     schedule_discord_inbound_processing,
 )
-from util.text_sanitizer import decode_unicode_escapes
+from util.text_sanitizer import decode_unicode_character_escapes
 
 logger = logging.getLogger(__name__)
 
@@ -898,7 +898,7 @@ def send_channel_message(
     attachments: Iterable[ResolvedAttachment] | None = None,
 ) -> PersistentAgentMessage:
     resolved_attachments = list(attachments or [])
-    body = decode_unicode_escapes(body)
+    body = decode_unicode_character_escapes(body)
     if not body and not resolved_attachments:
         raise ValueError("message is required when attachments is empty.")
     if len(resolved_attachments) > DISCORD_WEBHOOK_MAX_FILES:

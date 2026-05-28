@@ -674,12 +674,12 @@ class NativeDiscordBotTests(TestCase):
         message = send_channel_message(
             self.agent,
             channel_id="10",
-            body=r"Company \u2500 Approach \u2500 Weakness",
+            body=r"Company \u2500 Approach \u2500 Weakness\nUse \n literally",
         )
 
-        self.assertEqual(message.body, "Company \u2500 Approach \u2500 Weakness")
+        self.assertEqual(message.body, "Company ─ Approach ─ Weakness\\nUse \\n literally")
         send_call = post_mock.call_args_list[1]
-        self.assertEqual(send_call.kwargs["json"]["content"], "Company \u2500 Approach \u2500 Weakness")
+        self.assertEqual(send_call.kwargs["json"]["content"], "Company ─ Approach ─ Weakness\\nUse \\n literally")
 
     @tag("batch_agent_webhooks")
     @patch.dict(os.environ, {"GOBII_ENCRYPTION_KEY": "native-discord-tests"}, clear=False)
