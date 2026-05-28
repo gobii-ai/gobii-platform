@@ -1796,6 +1796,7 @@ class SolutionCtaCopyTests(TestCase):
             self.assertIsNotNone(logo)
             self.assertEqual(logo.get("src"), static("images/noBgIndigo600.png"))
             self.assertIsNone(logo.get("srcset"))
+            self.assertEqual(logo.get("fetchpriority"), "high")
 
     def test_solution_header_uses_fish_logo_when_fish_upper_left_is_on(self):
         with override_flag("fish_upper_left", active=True):
