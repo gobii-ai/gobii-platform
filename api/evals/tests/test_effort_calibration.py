@@ -272,12 +272,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_runtime_planning_skill_excludes_bounded_current_research(self):
         instructions = RUNTIME_PLANNING_SYSTEM_SKILL.prompt_instructions
 
-        self.assertIn("Do not create, update, or finish a plan", instructions)
-        self.assertIn("simple latest/current company, news, funding, product, status, or batch reports", instructions)
-        self.assertIn("send the final answer directly", instructions)
-        self.assertIn("use at most one initial plan update", instructions)
-        self.assertIn("do not call `update_plan` again", instructions)
-        self.assertIn("send the final answer with will_continue_work=false", instructions)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", instructions)
+        self.assertIn("where a visible plan helps", instructions)
+        self.assertIn("Keep plans short, current, and verifiable", instructions)
+        self.assertIn("each call replaces the full active plan", instructions)
+        self.assertIn("Send the final user-facing report before any final completion update", instructions)
 
     def test_contact_permission_description_defers_setup_only_future_sends(self):
         description = get_request_contact_permission_tool()["function"]["description"]

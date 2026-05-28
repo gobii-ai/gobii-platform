@@ -26,6 +26,8 @@ from api.models import (
 )
 from api.serializers import PersistentAgentListSerializer, PersistentAgentSerializer
 from api.services.persistent_agents import PersistentAgentProvisioningService
+from api.services.tool_blacklist import invalidate_tool_blacklist_cache
+from tests.utils.llm_seed import get_intelligence_tier
 
 
 def _tool_names(tools: list[dict]) -> set[str]:
@@ -57,6 +59,10 @@ class PersistentAgentPlanningModeTests(TestCase):
             charter="Initial charter",
             browser_use_agent=self.browser_agent,
         )
+        tier = get_intelligence_tier("standard")
+        tier.blacklisted_tools = []
+        tier.save(update_fields=["blacklisted_tools"])
+        invalidate_tool_blacklist_cache()
         EmailAddress.objects.create(
             user=self.user,
             email=self.user.email,
@@ -179,7 +185,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("You are a persistent AI agent.", prompt)
-        self.assertIn("Your charter is a living document.", prompt)
+        self.assertIn("## Durable Config", prompt)
         self.assertIn("search_tools(", prompt)
         self.assertNotIn("search_tools(will_continue_work=true)", prompt)
         self.assertIn("## Planning Mode", prompt)
@@ -265,7 +271,7 @@ class PersistentAgentPlanningModeTests(TestCase):
         )
 
         self.assertIn("You are a persistent AI agent.", prompt)
-        self.assertIn("Your charter is a living document.", prompt)
+        self.assertIn("## Durable Config", prompt)
         self.assertIn("## Planning Mode", prompt)
         self.assertIn("Resume the pending planning turn.", prompt)
         self.assertIn(

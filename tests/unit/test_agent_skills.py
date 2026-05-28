@@ -420,11 +420,10 @@ class AgentSkillsPersistenceTests(TestCase):
 
         self.assertIn("System Skill: Runtime Planning", block)
         self.assertIn("Tools: update_plan", block)
-        self.assertIn("Use `update_plan` for substantial multi-step work", block)
-        self.assertIn("usually 3-6 steps", block)
-        self.assertIn("drop stale prior-task or prior-run steps", block)
-        self.assertIn("do not create one step per day, hour, or recurrence slot", block)
-        self.assertIn("represent the current run with compact reusable phases", block)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", block)
+        self.assertIn("Keep plans short, current, and verifiable", block)
+        self.assertIn("each call replaces the full active plan", block)
+        self.assertIn("Send the final user-facing report before any final completion update", block)
         self.assertIn("Current plan: none", block)
 
     def test_custom_tool_development_system_skill_is_not_default_enabled(self):

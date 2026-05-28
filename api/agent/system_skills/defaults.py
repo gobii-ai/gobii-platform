@@ -28,14 +28,9 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
     ),
     query_aliases=("plan", "planning", "todo", "todos", "update plan", "task steps"),
     prompt_instructions=(
-        "Use `update_plan` for substantial multi-step work with useful visible milestones; do not use it as filler for simple or single-step queries.\n"
-        "Do not create, update, or finish a plan for quick lookups, simple research answers, scheduled briefings, one-shot chart requests, or simple latest/current company, news, funding, product, status, or batch reports. For those bounded current-research tasks, gather the small source set and send the final answer directly with a compact Sources section.\n"
-        "For explicit deep or exhaustive research, use at most one initial plan update if the scope benefits from it; do not call `update_plan` again just to mark research done, narrate progress, attach the final message, or prepare the final response. For explicit deep or exhaustive research with no file deliverables, send the final answer with will_continue_work=false.\n"
-        "Good plans are short, current, meaningful, logically ordered, and verifiable: usually 3-6 steps, statuses exactly `todo`, `doing`, `done`, and exactly one `doing` while work remains. Every call overwrites the current plan, so include the complete active plan and drop stale prior-task or prior-run steps.\n"
-        "For recurring or hourly jobs, do not create one step per day, hour, or recurrence slot; represent the current run with compact reusable phases such as `Fetch current data`, `Analyze changes`, and `Send report`.\n"
-        "Deliverables are top-level `files` and `messages`, not per-step. Use `files` only for final user-visible artifacts. Use `messages` only for final user-facing send_email/send_sms/send_chat_message deliverables with exact returned message_id UUIDs; do not include peer messages, placeholders, SQL snippets, URLs, or invented IDs. If sending the final message now and a completion plan update is still needed, send it first with will_continue_work=true, then call update_plan.\n"
-        "Preserve only still-relevant previous deliverables; do not repeat the whole plan in chat because the harness displays it. Mark phases done only after verification, and send the final user-facing report before the final completion update.\n\n"
-        "Use a plan when work is non-trivial beyond bounded source gathering/final answer, has phases, dependencies, ambiguity, multiple requested parts, explicit TODO/plan instructions, or newly discovered required steps."
+        "Use `update_plan` only for substantial multi-step work where a visible plan helps. "
+        "Keep plans short, current, and verifiable; each call replaces the full active plan. "
+        "Send the final user-facing report before any final completion update."
     ),
     default_enabled=True,
 )

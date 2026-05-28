@@ -351,7 +351,7 @@ class PromptContextBuilderTests(TestCase):
 
         self.assertIn("<agent_skills>", content)
         self.assertIn("System Skill: Runtime Planning", content)
-        self.assertIn("Use `update_plan` for substantial multi-step work", content)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", content)
 
     def test_update_plan_tool_execution_refreshes_runtime_planning_system_skill(self):
         prepared = _PreparedToolExecution(

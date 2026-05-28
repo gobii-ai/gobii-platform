@@ -51,11 +51,12 @@ class PromptContextSqlitePlacementTests(TestCase):
 
         combined = "\n".join(message["content"] for message in context)
 
-        self.assertIn("Preserve existing charter content that still applies", combined)
-        self.assertIn("merge or append new durable guidance", combined)
+        self.assertIn("Preserve still-relevant guidance", combined)
+        self.assertIn("Merge new durable guidance into the existing charter", combined)
+        self.assertIn("stable durable preferences", combined)
         self.assertIn("durable standing memory", combined)
-        self.assertIn("Stable preferences may be explicit or reasonably inferred", combined)
-        self.assertIn("Do not remove or weaken existing charter guidance based on an inferred preference", combined)
+        self.assertIn("named channels/tools", combined)
+        self.assertIn("weak guesses", combined)
         self.assertNotIn("UPDATE THIS CHARTER NOW", combined)
         self.assertNotIn("Don't wait for permission", combined)
         self.assertNotIn("or inferred preferences", combined)
