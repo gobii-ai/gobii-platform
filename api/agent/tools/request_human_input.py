@@ -48,11 +48,11 @@ def get_request_human_input_tool() -> dict[str, Any]:
         "properties": {
             "title": {
                 "type": "string",
-                "description": "Short user-facing label.",
+                "description": "Short label.",
             },
             "description": {
                 "type": "string",
-                "description": "One-sentence option detail.",
+                "description": "Option detail.",
             },
         },
         "required": ["title", "description"],
@@ -63,7 +63,7 @@ def get_request_human_input_tool() -> dict[str, Any]:
             "question": {
                 "type": "string",
                 "maxLength": MAX_HUMAN_INPUT_QUESTION_LENGTH,
-                "description": "Question text. Plain text only.",
+                "description": "Question text.",
             },
             "options": {
                 "type": "array",
