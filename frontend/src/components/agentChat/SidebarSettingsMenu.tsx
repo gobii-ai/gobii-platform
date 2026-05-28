@@ -4,6 +4,7 @@ import {
   Bell,
   Building2,
   ChevronDown,
+  CircleHelp,
   ClipboardList,
   CreditCard,
   KeyRound,
@@ -48,6 +49,7 @@ export type SidebarSettingsInfo = {
   notificationStatus?: 'off' | 'on' | 'needs_permission' | 'blocked'
   onNotificationsEnabledChange?: (enabled: boolean) => void
   taskCredits?: SidebarTaskCreditsInfo | null
+  onOpenHelp?: (() => void) | null
 }
 
 type SidebarSettingsMenuProps = SidebarSettingsInfo & {
@@ -123,6 +125,7 @@ export function SidebarSettingsMenu({
   notificationStatus = 'off',
   onNotificationsEnabledChange,
   taskCredits = null,
+  onOpenHelp = null,
   variant = 'sidebar',
   collapsed = false,
 }: SidebarSettingsMenuProps) {
@@ -196,19 +199,33 @@ export function SidebarSettingsMenu({
     <div
       className={`sidebar-settings sidebar-settings--${variant}`}
       data-collapsed={collapsed ? 'true' : 'false'}
+      data-has-help={onOpenHelp ? 'true' : 'false'}
     >
-      <Button
-        ref={triggerRef}
-        className="sidebar-settings__trigger"
-        aria-label="Open settings"
-        aria-expanded={open}
-        onPointerDownCapture={handleTriggerPointerDownCapture}
-        onPress={() => handleOpenChange(!open)}
-        data-open={open ? 'true' : 'false'}
-      >
-        <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
-        {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
-      </Button>
+      <div className="sidebar-settings__actions">
+        <Button
+          ref={triggerRef}
+          className="sidebar-settings__trigger"
+          aria-label="Open settings"
+          aria-expanded={open}
+          onPointerDownCapture={handleTriggerPointerDownCapture}
+          onPress={() => handleOpenChange(!open)}
+          data-open={open ? 'true' : 'false'}
+        >
+          <Settings className="sidebar-settings__trigger-icon" aria-hidden="true" />
+          {!collapsed ? <span className="sidebar-settings__trigger-label">Settings</span> : null}
+        </Button>
+        {onOpenHelp ? (
+          <button
+            type="button"
+            className="sidebar-settings__trigger sidebar-settings__trigger--help"
+            aria-label="Contact support"
+            title="Contact support"
+            onClick={onOpenHelp}
+          >
+            <CircleHelp className="sidebar-settings__trigger-icon" aria-hidden="true" />
+          </button>
+        ) : null}
+      </div>
       <Popover
         ref={popoverRef}
         triggerRef={triggerRef}

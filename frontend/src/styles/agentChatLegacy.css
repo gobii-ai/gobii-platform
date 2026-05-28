@@ -7926,6 +7926,24 @@
   border-top: 1px solid rgba(226, 232, 240, 0.75);
 }
 
+.sidebar-settings__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-settings__actions .sidebar-settings__trigger {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.sidebar-settings__actions .sidebar-settings__trigger--help {
+  flex: 0 0 2.5rem;
+  width: 2.5rem;
+  justify-content: center;
+  padding-inline: 0;
+}
+
 .sidebar-settings__trigger {
   position: relative;
   z-index: 1;
@@ -7975,7 +7993,12 @@
   padding: 0.75rem 0.75rem 0.75rem;
 }
 
+.sidebar-settings[data-collapsed='true'] .sidebar-settings__actions {
+  flex-direction: column;
+}
+
 .sidebar-settings[data-collapsed='true'] .sidebar-settings__trigger {
+  flex: none;
   justify-content: center;
   width: 2.5rem;
   height: 2.5rem;
@@ -7998,6 +8021,11 @@
   font-size: 0.9375rem;
 }
 
+.sidebar-settings--drawer .sidebar-settings__trigger--help {
+  flex-basis: 3rem;
+  width: 3rem;
+}
+
 .sidebar-settings--drawer .sidebar-settings__trigger:hover,
 .sidebar-settings--drawer .sidebar-settings__trigger[data-open='true'] {
   background: rgba(79, 70, 229, 0.13);
@@ -8014,8 +8042,8 @@
   width: calc(var(--agent-chat-sidebar-current-width, var(--agent-chat-sidebar-width, 18rem)) - 1rem);
 }
 
-.chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__trigger {
-  width: min(100%, calc(var(--agent-chat-sidebar-width, 18rem) - 1rem));
+.chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__actions {
+  width: 100%;
 }
 
 .chat-sidebar[data-sidebar-mode='gallery'] .sidebar-settings__popover--sidebar[data-collapsed='false'] {

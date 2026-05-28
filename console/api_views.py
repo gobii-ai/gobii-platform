@@ -12,17 +12,20 @@ import base64
 import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
+from smtplib import SMTPException
 from typing import Any
 from uuid import UUID
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import zstandard as zstd
+from anymail.exceptions import AnymailAPIError
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
+from django.core.mail import BadHeaderError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -222,6 +225,12 @@ from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, Us
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
+from console.support_requests import (
+    SupportRequestConfigurationError,
+    clean_support_message,
+    send_agent_message_report_email,
+    send_app_support_request,
+)
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 from console.views import (
     build_agent_detail_props_for_request,
@@ -475,6 +484,30 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "email": request.user.email,
             }
         )
+
+
+class AppSupportRequestAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+            clean_support_message(payload.get("message"))
+        except ValueError as exc:
+            return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+
+        try:
+            send_app_support_request(user=request.user, payload=payload)
+        except SupportRequestConfigurationError as exc:
+            return JsonResponse({"ok": False, "message": str(exc)}, status=500)
+        except (AnymailAPIError, BadHeaderError, OSError, SMTPException):
+            logger.exception("Failed to send in-app support request for user %s.", request.user.id)
+            return JsonResponse(
+                {"ok": False, "message": "Unable to send support request. Please try again later."},
+                status=500,
+            )
+
+        return JsonResponse({"ok": True})
 
 
 class UserPreferencesAPIView(ApiLoginRequiredMixin, View):
@@ -4586,6 +4619,22 @@ class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
             comment=comment,
             metadata={"comment_truncated": len(raw_comment.strip()) > AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH},
         )
+        try:
+            send_agent_message_report_email(report=report)
+        except SupportRequestConfigurationError as exc:
+            logger.warning("Message report %s was not emailed: %s", report.id, exc)
+            report.metadata = {
+                **report.metadata,
+                "support_email_error": str(exc),
+            }
+            report.save(update_fields=["metadata", "updated_at"])
+        except (AnymailAPIError, BadHeaderError, OSError, SMTPException) as exc:
+            logger.exception("Failed to email message report %s.", report.id)
+            report.metadata = {
+                **report.metadata,
+                "support_email_error": exc.__class__.__name__,
+            }
+            report.save(update_fields=["metadata", "updated_at"])
         Analytics.track_event(
             user_id=str(request.user.id),
             event=AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED,

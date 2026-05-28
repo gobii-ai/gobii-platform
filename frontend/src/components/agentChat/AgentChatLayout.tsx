@@ -199,6 +199,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenSecrets?: () => void
   sidebarIntegrationsUrl?: string | null
   onOpenIntegrations?: () => void
+  onOpenHelp?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -387,6 +388,7 @@ export function AgentChatLayout({
   onOpenSecrets,
   sidebarIntegrationsUrl = '/app/integrations',
   onOpenIntegrations,
+  onOpenHelp,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -1378,6 +1380,7 @@ export function AgentChatLayout({
     onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
+    onOpenHelp,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -1397,6 +1400,7 @@ export function AgentChatLayout({
     onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
+    onOpenHelp,
     sidebarBillingUrl,
     sidebarUsageUrl,
     sidebarApiKeysUrl,

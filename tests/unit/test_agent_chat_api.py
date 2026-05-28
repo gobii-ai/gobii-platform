@@ -3,12 +3,14 @@ from __future__ import annotations
 from datetime import timedelta
 from email.message import EmailMessage
 import json
+from smtplib import SMTPException
 from urllib.parse import parse_qs, urlparse
 from unittest.mock import MagicMock, patch
 
 from allauth.account.models import EmailAddress
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.core import mail
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import Client, TestCase, override_settings, tag
@@ -1959,6 +1961,7 @@ class AgentChatAPITests(TestCase):
         self.assertNotIn("comment", props)
 
     @tag("batch_agent_chat")
+    @override_settings(SUPPORT_EMAIL="support@example.com")
     @patch("console.api_views.run_reported_agent_judge")
     @patch("console.api_views.Analytics.track_event")
     def test_agent_message_report_stores_report_tracks_analytics_and_runs_judge(self, mock_track_event, mock_judge):
@@ -1988,6 +1991,22 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(len(report.comment), 2000)
         self.assertEqual(report.status, PersistentAgentMessageReport.Status.JUDGE_COMPLETED)
         self.assertTrue(report.metadata["comment_truncated"])
+        self.assertEqual(len(mail.outbox), 1)
+        support_email = mail.outbox[0]
+        self.assertEqual(support_email.to, ["support@example.com"])
+        self.assertEqual(support_email.subject, "Gobii message report")
+        self.assertEqual(support_email.from_email, settings.DEFAULT_FROM_EMAIL)
+        self.assertEqual(support_email.reply_to, [self.user.email])
+        self.assertIn("A user reported an agent message.", support_email.body)
+        self.assertIn(f"ID: {report.id}", support_email.body)
+        self.assertIn(f"ID: {self.user.id}", support_email.body)
+        self.assertIn("Email: owner@example.com", support_email.body)
+        self.assertIn(f"ID: {self.agent.id}", support_email.body)
+        self.assertIn(f"Name: {self.agent.name}", support_email.body)
+        self.assertIn(f"ID: {message.id}", support_email.body)
+        self.assertIn("This answer should be reviewed.", support_email.body)
+        self.assertIn("Reporter comment", support_email.body)
+        self.assertIn("x" * 2000, support_email.body)
         mock_judge.assert_called_once_with(
             self.agent,
             reported_message=message,
@@ -2003,6 +2022,35 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(props.get("comment_length"), 2000)
         self.assertNotIn("body", props)
         self.assertNotIn("comment", props)
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.send_agent_message_report_email", side_effect=SMTPException("nope"))
+    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_report_email_failure_does_not_block_report(self, mock_track_event, mock_judge, mock_email):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="This answer should be reviewed.",
+        )
+        mock_judge.return_value = {"ran": True, "status": "completed", "suggestion": None}
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
+            data=json.dumps({"comment": "Please review this."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        payload = response.json()
+        report = PersistentAgentMessageReport.objects.get(id=payload["report_id"])
+        self.assertEqual(report.status, PersistentAgentMessageReport.Status.JUDGE_COMPLETED)
+        self.assertEqual(report.metadata["support_email_error"], "SMTPException")
+        mock_email.assert_called_once_with(report=report)
+        mock_judge.assert_called_once()
+        mock_track_event.assert_called_once()
 
     @tag("batch_agent_chat")
     @patch("console.api_views.run_reported_agent_judge")
