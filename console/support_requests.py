@@ -101,10 +101,7 @@ def send_app_support_request(*, user: AbstractBaseUser, payload: dict[str, Any])
     email.send(fail_silently=False)
 
 
-def build_agent_message_report_email_body(*, report) -> str:
-    reporter = report.reporter
-    agent = report.agent
-    message = report.message
+def build_agent_message_report_email_body(*, user: AbstractBaseUser, agent: Any, message: Any, comment: str) -> str:
     message_channel = "-"
     if message.conversation_id:
         message_channel = message.conversation.channel
@@ -114,13 +111,9 @@ def build_agent_message_report_email_body(*, report) -> str:
     lines = [
         "A user reported an agent message.",
         "",
-        "Report",
-        f"ID: {report.id}",
-        f"Created at: {report.created_at.isoformat() if report.created_at else '-'}",
-        "",
         "Reporter",
-        f"ID: {reporter.pk}",
-        f"Email: {getattr(reporter, 'email', '') or '-'}",
+        f"ID: {user.pk}",
+        f"Email: {getattr(user, 'email', '') or '-'}",
         "",
         "Agent",
         f"ID: {agent.id}",
@@ -134,22 +127,22 @@ def build_agent_message_report_email_body(*, report) -> str:
         message.body or "-",
     ]
 
-    if report.comment:
-        lines.extend(["", "Reporter comment", report.comment])
+    if comment:
+        lines.extend(["", "Reporter comment", comment])
 
     return "\n".join(lines)
 
 
-def send_agent_message_report_email(*, report) -> None:
+def send_agent_message_report_email(*, user: AbstractBaseUser, agent: Any, message: Any, comment: str) -> None:
     recipient = settings.SUPPORT_EMAIL
     if not recipient:
         raise SupportRequestConfigurationError("Support email is not configured.")
 
-    reporter_email = getattr(report.reporter, "email", "") or ""
+    reporter_email = getattr(user, "email", "") or ""
     reply_to = [reporter_email] if reporter_email else []
     email = EmailMultiAlternatives(
         AGENT_MESSAGE_REPORT_SUBJECT,
-        build_agent_message_report_email_body(report=report),
+        build_agent_message_report_email_body(user=user, agent=agent, message=message, comment=comment),
         settings.DEFAULT_FROM_EMAIL,
         [recipient],
         reply_to=reply_to,

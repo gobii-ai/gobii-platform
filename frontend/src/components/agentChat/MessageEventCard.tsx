@@ -45,12 +45,12 @@ function isRecentMessage(timestamp?: string | null): boolean {
 }
 
 function plainTextFromHtml(html: string): string {
-  if (typeof document === 'undefined') {
+  if (typeof DOMParser === 'undefined') {
     return ''
   }
-  const container = document.createElement('div')
-  container.innerHTML = html
-  return container.textContent?.trim() || ''
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  return doc.body.textContent?.trim() || ''
 }
 
 async function writeMessageToClipboard(plainText: string, htmlText: string): Promise<void> {

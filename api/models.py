@@ -11888,68 +11888,6 @@ class PersistentAgentMessageRead(models.Model):
         return f"MSG_READ<{self.message_id}:{self.user_id}>"
 
 
-class PersistentAgentMessageReport(models.Model):
-    """User-submitted report for an outbound persistent-agent message."""
-
-    class Status(models.TextChoices):
-        SUBMITTED = "submitted", "Submitted"
-        JUDGE_COMPLETED = "judge_completed", "Judge Completed"
-        JUDGE_FAILED = "judge_failed", "Judge Failed"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    agent = models.ForeignKey(
-        "PersistentAgent",
-        on_delete=models.CASCADE,
-        related_name="message_reports",
-    )
-    message = models.ForeignKey(
-        PersistentAgentMessage,
-        on_delete=models.CASCADE,
-        related_name="reports",
-    )
-    reporter = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
-        related_name="persistent_agent_message_reports",
-    )
-    comment = models.TextField(blank=True)
-    status = models.CharField(
-        max_length=32,
-        choices=Status.choices,
-        default=Status.SUBMITTED,
-        db_index=True,
-    )
-    judge_completion = models.ForeignKey(
-        "PersistentAgentCompletion",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="message_reports",
-    )
-    judge_suggestion = models.ForeignKey(
-        PersistentAgentJudgeSuggestion,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="message_reports",
-    )
-    metadata = models.JSONField(default=dict, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["agent", "-created_at"], name="pa_msg_report_agent_idx"),
-            models.Index(fields=["message", "-created_at"], name="pa_msg_report_msg_idx"),
-            models.Index(fields=["reporter", "-created_at"], name="pa_msg_report_user_idx"),
-            models.Index(fields=["status", "-created_at"], name="pa_msg_report_status_idx"),
-        ]
-
-    def __str__(self):
-        return f"MSG_REPORT<{self.message_id}:{self.status}>"
-
-
 class PersistentAgentHumanInputRequest(models.Model):
     """Pending or answered human-input prompt tied to a conversation."""
 

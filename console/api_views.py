@@ -64,11 +64,11 @@ from api.agent.core.agent_judge import (
     approve_judge_suggestion,
     dismiss_judge_suggestion,
     run_manual_agent_judge,
-    run_reported_agent_judge,
 )
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
+from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from pages.public_template_urls import public_template_detail_path
@@ -104,12 +104,10 @@ from api.models import (
     AgentEmailOAuthCredential,
     AgentEmailOAuthSession,
     PersistentAgent,
-    PersistentAgentCompletion,
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
-    PersistentAgentMessageReport,
     PersistentAgentSecret,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
@@ -492,7 +490,9 @@ class AppSupportRequestAPIView(ApiLoginRequiredMixin, View):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
             payload = _parse_json_body(request)
-            clean_support_message(payload.get("message"))
+            if not isinstance(payload, dict):
+                return JsonResponse({"ok": False, "message": "Invalid request payload."}, status=400)
+            message = clean_support_message(payload.get("message"))
         except ValueError as exc:
             return JsonResponse({"ok": False, "message": str(exc)}, status=400)
 
@@ -507,6 +507,22 @@ class AppSupportRequestAPIView(ApiLoginRequiredMixin, View):
                 status=500,
             )
 
+        workspace_context = payload.get("workspaceContext")
+        if not isinstance(workspace_context, dict):
+            workspace_context = {}
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.SUPPORT_REQUEST_SUBMITTED,
+            source=AnalyticsSource.WEB,
+            properties={
+                "message_length": len(message),
+                "page_url": payload.get("pageUrl") if isinstance(payload.get("pageUrl"), str) else "",
+                "agent_id": payload.get("agentId") if isinstance(payload.get("agentId"), str) else "",
+                "agent_name": payload.get("agentName") if isinstance(payload.get("agentName"), str) else "",
+                "workspace_context_type": workspace_context.get("type") if isinstance(workspace_context.get("type"), str) else "",
+                "workspace_context_id": workspace_context.get("id") if isinstance(workspace_context.get("id"), str) else "",
+            },
+        )
         return JsonResponse({"ok": True})
 
 
@@ -4602,6 +4618,8 @@ class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
         message = _resolve_reportable_agent_message(agent, message_id)
         try:
             payload = _parse_json_body(request)
+            if not isinstance(payload, dict):
+                return HttpResponseBadRequest("Invalid request payload.")
         except ValueError as exc:
             return HttpResponseBadRequest(str(exc))
 
@@ -4612,29 +4630,17 @@ class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
             return HttpResponseBadRequest("comment must be a string")
         comment = raw_comment.strip()[:AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH]
 
-        report = PersistentAgentMessageReport.objects.create(
-            agent=agent,
-            message=message,
-            reporter=request.user,
-            comment=comment,
-            metadata={"comment_truncated": len(raw_comment.strip()) > AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH},
-        )
         try:
-            send_agent_message_report_email(report=report)
+            send_agent_message_report_email(user=request.user, agent=agent, message=message, comment=comment)
         except SupportRequestConfigurationError as exc:
-            logger.warning("Message report %s was not emailed: %s", report.id, exc)
-            report.metadata = {
-                **report.metadata,
-                "support_email_error": str(exc),
-            }
-            report.save(update_fields=["metadata", "updated_at"])
-        except (AnymailAPIError, BadHeaderError, OSError, SMTPException) as exc:
-            logger.exception("Failed to email message report %s.", report.id)
-            report.metadata = {
-                **report.metadata,
-                "support_email_error": exc.__class__.__name__,
-            }
-            report.save(update_fields=["metadata", "updated_at"])
+            logger.warning(
+                "Message report email was not sent for agent %s message %s: %s",
+                agent.id,
+                message.id,
+                exc,
+            )
+        except (AnymailAPIError, BadHeaderError, OSError, SMTPException):
+            logger.exception("Failed to email message report for agent %s message %s.", agent.id, message.id)
         Analytics.track_event(
             user_id=str(request.user.id),
             event=AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED,
@@ -4643,61 +4649,15 @@ class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
                 agent,
                 message,
                 {
-                    "report_id": str(report.id),
                     "comment_length": len(comment),
                     "comment_provided": bool(comment),
+                    "comment_truncated": len(raw_comment.strip()) > AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH,
                 },
             ),
         )
 
-        try:
-            judge_result = run_reported_agent_judge(agent, reported_message=message, user_comment=comment)
-        except Exception as exc:  # pragma: no cover - defensive; reports should persist even if advisory judging fails.
-            logger.exception("Failed to run reported-message judge for agent %s message %s", agent.id, message.id)
-            report.status = PersistentAgentMessageReport.Status.JUDGE_FAILED
-            report.metadata = {
-                **report.metadata,
-                "judge_error": exc.__class__.__name__,
-            }
-            report.save(update_fields=["status", "metadata", "updated_at"])
-            return JsonResponse(
-                {
-                    "ok": True,
-                    "report_id": str(report.id),
-                    "judge": {"ran": False, "status": "failed"},
-                },
-                status=202,
-            )
-
-        suggestion_payload = judge_result.get("suggestion") if isinstance(judge_result, dict) else None
-        completion_id = judge_result.get("completion_id") if isinstance(judge_result, dict) else None
-        if not completion_id and isinstance(suggestion_payload, dict):
-            completion_id = suggestion_payload.get("completionId")
-        suggestion_id = suggestion_payload.get("suggestionId") if isinstance(suggestion_payload, dict) else None
-        if completion_id:
-            report.judge_completion = (
-                PersistentAgentCompletion.objects.filter(agent=agent, id=completion_id).first()
-            )
-        if suggestion_id:
-            report.judge_suggestion = (
-                PersistentAgentJudgeSuggestion.objects.filter(agent=agent, id=suggestion_id).first()
-            )
-        report.status = PersistentAgentMessageReport.Status.JUDGE_COMPLETED
-        report.metadata = {
-            **report.metadata,
-            "judge_status": judge_result.get("status") if isinstance(judge_result, dict) else "",
-            "judge_ran": bool(judge_result.get("ran")) if isinstance(judge_result, dict) else False,
-        }
-        report.save(
-            update_fields=[
-                "status",
-                "judge_completion",
-                "judge_suggestion",
-                "metadata",
-                "updated_at",
-            ]
-        )
-        return JsonResponse({"ok": True, "report_id": str(report.id), "judge": judge_result})
+        transaction.on_commit(lambda: run_reported_agent_judge_task.delay(str(agent.id), str(message.id), comment))
+        return JsonResponse({"ok": True, "judge": {"ran": False, "status": "queued"}}, status=202)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

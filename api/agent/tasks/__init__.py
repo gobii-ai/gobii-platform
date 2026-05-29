@@ -22,3 +22,4 @@ from .agent_avatar import (  # noqa: F401
     generate_agent_avatar_task,
     generate_agent_visual_description_task,
 )
+from .reported_message_judge import run_reported_agent_judge_task  # noqa: F401

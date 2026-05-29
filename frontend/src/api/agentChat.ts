@@ -449,7 +449,6 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
 
 export type AgentMessageReportResponse = {
   ok: boolean
-  report_id?: string
   judge?: {
     ran?: boolean
     status?: string

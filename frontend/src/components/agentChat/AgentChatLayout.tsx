@@ -1,6 +1,6 @@
 import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { Loader2, Zap } from 'lucide-react'
+import { Flag, Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
@@ -21,13 +21,13 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
-import { ReportAgentMessageDialog } from './ReportAgentMessageDialog'
 import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
+import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
@@ -1866,12 +1866,22 @@ export function AgentChatLayout({
           isAgentWorking={isWorkingNow}
         />
       </AgentChatMobileSheet>
-      <ReportAgentMessageDialog
-        message={reportMessage}
+      <TextareaSubmitDialog
+        open={Boolean(reportMessage)}
+        title="Report message"
+        subtitle="Tell us what went wrong so we can review this agent response."
+        icon={Flag}
+        textareaId="agent-message-report-comment"
+        label="What should we know?"
+        placeholder="Optional details about what was incorrect, unhelpful, or concerning."
+        maxLength={2000}
+        valueResetKey={reportMessage?.id ?? null}
         busy={reportSubmitting}
         error={reportError}
         onClose={handleReportDialogClose}
         onSubmit={handleReportSubmit}
+        submitLabel="Submit report"
+        busyLabel="Submitting..."
       />
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (

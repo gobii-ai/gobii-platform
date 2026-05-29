@@ -90,6 +90,7 @@ class AnalyticsEvent(StrEnum):
     LOGGED_IN = 'Log In'
     LOGGED_OUT = 'Log Out'
     SUPPORT_VIEW = 'Support View'
+    SUPPORT_REQUEST_SUBMITTED = 'Support Request Submitted'
     PLAN_INTEREST = 'Paid Plan Interest'
     WEB_TASKS_LISTED = 'Tasks Listed'
     WEB_TASK_DETAILED = 'Task Details Viewed'

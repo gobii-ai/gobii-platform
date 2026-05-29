@@ -24,6 +24,7 @@ from api.agent.comms.imap_adapter import ImapEmailAdapter
 from api.agent.comms.adapters import ParsedMessage
 from api.agent.comms.message_service import ingest_inbound_message, ingest_inbound_webhook_message
 from api.agent.core.prompt_context import build_prompt_context
+from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
 from api.agent.peer_comm import PeerMessagingService
 from api.agent.tools.plan import PlanFileDeliverable, PlanMessageDeliverable, PlanSnapshot, PlanStepChange
 from api.models import (
@@ -46,7 +47,6 @@ from api.models import (
     PersistentAgentInboundWebhook,
     PersistentAgentMessage,
     PersistentAgentMessageAttachment,
-    PersistentAgentMessageReport,
     PersistentAgentSecret,
     PersistentAgentStep,
     PersistentAgentToolCall,
@@ -1962,9 +1962,9 @@ class AgentChatAPITests(TestCase):
 
     @tag("batch_agent_chat")
     @override_settings(SUPPORT_EMAIL="support@example.com")
-    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.run_reported_agent_judge_task.delay")
     @patch("console.api_views.Analytics.track_event")
-    def test_agent_message_report_stores_report_tracks_analytics_and_runs_judge(self, mock_track_event, mock_judge):
+    def test_agent_message_report_sends_email_tracks_analytics_and_queues_judge(self, mock_track_event, mock_judge_delay):
         message = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.agent_endpoint,
@@ -1973,24 +1973,20 @@ class AgentChatAPITests(TestCase):
             body="This answer should be reviewed.",
         )
         long_comment = f"  {'x' * 2010}  "
-        mock_judge.return_value = {"ran": True, "status": "completed", "suggestion": None}
 
-        response = self.client.post(
-            f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
-            data=json.dumps({"comment": long_comment}),
-            content_type="application/json",
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
+                data=json.dumps({"comment": long_comment}),
+                content_type="application/json",
+            )
 
-        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.status_code, 202, response.content)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        report = PersistentAgentMessageReport.objects.get(id=payload["report_id"])
-        self.assertEqual(report.agent, self.agent)
-        self.assertEqual(report.message, message)
-        self.assertEqual(report.reporter, self.user)
-        self.assertEqual(len(report.comment), 2000)
-        self.assertEqual(report.status, PersistentAgentMessageReport.Status.JUDGE_COMPLETED)
-        self.assertTrue(report.metadata["comment_truncated"])
+        self.assertEqual(payload["judge"], {"ran": False, "status": "queued"})
+        self.assertNotIn("report_id", payload)
+        mock_judge_delay.assert_called_once_with(str(self.agent.id), str(message.id), "x" * 2000)
         self.assertEqual(len(mail.outbox), 1)
         support_email = mail.outbox[0]
         self.assertEqual(support_email.to, ["support@example.com"])
@@ -1998,7 +1994,6 @@ class AgentChatAPITests(TestCase):
         self.assertEqual(support_email.from_email, settings.DEFAULT_FROM_EMAIL)
         self.assertEqual(support_email.reply_to, [self.user.email])
         self.assertIn("A user reported an agent message.", support_email.body)
-        self.assertIn(f"ID: {report.id}", support_email.body)
         self.assertIn(f"ID: {self.user.id}", support_email.body)
         self.assertIn("Email: owner@example.com", support_email.body)
         self.assertIn(f"ID: {self.agent.id}", support_email.body)
@@ -2007,27 +2002,51 @@ class AgentChatAPITests(TestCase):
         self.assertIn("This answer should be reviewed.", support_email.body)
         self.assertIn("Reporter comment", support_email.body)
         self.assertIn("x" * 2000, support_email.body)
-        mock_judge.assert_called_once_with(
-            self.agent,
-            reported_message=message,
-            user_comment="x" * 2000,
-        )
 
         mock_track_event.assert_called_once()
         self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED)
         props = mock_track_event.call_args.kwargs["properties"]
         self.assertEqual(props.get("agent_id"), str(self.agent.id))
         self.assertEqual(props.get("message_id"), str(message.id))
-        self.assertEqual(props.get("report_id"), str(report.id))
         self.assertEqual(props.get("comment_length"), 2000)
+        self.assertTrue(props.get("comment_truncated"))
         self.assertNotIn("body", props)
         self.assertNotIn("comment", props)
 
     @tag("batch_agent_chat")
     @patch("console.api_views.send_agent_message_report_email", side_effect=SMTPException("nope"))
-    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.run_reported_agent_judge_task.delay")
     @patch("console.api_views.Analytics.track_event")
-    def test_agent_message_report_email_failure_does_not_block_report(self, mock_track_event, mock_judge, mock_email):
+    def test_agent_message_report_email_failure_does_not_block_report(self, mock_track_event, mock_judge_delay, mock_email):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="This answer should be reviewed.",
+        )
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.post(
+                f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
+                data=json.dumps({"comment": "Please review this."}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 202, response.content)
+        self.assertNotIn("report_id", response.json())
+        mock_email.assert_called_once_with(
+            user=self.user,
+            agent=self.agent,
+            message=message,
+            comment="Please review this.",
+        )
+        mock_judge_delay.assert_called_once_with(str(self.agent.id), str(message.id), "Please review this.")
+        mock_track_event.assert_called_once()
+
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.reported_message_judge.run_reported_agent_judge")
+    def test_reported_message_judge_task_records_result(self, mock_judge):
         message = PersistentAgentMessage.objects.create(
             owner_agent=self.agent,
             from_endpoint=self.agent_endpoint,
@@ -2037,23 +2056,30 @@ class AgentChatAPITests(TestCase):
         )
         mock_judge.return_value = {"ran": True, "status": "completed", "suggestion": None}
 
-        response = self.client.post(
-            f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
-            data=json.dumps({"comment": "Please review this."}),
-            content_type="application/json",
+        run_reported_agent_judge_task.run(str(self.agent.id), str(message.id), "Please review this.")
+
+        mock_judge.assert_called_once_with(
+            self.agent,
+            reported_message=message,
+            user_comment="Please review this.",
         )
 
-        self.assertEqual(response.status_code, 200, response.content)
-        payload = response.json()
-        report = PersistentAgentMessageReport.objects.get(id=payload["report_id"])
-        self.assertEqual(report.status, PersistentAgentMessageReport.Status.JUDGE_COMPLETED)
-        self.assertEqual(report.metadata["support_email_error"], "SMTPException")
-        mock_email.assert_called_once_with(report=report)
+    @tag("batch_agent_chat")
+    @patch("api.agent.tasks.reported_message_judge.run_reported_agent_judge", side_effect=TimeoutError("nope"))
+    def test_reported_message_judge_task_marks_expected_failure(self, mock_judge):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="This answer should be reviewed.",
+        )
+        run_reported_agent_judge_task.run(str(self.agent.id), str(message.id), "Please review this.")
+
         mock_judge.assert_called_once()
-        mock_track_event.assert_called_once()
 
     @tag("batch_agent_chat")
-    @patch("console.api_views.run_reported_agent_judge")
+    @patch("console.api_views.run_reported_agent_judge_task.delay")
     @patch("console.api_views.Analytics.track_event")
     def test_agent_message_report_rejects_inbound_and_non_owned_messages(self, mock_track_event, mock_judge):
         inbound = PersistentAgentMessage.objects.create(
@@ -2102,7 +2128,29 @@ class AgentChatAPITests(TestCase):
 
         self.assertEqual(inbound_response.status_code, 404)
         self.assertEqual(non_owned_response.status_code, 404)
-        self.assertFalse(PersistentAgentMessageReport.objects.exists())
+        mock_track_event.assert_not_called()
+        mock_judge.assert_not_called()
+
+    @tag("batch_agent_chat")
+    @patch("console.api_views.run_reported_agent_judge_task.delay")
+    @patch("console.api_views.Analytics.track_event")
+    def test_agent_message_report_rejects_non_object_payload(self, mock_track_event, mock_judge):
+        message = PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            from_endpoint=self.agent_endpoint,
+            to_endpoint=self.user_endpoint,
+            is_outbound=True,
+            body="This answer should be reviewed.",
+        )
+
+        response = self.client.post(
+            f"/console/api/agents/{self.agent.id}/messages/{message.id}/report-issue/",
+            data=json.dumps(["bad"]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.content, b"JSON object expected")
         mock_track_event.assert_not_called()
         mock_judge.assert_not_called()
 
