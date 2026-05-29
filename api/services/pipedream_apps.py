@@ -14,6 +14,7 @@ from django.db.models import Q, QuerySet
 
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.models import MCPServerConfig, PersistentAgent, PersistentAgentEnabledTool, PipedreamAppSelection
+from api.services.mcp_config_validation import PIPEDREAM_OAUTH_APP_IDS_METADATA_KEY
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +115,31 @@ def get_platform_pipedream_app_slugs() -> list[str]:
     if config is not None and config.prefetch_apps:
         return normalize_app_slugs(config.prefetch_apps)
     return normalize_app_slugs(str(settings.PIPEDREAM_PREFETCH_APPS).split(","))
+
+
+def get_pipedream_oauth_app_id(app_slug: object) -> str:
+    normalized_slug = normalize_app_slug(app_slug)
+    if not normalized_slug or "," in normalized_slug:
+        return ""
+
+    config = (
+        MCPServerConfig.objects.filter(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=PIPEDREAM_RUNTIME_NAME,
+            is_active=True,
+        )
+        .only("metadata")
+        .first()
+    )
+    metadata = config.metadata if config is not None and isinstance(config.metadata, dict) else {}
+    raw_mapping = metadata.get(PIPEDREAM_OAUTH_APP_IDS_METADATA_KEY)
+    if not isinstance(raw_mapping, dict):
+        return ""
+
+    for raw_slug, oauth_app_id in raw_mapping.items():
+        if normalize_app_slug(raw_slug) == normalized_slug and isinstance(oauth_app_id, str):
+            return oauth_app_id.strip()
+    return ""
 
 
 def get_owner_selected_app_slugs(owner_scope: str, owner_user=None, owner_org=None) -> list[str]:

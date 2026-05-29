@@ -2,6 +2,7 @@ import logging
 import secrets
 from datetime import datetime, timedelta
 from typing import Tuple, Optional
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import requests
 from django.contrib.sites.models import Site
@@ -12,6 +13,7 @@ from django.utils import timezone
 from api.models import PersistentAgent
 from api.models import PipedreamConnectSession
 from api.agent.tools.mcp_manager import get_mcp_manager
+from api.services.pipedream_apps import get_pipedream_oauth_app_id
 
 
 logger = logging.getLogger(__name__)
@@ -24,6 +26,20 @@ def _https_base_url() -> str:
     current_site = Site.objects.get_current()
     domain = current_site.domain.strip().rstrip('/')
     return f"https://{domain}"
+
+
+def _append_connect_link_params(link: str, *, app_slug: str) -> str:
+    app = (app_slug or "").strip()
+    if not app:
+        return link
+
+    parsed = urlparse(link)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query["app"] = app
+    oauth_app_id = get_pipedream_oauth_app_id(app)
+    if oauth_app_id:
+        query["oauthAppId"] = oauth_app_id
+    return urlunparse(parsed._replace(query=urlencode(query)))
 
 
 def create_connect_session(agent: PersistentAgent, app_slug: str) -> Tuple[PipedreamConnectSession, Optional[str]]:
@@ -127,12 +143,14 @@ def create_connect_session(agent: PersistentAgent, app_slug: str) -> Tuple[Piped
             session.save(update_fields=["status", "updated_at"])
             return session, None
 
-        # Append &app=...
-        app = (app_slug or "").strip()
-        final_url = f"{link}{'&' if '?' in link else '?'}app={app}" if app else link
+        final_url = _append_connect_link_params(str(link), app_slug=app_slug or "")
         logger.info(
-            "PD Connect: token created session=%s app=%s expires_at=%s final_url_has_app=%s",
-            str(session.id), app or "", str(session.expires_at) if session.expires_at else "", "app=" in final_url
+            "PD Connect: token created session=%s app=%s expires_at=%s final_url_has_app=%s final_url_has_oauth_app=%s",
+            str(session.id),
+            app_slug or "",
+            str(session.expires_at) if session.expires_at else "",
+            "app=" in final_url,
+            "oauthAppId=" in final_url,
         )
         return session, final_url
     except Exception as e:

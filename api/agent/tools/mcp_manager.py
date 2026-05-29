@@ -76,6 +76,7 @@ from ...services.pipedream_apps import (
     build_owner_key,
     get_effective_pipedream_app_slugs_for_agent,
     get_platform_pipedream_app_slugs,
+    get_pipedream_oauth_app_id,
     normalize_app_slugs,
 )
 
@@ -2849,6 +2850,9 @@ class MCPToolManager:
         }
         if app_slug:
             headers["x-pd-app-slug"] = app_slug
+            oauth_app_id = get_pipedream_oauth_app_id(app_slug)
+            if oauth_app_id:
+                headers["x-pd-oauth-app-id"] = oauth_app_id
         return headers
 
     def _pd_parse_tool(self, tool_name: str) -> Optional[str]:
@@ -2870,10 +2874,17 @@ class MCPToolManager:
         component_key = str(params.get("componentKey") or params.get("component_key") or "").strip()
         return self._pd_parse_tool(component_key)
 
+    def _pd_agent_client_cache_key(self, agent_key: str, app_slug: Optional[str]) -> str:
+        oauth_app_id = get_pipedream_oauth_app_id(app_slug)
+        cache_key = f"{agent_key}:{app_slug or ''}"
+        if oauth_app_id:
+            cache_key = f"{cache_key}:{oauth_app_id}"
+        return cache_key
+
     def _get_pipedream_agent_client(self, agent: PersistentAgent, app_slug: Optional[str]) -> Client:
         """Get or create a Pipedream client for an agent/app pair."""
         agent_key = str(agent.id)
-        cache_key = f"{agent_key}:{app_slug or ''}"
+        cache_key = self._pd_agent_client_cache_key(agent_key, app_slug)
         if cache_key in self._pd_agent_clients:
             client = self._pd_agent_clients[cache_key]
             # Ensure Authorization header is current

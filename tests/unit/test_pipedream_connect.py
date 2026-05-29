@@ -18,6 +18,8 @@ from api.models import (
 )
 from api.agent.tools.mcp_manager import MCPToolManager, MCPToolInfo
 from api.integrations.pipedream_connect import create_connect_session
+from api.services.mcp_config_validation import validate_mcp_metadata_environment_references
+from api.services.pipedream_apps import get_pipedream_oauth_app_id
 from api.services.pipedream_connections import PipedreamConnectionError
 from api.webhooks import pipedream_connect_webhook
 
@@ -41,6 +43,22 @@ def _ensure_pipedream_config():
     if not config.url:
         config.url = "https://pipedream.example.com"
         config.save(update_fields=["url"])
+    return config
+
+
+def _ensure_platform_pipedream_config(metadata=None):
+    config, _ = MCPServerConfig.objects.update_or_create(
+        scope=MCPServerConfig.Scope.PLATFORM,
+        name="pipedream",
+        defaults={
+            "display_name": "Pipedream",
+            "description": "Pipedream test config",
+            "url": "https://pipedream.example.com",
+            "prefetch_apps": ["google_sheets", "notion"],
+            "metadata": metadata or {},
+            "is_active": True,
+        },
+    )
     return config
 
 
@@ -88,6 +106,81 @@ class PipedreamConnectHelperTests(TestCase):
 
         self.assertEqual(headers["x-pd-app-slug"], "google_sheets")
         self.assertEqual(headers["x-pd-tool-mode"], "tools-only")
+        self.assertNotIn("x-pd-oauth-app-id", headers)
+
+    def test_pipedream_oauth_app_id_helper_normalizes_metadata_slugs(self):
+        _ensure_platform_pipedream_config(
+            metadata={
+                "pipedream_oauth_app_ids": {
+                    " Notion ": " oa_notion ",
+                },
+            }
+        )
+
+        self.assertEqual(get_pipedream_oauth_app_id("notion"), "oa_notion")
+        self.assertEqual(get_pipedream_oauth_app_id(" Notion "), "oa_notion")
+        self.assertEqual(get_pipedream_oauth_app_id("google_sheets"), "")
+
+    def test_pipedream_oauth_app_id_metadata_validation_rejects_invalid_shape(self):
+        errors = validate_mcp_metadata_environment_references(
+            {"pipedream_oauth_app_ids": {"notion": "oa_notion"}}
+        )
+        self.assertEqual(errors, [])
+
+        errors = validate_mcp_metadata_environment_references(
+            {"pipedream_oauth_app_ids": {"notion": ""}}
+        )
+        self.assertTrue(any("pipedream_oauth_app_ids" in error for error in errors))
+
+        errors = validate_mcp_metadata_environment_references(
+            {"pipedream_oauth_app_ids": ["notion", "oa_notion"]}
+        )
+        self.assertTrue(any("pipedream_oauth_app_ids" in error for error in errors))
+
+    def test_pipedream_headers_include_oauth_app_id_for_mapped_single_app(self):
+        _ensure_platform_pipedream_config(
+            metadata={"pipedream_oauth_app_ids": {"notion": "oa_notion"}}
+        )
+        mgr = MCPToolManager()
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
+
+        headers = mgr._pd_build_headers(
+            app_slug="notion",
+            external_user_id="agent-id",
+            conversation_id="conversation-id",
+        )
+
+        self.assertEqual(headers["x-pd-app-slug"], "notion")
+        self.assertEqual(headers["x-pd-oauth-app-id"], "oa_notion")
+
+    def test_pipedream_headers_omit_oauth_app_id_for_discovery_app_list(self):
+        _ensure_platform_pipedream_config(
+            metadata={"pipedream_oauth_app_ids": {"notion": "oa_notion"}}
+        )
+        mgr = MCPToolManager()
+        mgr._get_pipedream_access_token = MagicMock(return_value="pd_token")
+
+        headers = mgr._pd_build_headers(
+            app_slug="notion,google_sheets",
+            external_user_id="agent-id",
+            conversation_id="conversation-id",
+        )
+
+        self.assertEqual(headers["x-pd-app-slug"], "notion,google_sheets")
+        self.assertNotIn("x-pd-oauth-app-id", headers)
+
+    def test_pipedream_agent_client_cache_key_includes_oauth_app_id_when_mapped(self):
+        mgr = MCPToolManager()
+        self.assertEqual(mgr._pd_agent_client_cache_key("agent-id", "notion"), "agent-id:notion")
+
+        _ensure_platform_pipedream_config(
+            metadata={"pipedream_oauth_app_ids": {"notion": "oa_notion"}}
+        )
+
+        self.assertEqual(
+            mgr._pd_agent_client_cache_key("agent-id", "notion"),
+            "agent-id:notion:oa_notion",
+        )
 
     @patch("api.integrations.pipedream_connect.requests.post")
     @patch("api.integrations.pipedream_connect.get_mcp_manager")
@@ -121,9 +214,43 @@ class PipedreamConnectHelperTests(TestCase):
         # Assert
         self.assertTrue(isinstance(session, PipedreamConnectSession))
         self.assertIn("app=google_sheets", url)
+        self.assertNotIn("oauthAppId=", url)
         self.assertEqual(session.connect_token, "ctok_abc")
         # Stored link is the Pipedream connect link
         self.assertIn("pipedream.com/_static/connect.html", session.connect_link_url)
+
+    @patch("api.integrations.pipedream_connect.requests.post")
+    @patch("api.integrations.pipedream_connect.get_mcp_manager")
+    def test_create_connect_session_appends_oauth_app_id_for_mapped_app(self, mock_get_mgr, mock_post):
+        _ensure_platform_pipedream_config(
+            metadata={"pipedream_oauth_app_ids": {"notion": "oa_notion"}}
+        )
+        User = get_user_model()
+        user = User.objects.create_user(username="notion-user@example.com")
+        bua = _create_browser_agent(user)
+        agent = PersistentAgent.objects.create(user=user, name="a", charter="c", browser_use_agent=bua)
+
+        mgr = MagicMock()
+        mgr._get_pipedream_access_token.return_value = "pd_token"
+        mock_get_mgr.return_value = mgr
+
+        resp = MagicMock()
+        future_expires = (timezone.now() + timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+        resp.json.return_value = {
+            "token": "ctok_notion",
+            "connect_link_url": "https://pipedream.com/_static/connect.html?token=ctok_notion",
+            "expires_at": future_expires,
+        }
+        resp.raise_for_status.return_value = None
+        mock_post.return_value = resp
+
+        from django.test import override_settings
+        with override_settings(PIPEDREAM_PROJECT_ID="proj_123", PIPEDREAM_ENVIRONMENT="development"):
+            session, url = create_connect_session(agent, "notion")
+
+        self.assertTrue(isinstance(session, PipedreamConnectSession))
+        self.assertIn("app=notion", url)
+        self.assertIn("oauthAppId=oa_notion", url)
 
     @patch("api.integrations.pipedream_connect.requests.post")
     @patch("api.integrations.pipedream_connect.get_mcp_manager")

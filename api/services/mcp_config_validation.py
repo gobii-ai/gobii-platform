@@ -2,8 +2,11 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
+from api.pipedream_app_utils import normalize_app_slug
+
 
 _ENVIRONMENT_VARIABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+PIPEDREAM_OAUTH_APP_IDS_METADATA_KEY = "pipedream_oauth_app_ids"
 
 
 def is_valid_environment_variable_name(name: Any) -> bool:
@@ -77,4 +80,28 @@ def validate_mcp_metadata_environment_references(metadata: Mapping[Any, Any]) ->
             "brightdata_search_fallback_zone_env must be an environment variable name like "
             "WEB_UNLOCKER_ZONE_FALLBACK."
         )
+
+    oauth_app_ids = metadata.get(PIPEDREAM_OAUTH_APP_IDS_METADATA_KEY)
+    if oauth_app_ids is not None:
+        if not isinstance(oauth_app_ids, Mapping):
+            errors.append("metadata.pipedream_oauth_app_ids must be a JSON object.")
+        else:
+            invalid_entries = []
+            for app_slug, oauth_app_id in oauth_app_ids.items():
+                normalized_slug = normalize_app_slug(app_slug)
+                if (
+                    not normalized_slug
+                    or "," in normalized_slug
+                    or not isinstance(oauth_app_id, str)
+                    or not oauth_app_id.strip()
+                ):
+                    invalid_entries.append(str(app_slug))
+            if invalid_entries:
+                preview = ", ".join(repr(name) for name in invalid_entries[:5])
+                if len(invalid_entries) > 5:
+                    preview = f"{preview}, ..."
+                errors.append(
+                    "metadata.pipedream_oauth_app_ids must map app slug strings "
+                    f"to non-empty OAuth app ID strings. Invalid entries: {preview}."
+                )
     return errors
