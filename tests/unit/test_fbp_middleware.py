@@ -13,18 +13,17 @@ class FbpMiddlewareTests(TestCase):
     def setUp(self) -> None:
         self.factory = RequestFactory()
         self.middleware = FbpMiddleware(lambda request: HttpResponse("ok"))
+        self.session_middleware = SessionMiddleware(lambda req: HttpResponse("noop"))
 
     def _build_request(self, cookies=None):
         request = self.factory.get("/")
-        session_middleware = SessionMiddleware(lambda req: HttpResponse("noop"))
-        session_middleware.process_request(request)
-        request.session.save()
+        self.session_middleware.process_request(request)
         if cookies:
             request.COOKIES.update(cookies)
         return request
 
     @tag("batch_fbp_middleware")
-    def test_get_or_make_generates_and_persists_identifier(self):
+    def test_get_or_make_generates_identifier_without_session_write(self):
         request = self._build_request()
         fixed_time = 1_720_000_000.123
         random_value = 9876543210
@@ -36,10 +35,13 @@ class FbpMiddlewareTests(TestCase):
 
         expected = f"fb.1.{int(fixed_time * 1000)}.{random_value}"
         self.assertEqual(fbp, expected)
-        self.assertEqual(request.session[settings.FBP_COOKIE_NAME], expected)
+        self.assertEqual(request.fbp, expected)
+        self.assertEqual(request.COOKIES[settings.FBP_COOKIE_NAME], expected)
+        self.assertNotIn(settings.FBP_COOKIE_NAME, request.session)
+        self.assertFalse(request.session.modified)
 
     @tag("batch_fbp_middleware")
-    def test_middleware_sets_cookie_when_missing(self):
+    def test_middleware_sets_cookie_when_missing_without_session_cookie(self):
         request = self._build_request()
         fixed_time = 1_720_000_001.456
         random_value = 1122334455
@@ -49,6 +51,7 @@ class FbpMiddlewareTests(TestCase):
             "middleware.fbp_middleware.random.randint", return_value=random_value
         ):
             response = self.middleware(request)
+        response = self.session_middleware.process_response(request, response)
 
         cookie = response.cookies[settings.FBP_COOKIE_NAME]
         self.assertEqual(cookie.value, expected)
@@ -56,6 +59,11 @@ class FbpMiddlewareTests(TestCase):
         self.assertTrue(cookie["secure"])
         self.assertEqual(cookie["samesite"], "Lax")
         self.assertFalse(bool(cookie["httponly"]))
+        self.assertEqual(request.fbp, expected)
+        self.assertEqual(request.COOKIES[settings.FBP_COOKIE_NAME], expected)
+        self.assertNotIn(settings.FBP_COOKIE_NAME, request.session)
+        self.assertFalse(request.session.modified)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies)
 
     @tag("batch_fbp_middleware")
     def test_middleware_respects_existing_cookie(self):
@@ -64,5 +72,6 @@ class FbpMiddlewareTests(TestCase):
 
         response = self.middleware(request)
 
+        self.assertEqual(request.fbp, cookie_value)
         self.assertNotIn(settings.FBP_COOKIE_NAME, request.session)
         self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
