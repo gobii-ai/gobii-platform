@@ -3,6 +3,11 @@
 
 {% block title %}{% if head_title %}{{ head_title }} · {% endif %}{% trans "Account Management" %}{% endblock %}
 
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="robots" content="noindex,follow">
+{% endblock %}
+
 {% block content %}
 <div class="flex justify-center pt-20">
   {# This inner div is where the card styling will go, similar to login/signup pages #}
@@ -24,4 +29,4 @@
     </div>
   {% endblock body_inner %}
 </div>
-{% endblock %} 
+{% endblock %}
