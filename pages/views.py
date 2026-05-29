@@ -105,6 +105,7 @@ from constants.stripe import PERSONAL_CHECKOUT_PAYMENT_METHOD_TYPES
 from constants.feature_flags import (
     CTA_SIGNUP_FIRST,
     CTA_SIGNUP_MODAL,
+    SOLUTION_CRAWLABLE_LINKS,
     STRIPE_SCALE_TRIAL_CHECKOUT_BILLING_ADDRESS_REQUIRED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_ENABLED,
     STRIPE_SCALE_TRIAL_CHECKOUT_INDIVIDUAL_NAME_OPTIONAL,
@@ -2976,6 +2977,7 @@ class StaticViewSitemap(sitemaps.Sitemap):
         # List of all static view names that should be included in the sitemap
         items = [
             'pages:home',
+            'pages:solutions',
             'pages:library',
         ]
         # Include pricing only when proprietary mode is enabled
@@ -3065,7 +3067,7 @@ class SolutionsSitemap(sitemaps.Sitemap):
 
     def items(self):
         try:
-            return list(SolutionView.SOLUTION_DATA.keys())
+            return list(SolutionView.DEDICATED_TEMPLATES.keys())
         except Exception as e:
             logger.error("Failed to generate SolutionsSitemap items: %s", e, exc_info=True)
             return []
@@ -3229,9 +3231,11 @@ class ClearSignupTrackingView(View):
         return JsonResponse(data)
 
 
-class SolutionView(TemplateView):
-    template_name = "solutions/solution.html"
+class SolutionsIndexView(TemplateView):
+    template_name = "solutions/index.html"
 
+
+class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
     DEDICATED_TEMPLATES = {
         'recruiting': 'solutions/recruiting.html',
@@ -3245,54 +3249,182 @@ class SolutionView(TemplateView):
         'recruiting': {
             'title': 'Recruiting',
             'tagline': 'Automate candidate sourcing and screening.',
-            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.'
+            'description': 'Find top talent faster with AI agents that work 24/7 to source, screen, and engage candidates.',
+            'seo_title': 'AI Recruiting Agents - Automate Sourcing & Screening | Gobii',
+            'seo_description': "Deploy AI recruiting agents that work 24/7 to source candidates, screen resumes, and engage top talent. Hire faster with Gobii's always-on digital workers.",
+            'social_image': 'images/solutions/recruiting-hero.jpg',
+            'social_image_alt': 'Gobii AI recruiting agents for candidate sourcing and screening',
+            'related_link': {
+                'intro': 'Want to inspect the agent first?',
+                'label': 'View the Talent Scout AI recruiting agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'talent-scout'},
+            },
         },
         'sales': {
             'title': 'Sales',
             'tagline': 'Supercharge your outbound outreach.',
-            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.'
+            'description': 'Scale your prospecting and personalized messaging to fill your pipeline automatically.',
+            'seo_title': 'AI Sales Agents - Automate Lead Gen & Outreach | Gobii',
+            'seo_description': "Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.",
+            'social_image': 'images/solutions/sales-hero.jpg',
+            'social_image_alt': 'Gobii AI sales agents for lead generation and account research',
+            'related_link': {
+                'intro': 'Want to inspect the agent first?',
+                'label': 'View the Lead Hunter AI sales agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'lead-hunter'},
+            },
         },
         'health-care': {
             'title': 'Health Care',
             'tagline': 'Streamline patient intake and administrative tasks.',
-            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.'
+            'description': 'Secure, HIPAA-compliant automation for modern healthcare providers and payers.',
+            'seo_title': 'AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii',
+            'seo_description': 'Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.',
+            'social_image': 'images/solutions/healthcare-hero.jpg',
+            'social_image_alt': 'Gobii healthcare AI agents for patient intake and administrative workflows',
+            'related_link': {
+                'intro': 'Want a compliance workflow to inspect?',
+                'label': 'View the Compliance Sentinel AI agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'compliance-audit-sentinel'},
+            },
         },
         'defense': {
             'title': 'Defense',
             'tagline': 'Secure, on-premise AI intelligence.',
-            'description': 'Mission-critical automation for national security with strict data governance.'
+            'description': 'Mission-critical automation for national security with strict data governance.',
+            'seo_title': 'AI Agents for Defense - Open Source, Airgapped, Fully Auditable | Gobii',
+            'seo_description': 'Open source AI agents designed for defense environments. Self-host in airgapped networks, audit every line of code, and deploy through trusted integration partners.',
+            'social_image': 'images/solutions/defense-hero.jpg',
+            'social_image_alt': 'Gobii open source AI agents for secure defense environments',
+            'related_link': {
+                'intro': 'Want a risk monitoring workflow to inspect?',
+                'label': 'View the Public Safety Scout AI agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'public-safety-scout'},
+            },
         },
         'engineering': {
             'title': 'Engineering',
             'tagline': 'Accelerate development workflows.',
-            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.'
+            'description': 'Automate code reviews, testing, and deployment pipelines to ship software faster.',
+            'seo_title': "AI Agents for Developers - Build on Gobii's Platform | Gobii",
+            'seo_description': "Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.",
+            'social_image': 'images/solutions/engineering-hero.jpg',
+            'social_image_alt': 'Gobii developer platform for building AI browser agents',
+            'related_link': {
+                'intro': 'Want a developer workflow to inspect?',
+                'label': 'View the Standup Coordinator AI agent',
+                'route': 'pages:pretrained_worker_detail',
+                'kwargs': {'slug': 'team-standup-coordinator'},
+            },
         },
     }
 
+    def dispatch(self, request, *args, **kwargs):
+        if kwargs.get('slug', '') not in self.DEDICATED_TEMPLATES:
+            raise Http404("Solution not found")
+        return super().dispatch(request, *args, **kwargs)
+
     def get_template_names(self):
         slug = self.kwargs.get('slug', '')
-        if slug in self.DEDICATED_TEMPLATES:
-            return [self.DEDICATED_TEMPLATES[slug]]
-        return [self.template_name]
+        return [self.DEDICATED_TEMPLATES[slug]]
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         slug = self.kwargs['slug']
-        data = self.SOLUTION_DATA.get(slug, {
-            'title': slug.replace('-', ' ').title(),
-            'tagline': 'AI Solutions for your industry.',
-            'description': 'Tailored AI agents and automation to help you scale.'
-        })
+        data = self.SOLUTION_DATA[slug]
+        solution_url = self.request.build_absolute_uri(reverse('pages:solution', kwargs={'slug': slug}))
+        solutions_url = self.request.build_absolute_uri(reverse('pages:solutions'))
+        home_url = self.request.build_absolute_uri(reverse('pages:home'))
+        social_image_url = self.request.build_absolute_uri(static(data['social_image']))
 
         solution_spawn_requires_trial = False
         if self.request.user.is_authenticated:
             solution_spawn_requires_trial = not can_user_use_personal_agents_and_api(self.request.user)
 
+        related_link = data.get('related_link') or {}
+        if related_link:
+            related_link = {
+                'intro': related_link['intro'],
+                'label': related_link['label'],
+                'url': reverse(related_link['route'], kwargs=related_link.get('kwargs', {})),
+            }
+
+        structured_data = {
+            "@context": "https://schema.org",
+            "@type": "WebPage",
+            "name": data['seo_title'],
+            "description": data['seo_description'],
+            "url": solution_url,
+            "image": social_image_url,
+            "publisher": {
+                "@type": "Organization",
+                "name": "Gobii",
+            },
+            "isPartOf": {
+                "@type": "WebSite",
+                "name": "Gobii",
+                "url": home_url,
+            },
+            "mainEntity": {
+                "@type": "Service",
+                "name": f"Gobii {data['title']} AI agents",
+                "description": data['seo_description'],
+                "url": solution_url,
+                "image": social_image_url,
+                "serviceType": "AI agent solution",
+                "category": data['title'],
+                "provider": {
+                    "@type": "Organization",
+                    "name": "Gobii",
+                },
+            },
+        }
+        breadcrumb_data = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "name": "Home",
+                    "item": home_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 2,
+                    "name": "Solutions",
+                    "item": solutions_url,
+                },
+                {
+                    "@type": "ListItem",
+                    "position": 3,
+                    "name": data['title'],
+                    "item": solution_url,
+                },
+            ],
+        }
+
         context.update({
             'solution_title': data['title'],
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],
+            'solution_seo_title': data['seo_title'],
+            'solution_seo_description': data['seo_description'],
+            'solution_social_image_alt': data['social_image_alt'],
+            'solution_social_image_url': social_image_url,
+            'solution_structured_data_json': html_safe_json_dumps(structured_data),
+            'solution_breadcrumb_json': html_safe_json_dumps(breadcrumb_data),
             'solution_spawn_requires_trial': solution_spawn_requires_trial,
+            'solution_related_link': related_link,
+            'solution_crawlable_links_enabled': is_waffle_flag_active(
+                SOLUTION_CRAWLABLE_LINKS,
+                self.request,
+                default=False,
+            ),
         })
         if slug in {"health-care", "defense"}:
             context["marketing_contact_form"] = MarketingContactForm()

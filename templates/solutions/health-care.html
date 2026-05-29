@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}AI Healthcare Agents - Automate Admin & Patient Workflows | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Open source AI agents designed to support HIPAA compliance. Self-host in your environment, fully audit the code, and automate patient intake, scheduling, and admin tasks.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .healthcare-panel {
     position: relative;
@@ -138,8 +138,8 @@
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          Healthcare automation,
-          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">done right</span>
+          Healthcare AI agents for
+          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">care and admin automation</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
@@ -163,6 +163,7 @@
             See how it works
           </a>
         </div>
+        {% include "solutions/_crawlable_related_link.html" %}
 
         <!-- Inline stats -->
         <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">

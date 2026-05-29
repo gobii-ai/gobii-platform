@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% load static %}
 
-{% block title %}AI Agents for Developers - Build on Gobii's Platform | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Build powerful AI agents with Gobii's API. Create, deploy, and control always-on agents programmatically. Self-hosted or cloud. Get started in minutes.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .engineering-panel {
     position: relative;
@@ -163,8 +163,8 @@
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          The platform for
-          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">AI agents</span>
+          Agentic AI API for
+          <span class="font-normal bg-gradient-to-r from-violet-800 to-purple-700 bg-clip-text text-transparent">automation</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
@@ -188,6 +188,7 @@
             Read the docs
           </a>
         </div>
+        {% include "solutions/_crawlable_related_link.html" %}
 
         <!-- Inline stats -->
         <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
@@ -715,12 +716,6 @@ agent = response.<span class="function">json</span>()
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
         </svg>
         Free tier available
-      </div>
-      <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-violet-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        No credit card required
       </div>
     </div>
   </div>

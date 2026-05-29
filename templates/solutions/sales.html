@@ -2,11 +2,11 @@
 {% load static %}
 {% load cta_tags %}
 
-{% block title %}AI Sales Agents - Automate Lead Gen & Outreach | Gobii{% endblock %}
+{% block title %}{{ solution_seo_title }}{% endblock %}
 
 {% block head_extras %}
 {{ block.super }}
-<meta name="description" content="Deploy AI sales agents that work 24/7 to find prospects, research accounts, and fill your pipeline. Book more demos with Gobii's always-on digital workers.">
+{% include "solutions/_seo_meta.html" %}
 <style>
   .sales-panel {
     position: relative;
@@ -139,8 +139,8 @@
       <!-- Hero Content -->
       <div class="relative z-10 max-w-2xl ml-2 sm:ml-4 lg:ml-8 2xl:ml-0">
         <h1 class="text-4xl sm:text-5xl lg:text-6xl tracking-tight font-light text-gray-900 leading-[1.1]">
-          Your pipeline,
-          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">always full</span>
+          AI sales agents for
+          <span class="font-normal bg-gradient-to-r from-indigo-700 to-violet-600 bg-clip-text text-transparent">outbound lead generation</span>
         </h1>
 
         <p class="mt-6 text-lg text-gray-700 leading-relaxed max-w-xl">
@@ -168,6 +168,7 @@
             See how it works
           </a>
         </div>
+        {% include "solutions/_crawlable_related_link.html" %}
 
         <!-- Inline stats -->
         <div class="mt-16 flex flex-wrap gap-x-14 gap-y-5">
@@ -700,12 +701,6 @@
 
     <!-- Trust indicators -->
     <div class="mt-14 flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-sm text-gray-500">
-      <div class="flex items-center gap-2">
-        <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-        No credit card required
-      </div>
       <div class="flex items-center gap-2">
         <svg class="w-5 h-5 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>

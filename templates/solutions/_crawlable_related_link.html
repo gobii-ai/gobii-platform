@@ -1,0 +1,8 @@
+{% if solution_crawlable_links_enabled and solution_related_link %}
+  <p class="mt-5 text-sm text-gray-700">
+    {{ solution_related_link.intro }}
+    <a href="{{ solution_related_link.url }}" class="font-medium text-indigo-700 underline decoration-indigo-300 underline-offset-4 transition-colors hover:text-indigo-800 hover:decoration-indigo-500">
+      {{ solution_related_link.label }}
+    </a>.
+  </p>
+{% endif %}
