@@ -126,7 +126,18 @@ class EvalCreditPolicyTests(TestCase):
             slug="normal-tool-org",
         )
 
-        with patch(
+        self.assertEqual(agent.execution_environment, "local")
+
+        with self.settings(
+            GOBII_PROPRIETARY_MODE=True,
+            GOBII_ENABLE_COMMUNITY_UNLIMITED=False,
+        ), patch(
+            "api.agent.core.event_processing.is_eval_credit_exempt_context",
+            return_value=False,
+        ), patch(
+            "api.agent.core.event_processing.can_bypass_task_credit_for_signup_preview",
+            return_value=False,
+        ), patch(
             "api.agent.core.event_processing.get_tool_credit_cost",
             return_value=Decimal("1.000"),
         ), patch(
