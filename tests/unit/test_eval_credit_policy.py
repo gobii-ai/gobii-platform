@@ -126,9 +126,20 @@ class EvalCreditPolicyTests(TestCase):
             slug="normal-tool-org",
         )
 
-        result = _ensure_credit_for_tool(agent, "http_request")
+        with patch(
+            "api.agent.core.event_processing.get_tool_credit_cost",
+            return_value=Decimal("1.000"),
+        ), patch(
+            "api.agent.core.event_processing.TaskCreditService.calculate_available_tasks_for_owner",
+            return_value=Decimal("0"),
+        ) as calculate_available, patch(
+            "api.agent.core.event_processing.TaskCreditService.check_and_consume_credit_for_owner"
+        ) as consume_credit:
+            result = _ensure_credit_for_tool(agent, "http_request")
 
         self.assertFalse(result)
+        calculate_available.assert_called_once()
+        consume_credit.assert_not_called()
 
     def test_eval_browser_task_does_not_consume_task_credit(self):
         user, organization, browser_agent, agent = self._agent(
