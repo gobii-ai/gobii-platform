@@ -25,7 +25,10 @@ def get_or_make_fbp(request):
         setattr(request, "fbp", fbp)
         # Request.COOKIES is request-scoped; updating it lets downstream
         # attribution code see the generated value before the browser returns it.
-        request.COOKIES[settings.FBP_COOKIE_NAME] = fbp
+        try:
+            request.COOKIES[settings.FBP_COOKIE_NAME] = fbp
+        except (AttributeError, TypeError):
+            pass
     else:
         # normalize onto request for convenience
         setattr(request, "fbp", fbp)
