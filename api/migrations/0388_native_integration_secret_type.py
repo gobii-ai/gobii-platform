@@ -4,7 +4,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("api", "0385_unique_public_template_slugs"),
+        ("api", "0387_add_stripe_checkout_tos_consent_switch"),
     ]
 
     operations = [
