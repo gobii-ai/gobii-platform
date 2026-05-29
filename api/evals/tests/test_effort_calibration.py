@@ -89,10 +89,12 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
 
     def test_eval_synthetic_search_tool_matches_production_query_shape(self):
         parameters = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["parameters"]
+        description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["mcp_brightdata_search_engine"]["description"]
 
         self.assertEqual(set(parameters["properties"]), {"query"})
         self.assertEqual(parameters["required"], ["query"])
         self.assertFalse(parameters["additionalProperties"])
+        self.assertIn(".example.test URLs are valid source URLs", description)
 
     def test_sqlite_result_text_read_detector_finds_retrieval_loops(self):
         reads = _sqlite_result_text_reads(
@@ -272,12 +274,11 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
     def test_runtime_planning_skill_excludes_bounded_current_research(self):
         instructions = RUNTIME_PLANNING_SYSTEM_SKILL.prompt_instructions
 
-        self.assertIn("Do not create, update, or finish a plan", instructions)
-        self.assertIn("simple latest/current company, news, funding, product, status, or batch reports", instructions)
-        self.assertIn("send the final answer directly", instructions)
-        self.assertIn("use at most one initial plan update", instructions)
-        self.assertIn("do not call `update_plan` again", instructions)
-        self.assertIn("send the final answer with will_continue_work=false", instructions)
+        self.assertIn("Use `update_plan` only for substantial multi-step work", instructions)
+        self.assertIn("where a visible plan helps", instructions)
+        self.assertIn("Keep plans short, current, and verifiable", instructions)
+        self.assertIn("each call replaces the full active plan", instructions)
+        self.assertIn("Send the final user-facing report before any final completion update", instructions)
 
     def test_contact_permission_description_defers_setup_only_future_sends(self):
         description = get_request_contact_permission_tool()["function"]["description"]
@@ -713,5 +714,5 @@ class FirstRunPromptCalibrationTests(TestCase):
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
         self.assertIn("For clear setup requests, especially scheduled digests", system_prompt)
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
-        self.assertIn("call the welcome send tool and end_planning in the same response", system_prompt)
+        self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)

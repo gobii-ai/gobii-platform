@@ -1204,10 +1204,7 @@ class CharterAddsDurablePreferencePreservingExistingScenario(CharterMemoryScenar
         ScenarioTask(name="verify_charter_update_preserved_existing", assertion_type="manual"),
     ]
     existing_charter = "Monitor AI funding news weekly. Prefer concise section titles in reports."
-    prompt = (
-        "Going forward, always answer status updates in concise bullets. "
-        "Keep my existing standing guidance too."
-    )
+    prompt = "For status updates, concise bullets work best for me going forward."
     verification_task_name = "verify_charter_update_preserved_existing"
     success_summary = "Agent merged the durable bullet preference into charter while preserving existing guidance."
     failure_summary = "Expected a charter update preserving existing job/guidance and adding bullets"
@@ -1232,10 +1229,7 @@ class CharterAddsInferredPreferencePreservingExistingScenario(CharterMemoryScena
         ScenarioTask(name="verify_inferred_preference_preserved_existing", assertion_type="manual"),
     ]
     existing_charter = "Prepare weekly portfolio risk updates. Track earnings dates and major macro events."
-    prompt = (
-        "This is the third time I'm asking: lead with a short TL;DR before the details. "
-        "That format works better for me."
-    )
+    prompt = "I keep asking for TL;DR first before the details. That format works better for me."
     verification_task_name = "verify_inferred_preference_preserved_existing"
     success_summary = "Agent captured the inferred TL;DR preference while preserving existing portfolio guidance."
     failure_summary = "Expected a charter update preserving portfolio guidance and adding inferred TL;DR preference"
@@ -1310,10 +1304,7 @@ class CharterNarrowsScopePreservingUnrelatedGuidanceScenario(CharterMemoryScenar
         "Monitor competitor pricing for enterprise and consumer plans. "
         "Use concise bullets. Send routine updates in Slack."
     )
-    prompt = (
-        "Actually narrow the pricing monitor to enterprise plans only. "
-        "Keep my standing format and delivery preferences."
-    )
+    prompt = "Actually, enterprise plans are the only pricing scope I care about now."
     verification_task_name = "verify_scope_replaced_and_guidance_preserved"
     success_summary = "Agent narrowed the pricing scope while preserving format and delivery guidance."
     failure_summary = "Expected enterprise-only scope, no consumer scope, and preserved concise bullets/Slack guidance"

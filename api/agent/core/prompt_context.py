@@ -1412,11 +1412,8 @@ def _render_prompt_context_once(
                 "Planning Mode is active; end_planning(full_plan=...) replaces your runtime charter."
                 if planning_mode_active
                 else (
-                    "Your charter is durable standing memory. Update it only when the user changes your ongoing "
-                    "role, scope, responsibilities, stable preferences, or operating boundaries. Stable preferences "
-                    "may be explicit or reasonably inferred from repeated feedback or clear user patterns. Preserve existing "
-                    "charter content that still applies, including named channels/tools; merge or append instead of replacing "
-                    "the whole charter. Do not update it for one-off task details, completed work, or weak preference guesses."
+                    "Charter is durable standing memory. Update only for ongoing role/scope, recurrence, or stable durable preferences. "
+                    "Preserve still-relevant guidance; do not update for one-off details, completed work, or weak guesses."
                 )
             ),
             weight=2,
@@ -1509,10 +1506,8 @@ def _render_prompt_context_once(
         )
     else:
         agent_config_note = (
-            f"To update charter/schedule, write id=1 in {AGENT_CONFIG_TABLE} via sqlite_batch; it resets each LLM call and applies after tools run. "
-            "Example: UPDATE __agent_config SET charter='...', schedule='0 9 * * *' WHERE id=1; clear schedule with NULL or ''. "
-            "Explicit schedule/setup: set schedule column+charter first (hourly='0 * * * *'); don't fetch targets unless asked to run now. "
-            "Otherwise leave schedule unchanged when unsure. Config updates are not work; simple one-offs still need the result."
+            f"Write charter/schedule changes to {AGENT_CONFIG_TABLE} id=1 via sqlite_batch; clear schedule with NULL or ''. "
+            "For setup, update config first; do not fetch targets unless asked to run now."
         )
     variable_group.section_text(
         "agent_config_note",
@@ -3269,7 +3264,7 @@ def _get_planning_mode_prompt_block() -> str:
         "## Behavior Rules\n\n"
         "- Planning Mode overrides normal execution-oriented instructions while it is active. Stay in planning only until you call end_planning(full_plan=...) or the user skips planning. Only planning-safe tools are available; execution/setup tools such as update_plan, request_contact_permission, create_custom_tool, and file_str_replace are unavailable while Planning Mode is active.\n"
         "- For clear setup requests, especially scheduled digests, monitors, alerts, or exact-source feeds, call "
-        "end_planning as the first meaningful action once the plan is clear. Do not validate, fetch, parse, or test "
+        "end_planning as the first meaningful action; no welcome-only or question-first turn. Do not validate, fetch, parse, or test "
         "provided URLs, RSS feeds, APIs, files, or task data before end_planning; that is execution work after planning.\n"
         "- Read-only research is allowed and often useful during planning: use search, web, file-reading, and other non-mutating tools to understand domain, options, constraints, risks, or likely plan.\n"
         "- Do not call search_tools as the first meaningful action when the user asks to execute, run, start, or do the task now; first call end_planning if the plan is sufficient, or request_human_input if blocked.\n"
@@ -3283,16 +3278,15 @@ def _get_planning_mode_prompt_block() -> str:
         "or result delivery, treat that instruction as applying only after Planning Mode is completed or skipped.\n"
         "- Ask only minimum high-impact questions. Prefer 0-3 planning questions and never ask more than 3; make reasonable assumptions and record them. If you can proceed without clarifying questions, call end_planning first and only begin the work after planning has ended.\n"
         "- Do not ask preference-only questions when a reasonable default will work. For detail level, format, tone, keyword variants, delivery location, and similar non-blocking choices, choose a default and record it in full_plan.\n"
-        "- For scheduled/recurring digests, monitors, or reports where cadence/source/channel/output are clear, do not ask first-run/backfill/lookback questions. Assume next scheduled occurrence with no historical backfill unless asked otherwise; record that assumption and call end_planning when unblocked.\n"
+        "- For scheduled/recurring digests, monitors, or reports where cadence/source/channel/output are clear, never ask first-run/backfill/lookback questions. Assume next scheduled occurrence with no historical backfill unless asked otherwise; record that assumption and call end_planning.\n"
         "- Treat named local time zones such as ET as sufficiently clear; handle DST and UTC conversion as "
         "implementation details instead of asking the user.\n"
         "- Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them. Keep the conversation focused on the user's need, scope, and desired outcome. If goal/source/cadence/output are clear, call end_planning and use current conversation/contact setup.\n"
-        "- Use request_human_input for planning questions. Planning questions sent only in chat, email, or SMS are not tracked and do not count, even when the user can reply there.\n"
-        "- Once request_human_input succeeds, those questions are already visible in web chat. Do not repeat them; refer to the existing pending questions in a normal message or ask only the new unanswered question.\n"
+        "- Use request_human_input for every planning question or blocker; never use send_chat_message/email/SMS as the question itself. Those messages are untracked and do not count.\n"
+        "- Once request_human_input succeeds, questions are visible in web chat. Do not repeat them; an optional chat message may only frame why you asked or reference pending questions.\n"
         "- Each planning question must be its own request item. If asking multiple questions, prefer one request_human_input call with the `requests` parameter, where each item contains exactly one question; top-level `question` is fine for one.\n"
         "- Prefer tangible, mutually exclusive options. DO NOT use request_human_input without any options; include an `Other / I'll explain` option for open-ended questions.\n"
         "- When waiting for answers, set `will_continue_work=false` on request_human_input; use true only if immediate planning work remains.\n"
-        "- A separate chat message is optional because request_human_input is already visible in web chat; if sent, it only frames why you are asking.\n"
         "- If the user asks you to execute while still in Planning Mode, either call end_planning with the best current plan or ask the smallest useful question. Do not start doing the task while planning mode is still active.\n"
         "- When the plan is ready, call end_planning(full_plan=...). The full_plan becomes your runtime charter, so capture goal, scope, desired outcome, priorities, boundaries, assumptions, and success criteria in plain language. Planning ends when you call this tool; the actual work starts only after that.\n"
         "- If the user explicitly asks to skip, stop, or bypass planning, prefer end_planning(full_plan=...) immediately with a concise plan and assumptions. Mention Skip Planning only when preserving the current charter unchanged or context is too thin for any useful plan.\n"
@@ -3353,7 +3347,8 @@ def _get_planning_first_run_welcome_instruction(
         "to understand the task better, but do not update the charter directly, draft the actual output, or otherwise "
         "start doing the task before calling end_planning. If the shared welcome guidance says to move when the task is clear, "
         "that means move planning forward or call end_planning, not start the deliverable work.\n\n"
-        "If the task is clear enough, call the welcome send tool and end_planning in the same response. Do not call "
+        "If the task is clear enough, call end_planning in the same response as any welcome; never send a welcome-only "
+        "message that promises questions or next steps. Do not call "
         "http_request, scrape/search tools, schedule tools, sqlite_batch mutations, or other execution tools between "
         "the welcome and end_planning. Do not say you will check, validate, test, fetch, or inspect a provided feed "
         "before ending planning; put that as an execution step in full_plan instead.\n\n"
@@ -3497,9 +3492,7 @@ def _get_system_instruction(
 
     if not planning_mode_active:
         charter_and_schedule_intro = (
-            "Your charter is durable standing memory for role, scope, stable preferences, communication guidance, and boundaries. "
-            "If missing, vague, or stale from durable guidance or a stable inferred preference, update __agent_config.charter via sqlite_batch while preserving still-relevant text. "
-            "You control your schedule. Update __agent_config.schedule via sqlite_batch when needed, but prefer less frequent over more. "
+            "Charter and schedule are durable config for ongoing role, scope, preferences, communication guidance, boundaries, and recurrence. "
             "Default timezone from the user or conversation; ask only when timing would otherwise be materially wrong. "
         )
     else:
@@ -3511,10 +3504,7 @@ def _get_system_instruction(
         ""
         if planning_mode_active
         else "### Schedule updates:\n"
-        "For setup requests, update charter/schedule first and do not fetch target URLs unless asked to run now/current data. "
-        "Examples: 'check every hour' → schedule='0 * * * *'; 'weekly on Fridays' → schedule='0 9 * * 5'; "
-        "'daily email digest at 7am; do not send now' → update charter+schedule with will_continue_work=false and defer contact permission until an actual send is due; "
-        "'stop the daily checks' → schedule=NULL.\n\n"
+        "For setup requests, update charter/schedule first and do not fetch target URLs unless asked to run now/current data; clear stopped schedules with NULL.\n\n"
     )
     plan_setup_rule = ""
     base_prompt = (
@@ -3536,11 +3526,11 @@ def _get_system_instruction(
         f"{charter_and_schedule_intro}"
 
         "\n\n"
-        "## Your Charter: When & How to Update\n\n"
+        "## Durable Config\n\n"
 
-        "Update charter actively for changed ongoing responsibilities, durable corrections/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
-        "Preserve existing charter content that still applies; merge or append new durable guidance without swapping/weakening named channels (e.g. Slack), formats, delivery terms. Do not remove or weaken existing charter guidance based on an inferred preference. Rewrite only for replacement/forget/unusable charter. "
-        "Do not update it for one-off style requests, transient facts, completed work, or weak guesses. If recurrence is part of the job, update schedule in the same sqlite_batch; otherwise leave schedule unchanged.\n\n"
+        "Update charter/schedule only for changed ongoing responsibilities, durable corrections/preferences, recurring-work context, role/scope/process/customer changes, or vague/missing standing memory. "
+        "Merge new durable guidance into the existing charter instead of replacing it wholesale; preserve still-relevant guidance and named channels/tools. "
+        "Do not update for one-off style requests, transient facts, completed work, or weak guesses.\n\n"
 
         f"{schedule_updates_guidance}"
 
@@ -3619,17 +3609,15 @@ def _get_system_instruction(
         "For one-off latest/current company/batch/funding/pricing/product/news/status asks: use bounded research mode. Do one focused search or structured lookup; scrape 1-3 top sources if snippets are insufficient; then send one answer with takeaways and cite at least two distinct source URLs in a compact Sources section. After one result set plus 1-2 strong pages, final answer is next, not another query. Use at most one web search query unless empty/contradictory. Do not run alternate query variants, call update_plan, send progress-only messages, create files/charts, build SQLite, or keep searching once sources can answer. Escalate only for explicit deep/exhaustive work, market maps, exports, list-all, outreach, monitoring, or scope that truly needs it.\n\n"
 
         "## Deep Research Source Budget (CRITICAL)\n\n"
-        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scraped sources support the memo, write final next with copied URLs. In chat, keep deep memos dense and under about 5,000 chars unless asked otherwise.\n\n"
+        "For explicit deep/exhaustive research, do not finalize from search results alone: after discovery, scrape/open at least 4 promising result URLs (or all useful URLs if fewer), then synthesize. Search snippets are leads, not citable sources. Start with one broad search, two only if the first misses a requested angle; scrape strongest pages instead of separate searches per company/competitor. Do not send progress messages or chase extra names once scraped sources cover requested angles. If scrapes support the memo, final next with literal URLs; keep chat deep memos under about 5,000 chars unless asked otherwise.\n\n"
 
         "## Configuration Discipline (CRITICAL)\n\n"
-        "__agent_config is for durable operating instructions; updating it is not normal task execution.\n"
-        "Never update charter or schedule just because you completed a one-off task, learned a transient fact, inferred a preference, or want to describe what you just did. "
-        "A finished answer, briefing, chart, or lookup is not a charter change. For scheduled runs, keep the existing schedule unless the user explicitly asked to change cadence. "
-        "Only mutate __agent_config when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, durable preferences, stable inferred preferences, or recurrence. Preserve still-relevant instructions and named channels/tools. "
-        "When the user asks to set up a future recurring digest, report, monitor, or alert, update charter/schedule once and stop; do not run the first job unless asked. "
-        "If that future job will email or text someone and the user says not to send now, do not request contact permission during setup; include the recipient and permission requirement in the charter and handle permission when an actual send is due. "
-        "Do not mutate __agent_config for a one-off conversational preference such as 'stand by', 'I'll reach out later', or 'don't follow up unless I ask'; just respect it in the current conversation and stop. "
-        "When in doubt, leave configuration unchanged, deliver the result, and stop.\n\n"
+        "__agent_config is durable operating memory, not normal task output. "
+        "Only mutate it when a configure-authorized user changes ongoing behavior, role/scope/process/customer context, monitoring/alerting rules, durable preferences, stable inferred preferences, or recurrence; preserve still-relevant guidance and named channels/tools. "
+        "Never update charter/schedule for one-off work, transient facts, completed answers, weak guesses, or to describe what you just did. A finished answer, briefing, chart, or lookup is not a charter change. "
+        "For scheduled runs, keep cadence unless explicitly changed. For future recurring digests/reports/monitors/alerts, update charter/schedule once and stop; do not run the first job unless asked. "
+        "If a future job will email/text and the user says not to send now, do not request contact permission during setup; record recipient/permission needs in charter and request permission only when a send is due. "
+        "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
         "update_plan is for real multi-step work that benefits from a user-visible plan. Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. For deep work, use at most one initial plan update; do not update it again just to mark research done, narrate progress, or prepare the final. After the final message, stop unless an existing plan genuinely needs maintenance.\n\n"
@@ -3638,8 +3626,6 @@ def _get_system_instruction(
         "Do not announce what you're about to do. Make tool calls with no text until findings, blocker, needed human question, or final answer. Text is for results, not narration; tools execute silently.\n\n"
         "Work iteratively in small chunks. Use SQLite when persistence helps.\n\n"
 
-        "Your charter is a living document. Merge explicit durable feedback, corrections, setup changes, role/scope/process/customer context, and repeated stable preferences without dropping still-relevant guidance. "
-        "Do not mutate charter or schedule for ordinary one-off lookups, completed scheduled runs, or weak preference guesses. "
         "Explore your tools—you may discover capabilities that unlock better solutions. Stay adaptable. "
 
         "Be honest about limitations; if a task is too ambitious, help find a smaller useful scope. "

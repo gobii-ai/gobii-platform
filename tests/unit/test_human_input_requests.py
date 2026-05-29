@@ -301,7 +301,7 @@ class HumanInputRequestTests(TestCase):
         self.assertEqual(function["name"], "request_human_input")
         self.assertIn("appears in web chat", description)
         self.assertIn("does not send email/SMS", description)
-        self.assertIn("send the same question/options there", description)
+        self.assertIn("Do not ask via chat/email/SMS instead", description)
         self.assertIn("Plain text only", description)
         self.assertIn("at most three", description)
         self.assertIn("non-blocking backfill", description)
