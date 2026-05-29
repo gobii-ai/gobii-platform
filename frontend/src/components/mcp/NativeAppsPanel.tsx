@@ -8,6 +8,8 @@ import {
   startNativeIntegrationConnect,
   type NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
+import { readStoredConsoleContext } from '../../util/consoleContextStorage'
 
 type NativeAppsPanelProps = {
   listUrl: string
@@ -36,11 +38,12 @@ export function NativeAppsPanel({
         providerKey: payload.providerKey,
         returnUrl: window.location.href,
         createdAt: Date.now(),
+        context: readStoredConsoleContext(),
       })
       window.location.href = payload.authorizationUrl
     },
     onError: (error) => {
-      onError(error instanceof Error ? error.message : 'Unable to start connection.')
+      onError(safeErrorMessage(error))
     },
   })
 
@@ -51,7 +54,7 @@ export function NativeAppsPanel({
       onSuccess(`${provider.displayName} disconnected.`)
     },
     onError: (error) => {
-      onError(error instanceof Error ? error.message : 'Unable to disconnect integration.')
+      onError(safeErrorMessage(error))
     },
   })
 

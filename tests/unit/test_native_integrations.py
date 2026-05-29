@@ -114,7 +114,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(provider.display_name, "Google Sheets")
         self.assertEqual(provider.auth_type, "oauth2")
         self.assertEqual(provider.api_hosts, ("sheets.googleapis.com",))
-        self.assertEqual(provider.scopes, ("https://www.googleapis.com/auth/spreadsheets",))
+        self.assertEqual(provider.scopes, ("https://www.googleapis.com/auth/drive.file",))
 
     def test_list_reports_connected_state_for_user_context(self):
         self._create_integration_secret(owner_user=self.user)
@@ -148,8 +148,15 @@ class NativeIntegrationTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["provider_key"], "google_sheets")
         self.assertIn("https://accounts.google.com/o/oauth2/v2/auth", payload["authorization_url"])
-        self.assertIn("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fspreadsheets", payload["authorization_url"])
+        self.assertIn("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file", payload["authorization_url"])
         self.assertIn("state=", payload["authorization_url"])
+
+    @override_settings(GOOGLE_CLIENT_ID="", GOOGLE_CLIENT_SECRET="")
+    def test_connect_returns_configuration_error_without_google_oauth_credentials(self):
+        response = self.client.post(reverse("console-native-integration-connect", args=["google_sheets"]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Google Sheets OAuth is not configured."})
 
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
@@ -179,6 +186,40 @@ class NativeIntegrationTests(TestCase):
         stored = json.loads(secret.get_value())
         self.assertEqual(stored["access_token"], "new-access-token")
         self.assertEqual(stored["refresh_token"], "new-refresh-token")
+
+    @patch("console.native_integrations_api.httpx.post")
+    def test_callback_accepts_matching_organization_context_override(self, mock_post):
+        headers = {
+            "X-Gobii-Context-Type": "organization",
+            "X-Gobii-Context-Id": str(self.org.id),
+        }
+        start = self.client.post(
+            reverse("console-native-integration-connect", args=["google_sheets"]),
+            headers=headers,
+        )
+        state = start.json()["state"]
+        token_response = MagicMock()
+        token_response.status_code = 200
+        token_response.json.return_value = {
+            "access_token": "org-access-token",
+            "refresh_token": "org-refresh-token",
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+        }
+        mock_post.return_value = token_response
+
+        response = self.client.post(
+            reverse("console-native-integration-callback", args=["google_sheets"]),
+            data=json.dumps({"authorization_code": "auth-code", "state": state}),
+            content_type="application/json",
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        secret = GlobalSecret.objects.get(organization=self.org, secret_type=GlobalSecret.SecretType.INTEGRATION)
+        stored = json.loads(secret.get_value())
+        self.assertEqual(stored["access_token"], "org-access-token")
 
     def test_revoke_deletes_only_provider_integration_secret(self):
         self._create_integration_secret(owner_user=self.user)

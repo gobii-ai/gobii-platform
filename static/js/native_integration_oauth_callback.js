@@ -33,6 +33,19 @@ function getPendingSession(state) {
   }
 }
 
+function buildCallbackHeaders(sessionData) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-CSRFToken": getCsrfToken(),
+  };
+  const context = sessionData && sessionData.context;
+  if (context && typeof context === "object" && context.type && context.id) {
+    headers["X-Gobii-Context-Type"] = String(context.type);
+    headers["X-Gobii-Context-Id"] = String(context.id);
+  }
+  return headers;
+}
+
 async function completeOAuth() {
   const params = new URLSearchParams(window.location.search);
   const error = params.get("error");
@@ -60,10 +73,7 @@ async function completeOAuth() {
   try {
     const response = await fetch(`/console/api/native-integrations/${encodeURIComponent(sessionData.providerKey)}/callback/`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CSRFToken": getCsrfToken(),
-      },
+      headers: buildCallbackHeaders(sessionData),
       body: JSON.stringify({
         authorization_code: code,
         state,
