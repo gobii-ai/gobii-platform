@@ -7,6 +7,7 @@ from unittest.mock import patch, MagicMock
 
 from bs4 import BeautifulSoup
 from allauth.socialaccount.models import SocialApp
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
@@ -14,7 +15,7 @@ from django.contrib.sites.models import Site
 from django.core import signing
 from django.template.loader import render_to_string
 from django.templatetags.static import static
-from django.test import RequestFactory, TestCase, modify_settings, override_settings, tag
+from django.test import Client, RequestFactory, TestCase, modify_settings, override_settings, tag
 from django.urls import reverse
 from django.utils import timezone
 from waffle.testutils import override_flag, override_switch
@@ -98,6 +99,59 @@ class HomePageTests(TestCase):
         main_landmarks = soup.find_all("main")
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
+
+    def test_home_page_defers_csrf_token_for_passive_get(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(settings.CSRF_COOKIE_NAME, response.cookies)
+        content = response.content.decode("utf-8")
+        self.assertNotIn('name="csrfmiddlewaretoken"', content)
+
+        soup = BeautifulSoup(content, "html.parser")
+        lazy_post_forms = [
+            form for form in soup.find_all("form")
+            if (form.get("method") or "").lower() == "post"
+        ]
+        self.assertGreater(len(lazy_post_forms), 0)
+        for form in lazy_post_forms:
+            self.assertTrue(form.has_attr("data-lazy-csrf"))
+
+    def test_home_page_defers_csrf_token_with_signup_modal_enabled(self):
+        with override_flag("cta_signup_modal", active=True):
+            response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "gobii-cta-signup-modal-config")
+        self.assertNotIn(settings.CSRF_COOKIE_NAME, response.cookies)
+        self.assertNotIn(
+            'name="csrfmiddlewaretoken"',
+            response.content.decode("utf-8"),
+        )
+
+    def test_homepage_csrf_token_endpoint_sets_cookie_and_returns_token(self):
+        response = self.client.get(reverse("pages:homepage_csrf_token"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "no-store, max-age=0")
+        self.assertIn(settings.CSRF_COOKIE_NAME, response.cookies)
+        self.assertTrue(response.json().get("csrfToken"))
+
+    def test_home_spawn_accepts_lazy_csrf_token_for_anonymous_user(self):
+        client = Client(enforce_csrf_checks=True)
+        csrf_response = client.get(reverse("pages:homepage_csrf_token"))
+        csrf_token = csrf_response.json()["csrfToken"]
+
+        response = client.post(
+            reverse("pages:home_agent_spawn"),
+            {
+                "charter": "Custom charter",
+                "csrfmiddlewaretoken": csrf_token,
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(urlparse(response["Location"]).path, reverse("account_login"))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_home_page_omits_stripe_js_without_checkout_cta(self):
@@ -1488,6 +1542,8 @@ class PretrainedWorkerDirectoryTests(TestCase):
         self.assertIsNotNone(detail_source)
         detail_form = detail_source.find_parent("form")
         self.assertIsNotNone(detail_form)
+        self.assertFalse(detail_form.has_attr("data-lazy-csrf"))
+        self.assertIsNotNone(detail_form.find("input", {"name": "csrfmiddlewaretoken"}))
         detail_button = detail_form.find("button", {"type": "submit"})
         self.assertIsNotNone(detail_button)
         detail_button_text = " ".join(
