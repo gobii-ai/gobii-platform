@@ -12,17 +12,20 @@ import base64
 import zipfile
 from datetime import datetime, timedelta, timezone as dt_timezone
 from decimal import Decimal, InvalidOperation
+from smtplib import SMTPException
 from typing import Any
 from uuid import UUID
 from urllib.parse import urljoin, urlparse
 
 import httpx
 import zstandard as zstd
+from anymail.exceptions import AnymailAPIError
 from dateutil.relativedelta import relativedelta
 from django.contrib.auth import get_user_model
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.conf import settings
 from django.core.exceptions import PermissionDenied, RequestDataTooBig, ValidationError
+from django.core.mail import BadHeaderError
 from django.db import IntegrityError, models, transaction
 from django.db.models import Max, Q
 from django.http import FileResponse, Http404, HttpRequest, HttpResponseBadRequest, HttpResponseForbidden, JsonResponse
@@ -57,10 +60,15 @@ from api.agent.core.processing_flags import (
     clear_processing_work_state,
     set_processing_stop_requested,
 )
-from api.agent.core.agent_judge import approve_judge_suggestion, dismiss_judge_suggestion, run_manual_agent_judge
+from api.agent.core.agent_judge import (
+    approve_judge_suggestion,
+    dismiss_judge_suggestion,
+    run_manual_agent_judge,
+)
 from api.domain_validation import DomainPatternValidator
 from api.agent.files.attachment_helpers import load_signed_filespace_download_payload
 from api.agent.files.filespace_service import dedupe_name, get_or_create_default_filespace
+from api.agent.tasks.reported_message_judge import run_reported_agent_judge_task
 from api.agent.tools.mcp_manager import get_mcp_manager
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from pages.public_template_urls import public_template_detail_path
@@ -99,6 +107,7 @@ from api.models import (
     PersistentAgentCommsEndpoint,
     PersistentAgentHumanInputRequest,
     PersistentAgentJudgeSuggestion,
+    PersistentAgentMessage,
     PersistentAgentSecret,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
@@ -214,6 +223,12 @@ from console.forms import MCPServerConfigForm, PhoneAddForm, PhoneVerifyForm, Us
 from console.phone_utils import get_phone_cooldown_remaining, get_primary_phone, serialize_phone
 from console.agent_quick_settings import build_agent_quick_settings_payload
 from console.system_status import build_system_status_payload
+from console.support_requests import (
+    SupportRequestConfigurationError,
+    clean_support_message,
+    send_agent_message_report_email,
+    send_app_support_request,
+)
 from console.agent_cards import enrich_agents_for_card_surface, serialize_agent_card_payload
 from console.views import (
     build_agent_detail_props_for_request,
@@ -467,6 +482,48 @@ class ConsoleSessionAPIView(LoginRequiredMixin, View):
                 "email": request.user.email,
             }
         )
+
+
+class AppSupportRequestAPIView(ApiLoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        try:
+            payload = _parse_json_body(request)
+            if not isinstance(payload, dict):
+                return JsonResponse({"ok": False, "message": "Invalid request payload."}, status=400)
+            message = clean_support_message(payload.get("message"))
+        except ValueError as exc:
+            return JsonResponse({"ok": False, "message": str(exc)}, status=400)
+
+        try:
+            send_app_support_request(user=request.user, payload=payload)
+        except SupportRequestConfigurationError as exc:
+            return JsonResponse({"ok": False, "message": str(exc)}, status=500)
+        except (AnymailAPIError, BadHeaderError, OSError, SMTPException):
+            logger.exception("Failed to send in-app support request for user %s.", request.user.id)
+            return JsonResponse(
+                {"ok": False, "message": "Unable to send support request. Please try again later."},
+                status=500,
+            )
+
+        workspace_context = payload.get("workspaceContext")
+        if not isinstance(workspace_context, dict):
+            workspace_context = {}
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.SUPPORT_REQUEST_SUBMITTED,
+            source=AnalyticsSource.WEB,
+            properties={
+                "message_length": len(message),
+                "page_url": payload.get("pageUrl") if isinstance(payload.get("pageUrl"), str) else "",
+                "agent_id": payload.get("agentId") if isinstance(payload.get("agentId"), str) else "",
+                "agent_name": payload.get("agentName") if isinstance(payload.get("agentName"), str) else "",
+                "workspace_context_type": workspace_context.get("type") if isinstance(workspace_context.get("type"), str) else "",
+                "workspace_context_id": workspace_context.get("id") if isinstance(workspace_context.get("id"), str) else "",
+            },
+        )
+        return JsonResponse({"ok": True})
 
 
 class UserPreferencesAPIView(ApiLoginRequiredMixin, View):
@@ -4486,6 +4543,121 @@ class AgentMessageCreateAPIView(LoginRequiredMixin, View):
         )
 
         return JsonResponse({"event": event}, status=201)
+
+
+AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH = 2000
+
+
+def _resolve_reportable_agent_message(agent: PersistentAgent, message_id: str) -> PersistentAgentMessage:
+    message = (
+        PersistentAgentMessage.objects.filter(
+            id=message_id,
+            owner_agent=agent,
+            is_outbound=True,
+            peer_agent__isnull=True,
+        )
+        .select_related("conversation", "from_endpoint", "owner_agent")
+        .first()
+    )
+    if message is None:
+        raise Http404("Message not found.")
+    return message
+
+
+def _agent_message_action_properties(
+    agent: PersistentAgent,
+    message: PersistentAgentMessage,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    properties: dict[str, Any] = {
+        "message_id": str(message.id),
+        "message_channel": (
+            message.conversation.channel
+            if message.conversation_id
+            else message.from_endpoint.channel if message.from_endpoint_id else ""
+        ),
+        "message_timestamp": message.timestamp.isoformat() if message.timestamp else "",
+    }
+    if extra:
+        properties.update(extra)
+    return _web_chat_properties(agent, properties)
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageCopyAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        message = _resolve_reportable_agent_message(agent, message_id)
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.AGENT_MESSAGE_COPIED,
+            source=AnalyticsSource.WEB,
+            properties=_agent_message_action_properties(agent, message),
+        )
+        return JsonResponse({"ok": True})
+
+
+@method_decorator(csrf_exempt, name="dispatch")
+class AgentMessageReportIssueAPIView(LoginRequiredMixin, View):
+    http_method_names = ["post"]
+
+    def post(self, request: HttpRequest, agent_id: str, message_id: str, *args: Any, **kwargs: Any):
+        agent = resolve_agent_for_request(
+            request,
+            agent_id,
+            allow_shared=True,
+            allow_delinquent_personal_chat=True,
+        )
+        message = _resolve_reportable_agent_message(agent, message_id)
+        try:
+            payload = _parse_json_body(request)
+            if not isinstance(payload, dict):
+                return HttpResponseBadRequest("Invalid request payload.")
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        raw_comment = payload.get("comment", "")
+        if raw_comment is None:
+            raw_comment = ""
+        if not isinstance(raw_comment, str):
+            return HttpResponseBadRequest("comment must be a string")
+        comment = raw_comment.strip()[:AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH]
+
+        try:
+            send_agent_message_report_email(user=request.user, agent=agent, message=message, comment=comment)
+        except SupportRequestConfigurationError as exc:
+            logger.warning(
+                "Message report email was not sent for agent %s message %s: %s",
+                agent.id,
+                message.id,
+                exc,
+            )
+        except (AnymailAPIError, BadHeaderError, OSError, SMTPException):
+            logger.exception("Failed to email message report for agent %s message %s.", agent.id, message.id)
+        Analytics.track_event(
+            user_id=str(request.user.id),
+            event=AnalyticsEvent.AGENT_MESSAGE_ISSUE_REPORTED,
+            source=AnalyticsSource.WEB,
+            properties=_agent_message_action_properties(
+                agent,
+                message,
+                {
+                    "comment_length": len(comment),
+                    "comment_provided": bool(comment),
+                    "comment_truncated": len(raw_comment.strip()) > AGENT_MESSAGE_REPORT_COMMENT_MAX_LENGTH,
+                },
+            ),
+        )
+
+        transaction.on_commit(lambda: run_reported_agent_judge_task.delay(str(agent.id), str(message.id), comment))
+        return JsonResponse({"ok": True, "judge": {"ran": False, "status": "queued"}}, status=202)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

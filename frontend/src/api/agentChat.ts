@@ -447,6 +447,35 @@ export async function sendAgentMessage(agentId: string, body: string, attachment
   return response.event
 }
 
+export type AgentMessageReportResponse = {
+  ok: boolean
+  judge?: {
+    ran?: boolean
+    status?: string
+    suggestion_type?: string | null
+    suggestion?: unknown
+  }
+}
+
+export async function trackAgentMessageCopy(agentId: string, messageId: string): Promise<{ ok: boolean }> {
+  return jsonRequest<{ ok: boolean }>(`/console/api/agents/${agentId}/messages/${messageId}/copy/`, {
+    method: 'POST',
+    includeCsrf: true,
+  })
+}
+
+export async function reportAgentMessageIssue(
+  agentId: string,
+  messageId: string,
+  comment: string,
+): Promise<AgentMessageReportResponse> {
+  return jsonRequest<AgentMessageReportResponse>(`/console/api/agents/${agentId}/messages/${messageId}/report-issue/`, {
+    method: 'POST',
+    includeCsrf: true,
+    json: { comment },
+  })
+}
+
 export async function markLatestAgentMessageRead(agentId: string): Promise<AgentMessageReadState> {
   const payload = await jsonRequest<AgentMessageReadStatePayload>(`/console/api/agents/${agentId}/messages/latest/read/`, {
     method: 'POST',

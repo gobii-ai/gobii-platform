@@ -1,10 +1,12 @@
 import ReactJsonView from '@microlink/react-json-view'
-import { memo } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
+import { Check, Copy, Flag } from 'lucide-react'
 import type { AgentMessage } from './types'
 import { MessageContent } from './MessageContent'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { formatRelativeTimestamp } from '../../util/time'
 import { buildUserChatPalette } from '../../util/color'
+import { sanitizeHtml } from '../../util/sanitize'
 
 const CHANNEL_LABELS: Record<string, string> = {
   email: 'Email',
@@ -30,6 +32,8 @@ type MessageEventCardProps = {
   viewerUserId?: number | null
   viewerEmail?: string | null
   onMessageLinkClick?: (href: string) => boolean | void
+  onMessageCopied?: (message: AgentMessage) => void | Promise<void>
+  onReportMessage?: (message: AgentMessage) => void
 }
 
 // Only animate messages that arrived recently (within last 3 seconds)
@@ -38,6 +42,33 @@ function isRecentMessage(timestamp?: string | null): boolean {
   const messageTime = Date.parse(timestamp)
   if (Number.isNaN(messageTime)) return false
   return Date.now() - messageTime < 3000
+}
+
+function plainTextFromHtml(html: string): string {
+  if (typeof DOMParser === 'undefined') {
+    return ''
+  }
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  return doc.body.textContent?.trim() || ''
+}
+
+async function writeMessageToClipboard(plainText: string, htmlText: string): Promise<void> {
+  if (
+    htmlText
+    && typeof ClipboardItem !== 'undefined'
+    && typeof navigator.clipboard.write === 'function'
+  ) {
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        'text/html': new Blob([htmlText], { type: 'text/html' }),
+      }),
+    ])
+    return
+  }
+
+  await navigator.clipboard.writeText(plainText)
 }
 
 export const MessageEventCard = memo(function MessageEventCard({
@@ -49,7 +80,10 @@ export const MessageEventCard = memo(function MessageEventCard({
   viewerUserId,
   viewerEmail,
   onMessageLinkClick,
+  onMessageCopied,
+  onReportMessage,
 }: MessageEventCardProps) {
+  const [copied, setCopied] = useState(false)
   const isAgent = Boolean(message.isOutbound)
   const shouldAnimate = isAgent && isRecentMessage(message.timestamp)
   const channel = (message.channel || 'web').toLowerCase()
@@ -149,6 +183,32 @@ export const MessageEventCard = memo(function MessageEventCard({
       : `${channelTagBaseClass} user-channel-badge`
 
   const bubbleStyle = palette?.cssVars
+  const showMessageActions = isAgent && !isPeer
+  const clipboardHtml = useMemo(() => (
+    message.bodyHtml?.trim() ? sanitizeHtml(message.bodyHtml) : ''
+  ), [message.bodyHtml])
+  const clipboardPlainText = useMemo(() => (
+    message.bodyText?.trim() || (clipboardHtml ? plainTextFromHtml(clipboardHtml) : '')
+  ), [clipboardHtml, message.bodyText])
+  const copyDisabled = !clipboardPlainText && !clipboardHtml
+
+  const handleCopyMessage = useCallback(async () => {
+    if (copyDisabled) {
+      return
+    }
+    try {
+      await writeMessageToClipboard(clipboardPlainText, clipboardHtml)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1600)
+      void onMessageCopied?.(message)
+    } catch {
+      setCopied(false)
+    }
+  }, [clipboardHtml, clipboardPlainText, copyDisabled, message, onMessageCopied])
+
+  const handleReportMessage = useCallback(() => {
+    onReportMessage?.(message)
+  }, [message, onReportMessage])
 
   return (
     <article
@@ -171,7 +231,32 @@ export const MessageEventCard = memo(function MessageEventCard({
           ) : null}
           <span className="chat-author-name">{authorLabel}</span>
           {showChannelTag ? <span className={channelTagClass}>{channelLabel}</span> : null}
-          <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
+          <span className="chat-message-meta-slot">
+            <span className="chat-timestamp" title={metaTitle}>{metaLabel}</span>
+            {showMessageActions ? (
+              <span className="chat-message-actions" aria-label="Message actions">
+                <button
+                  type="button"
+                  className="chat-message-action-button"
+                  onClick={handleCopyMessage}
+                  disabled={copyDisabled}
+                  title={copyDisabled ? 'No message text to copy' : copied ? 'Copied' : 'Copy message'}
+                  aria-label={copyDisabled ? 'No message text to copy' : copied ? 'Copied message' : 'Copy message'}
+                >
+                  {copied ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Copy className="h-3.5 w-3.5" aria-hidden="true" />}
+                </button>
+                <button
+                  type="button"
+                  className="chat-message-action-button"
+                  onClick={handleReportMessage}
+                  title="Report issue"
+                  aria-label="Report issue"
+                >
+                  <Flag className="h-3.5 w-3.5" aria-hidden="true" />
+                </button>
+              </span>
+            ) : null}
+          </span>
         </div>
         {isWebhook && webhookMetaBits.length > 0 ? (
           <div className="mb-2 flex flex-wrap gap-2 text-[11px] font-medium text-slate-500">

@@ -55,6 +55,7 @@ import { AgentIntelligenceGateModal } from '../components/agentChat/AgentIntelli
 import { CollaboratorInviteDialog } from '../components/agentChat/CollaboratorInviteDialog'
 import { PublicAgentShareDialog } from '../components/agentChat/PublicAgentShareDialog'
 import { Modal } from '../components/common/Modal'
+import { HelpSupportDialog } from '../components/common/HelpSupportDialog'
 import { ChatSidebar } from '../components/agentChat/ChatSidebar'
 import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
@@ -1453,6 +1454,7 @@ export function AgentChatPage({
 
   const [collaboratorInviteOpen, setCollaboratorInviteOpen] = useState(false)
   const [publicShareOpen, setPublicShareOpen] = useState(false)
+  const [supportDialogOpen, setSupportDialogOpen] = useState(false)
   const [pendingAvatarTracking, setPendingAvatarTracking] = useState<PendingAvatarTracking>({})
   const trackPendingAvatarRefresh = useCallback((agentId: string) => {
     const expiresAt = Date.now() + ROSTER_PENDING_AVATAR_TRACK_WINDOW_MS
@@ -3069,6 +3071,14 @@ export function AgentChatPage({
     setPublicShareOpen(false)
   }, [])
 
+  const handleOpenSupport = useCallback(() => {
+    setSupportDialogOpen(true)
+  }, [])
+
+  const handleCloseSupport = useCallback(() => {
+    setSupportDialogOpen(false)
+  }, [])
+
   // Detect if the requested agent doesn't exist (deleted or never existed)
   const requestedAgentDeleted = Boolean(
     routeAgentId
@@ -3965,6 +3975,7 @@ export function AgentChatPage({
     onOpenOrganization: isImmersiveShellPath ? handleOpenOrganization : null,
     onOpenSecrets: isImmersiveShellPath ? handleOpenSecrets : null,
     onOpenIntegrations: isImmersiveShellPath ? handleOpenIntegrations : null,
+    onOpenHelp: handleOpenSupport,
     taskCredits: taskQuota
       ? {
           usedToday: usageSummary?.metrics.todayCredits?.total ?? null,
@@ -3982,6 +3993,7 @@ export function AgentChatPage({
     handleOpenOrganization,
     handleOpenSecrets,
     handleOpenIntegrations,
+    handleOpenSupport,
     isProprietaryMode,
     isImmersiveShellPath,
     onOpenBilling,
@@ -4092,6 +4104,13 @@ export function AgentChatPage({
       style={agentChatPageStyle}
     >
       {createOrganizationModal}
+      <HelpSupportDialog
+        open={supportDialogOpen}
+        onClose={handleCloseSupport}
+        agentId={activeAgentId}
+        agentName={activeAgentId ? resolvedAgentName : null}
+        workspaceContext={effectiveContext}
+      />
       <ChatSidebar {...selectionSidebarProps} />
       <main className={selectionMainClassName} data-sidebar-mode={selectionSidebarMode}>
         <div id="agent-workspace-root">
@@ -4694,6 +4713,13 @@ export function AgentChatPage({
         agentName={resolvedAgentName || agentName}
         onClose={handleClosePublicShare}
       />
+      <HelpSupportDialog
+        open={supportDialogOpen}
+        onClose={handleCloseSupport}
+        agentId={activeAgentId}
+        agentName={isNewAgent ? 'New Agent' : (resolvedAgentName || agentName)}
+        workspaceContext={effectiveContext}
+      />
       {createOrganizationModal}
       <AgentChatLayout
         agentId={activeAgentId}
@@ -4746,6 +4772,7 @@ export function AgentChatPage({
         onOpenSecrets={isImmersiveShellPath ? handleOpenSecrets : undefined}
         sidebarIntegrationsUrl={integrationsUrl}
         onOpenIntegrations={isImmersiveShellPath ? handleOpenIntegrations : undefined}
+        onOpenHelp={handleOpenSupport}
         sidebarTodayCreditsUsed={usageSummary?.metrics.todayCredits?.total ?? null}
         sidebarCreditsResetOn={usageSummary?.period?.resetOn ?? null}
         sidebarNotificationsEnabled={agentChatNotificationsEnabled}

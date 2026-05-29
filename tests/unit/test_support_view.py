@@ -1,5 +1,6 @@
-from unittest.mock import patch
+import json
 from smtplib import SMTPException
+from unittest.mock import patch
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from django.test import TestCase, override_settings, tag
 from django.test.utils import modify_settings
 from django.urls import reverse
 from constants.feature_flags import SUPPORT_INTERCOM
+from util.analytics import AnalyticsEvent
 from waffle.models import Flag
 from waffle.testutils import override_flag
 
@@ -267,3 +269,146 @@ class SupportViewTurnstileTests(TestCase):
             from_email=settings.DEFAULT_FROM_EMAIL,
             reply_to=["user@example.com"],
         )
+
+    def _login_support_user(self):
+        user = get_user_model().objects.create_user(
+            username="support-user",
+            email="support-user@example.com",
+            password="password123",
+        )
+        self.client.force_login(user)
+        return user
+
+    @tag(BATCH_TAG)
+    @patch("console.api_views.Analytics.track_event")
+    def test_console_support_request_sends_context_email_and_tracks_analytics(self, mock_track_event):
+        user = self._login_support_user()
+        payload = {
+            "message": "The chat sidebar is not responding.",
+            "pageUrl": "https://gobii.test/app/agents/agent-1",
+            "agentId": "agent-1",
+            "agentName": "Research Agent",
+            "workspaceContext": {
+                "type": "organization",
+                "id": "org-1",
+                "name": "Acme Ops",
+            },
+        }
+
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps(payload),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"ok": True})
+        self._assert_single_email(
+            to=["support@example.com"],
+            subject="Gobii app support request",
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            reply_to=[user.email],
+        )
+        body = mail.outbox[0].body
+        self.assertIn("ID: " + str(user.id), body)
+        self.assertIn("Email: support-user@example.com", body)
+        self.assertIn("https://gobii.test/app/agents/agent-1", body)
+        self.assertIn("ID: agent-1", body)
+        self.assertIn("Name: Research Agent", body)
+        self.assertIn("type=organization, id=org-1, name=Acme Ops", body)
+        self.assertIn("The chat sidebar is not responding.", body)
+        mock_track_event.assert_called_once()
+        self.assertEqual(mock_track_event.call_args.kwargs.get("event"), AnalyticsEvent.SUPPORT_REQUEST_SUBMITTED)
+        self.assertEqual(mock_track_event.call_args.kwargs.get("user_id"), str(user.id))
+        props = mock_track_event.call_args.kwargs["properties"]
+        self.assertEqual(props.get("message_length"), len(payload["message"]))
+        self.assertEqual(props.get("page_url"), payload["pageUrl"])
+        self.assertEqual(props.get("agent_id"), payload["agentId"])
+        self.assertEqual(props.get("workspace_context_type"), "organization")
+        self.assertEqual(props.get("workspace_context_id"), "org-1")
+
+    @tag(BATCH_TAG)
+    def test_console_support_request_rejects_empty_message(self):
+        self._login_support_user()
+
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps({"message": "   "}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "message": "Message is required."})
+        self.assertEqual(mail.outbox, [])
+
+    @tag(BATCH_TAG)
+    def test_console_support_request_rejects_non_object_payload(self):
+        self._login_support_user()
+
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps(["Please help."]),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"ok": False, "message": "JSON object expected"})
+        self.assertEqual(mail.outbox, [])
+
+    @tag(BATCH_TAG)
+    def test_console_support_request_rejects_overlong_message(self):
+        self._login_support_user()
+
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps({"message": "x" * 4001}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("4000 characters or fewer", response.json()["message"])
+        self.assertEqual(mail.outbox, [])
+
+    @tag(BATCH_TAG)
+    @override_settings(SUPPORT_EMAIL=None)
+    def test_console_support_request_with_no_recipient_email_fails(self):
+        self._login_support_user()
+
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps({"message": "Please help."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(response.json(), {"ok": False, "message": "Support email is not configured."})
+        self.assertEqual(mail.outbox, [])
+
+    @tag(BATCH_TAG)
+    def test_console_support_request_send_failure_returns_structured_error(self):
+        self._login_support_user()
+
+        with patch("console.support_requests.EmailMultiAlternatives.send", side_effect=SMTPException("nope")):
+            response = self.client.post(
+                reverse("console_app_support_request"),
+                data=json.dumps({"message": "Please help."}),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 500)
+        self.assertEqual(
+            response.json(),
+            {"ok": False, "message": "Unable to send support request. Please try again later."},
+        )
+        self.assertEqual(mail.outbox, [])
+
+    @tag(BATCH_TAG)
+    def test_console_support_request_requires_login(self):
+        response = self.client.post(
+            reverse("console_app_support_request"),
+            data=json.dumps({"message": "Please help."}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json(), {"error": "Authentication required"})

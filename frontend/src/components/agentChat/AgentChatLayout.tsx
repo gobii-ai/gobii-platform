@@ -1,6 +1,6 @@
 import type { KeyboardEvent, MouseEvent, ReactNode, Ref } from 'react'
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { Loader2, Zap } from 'lucide-react'
+import { Flag, Loader2, Zap } from 'lucide-react'
 import '../../styles/agentChatLegacy.css'
 import { TypingIndicator, deriveTypingStatusText } from './TypingIndicator'
 import { track } from '../../util/analytics'
@@ -21,16 +21,19 @@ import { ContactCapCalloutCard } from './ContactCapCalloutCard'
 import { TaskCreditsCalloutCard } from './TaskCreditsCalloutCard'
 import { ScheduledResumeCard } from './ScheduledResumeCard'
 import { StarterPromptSuggestions } from './StarterPromptSuggestions'
+import { reportAgentMessageIssue, trackAgentMessageCopy } from '../../api/agentChat'
 import { AgentSignupPreviewPanel } from './AgentSignupPreviewPanel'
 import { getInitialAgentChatSidebarMode } from './sidebarMode'
 import { useStarterPrompts } from './useStarterPrompts'
 import { SubscriptionUpgradeModal } from '../common/SubscriptionUpgradeModal'
 import { SubscriptionUpgradePlans } from '../common/SubscriptionUpgradePlans'
+import { TextareaSubmitDialog } from '../common/TextareaSubmitDialog'
 import type { AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import type { SelectionShellPage } from './SelectionShellPageSwitcher'
 import type { AgentTimelineProps } from './types'
 import type {
   PendingActionRequest,
+  AgentMessage,
   ProcessingWebTask,
   StreamState,
   PlanSnapshot,
@@ -196,6 +199,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onOpenSecrets?: () => void
   sidebarIntegrationsUrl?: string | null
   onOpenIntegrations?: () => void
+  onOpenHelp?: () => void
   sidebarTodayCreditsUsed?: number | null
   sidebarCreditsResetOn?: string | null
   sidebarNotificationsEnabled?: boolean
@@ -384,6 +388,7 @@ export function AgentChatLayout({
   onOpenSecrets,
   sidebarIntegrationsUrl = '/app/integrations',
   onOpenIntegrations,
+  onOpenHelp,
   sidebarTodayCreditsUsed = null,
   sidebarCreditsResetOn = null,
   sidebarNotificationsEnabled = true,
@@ -547,6 +552,9 @@ export function AgentChatLayout({
   const [planPreviewExiting, setPlanPreviewExiting] = useState(false)
   const [planHoverPreviewVisible, setPlanHoverPreviewVisible] = useState(false)
   const [planHoverPreviewExiting, setPlanHoverPreviewExiting] = useState(false)
+  const [reportMessage, setReportMessage] = useState<AgentMessage | null>(null)
+  const [reportSubmitting, setReportSubmitting] = useState(false)
+  const [reportError, setReportError] = useState<string | null>(null)
   const planPanelMode = agentId ? agentPlanPanelModes[agentId] ?? 'hidden' : defaultPlanPanelMode
   const hasStoredPlanPanelMode = agentId
     ? Object.prototype.hasOwnProperty.call(agentPlanPanelModes, agentId)
@@ -628,6 +636,44 @@ export function AgentChatLayout({
   const handleAddonsClose = useCallback(() => {
     setAddonsMode(null)
   }, [])
+
+  const handleMessageCopied = useCallback((message: AgentMessage) => {
+    if (!agentId) {
+      return
+    }
+    void trackAgentMessageCopy(agentId, message.id).catch(() => {
+      // Copying is already complete; tracking should not interrupt the UI.
+    })
+  }, [agentId])
+
+  const handleReportMessage = useCallback((message: AgentMessage) => {
+    setReportMessage(message)
+    setReportError(null)
+  }, [])
+
+  const handleReportDialogClose = useCallback(() => {
+    if (reportSubmitting) {
+      return
+    }
+    setReportMessage(null)
+    setReportError(null)
+  }, [reportSubmitting])
+
+  const handleReportSubmit = useCallback(async (comment: string) => {
+    if (!agentId || !reportMessage) {
+      return
+    }
+    setReportSubmitting(true)
+    setReportError(null)
+    try {
+      await reportAgentMessageIssue(agentId, reportMessage.id, comment)
+      setReportMessage(null)
+    } catch {
+      setReportError('Unable to submit the report. Please try again.')
+    } finally {
+      setReportSubmitting(false)
+    }
+  }, [agentId, reportMessage])
 
   useEffect(() => {
     const checkMobile = () => {
@@ -1334,6 +1380,7 @@ export function AgentChatLayout({
     onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
+    onOpenHelp,
     taskCredits: taskQuota
       ? {
           usedToday: sidebarTodayCreditsUsed,
@@ -1353,6 +1400,7 @@ export function AgentChatLayout({
     onOpenOrganization,
     onOpenSecrets,
     onOpenIntegrations,
+    onOpenHelp,
     sidebarBillingUrl,
     sidebarUsageUrl,
     sidebarApiKeysUrl,
@@ -1558,6 +1606,8 @@ export function AgentChatLayout({
                     animateIncoming={realtimeEventCursors?.has(event.cursor) ?? false}
                     onIncomingAnimationConsumed={onRealtimeEventAnimationConsumed}
                     onMessageLinkClick={handleMessageLinkClick}
+                    onMessageCopied={handleMessageCopied}
+                    onReportMessage={handleReportMessage}
                   />
                 ))}
                 {showScheduledResumeEvent ? (
@@ -1816,6 +1866,23 @@ export function AgentChatLayout({
           isAgentWorking={isWorkingNow}
         />
       </AgentChatMobileSheet>
+      <TextareaSubmitDialog
+        open={Boolean(reportMessage)}
+        title="Report message"
+        subtitle="Tell us what went wrong so we can review this agent response."
+        icon={Flag}
+        textareaId="agent-message-report-comment"
+        label="What should we know?"
+        placeholder="Optional details about what was incorrect, unhelpful, or concerning."
+        maxLength={2000}
+        valueResetKey={reportMessage?.id ?? null}
+        busy={reportSubmitting}
+        error={reportError}
+        onClose={handleReportDialogClose}
+        onSubmit={handleReportSubmit}
+        submitLabel="Submit report"
+        busyLabel="Submitting..."
+      />
       {isUpgradeModalOpen && isProprietaryMode && !isCollaborator ? (
         isMobileUpgrade && upgradeModalDismissible ? (
           <AgentChatMobileSheet

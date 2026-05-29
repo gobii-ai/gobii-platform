@@ -150,6 +150,24 @@ def run_manual_agent_judge(agent: PersistentAgent, *, tools: list[dict[str, Any]
     return _run_judge(agent, trigger, cache_evidence=False, review_required=True)
 
 
+def run_reported_agent_judge(
+    agent: PersistentAgent,
+    *,
+    reported_message: PersistentAgentMessage,
+    user_comment: str = "",
+    tools: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Run the judge from an explicit user report and auto-apply useful guidance."""
+
+    trigger = build_reported_judge_trigger(
+        agent,
+        reported_message=reported_message,
+        user_comment=user_comment,
+        tools=tools,
+    )
+    return _run_judge(agent, trigger, cache_evidence=False, review_required=False)
+
+
 def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, Any]] | None = None) -> JudgeTrigger:
     prompt_limits = _judge_prompt_limits()
     non_judge_step_count = _count_non_judge_steps(agent)
@@ -171,6 +189,50 @@ def build_manual_judge_trigger(agent: PersistentAgent, *, tools: list[dict[str, 
             "manual_run_at": timezone.now().isoformat(),
             "step_count": non_judge_step_count,
             "reasons": reasons,
+            "message_ids": [str(message.id) for message in recent_messages],
+            "tool_step_ids": [str(call.step_id) for call in recent_tool_calls],
+        }
+    )
+    return JudgeTrigger(
+        reasons=reasons,
+        evidence_hash=evidence_hash,
+        trajectory=trajectory,
+        non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
+    )
+
+
+def build_reported_judge_trigger(
+    agent: PersistentAgent,
+    *,
+    reported_message: PersistentAgentMessage,
+    user_comment: str = "",
+    tools: list[dict[str, Any]] | None = None,
+) -> JudgeTrigger:
+    prompt_limits = _judge_prompt_limits()
+    non_judge_step_count = _count_non_judge_steps(agent)
+    recent_messages = _recent_messages(agent, prompt_limits)
+    recent_tool_calls = _recent_tool_calls(agent, prompt_limits)
+    reasons = ["user_reported_agent_message"]
+    report_context = _reported_message_context(reported_message, user_comment=user_comment)
+    trajectory = _build_trajectory_packet(
+        agent,
+        tools=tools or [],
+        recent_messages=recent_messages,
+        recent_tool_calls=recent_tool_calls,
+        trigger_reasons=reasons,
+        non_judge_step_count=non_judge_step_count,
+        prompt_limits=prompt_limits,
+        report_context=report_context,
+    )
+    evidence_hash = _hash_payload(
+        {
+            "agent_id": str(agent.id),
+            "step_count": non_judge_step_count,
+            "reasons": reasons,
+            "reported_message_id": str(reported_message.id),
+            "reported_message_body": reported_message.body or "",
+            "user_comment": user_comment or "",
             "message_ids": [str(message.id) for message in recent_messages],
             "tool_step_ids": [str(call.step_id) for call in recent_tool_calls],
         }
@@ -366,6 +428,7 @@ def _run_judge(
         "status": "completed",
         "suggestion_type": suggestion_type,
         "suggestion": _serialize_judge_result_suggestion(suggestion, completion),
+        "completion_id": str(completion.id) if completion else None,
     }
 
 
@@ -448,6 +511,7 @@ def _judge_run_result(
         "status": status,
         "suggestion_type": _clean_choice((payload or {}).get("suggestion_type")) or None,
         "suggestion": _serialize_judge_result_suggestion(suggestion, completion),
+        "completion_id": str(completion.id) if completion else None,
     }
 
 
@@ -727,6 +791,7 @@ def _build_trajectory_packet(
     trigger_reasons: list[str],
     non_judge_step_count: int,
     prompt_limits: JudgePromptLimits,
+    report_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     tier = get_agent_llm_tier(agent)
     recent_steps = list(
@@ -765,6 +830,7 @@ def _build_trajectory_packet(
             ),
         ],
         "trigger_reasons": trigger_reasons,
+        "user_report": report_context or {},
         "non_judge_step_count": non_judge_step_count,
         "policy_excerpts": [
             (
@@ -944,6 +1010,20 @@ def _message_channel(message: PersistentAgentMessage) -> str:
     return ""
 
 
+def _reported_message_context(message: PersistentAgentMessage, *, user_comment: str = "") -> dict[str, Any]:
+    return {
+        "source_type": "user_message_report",
+        "reported_message": {
+            "id": str(message.id),
+            "direction": "agent_to_user" if message.is_outbound else "user_to_agent",
+            "channel": _message_channel(message),
+            "timestamp": message.timestamp.isoformat() if message.timestamp else None,
+            "body": _truncate(message.body or "", 4000),
+        },
+        "user_comment": _truncate(user_comment or "", 2000),
+    }
+
+
 def _serialize_tool_call(call: PersistentAgentToolCall) -> dict[str, Any]:
     return {
         "source_type": "tool_call",
@@ -1053,6 +1133,8 @@ def _build_judge_user_prompt(
     )
 
     high_priority = prompt.group("high_priority", weight=8)
+    if trajectory.get("user_report"):
+        high_priority.section_text("user_report", _json_section(trajectory.get("user_report") or {}), weight=9)
     high_priority.section_text("messages", _json_section(recent_trajectory.get("messages") or []), weight=8)
     high_priority.section_text("system_directives", _json_section(recent_trajectory.get("system_directives") or []), weight=5)
     high_priority.section_text("plan_snapshot", _json_section(recent_trajectory.get("plan_snapshot") or {}), weight=4)
@@ -1253,9 +1335,11 @@ __all__ = [
     "approve_judge_suggestion",
     "build_manual_judge_trigger",
     "build_judge_trigger",
+    "build_reported_judge_trigger",
     "dismiss_judge_suggestion",
     "is_agent_judge_enabled_for_agent",
     "maybe_run_agent_judge",
     "report_judge_suggestion",
     "run_manual_agent_judge",
+    "run_reported_agent_judge",
 ]
