@@ -8,7 +8,15 @@ from api.agent.tools.plan import (
     execute_update_plan,
     get_update_plan_tool,
 )
-from api.models import BrowserUseAgent, PersistentAgent, PersistentAgentKanbanCard
+from api.models import (
+    BrowserUseAgent,
+    CommsChannel,
+    PersistentAgent,
+    PersistentAgentCommsEndpoint,
+    PersistentAgentConversation,
+    PersistentAgentKanbanCard,
+    PersistentAgentMessage,
+)
 
 
 @tag("batch_agent_tools")
@@ -122,6 +130,64 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Write investment memo",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research source set", "status": "done"},
+                    {"step": "Synthesize investment memo", "status": "done"},
+                ],
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertIsNotNone(result)
+        self.assertTrue(result["skipped"])
+        self.assertFalse(result["auto_sleep_ok"])
+
+    def test_old_outbound_message_does_not_turn_redundant_plan_skip_into_sleep(self):
+        agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address="plan-research-agent",
+            is_primary=True,
+        )
+        user_endpoint = PersistentAgentCommsEndpoint.objects.create(
+            channel=CommsChannel.WEB,
+            address="plan-research-user",
+        )
+        conversation = PersistentAgentConversation.objects.create(
+            owner_agent=self.agent,
+            channel=CommsChannel.WEB,
+            address=user_endpoint.address,
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=user_endpoint,
+            is_outbound=False,
+            body="Previous run request.",
+        )
+        PersistentAgentMessage.objects.create(
+            owner_agent=self.agent,
+            conversation=conversation,
+            from_endpoint=agent_endpoint,
+            is_outbound=True,
+            body="Previous run final report.",
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research source set",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=2,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize investment memo",
             status=PersistentAgentKanbanCard.Status.TODO,
             priority=1,
         )

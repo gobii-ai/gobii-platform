@@ -384,7 +384,7 @@ def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> 
         return None
 
     will_continue_work = _coerce_optional_bool(params.get("will_continue_work"))
-    if will_continue_work is False or _has_outbound_since_latest_inbound(agent):
+    if will_continue_work is False:
         return {
             "status": "ok",
             "message": (
@@ -488,22 +488,6 @@ def _validate_update_plan_params(agent, params: dict[str, Any]) -> dict[str, Any
     file_items = _validate_file_deliverables(params.get("files"), errors)
     message_items = _validate_message_deliverables(agent, params.get("messages"), errors)
     return {"errors": errors, "plan": plan_items, "files": file_items, "messages": message_items}
-
-
-def _has_outbound_since_latest_inbound(agent) -> bool:
-    latest_inbound_at = (
-        PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
-        .order_by("-timestamp")
-        .values_list("timestamp", flat=True)
-        .first()
-    )
-    if latest_inbound_at is None:
-        return False
-    return PersistentAgentMessage.objects.filter(
-        owner_agent=agent,
-        is_outbound=True,
-        timestamp__gt=latest_inbound_at,
-    ).exists()
 
 
 def _format_plan_validation_message(errors: list[str]) -> str:
