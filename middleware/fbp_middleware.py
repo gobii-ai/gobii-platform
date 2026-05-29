@@ -5,9 +5,9 @@ def get_or_make_fbp(request):
     """
     Generates or retrieves the Facebook Browser Pixel (fbp) identifier.
 
-    This function attempts to acquire the fbp identifier from the request's cookies
-    or session storage. If the identifier does not exist, it generates a new one,
-    stores it in the session for future use, and returns the generated value.
+    This function attempts to acquire the fbp identifier from the request's cookies.
+    If the identifier does not exist, it generates a new one and surfaces it on
+    the current request without creating an anonymous Django session.
 
     Arguments:
         request: A Django HttpRequest object which provides access to cookies and
@@ -18,18 +18,16 @@ def get_or_make_fbp(request):
     """
     fbp = (
         request.COOKIES.get(settings.FBP_COOKIE_NAME)
-        or request.session.get(settings.FBP_COOKIE_NAME)
         or getattr(request, "fbp", None)
     )
     if not fbp:
         fbp = f"fb.1.{int(time.time() * 1000)}.{random.randint(10**9, 10**10 - 1)}"
-        request.session[settings.FBP_COOKIE_NAME] = fbp
-        # also surface on the request so downstream sees it this request
         setattr(request, "fbp", fbp)
+        # Request.COOKIES is request-scoped; updating it lets downstream
+        # attribution code see the generated value before the browser returns it.
         try:
-            # request.COOKIES is a dict-like and is safe to mutate during request handling
             request.COOKIES[settings.FBP_COOKIE_NAME] = fbp
-        except Exception:
+        except (AttributeError, TypeError):
             pass
     else:
         # normalize onto request for convenience
