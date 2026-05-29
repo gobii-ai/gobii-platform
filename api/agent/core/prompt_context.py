@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from functools import partial
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Set, Tuple
 from uuid import UUID, uuid4
 
 import zstandard as zstd
@@ -4191,13 +4191,14 @@ def _get_unified_history_prompt(
     tool_call_records: List[ToolCallResultRecord] = []
     browser_task_result_record_ids: Dict[str, str] = {}
     recency_positions: Dict[str, int] = {}
-    fresh_tool_call_step_id: Optional[str] = None
+    fresh_tool_call_step_ids: Set[str] = set()
     if steps:
         step_lookup = {str(step.id): step for step in steps}
+        tool_call_completion_ids: Dict[str, Optional[str]] = {}
         tool_call_results = (
             PersistentAgentToolCall.objects
             .filter(step_id__in=list(step_lookup.keys()))
-            .values("step_id", "result", "tool_name")
+            .values("step_id", "result", "tool_name", "step__completion_id")
         )
         for row in tool_call_results:
             step_id = str(row["step_id"])
@@ -4207,6 +4208,8 @@ def _get_unified_history_prompt(
             result_text = row.get("result") or ""
             if not result_text:
                 continue
+            completion_id = row.get("step__completion_id")
+            tool_call_completion_ids[step_id] = str(completion_id) if completion_id else None
             tool_call_records.append(
                 ToolCallResultRecord(
                     step_id=step_id,
@@ -4216,10 +4219,16 @@ def _get_unified_history_prompt(
                 )
             )
         if tool_call_records:
-            tool_call_step_ids = {record.step_id for record in tool_call_records}
-            most_recent_step_id = str(steps[0].id)
-            if most_recent_step_id in tool_call_step_ids:
-                fresh_tool_call_step_id = most_recent_step_id
+            newest_record = max(tool_call_records, key=lambda record: record.created_at)
+            newest_completion_id = tool_call_completion_ids.get(newest_record.step_id)
+            if newest_completion_id:
+                fresh_tool_call_step_ids = {
+                    record.step_id
+                    for record in tool_call_records
+                    if tool_call_completion_ids.get(record.step_id) == newest_completion_id
+                }
+            else:
+                fresh_tool_call_step_ids = {newest_record.step_id}
 
             # Build recency position map: most recent = 0, then 1, 2, etc.
             ordered_records = sorted(tool_call_records, key=lambda r: r.created_at, reverse=True)
@@ -4236,7 +4245,7 @@ def _get_unified_history_prompt(
     tool_result_prompt_info = prepare_tool_results_for_prompt(
         tool_call_records,
         recency_positions=recency_positions,
-        fresh_tool_call_step_id=fresh_tool_call_step_id,
+        fresh_tool_call_step_ids=fresh_tool_call_step_ids,
     )
 
     # format steps (group meta/params/result components together)

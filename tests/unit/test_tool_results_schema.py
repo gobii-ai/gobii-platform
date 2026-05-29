@@ -683,6 +683,69 @@ class PreviewByteLimitTests(SimpleTestCase):
         self.assertFalse(is_inline)
         self.assertLess(len(preview), len(medium_text))
 
+    def test_fresh_tool_call_step_ids_inline_multiple_records(self):
+        """Every record in the fresh step set should get the one-time full inline preview."""
+        from api.agent.core.tool_results import (
+            FRESH_RESULT_INLINE_THRESHOLD,
+            ToolCallResultRecord,
+            prepare_tool_results_for_prompt,
+        )
+
+        first_text = "a" * (FRESH_RESULT_INLINE_THRESHOLD - 10000)
+        second_text = "b" * (FRESH_RESULT_INLINE_THRESHOLD - 9000)
+        records = [
+            ToolCallResultRecord(
+                step_id="step-a",
+                tool_name="http_request",
+                created_at=datetime.now(timezone.utc),
+                result_text=first_text,
+            ),
+            ToolCallResultRecord(
+                step_id="step-b",
+                tool_name="http_request",
+                created_at=datetime.now(timezone.utc),
+                result_text=second_text,
+            ),
+        ]
+
+        info = prepare_tool_results_for_prompt(
+            records,
+            recency_positions={},
+            fresh_tool_call_step_ids={"step-a", "step-b"},
+        )
+
+        self.assertTrue(info["step-a"].is_inline)
+        self.assertTrue(info["step-b"].is_inline)
+        self.assertIn("[FULL RESULT", info["step-a"].preview_text)
+        self.assertIn("[FULL RESULT", info["step-b"].preview_text)
+        self.assertIn("ONE-TIME VIEW", info["step-a"].preview_text)
+        self.assertIn("ONE-TIME VIEW", info["step-b"].preview_text)
+
+    def test_non_fresh_step_id_without_recency_gets_meta_only(self):
+        """Fresh step sets should not change old result preview behavior."""
+        from api.agent.core.tool_results import (
+            FRESH_RESULT_INLINE_THRESHOLD,
+            ToolCallResultRecord,
+            prepare_tool_results_for_prompt,
+        )
+
+        result_text = "z" * (FRESH_RESULT_INLINE_THRESHOLD - 10000)
+        record = ToolCallResultRecord(
+            step_id="old-step",
+            tool_name="http_request",
+            created_at=datetime.now(timezone.utc),
+            result_text=result_text,
+        )
+
+        info = prepare_tool_results_for_prompt(
+            [record],
+            recency_positions={},
+            fresh_tool_call_step_ids={"new-step"},
+        )
+
+        self.assertFalse(info["old-step"].is_inline)
+        self.assertIsNone(info["old-step"].preview_text)
+
 
 @tag("batch_tool_results")
 class CsvAutoLoadTests(SimpleTestCase):
