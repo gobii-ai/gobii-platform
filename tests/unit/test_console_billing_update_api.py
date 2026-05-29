@@ -6,6 +6,7 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.test import TestCase, tag
 from django.urls import reverse
+from waffle.testutils import override_switch
 
 from api.models import (
     BrowserUseAgent,
@@ -16,6 +17,7 @@ from api.models import (
     ProxyServer,
     UserBilling,
 )
+from constants.feature_flags import STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED
 from constants.stripe import EXCLUDED_PAYMENT_METHOD_TYPES
 
 
@@ -316,17 +318,18 @@ class ConsoleBillingUpdateApiTests(TestCase):
         mock_get_stripe_settings.return_value = SimpleNamespace(org_team_price_id="price_org_team")
         mock_session_create.return_value = SimpleNamespace(url="https://stripe.test/org-seat-checkout")
 
-        resp = self.client.post(
-            self.url,
-            data=json.dumps(
-                {
-                    "ownerType": "organization",
-                    "organizationId": str(self.org.id),
-                    "seatsTarget": 2,
-                }
-            ),
-            content_type="application/json",
-        )
+        with override_switch(STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED, active=True):
+            resp = self.client.post(
+                self.url,
+                data=json.dumps(
+                    {
+                        "ownerType": "organization",
+                        "organizationId": str(self.org.id),
+                        "seatsTarget": 2,
+                    }
+                ),
+                content_type="application/json",
+            )
 
         self.assertEqual(resp.status_code, 200)
         payload = resp.json()
@@ -336,6 +339,10 @@ class ConsoleBillingUpdateApiTests(TestCase):
         self.assertEqual(
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertEqual(
+            kwargs["consent_collection"],
+            {"terms_of_service": "required"},
         )
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")

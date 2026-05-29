@@ -33,7 +33,10 @@ from config.socialaccount_adapter import (
     OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY,
     build_oauth_charter_stash_cache_key,
 )
-from constants.feature_flags import SOLUTION_CRAWLABLE_LINKS
+from constants.feature_flags import (
+    SOLUTION_CRAWLABLE_LINKS,
+    STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED,
+)
 from pages import views as page_views
 from pages.models import LandingPage
 from agents.services import PretrainedWorkerTemplateService
@@ -3209,6 +3212,8 @@ class CheckoutRedirectTests(TestCase):
             override_switch("stripe_scale_trial_checkout_billing_address_required", active=True),
             override_switch("stripe_scale_trial_checkout_individual_name_enabled", active=True),
             override_switch("stripe_scale_trial_checkout_individual_name_optional", active=True),
+            override_switch(STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED, active=True),
+            patch("pages.views._emit_checkout_initiated_event"),
         ):
             resp = self.client.get("/subscribe/scale/")
 
@@ -3216,6 +3221,10 @@ class CheckoutRedirectTests(TestCase):
         self.assertEqual(resp["Location"], "https://stripe.test/checkout-scale")
 
         kwargs = mock_session_create.call_args.kwargs
+        self.assertEqual(
+            kwargs["consent_collection"],
+            {"terms_of_service": "required"},
+        )
         self.assertEqual(kwargs["billing_address_collection"], "required")
         self.assertEqual(
             kwargs["name_collection"],

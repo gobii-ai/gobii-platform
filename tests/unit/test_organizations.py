@@ -6,7 +6,9 @@ from django.core.exceptions import ValidationError
 from django.utils import timezone
 
 from console import views as console_views
+from constants.feature_flags import STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED
 from waffle.models import Flag
+from waffle.testutils import override_switch
 
 from api.models import (
     Organization,
@@ -71,7 +73,8 @@ class OrganizationInvitesTest(TestCase):
 
         url = reverse("organization_seat_checkout", kwargs={"org_id": self.org.id})
         stripe_settings = get_stripe_settings(force_reload=True)
-        resp = self.client.post(url, {"seats": 1})
+        with override_switch(STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED, active=True):
+            resp = self.client.post(url, {"seats": 1})
 
         self.assertEqual(resp.status_code, 302)
         self.assertEqual(resp["Location"], "https://stripe.test/checkout")
@@ -82,6 +85,10 @@ class OrganizationInvitesTest(TestCase):
         self.assertEqual(
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertEqual(
+            kwargs["consent_collection"],
+            {"terms_of_service": "required"},
         )
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(line_items[0]["price"], stripe_settings.org_team_price_id)
@@ -723,7 +730,10 @@ class OrganizationBillingCheckoutHelpersTest(TestCase):
     def test_start_addon_checkout_session_excludes_disabled_payment_methods(self, mock_session_create):
         mock_session_create.return_value = MagicMock(url="https://stripe.test/addon-checkout")
 
-        with patch.object(console_views.stripe, "api_key", "sk_test_checkout"):
+        with (
+            patch.object(console_views.stripe, "api_key", "sk_test_checkout"),
+            override_switch(STRIPE_CHECKOUT_TOS_CONSENT_REQUIRED, active=True),
+        ):
             checkout_url = console_views._start_addon_checkout_session(
                 customer_id="cus_addon",
                 price_id="price_addon",
@@ -737,6 +747,10 @@ class OrganizationBillingCheckoutHelpersTest(TestCase):
         self.assertEqual(
             kwargs["excluded_payment_method_types"],
             EXCLUDED_PAYMENT_METHOD_TYPES,
+        )
+        self.assertEqual(
+            kwargs["consent_collection"],
+            {"terms_of_service": "required"},
         )
         self.assertNotIn("payment_method_types", kwargs)
         self.assertEqual(kwargs["metadata"]["flow_type"], "purchase")

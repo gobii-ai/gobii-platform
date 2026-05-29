@@ -72,6 +72,7 @@ from billing.checkout_metadata import (
     clear_checkout_fingerprint_metadata,
 )
 from billing.checkout_context import record_checkout_context
+from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from config.stripe_config import get_stripe_settings
 
@@ -921,7 +922,7 @@ def _create_checkout_session_with_customer_context(
         )
 
     try:
-        session = stripe.checkout.Session.create(**checkout_kwargs)
+        session = create_stripe_checkout_session(stripe, **checkout_kwargs)
     except stripe.error.StripeError as exc:
         if customer_checkout_context_set:
             try:
