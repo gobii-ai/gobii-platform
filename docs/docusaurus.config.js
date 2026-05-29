@@ -99,10 +99,15 @@ const config = {
       innerHTML: JSON.stringify({
         '@context': 'https://schema.org',
         '@type': 'Organization',
+        '@id': 'https://gobii.ai/#organization',
         name: 'Gobii',
         url: 'https://gobii.ai',
         logo: `${siteUrl}/images/favicon.png`,
-        sameAs: ['https://github.com/gobii-ai/gobii-platform'],
+        sameAs: [
+          'https://github.com/gobii-ai',
+          'https://www.linkedin.com/company/gobii-ai',
+          'https://x.com/gobii_ai',
+        ],
       }),
     },
     {
@@ -116,8 +121,25 @@ const config = {
         name: 'Gobii Docs',
         url: siteUrl,
         publisher: {
-          '@type': 'Organization',
-          name: 'Gobii',
+          '@id': 'https://gobii.ai/#organization',
+        },
+      }),
+    },
+    {
+      tagName: 'script',
+      attributes: {
+        type: 'application/ld+json',
+      },
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareSourceCode',
+        '@id': 'https://github.com/gobii-ai/gobii-platform#source-code',
+        name: 'Gobii Platform',
+        codeRepository: 'https://github.com/gobii-ai/gobii-platform',
+        url: siteUrl,
+        license: 'https://github.com/gobii-ai/gobii-platform/blob/main/LICENSE',
+        publisher: {
+          '@id': 'https://gobii.ai/#organization',
         },
       }),
     },

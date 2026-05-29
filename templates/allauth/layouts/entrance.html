@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}{% if head_title %}{{ head_title }} · {% endif %}Gobii{% endblock %}
 
+{% block head_extras %}
+  {{ block.super }}
+  <meta name="robots" content="noindex,follow">
+{% endblock %}
+
 {% block content %}
 <div class="flex justify-center pt-20">
   {% block body_inner %}{% endblock %}
