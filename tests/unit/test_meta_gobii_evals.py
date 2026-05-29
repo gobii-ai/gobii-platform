@@ -46,6 +46,7 @@ from api.models import (
     EvalRunTask,
     EvalSuiteRun,
     LLMProvider,
+    Organization,
     PersistentAgent,
     PersistentModelEndpoint,
     ProfilePersistentTierEndpoint,
@@ -1552,7 +1553,15 @@ class MetaGobiiLocalEvalSetupTests(TestCase):
         self.assertEqual(suite_run.suite_slug, "single::meta_gobii_negative_content_task")
         self.assertEqual(suite_run.launch_config, {"mode": "simulated"})
         self.assertEqual(suite_run.runs.count(), 1)
-        self.assertEqual(suite_run.runs.first().scenario_slug, "meta_gobii_negative_content_task")
+        run = suite_run.runs.select_related("agent__organization", "agent__user").first()
+        self.assertEqual(run.scenario_slug, "meta_gobii_negative_content_task")
+        self.assertEqual(run.agent.user.username, "eval_runner")
+        self.assertEqual(run.agent.organization.slug, "eval-runner")
+        self.assertEqual(run.agent.execution_environment, "eval")
+        self.assertGreaterEqual(
+            Organization.objects.get(slug="eval-runner").billing.purchased_seats,
+            1,
+        )
         self.assertFalse(
             EvalRunTask.objects.filter(run__suite_run=suite_run)
             .exclude(status=EvalRunTask.Status.PASSED)

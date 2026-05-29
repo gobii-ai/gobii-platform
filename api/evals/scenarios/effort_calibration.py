@@ -342,11 +342,13 @@ class EffortCalibrationScenario(EvalScenario, ScenarioExecutionTools):
             )
 
     def _seed_recent_high_burn(self, agent_id: str, *, credits: str = "45") -> PersistentAgentStep:
-        return PersistentAgentStep.objects.create(
+        step = PersistentAgentStep.objects.create(
             agent_id=agent_id,
             description="Prior high-burn eval work chunk",
-            credits_cost=Decimal(credits),
         )
+        PersistentAgentStep.objects.filter(id=step.id).update(credits_cost=Decimal(credits))
+        step.credits_cost = Decimal(credits)
+        return step
 
     def _is_simulated(self, run_id: str) -> bool:
         run = EvalRun.objects.select_related("suite_run").get(id=run_id)
@@ -1894,10 +1896,14 @@ class EffortPartialSourceBlockReportsAndResumesScenario(EffortCalibrationScenari
                 eval_run_id=run_id,
                 mock_config=mock_config,
                 eval_stop_policy={
-                    "stop_on_tool_names": list(EFFORT_OVERWORK_TOOL_NAMES | ARTIFACT_TOOL_NAMES | RESEARCH_TOOL_NAMES),
+                    "stop_on_tool_names": list(
+                        (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                        | ARTIFACT_TOOL_NAMES
+                        | RESEARCH_TOOL_NAMES
+                    ),
                     "stop_on_human_input_request": True,
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch"],
+                    "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
                     "max_relevant_tool_calls": 6,
                     "ignored_tool_names": list(MESSAGE_TOOL_NAMES | STOP_TOOL_NAMES),
                 },

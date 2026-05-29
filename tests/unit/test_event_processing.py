@@ -4787,6 +4787,17 @@ class OrchestratorHumanInputInterruptTests(TestCase):
             charter="Handle prompt interrupts",
             browser_use_agent=self.browser_agent,
         )
+        TaskCredit.objects.create(
+            user=self.user,
+            credits=Decimal("50"),
+            credits_used=Decimal("0"),
+            granted_date=timezone.now(),
+            expiration_date=timezone.now() + timedelta(days=30),
+            plan=PlanNamesChoices.FREE,
+            grant_type=GrantTypeChoices.PLAN,
+            additional_task=False,
+            voided=False,
+        )
 
     def _prompt_context(self):
         return ([{"role": "system", "content": "sys"}], 1000, None, {})

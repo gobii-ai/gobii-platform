@@ -172,6 +172,31 @@ class MessageQualityScenarioTests(SimpleTestCase):
 
         self.assertEqual(set(scenario._mock_config(case)), {"send_email"})
 
+    def test_email_cases_allow_web_chat_confirmation_as_secondary_delivery(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+        calls = [
+            type("Call", (), {"tool_name": "send_email"})(),
+            type("Call", (), {"tool_name": "send_chat_message"})(),
+        ]
+
+        self.assertEqual(MessageQualityScenario._unexpected_message_calls(case, calls), [])
+        self.assertEqual(
+            [call.tool_name for call in MessageQualityScenario._allowed_confirmation_calls(case, calls)],
+            ["send_chat_message"],
+        )
+        self.assertIn("send_chat_message", MessageQualityScenario._allowed_tool_names(case))
+
+    def test_email_cases_still_reject_other_secondary_delivery_channels(self):
+        case = next(case for case in MESSAGE_QUALITY_CASES if case.channel == "email")
+        calls = [
+            type("Call", (), {"tool_name": "send_email"})(),
+            type("Call", (), {"tool_name": "send_sms"})(),
+        ]
+
+        unexpected = MessageQualityScenario._unexpected_message_calls(case, calls)
+
+        self.assertEqual([call.tool_name for call in unexpected], ["send_sms"])
+
     def test_mock_email_message_ids_are_not_treated_as_persisted_messages(self):
         scenario = MessageQualityScenario()
         call = type(

@@ -1,14 +1,10 @@
 import argparse
 import time
 import uuid
-from datetime import timedelta
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
-from decimal import Decimal
 
-from allauth.account.models import EmailAddress
 from django.conf import settings
-from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 from django.utils import timezone
@@ -22,6 +18,9 @@ from api.evals.catalog import (
     scenario_to_suite_slugs,
 )
 from api.evals.local_setup import ensure_eval_local_setup, get_eval_local_routing_profile_seeds
+from api.evals.owner import (
+    ensure_eval_runner_user_and_owner,
+)
 from api.evals.registry import ScenarioRegistry
 from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task, gc_eval_runs_task
@@ -33,10 +32,8 @@ from api.models import (
     EvalSuiteRun,
     LLMRoutingProfile,
     PersistentAgent,
-    TaskCredit,
 )
 from api.services.llm_routing_profile_snapshot import create_eval_profile_snapshot
-from constants.grant_types import GrantTypeChoices
 
 
 @dataclass(frozen=True)
@@ -44,35 +41,6 @@ class EvalExecutionPlan:
     effective_max_concurrency: int
     use_eager_thread_pool: bool
     warn_sqlite_serial: bool
-
-
-def ensure_local_eval_runner_credits(user, stdout=None) -> None:
-    if not settings.EVAL_LOCAL_SETUP_ENABLED:
-        return
-
-    now = timezone.now()
-    active_credits = TaskCredit.objects.filter(
-        user=user,
-        expiration_date__gte=now,
-        additional_task=False,
-        voided=False,
-    )
-    remaining = sum((credit.remaining for credit in active_credits), Decimal("0"))
-    if remaining >= Decimal("5000"):
-        return
-
-    TaskCredit.objects.create(
-        user=user,
-        credits=Decimal("20000.000"),
-        credits_used=Decimal("0.000"),
-        granted_date=now,
-        expiration_date=now + timedelta(days=30),
-        additional_task=False,
-        grant_type=GrantTypeChoices.COMPENSATION,
-        comments="Local canonical eval runner credit grant.",
-    )
-    if stdout:
-        stdout.write("Granted local eval runner task credits.")
 
 
 def ensure_local_eval_sandbox_flag(stdout=None) -> None:
@@ -605,23 +573,21 @@ class Command(BaseCommand):
             f"{len(routing_profile_matrix)} routing profile slot(s): {total_run_count} total run(s)."
         )
 
-        # Base user attribution
-        User = get_user_model()
-        user, _ = User.objects.get_or_create(username="eval_runner", defaults={"email": "eval@localhost"})
-        EmailAddress.objects.update_or_create(
-            user=user,
-            email=user.email,
-            defaults={"verified": True, "primary": True},
+        user, eval_organization = ensure_eval_runner_user_and_owner(
+            minimum_seats=max(1, total_run_count),
+            stdout=self.stdout,
         )
-        ensure_local_eval_runner_credits(user, stdout=self.stdout)
         ensure_local_eval_sandbox_flag(stdout=self.stdout)
 
         def _create_ephemeral_agent(label_suffix: str) -> PersistentAgent:
             unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
-            browser_agent = BrowserUseAgent.objects.create(name=f"Eval Browser {unique_id}", user=user)
+            browser_agent = BrowserUseAgent(name=f"Eval Browser {unique_id}", user=user)
+            browser_agent._agent_creation_organization = eval_organization
+            browser_agent.save()
             agent = PersistentAgent.objects.create(
                 name=f"Eval Agent {unique_id}",
                 user=user,
+                organization=eval_organization,
                 browser_use_agent=browser_agent,
                 execution_environment="eval",
                 charter="You are a test agent.",

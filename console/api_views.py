@@ -271,6 +271,7 @@ from api.evals.suites import SuiteRegistry
 from api.evals.tasks import run_eval_task
 from api.evals.runner import _update_suite_state
 from api.evals.realtime import broadcast_run_update, broadcast_suite_update
+from api.evals.owner import ensure_eval_runner_user_and_owner
 from api.evals.global_skill_evals import (
     GLOBAL_SKILL_EVAL_RUBRIC_VERSION,
     GLOBAL_SKILL_EVAL_SCENARIO_SLUG,
@@ -2951,20 +2952,19 @@ def _resolve_console_secret_owner(request: HttpRequest):
 
 
 def _create_eval_ephemeral_agent(
-    request: HttpRequest,
     *,
     label_suffix: str,
-    owner_org=None,
+    eval_user,
+    eval_organization,
 ) -> PersistentAgent:
     unique_id = f"{label_suffix}-{uuid.uuid4().hex[:8]}" if label_suffix else uuid.uuid4().hex[:12]
-    browser_agent = BrowserUseAgent.objects.create(
-        name=f"Eval Browser {unique_id}",
-        user=request.user,
-    )
+    browser_agent = BrowserUseAgent(name=f"Eval Browser {unique_id}", user=eval_user)
+    browser_agent._agent_creation_organization = eval_organization
+    browser_agent.save()
     return PersistentAgent.objects.create(
         name=f"Eval Agent {unique_id}",
-        user=request.user,
-        organization=owner_org,
+        user=eval_user,
+        organization=eval_organization,
         browser_use_agent=browser_agent,
         execution_environment="eval",
         charter="You are a test agent.",
@@ -9225,13 +9225,16 @@ class GlobalSkillEvalRunCreateAPIView(SystemAdminAPIView):
             llm_routing_profile=profile_snapshot,
         )
 
+        eval_user, eval_organization = ensure_eval_runner_user_and_owner(
+            minimum_seats=max(1, requested_runs),
+        )
         created_runs: list[EvalRun] = []
         for iteration in range(requested_runs):
             suffix = f"{skill.name[:8]}-{iteration + 1}" if requested_runs > 1 else skill.name[:8]
             run_agent = _create_eval_ephemeral_agent(
-                request,
                 label_suffix=suffix,
-                owner_org=owner_org,
+                eval_user=eval_user,
+                eval_organization=eval_organization,
             )
             run = EvalRun.objects.create(
                 suite_run=suite_run,
@@ -9344,7 +9347,16 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
             except PersistentAgent.DoesNotExist:
                 return HttpResponseBadRequest("Agent not found")
 
-        _owner_user, owner_org = _resolve_console_secret_owner(request)
+        total_ephemeral_run_count = 0
+        if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO:
+            total_ephemeral_run_count = sum(len(scenario_slugs) for _suite_slug, scenario_slugs in suite_specs)
+            total_ephemeral_run_count *= requested_runs
+        eval_user = None
+        eval_organization = None
+        if total_ephemeral_run_count:
+            eval_user, eval_organization = ensure_eval_runner_user_and_owner(
+                minimum_seats=max(1, total_ephemeral_run_count),
+            )
 
         created_suite_runs: list[EvalSuiteRun] = []
         created_runs: list[EvalRun] = []
@@ -9385,9 +9397,9 @@ class EvalSuiteRunCreateAPIView(SystemAdminAPIView):
                     if agent_strategy == EvalSuiteRun.AgentStrategy.EPHEMERAL_PER_SCENARIO or run_agent is None:
                         suffix = f"{scenario.slug[:8]}-{iteration + 1}" if requested_runs > 1 else scenario.slug[:8]
                         run_agent = _create_eval_ephemeral_agent(
-                            request,
                             label_suffix=suffix,
-                            owner_org=owner_org,
+                            eval_user=eval_user,
+                            eval_organization=eval_organization,
                         )
 
                     run = EvalRun.objects.create(

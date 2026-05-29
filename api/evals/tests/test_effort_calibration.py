@@ -18,9 +18,12 @@ from api.agent.tools.request_contact_permission import get_request_contact_permi
 from api.agent.tools.request_human_input import execute_request_human_input, get_request_human_input_tool
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.evals.scenarios.effort_calibration import (
+    ARTIFACT_TOOL_NAMES,
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
+    EFFORT_OVERWORK_TOOL_NAMES,
     EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+    RESEARCH_TOOL_NAMES,
     EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
     EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
@@ -369,6 +372,49 @@ class EvalStopPolicyBudgetTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("relevant tool call budget reached: 1/1", reason)
+
+    def test_partial_source_policy_allows_plan_before_candidate_batch(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_source_policy_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Partial Source Policy Browser")
+        agent = PersistentAgent.objects.create(
+            name="Partial Source Policy Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="update_plan",
+            tool_params={"plan": [{"step": "Verify batch", "status": "doing"}], "will_continue_work": True},
+            result="",
+            status="pending",
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {
+                "stop_on_tool_names": list(
+                    (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                    | ARTIFACT_TOOL_NAMES
+                    | RESEARCH_TOOL_NAMES
+                ),
+                "stop_on_unexpected_relevant_tool": True,
+                "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                "max_relevant_tool_calls": 6,
+            },
+        )
+
+        self.assertFalse(should_stop)
+        self.assertEqual(reason, "")
 
 
 @tag("eval_sim")
