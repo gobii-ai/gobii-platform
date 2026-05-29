@@ -53,6 +53,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     build_checkout_flow_metadata,
 )
+from billing.checkout_sessions import create_stripe_checkout_session
 from billing.plan_resolver import get_active_public_plan_monthly_task_credits
 from billing.churnkey import build_churnkey_cancel_flow_config
 from billing.services import BillingService
@@ -5510,7 +5511,8 @@ class OrganizationSeatCheckoutView(StripeFeatureRequiredMixin, WaffleFlagMixin, 
                 },
                 flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
             )
-            session = stripe.checkout.Session.create(
+            session = create_stripe_checkout_session(
+                stripe,
                 customer=customer.id,
                 api_key=stripe.api_key,
                 mode="subscription",
@@ -6881,7 +6883,8 @@ def _start_addon_checkout_session(customer_id: str, price_id: str, quantity: int
         None,
         flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     )
-    session = stripe.checkout.Session.create(
+    session = create_stripe_checkout_session(
+        stripe,
         api_key=stripe.api_key,
         customer=customer_id,
         success_url=success_url,

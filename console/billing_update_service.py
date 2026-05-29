@@ -15,6 +15,7 @@ from billing.checkout_metadata import (
     STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
     build_checkout_flow_metadata,
 )
+from billing.checkout_sessions import create_stripe_checkout_session
 from billing.services import BillingService
 from config.stripe_config import get_stripe_settings
 from constants.plans import PlanNamesChoices
@@ -531,7 +532,8 @@ def handle_console_billing_update(request: HttpRequest) -> tuple[dict[str, objec
                         },
                         flow_type=STRIPE_CHECKOUT_FLOW_TYPE_PURCHASE,
                     )
-                    session = stripe.checkout.Session.create(
+                    session = create_stripe_checkout_session(
+                        stripe,
                         customer=customer.id,
                         api_key=stripe.api_key,
                         mode="subscription",
