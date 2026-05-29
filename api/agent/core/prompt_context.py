@@ -4720,11 +4720,15 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
     global_env_vars = global_qs.filter(
         secret_type=GlobalSecret.SecretType.ENV_VAR,
     ).order_by('name')
+    global_integrations = global_qs.filter(
+        secret_type=GlobalSecret.SecretType.INTEGRATION,
+    ).order_by('name')
 
     has_any = (
         available_credentials or pending_credentials
         or available_env_vars or pending_env_vars
         or global_credentials or global_env_vars
+        or global_integrations
     )
     if not has_any:
         return "No secrets configured."
@@ -4740,6 +4744,13 @@ def _get_secrets_block(agent: PersistentAgent) -> str:
         if global_env_vars:
             lines.append("  Sandbox environment variable secrets (readable via os.environ):")
             lines.extend(_format_env_var_secrets(global_env_vars, is_pending=False))
+
+    if global_integrations:
+        if lines:
+            lines.append("")
+        lines.append("Native integrations available through tools:")
+        for secret in global_integrations:
+            lines.append(f"  - {secret.name}: use `http_request` against the provider API; authentication is applied automatically when supported.")
 
     # Agent-specific secrets (override globals on key conflict)
     if available_credentials:

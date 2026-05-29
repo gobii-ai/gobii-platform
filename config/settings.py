@@ -15,6 +15,8 @@ from django.core.exceptions import ImproperlyConfigured
 LOG_LEVEL = os.getenv("DJANGO_LOG_LEVEL", "INFO")
 
 GA_MEASUREMENT_ID = os.getenv("GA_MEASUREMENT_ID", "")  # e.g. G-2PCKFMF85B
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 ROOT_DIR = BASE_DIR.parent

@@ -4586,6 +4586,12 @@ class AgentEmailOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
     template_name = "console/agent_email_oauth_callback.html"
 
 
+class NativeIntegrationOAuthCallbackPageView(ConsoleViewMixin, TemplateView):
+    """Landing page shown after native integration OAuth redirects back to Gobii."""
+
+    template_name = "console/native_integration_oauth_callback.html"
+
+
 class SharedAgentAccessMixin(AgentOwnerContextOverrideMixin):
     allow_delinquent_personal_chat = False
 

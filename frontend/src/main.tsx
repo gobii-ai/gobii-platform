@@ -124,6 +124,7 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
+    const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
     const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
@@ -138,6 +139,7 @@ switch (appName) {
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
         pipedreamAppsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         oauthStartUrl={oauthStartUrl}

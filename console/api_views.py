@@ -735,8 +735,8 @@ def _resolve_managed_email_oauth_client(provider: str) -> tuple[str, str]:
     provider_key = provider.lower()
     if provider_key in GOOGLE_PROVIDER_KEYS:
         return (
-            os.getenv("GOOGLE_CLIENT_ID", ""),
-            os.getenv("GOOGLE_CLIENT_SECRET", ""),
+            settings.GOOGLE_CLIENT_ID,
+            settings.GOOGLE_CLIENT_SECRET,
         )
     if provider_key in MICROSOFT_PROVIDER_KEYS:
         return (

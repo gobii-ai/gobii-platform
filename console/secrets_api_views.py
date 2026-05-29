@@ -21,6 +21,10 @@ from console.context_helpers import build_console_context
 from util.analytics import Analytics, AnalyticsEvent, AnalyticsSource
 
 logger = logging.getLogger(__name__)
+VISIBLE_SECRET_TYPES = (
+    GlobalSecret.SecretType.CREDENTIAL,
+    GlobalSecret.SecretType.ENV_VAR,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -72,8 +76,12 @@ def _serialize_agent_secret(secret: PersistentAgentSecret) -> dict:
 
 def _global_secrets_queryset(owner_user, owner_org):
     if owner_org:
-        return GlobalSecret.objects.filter(organization=owner_org)
-    return GlobalSecret.objects.filter(user=owner_user, organization__isnull=True)
+        return GlobalSecret.objects.filter(organization=owner_org, secret_type__in=VISIBLE_SECRET_TYPES)
+    return GlobalSecret.objects.filter(
+        user=owner_user,
+        organization__isnull=True,
+        secret_type__in=VISIBLE_SECRET_TYPES,
+    )
 
 
 def _create_global_secret(payload: dict, owner_user, owner_org) -> GlobalSecret:
@@ -83,6 +91,8 @@ def _create_global_secret(payload: dict, owner_user, owner_org) -> GlobalSecret:
         raise ValidationError({"name": "Name is required."})
 
     secret_type = payload.get("secret_type", "credential")
+    if secret_type not in VISIBLE_SECRET_TYPES:
+        raise ValidationError({"secret_type": "Unsupported secret type."})
     domain = (payload.get("domain_pattern") or "").strip()
     description = (payload.get("description") or "").strip()
     value = payload.get("value") or ""
@@ -176,6 +186,8 @@ class GlobalSecretDetailAPIView(LoginRequiredMixin, View):
         if "domain_pattern" in payload:
             secret.domain_pattern = (payload["domain_pattern"] or "").strip()
         if "secret_type" in payload:
+            if payload["secret_type"] not in VISIBLE_SECRET_TYPES:
+                return JsonResponse({"errors": {"secret_type": ["Unsupported secret type."]}}, status=400)
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])
@@ -219,10 +231,20 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
         agent = self._get_agent(request, agent_id)
 
         # Agent-level secrets
-        agent_secrets = PersistentAgentSecret.objects.filter(agent=agent, requested=False).order_by("secret_type", "domain_pattern", "name")
-        requested_secrets = PersistentAgentSecret.objects.filter(agent=agent, requested=True).order_by("secret_type", "domain_pattern", "name")
+        agent_secrets = PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=False,
+            secret_type__in=VISIBLE_SECRET_TYPES,
+        ).order_by("secret_type", "domain_pattern", "name")
+        requested_secrets = PersistentAgentSecret.objects.filter(
+            agent=agent,
+            requested=True,
+            secret_type__in=VISIBLE_SECRET_TYPES,
+        ).order_by("secret_type", "domain_pattern", "name")
 
-        global_secrets = global_secrets_queryset_for_agent(agent).order_by("secret_type", "domain_pattern", "name")
+        global_secrets = global_secrets_queryset_for_agent(agent).filter(
+            secret_type__in=VISIBLE_SECRET_TYPES,
+        ).order_by("secret_type", "domain_pattern", "name")
 
         return JsonResponse({
             "agent_secrets": [_serialize_agent_secret(s) for s in agent_secrets],
@@ -259,6 +281,8 @@ class AgentSecretListAPIView(LoginRequiredMixin, View):
             return JsonResponse({"errors": {"name": ["Name is required."]}}, status=400)
 
         secret_type = payload.get("secret_type", "credential")
+        if secret_type not in VISIBLE_SECRET_TYPES:
+            return JsonResponse({"errors": {"secret_type": ["Unsupported secret type."]}}, status=400)
         domain = (payload.get("domain_pattern") or "").strip()
         description = (payload.get("description") or "").strip()
         value = payload.get("value") or ""
@@ -304,7 +328,11 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
     def _get_agent_and_secret(self, request, agent_id, secret_id):
         agent = resolve_manageable_agent_for_request(request, str(agent_id))
         try:
-            secret = PersistentAgentSecret.objects.get(pk=secret_id, agent=agent)
+            secret = PersistentAgentSecret.objects.get(
+                pk=secret_id,
+                agent=agent,
+                secret_type__in=VISIBLE_SECRET_TYPES,
+            )
         except PersistentAgentSecret.DoesNotExist:
             return agent, None
         return agent, secret

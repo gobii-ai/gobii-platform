@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="min-h-screen bg-slate-950 flex items-center justify-center px-4 py-8">
+  <div class="max-w-lg w-full rounded-xl border border-slate-200/20 bg-slate-900 p-6 space-y-4">
+    <div class="flex items-center gap-3">
+      <div class="rounded-full border border-sky-300/25 bg-sky-950/45 p-2 text-sky-100">
+        <i data-lucide="plug" class="h-5 w-5"></i>
+      </div>
+      <div>
+        <h1 class="text-lg font-semibold text-slate-50">Finishing Connection</h1>
+        <p class="text-sm text-slate-300">Please wait while we securely store your integration.</p>
+      </div>
+    </div>
+    <p id="native-oauth-status" class="text-sm text-slate-200">Completing authorization...</p>
+    <pre id="native-oauth-error" class="hidden rounded-lg border border-rose-300/25 bg-rose-950/30 px-3 py-2 text-xs text-rose-100 whitespace-pre-wrap"></pre>
+    <div class="text-xs text-slate-400">
+      You can close this tab once the connection succeeds. We'll redirect automatically in a moment.
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{{ block.super }}
+<script src="https://unpkg.com/lucide@latest"></script>
+<script>
+  document.addEventListener('DOMContentLoaded', () => {
+    if (window.lucide) {
+      window.lucide.createIcons({ nameAttr: 'data-lucide' });
+    }
+  });
+</script>
+<script type="module" src="{% static 'js/native_integration_oauth_callback.js' %}"></script>
+{% endblock %}
