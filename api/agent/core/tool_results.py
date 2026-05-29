@@ -135,10 +135,14 @@ def prepare_tool_results_for_prompt(
     *,
     recency_positions: Dict[str, int],
     fresh_tool_call_step_id: Optional[str] = None,
+    fresh_tool_call_step_ids: Optional[Set[str]] = None,
 ) -> Dict[str, ToolResultPromptInfo]:
     prompt_info: Dict[str, ToolResultPromptInfo] = {}
     rows: List[Tuple] = []
     csv_candidates: List[Tuple[str, str, ResultAnalysis]] = []
+    fresh_step_ids = set(fresh_tool_call_step_ids or ())
+    if fresh_tool_call_step_id:
+        fresh_step_ids.add(fresh_tool_call_step_id)
     short_id_map = _build_short_result_id_map(
         [
             record.step_id
@@ -167,9 +171,7 @@ def prepare_tool_results_for_prompt(
         is_analysis_eligible = record.tool_name.startswith(SCHEMA_ELIGIBLE_TOOL_PREFIXES)
 
         recency_position = recency_positions.get(record.step_id)
-        is_fresh_tool_call = bool(
-            fresh_tool_call_step_id and record.step_id == fresh_tool_call_step_id
-        )
+        is_fresh_tool_call = record.step_id in fresh_step_ids
 
         # Extract context hint for lightning-fast agent decisions
         # This is optimistic - if extraction fails, we just skip it
@@ -717,15 +719,15 @@ def _build_prompt_preview(
     tiers = PREVIEW_TIERS_SQLITE if is_sqlite else PREVIEW_TIERS_EXTERNAL
     tier_count = len(tiers)
 
-    # No position means meta only (old result beyond tier range)
-    if recency_position is None or recency_position >= tier_count:
-        return None, False
-
     # For fresh tool calls under ~10K tokens, return full result inline
     # wrapped as a "pre-executed" SQLite query result to prime the agent's
     # mental model that inspection is already done
     if is_fresh_tool_call and full_bytes <= FRESH_RESULT_INLINE_THRESHOLD:
         return _wrap_as_sqlite_result(result_text, full_bytes), True
+
+    # No position means meta only (old result beyond tier range)
+    if recency_position is None or recency_position >= tier_count:
+        return None, False
 
     max_bytes = tiers[recency_position]
 
