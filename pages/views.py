@@ -1170,6 +1170,7 @@ class HomePage(TemplateView):
             {
                 "homepage_integrations_enabled": integrations_enabled,
                 "homepage_integrations_inline_builtins": inline_builtin_integrations,
+                "homepage_integrations_initial_selected_app_slugs": initial_selected_pipedream_app_slugs,
                 "homepage_integrations_modal_props": {
                     "builtins": builtin_integrations,
                     "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),

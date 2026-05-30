@@ -21,6 +21,7 @@ export type HomepageIntegrationsModalProps = {
   initialSelectedAppSlugs: string[]
   searchUrl: string
   selectedFieldsContainerId: string
+  initialOpen?: boolean
 }
 
 function fallbackAppForSlug(slug: string): PipedreamAppSummary {
@@ -38,8 +39,9 @@ export function HomepageIntegrationsModal({
   initialSelectedAppSlugs,
   searchUrl,
   selectedFieldsContainerId,
+  initialOpen = false,
 }: HomepageIntegrationsModalProps) {
-  const [open, setOpen] = useState(Boolean(initialSearchTerm))
+  const [open, setOpen] = useState(Boolean(initialOpen || initialSearchTerm))
   const [isMobile, setIsMobile] = useState(false)
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm)
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(initialSearchTerm.trim())
@@ -71,10 +73,12 @@ export function HomepageIntegrationsModal({
       return
     }
     const openModal = () => setOpen(true)
+    document.addEventListener('homepage-integrations:open', openModal)
     openButtons.forEach((button) => {
       button.addEventListener('click', openModal)
     })
     return () => {
+      document.removeEventListener('homepage-integrations:open', openModal)
       openButtons.forEach((button) => {
         button.removeEventListener('click', openModal)
       })

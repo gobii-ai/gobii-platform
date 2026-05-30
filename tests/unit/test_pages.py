@@ -987,6 +987,10 @@ class HomePageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
+            response.context.get("homepage_integrations_initial_selected_app_slugs"),
+            ["slack", "trello"],
+        )
+        self.assertEqual(
             response.context.get("homepage_integrations_modal_props"),
             {
                 "builtins": [],
@@ -996,6 +1000,11 @@ class HomePageTests(TestCase):
                 "selectedFieldsContainerId": "homepage-integrations-selected-fields",
             },
         )
+        soup = BeautifulSoup(response.content, "html.parser")
+        selected_fields = soup.select(
+            '#homepage-integrations-selected-fields input[name="selected_pipedream_app_slugs"]'
+        )
+        self.assertEqual([field["value"] for field in selected_fields], ["slack", "trello"])
 
     @patch(
         "pages.views.get_owner_selected_app_slugs",
