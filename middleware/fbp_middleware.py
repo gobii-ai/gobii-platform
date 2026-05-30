@@ -1,7 +1,16 @@
 import random, time
 from django.conf import settings
 
-FBP_EXCLUDED_PATHS = frozenset({"/manifest.json"})
+FBP_EXCLUDED_PATHS = frozenset(
+    {
+        "/install.sh",
+        "/llms-full.txt",
+        "/llms.txt",
+        "/manifest.json",
+        "/robots.txt",
+        "/sitemap.xml",
+    }
+)
 
 
 def _should_skip_fbp(request):
