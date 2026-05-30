@@ -2066,7 +2066,11 @@ class WebManifestView(View):
             fish_collateral_enabled=is_fish_collateral_enabled(),
         )
         response = JsonResponse(payload, content_type="application/manifest+json")
-        response["Cache-Control"] = "no-store, max-age=0"
+        response["Cache-Control"] = "public, max-age=3600"
+        session = getattr(request, "session", None)
+        if session is not None and not session.modified:
+            # The manifest is global metadata; avoid session middleware adding Vary: Cookie.
+            session.accessed = False
         return response
 
 
