@@ -22,8 +22,8 @@ if (mountNode) {
       return ''
     }
     try {
-      const props = JSON.parse(script.textContent) as { initialSearchTerm?: unknown }
-      return typeof props.initialSearchTerm === 'string' ? props.initialSearchTerm.trim() : ''
+      const props = JSON.parse(script.textContent) as Record<string, unknown> | null
+      return props && typeof props.initialSearchTerm === 'string' ? props.initialSearchTerm.trim() : ''
     } catch (error) {
       console.error('Failed to parse homepage integrations props.', error)
       return ''
