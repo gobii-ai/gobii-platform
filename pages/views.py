@@ -13,6 +13,8 @@ from django.core import signing
 from django.core.mail import send_mail
 from django.contrib import messages
 from django.utils.decorators import method_decorator
+from django.middleware.csrf import get_token
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.views.decorators.vary import vary_on_cookie
 from django.shortcuts import redirect, resolve_url
 from django.http import HttpResponseRedirect
@@ -1388,6 +1390,16 @@ class HomeAgentSpawnView(TemplateView):
         homepage_view = HomePage()
         homepage_view.request = self.request
         return homepage_view.get_context_data(**kwargs)
+
+
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class HomepageCsrfTokenView(View):
+    http_method_names = ["get"]
+
+    def get(self, request, *args, **kwargs):
+        response = JsonResponse({"csrfToken": get_token(request)})
+        response["Cache-Control"] = "no-store, max-age=0"
+        return response
 
 
 class HomepageIntegrationsSearchView(View):

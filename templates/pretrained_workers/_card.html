@@ -47,8 +47,8 @@
       {% endif %}
     </dl>
     <div class="mt-auto pt-6 flex flex-col gap-3">
-      <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents">
-        {% csrf_token %}
+      <form method="post" action="{% url 'pages:pretrained_worker_hire' worker.code %}" class="contents"{% if lazy_csrf %} data-lazy-csrf{% endif %}>
+        {% if not lazy_csrf %}{% csrf_token %}{% endif %}
         <input type="hidden" name="source_page" value="home_pretrained_workers" />
         <input type="hidden" name="trial_onboarding" value="1" />
         <input type="hidden" name="trial_onboarding_target" value="agent_ui" />

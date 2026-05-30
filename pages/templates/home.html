@@ -391,8 +391,7 @@
       <!-- Agent Spawn Form -->
       {% if not user.is_authenticated or account.usage.agents_unlimited is True or account.usage.agents_available > 0 %}
       <div class="max-w-4xl mx-auto relative z-20">
-          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form data-analytics-cta-id="home_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
-            {% csrf_token %}
+          <form method="post" name="create-agent-form" id="create-agent-form" action="{% url 'pages:home_agent_spawn' %}" data-authenticated="{{ user.is_authenticated|yesno:'true,false' }}" data-requires-trial="{{ home_spawn_requires_trial|yesno:'true,false' }}" data-immersive-form data-lazy-csrf data-analytics-cta-id="home_hero" data-analytics-placement="hero" data-analytics-intent="spawn_agent">
             <input type="hidden" name="return_to" id="agent-return-to" value="">
             <input type="hidden" name="embed" id="agent-embed" value="{% if user.is_authenticated %}1{% else %}0{% endif %}">
             <input type="hidden" name="source_page" value="home_hero">
@@ -1409,7 +1408,7 @@
       {% if homepage_pretrained_workers %}
         <div class="mt-12 grid gap-8 md:grid-cols-2 xl:grid-cols-3">
           {% for worker in homepage_pretrained_workers %}
-            {% include "pretrained_workers/_card.html" with worker=worker %}
+            {% include "pretrained_workers/_card.html" with worker=worker lazy_csrf=True %}
           {% endfor %}
         </div>
       {% else %}
@@ -1472,6 +1471,88 @@
     </script>
 
     {% include "partials/_immersive_overlay.html" %}
+
+    <script>
+      (function () {
+        const csrfTokenUrl = "{% url 'pages:homepage_csrf_token' %}";
+        const csrfFieldName = "csrfmiddlewaretoken";
+        let csrfRequest = null;
+
+        function readCsrfToken() {
+          if (typeof window.getCsrfTokenValue === 'function') {
+            return window.getCsrfTokenValue() || '';
+          }
+          return '';
+        }
+
+        function setFormCsrfToken(form, token) {
+          if (!token) return;
+          let input = form.querySelector(`input[name="${csrfFieldName}"]`);
+          if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = csrfFieldName;
+            form.prepend(input);
+          }
+          input.value = token;
+        }
+
+        async function fetchCsrfToken() {
+          const existingToken = readCsrfToken();
+          if (existingToken) {
+            return existingToken;
+          }
+          if (!csrfRequest) {
+            csrfRequest = fetch(csrfTokenUrl, {
+              credentials: 'same-origin',
+              headers: { 'Accept': 'application/json' },
+            })
+              .then(async (response) => {
+                if (!response.ok) {
+                  throw new Error('CSRF token request failed');
+                }
+                const payload = await response.json();
+                return payload.csrfToken || readCsrfToken();
+              })
+              .finally(() => {
+                csrfRequest = null;
+              });
+          }
+          return csrfRequest;
+        }
+
+        document.addEventListener('submit', function (event) {
+          const form = event.target;
+          if (!(form instanceof HTMLFormElement) || !form.hasAttribute('data-lazy-csrf')) {
+            return;
+          }
+          const existingInput = form.querySelector(`input[name="${csrfFieldName}"]`);
+          if (existingInput && existingInput.value) {
+            return;
+          }
+          const cookieToken = readCsrfToken();
+          if (cookieToken) {
+            setFormCsrfToken(form, cookieToken);
+            return;
+          }
+
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          fetchCsrfToken()
+            .then((token) => {
+              setFormCsrfToken(form, token);
+              if (typeof form.requestSubmit === 'function') {
+                form.requestSubmit();
+              } else {
+                form.submit();
+              }
+            })
+            .catch(() => {
+              form.submit();
+            });
+        }, true);
+      })();
+    </script>
 
     <script>
       document.addEventListener('DOMContentLoaded', function () {
