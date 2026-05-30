@@ -930,6 +930,85 @@ class ImpliedSendTests(TestCase):
         self.assertFalse(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, True)
 
+    def test_terminal_planning_answer_skips_stale_planning_mode(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        final_chat = ep._ToolExecutionOutcome(
+            prepared=ep._PreparedToolExecution(
+                idx=1,
+                tool_name="send_chat_message",
+                tool_params={
+                    "body": (
+                        "MikroTik has several new networking products worth watching.\n\n"
+                        "Sources:\n"
+                        "- https://example.test/mikrotik\n"
+                    ),
+                    "will_continue_work": False,
+                },
+                exec_params={},
+                pending_step=None,
+                credits_consumed=None,
+                consumed_credit=None,
+                call_id="call_chat",
+                explicit_continue=False,
+                inferred_continue=False,
+                parallel_safe=False,
+                parallel_ineligible_reason=None,
+            ),
+            result={
+                "status": "ok",
+                "message": "Web chat message sent.",
+                "auto_sleep_ok": True,
+            },
+            duration_ms=1,
+            updated_tools=None,
+            variable_map={},
+        )
+        finalized = ep._finalize_tool_batch(
+            self.agent,
+            [final_chat],
+            attach_completion=lambda step_kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertTrue(
+            ep._should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=finalized.followup_required,
+            )
+        )
+        with patch("console.agent_chat.signals.emit_agent_planning_state_update") as mock_emit:
+            self.assertTrue(ep._skip_stale_planning_mode_after_terminal_delivery(self.agent))
+
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.SKIPPED)
+        mock_emit.assert_called_once()
+
+    def test_terminal_planning_answer_waits_when_followup_required(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state", "updated_at"])
+        finalized = ep._FinalizedToolBatch(
+            executed_calls=1,
+            followup_required=False,
+            message_delivery_ok=True,
+            last_explicit_continue=False,
+            inferred_message_continue_this_iteration=False,
+            executed_non_message_action=False,
+            terminal_message_delivery_ok=True,
+        )
+
+        self.assertFalse(
+            ep._should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=True,
+            )
+        )
+        self.agent.refresh_from_db()
+        self.assertEqual(self.agent.planning_state, PersistentAgent.PlanningState.PLANNING)
+
     def test_prepare_tool_batch_skips_one_off_config_churn_before_terminal_message(self):
         self._add_inbound_web_message("What's the latest Bitcoin price right now?")
 

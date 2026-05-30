@@ -1795,6 +1795,56 @@ class _FinalizedToolBatch:
     human_input_request_ok: bool = False
 
 
+def _should_skip_stale_planning_mode_after_terminal_delivery(
+    agent: PersistentAgent,
+    finalized_batch: _FinalizedToolBatch,
+    *,
+    followup_required: bool,
+) -> bool:
+    return (
+        agent.planning_state == PersistentAgent.PlanningState.PLANNING
+        and not followup_required
+        and finalized_batch.terminal_message_delivery_ok
+        and not finalized_batch.human_input_request_ok
+    )
+
+
+def _skip_stale_planning_mode_after_terminal_delivery(agent: PersistentAgent) -> bool:
+    """Clear Planning Mode after a terminal answer slipped through without end_planning.
+
+    This preserves the existing charter instead of guessing a full plan from the answer body.
+    """
+    from api.services.agent_planning import skip_agent_planning
+    from console.agent_chat.signals import emit_agent_planning_state_update
+
+    try:
+        updated_agent, cancelled_count = skip_agent_planning(agent)
+    except (DatabaseError, PersistentAgent.DoesNotExist):
+        logger.exception(
+            "Agent %s: failed to clear stale Planning Mode after terminal message delivery.",
+            getattr(agent, "id", None),
+        )
+        return False
+
+    if updated_agent.planning_state == PersistentAgent.PlanningState.PLANNING:
+        logger.warning(
+            "Agent %s: terminal message delivered but Planning Mode remains active.",
+            updated_agent.id,
+        )
+        return False
+
+    if updated_agent.planning_state == PersistentAgent.PlanningState.SKIPPED:
+        emit_agent_planning_state_update(
+            updated_agent,
+            include_pending_actions=cancelled_count > 0,
+        )
+        logger.warning(
+            "Agent %s: cleared stale Planning Mode after terminal message delivery.",
+            updated_agent.id,
+        )
+    return True
+
+
 def _latest_inbound_message_needs_reply(agent: PersistentAgent) -> bool:
     latest_inbound = (
         PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=False)
@@ -6333,6 +6383,14 @@ def _run_agent_loop(
                     inferred_message_continue_streak += 1
                 else:
                     inferred_message_continue_streak = 0
+
+                if _should_skip_stale_planning_mode_after_terminal_delivery(
+                    agent,
+                    finalized_batch,
+                    followup_required=followup_required,
+                ):
+                    if not _skip_stale_planning_mode_after_terminal_delivery(agent):
+                        followup_required = True
 
                 if all_calls_sleep:
                     logger.info("Agent %s is sleeping.", agent.id)
