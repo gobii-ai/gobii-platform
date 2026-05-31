@@ -1406,6 +1406,14 @@ class CanonicalLinkTests(TestCase):
 
 @tag("batch_pages")
 class SitemapTests(TestCase):
+    def test_sitemap_omits_google_ignored_changefreq_and_priority(self):
+        response = self.client.get("/sitemap.xml")
+
+        self.assertEqual(response.status_code, 200)
+        content = response.content.decode()
+        self.assertNotIn("<changefreq>", content)
+        self.assertNotIn("<priority>", content)
+
     def test_pretrained_worker_detail_urls_included(self):
         response = self.client.get("/sitemap.xml")
         self.assertEqual(response.status_code, 200)

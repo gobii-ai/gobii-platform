@@ -2983,9 +2983,6 @@ class PricingView(TemplateView):
     pass
 
 class StaticViewSitemap(sitemaps.Sitemap):
-    priority = 0.5
-    changefreq = 'weekly'
-
     def items(self):
         # List of all static view names that should be included in the sitemap
         items = [
@@ -3014,9 +3011,6 @@ class StaticViewSitemap(sitemaps.Sitemap):
 
 
 class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
-    changefreq = "weekly"
-    priority = 0.6
-
     def items(self):
         try:
             return list(PretrainedWorkerTemplateService.get_active_templates())
@@ -3032,9 +3026,6 @@ class PretrainedWorkerTemplateSitemap(sitemaps.Sitemap):
 
 
 class PublicTemplateSitemap(sitemaps.Sitemap):
-    changefreq = "weekly"
-    priority = 0.7
-
     def items(self):
         return (
             PersistentAgentTemplate.objects.select_related("public_profile")
@@ -3050,9 +3041,6 @@ class PublicTemplateSitemap(sitemaps.Sitemap):
 
 
 class PublicTemplateCategorySitemap(sitemaps.Sitemap):
-    changefreq = "weekly"
-    priority = 0.65
-
     def items(self):
         category_values = (
             PersistentAgentTemplate.objects.filter(
@@ -3075,9 +3063,6 @@ class PublicTemplateCategorySitemap(sitemaps.Sitemap):
 
 
 class SolutionsSitemap(sitemaps.Sitemap):
-    changefreq = "monthly"
-    priority = 0.5
-
     def items(self):
         try:
             return list(SolutionView.DEDICATED_TEMPLATES.keys())

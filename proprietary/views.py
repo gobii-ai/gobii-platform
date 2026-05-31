@@ -874,9 +874,6 @@ class BlogPostView(ProprietaryModeRequiredMixin, TemplateView):
         return context
 
 class BlogSitemap(sitemaps.Sitemap):
-    priority = 0.6
-    changefreq = 'weekly'
-
     def items(self):
         return get_all_blog_posts()
 
