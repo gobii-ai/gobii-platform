@@ -12,7 +12,7 @@
     <h1 class="text-4xl font-semibold mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h1>
     <p class="text-lg leading-relaxed mb-4">
       <a href="{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}" aria-label="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}"
-         title="Gobii Homepage">Gobii</a> envisions a future where intelligent agents collaborate seamlessly
+         title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage">Gobii</a> envisions a future where intelligent agents collaborate seamlessly
       with humans to automate the countless web-based tasks that slow us down today. From gathering research to filling
       forms to orchestrating multi-step workflows, our cloud-hosted browser agents combine modern large-language models with
       resilient browser automation to act exactly where the APIs stop.
