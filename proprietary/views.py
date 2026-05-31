@@ -723,7 +723,7 @@ class BlogIndexView(ProprietaryModeRequiredMixin, TemplateView):
         posts = get_all_blog_posts()
         context["posts"] = posts
 
-        seo_title = "Gobii Blog"
+        seo_title = "AI Agent Automation Blog"
         seo_description = (
             "Updates from the Gobii team on pretrained workers, automation strategies, and product releases."
         )

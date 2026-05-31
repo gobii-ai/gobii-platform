@@ -4499,8 +4499,33 @@ class LoginTurnstilePageTests(TestCase):
         self.assertContains(response, "cf-turnstile")
         self.assertContains(response, "turnstile/v0/api.js?render=explicit")
         self.assertEqual(response.content.decode("utf-8").count("turnstile/v0/api.js"), 1)
+
+
 @tag("batch_pages")
 class MarketingMetaTests(TestCase):
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("proprietary.views.get_stripe_settings")
+    def test_utility_page_titles_are_intent_specific(self, mock_get_stripe_settings):
+        mock_get_stripe_settings.return_value = SimpleNamespace(
+            startup_trial_days=7,
+            scale_trial_days=14,
+        )
+        cases = [
+            (reverse("proprietary:pricing"), "Gobii Pricing | AI Agent Plans"),
+            (reverse("proprietary:blog_index"), "AI Agent Automation Blog | Gobii"),
+            ("/about/", "About Gobii | AI Agents for Real Work"),
+            ("/team/", "Gobii Team | Building AI Agents"),
+            ("/careers/", "Careers at Gobii | Build AI Agents"),
+        ]
+
+        for path, expected_title in cases:
+            with self.subTest(path=path):
+                response = self.client.get(path)
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                self.assertEqual(soup.title.get_text(strip=True), expected_title)
+
     def test_terms_meta_description(self):
         response = self.client.get("/tos/")
         self.assertContains(
