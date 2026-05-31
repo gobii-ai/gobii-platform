@@ -100,6 +100,39 @@ class HomePageTests(TestCase):
         self.assertEqual(len(main_landmarks), 1)
         self.assertEqual(main_landmarks[0].get("id"), "main-content")
 
+    def test_home_page_charter_textarea_has_hidden_accessible_label(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        textarea = soup.find("textarea", {"name": "charter"})
+        self.assertIsNotNone(textarea)
+        label = soup.find("label", {"for": textarea.get("id")})
+        self.assertIsNotNone(label)
+        self.assertIn("sr-only", label.get("class", []))
+        self.assertEqual(label.get_text(strip=True), "Describe what you want your Gobii to do")
+
+    def test_home_page_form_controls_have_accessible_names(self):
+        response = self.client.get("/")
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content.decode("utf-8"), "html.parser")
+        ignored_input_types = {"hidden", "submit", "button", "image", "reset"}
+        controls = [
+            control
+            for control in soup.find_all(["input", "textarea", "select"])
+            if (control.get("type") or "").lower() not in ignored_input_types
+        ]
+
+        self.assertGreater(len(controls), 0)
+        for control in controls:
+            control_id = control.get("id")
+            has_label = bool(control_id and soup.find("label", {"for": control_id}))
+            has_wrapping_label = control.find_parent("label") is not None
+            has_aria_name = bool(control.get("aria-label") or control.get("aria-labelledby"))
+            with self.subTest(control=control.get("name") or control_id):
+                self.assertTrue(has_label or has_wrapping_label or has_aria_name)
+
     def test_home_page_defers_csrf_token_for_passive_get(self):
         response = self.client.get("/")
 

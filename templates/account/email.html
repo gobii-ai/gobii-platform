@@ -88,7 +88,8 @@
       <form method="post" action="{% url 'account_email' %}" class="space-y-4">
         {% csrf_token %}
         <div class="flex flex-wrap gap-2">
-          <select name="email" class="flex-1 min-w-0 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
+          <label for="account-email-action-address" class="sr-only">{% trans "Email address" %}</label>
+          <select id="account-email-action-address" name="email" class="flex-1 min-w-0 text-sm border-gray-300 rounded-lg focus:border-blue-500 focus:ring-blue-500">
             {% for emailaddress in emailaddresses %}
               <option value="{{ emailaddress.email }}" {% if emailaddress.primary %}selected{% endif %}>
                 {{ emailaddress.email }}
