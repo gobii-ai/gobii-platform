@@ -86,14 +86,52 @@ def _drive_files_result(files: list[dict[str, str]]) -> dict[str, Any]:
 
 def _drive_spreadsheet_rule(files: list[dict[str, str]], *extra_url_terms: str) -> dict[str, Any]:
     return {
-        "url_contains": (
-            "www.googleapis.com/drive/v3/files",
+        "url_contains": "www.googleapis.com/drive/v3/files",
+        "url_decoded_contains": (
             "mimetype",
+            "application/vnd.google-apps.spreadsheet",
             "trashed",
             "false",
             *extra_url_terms,
         ),
         "result": _drive_files_result(files),
+    }
+
+
+def _generic_tracker_metadata_rule() -> dict[str, Any]:
+    return {
+        "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
+            {
+                "spreadsheetId": GENERIC_TRACKER_ID,
+                "properties": {"title": "Ops Tracker"},
+                "sheets": [
+                    {"properties": {"title": "Leads"}},
+                    {"properties": {"title": "Tasks"}},
+                    {"properties": {"title": "Archive"}},
+                ],
+            },
+        ),
+    }
+
+
+def _generic_tracker_leads_values_rule() -> dict[str, Any]:
+    return {
+        "url_contains": (
+            f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values",
+            "leads",
+        ),
+        "result": _http_result(
+            f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}/values/Leads!A1:Z",
+            {
+                "range": "Leads!A1:Z",
+                "values": [
+                    ["Company", "Owner", "Priority"],
+                    ["Existing Co", "Mina", "Medium"],
+                ],
+            },
+        ),
     }
 
 
@@ -165,21 +203,7 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         prompt="For Google spreadsheet sheet-123, list the worksheet tabs.",
         http_rules=(
             _drive_spreadsheet_rule([GENERIC_TRACKER_FILE]),
-            {
-                "url_contains": f"sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
-                "result": _http_result(
-                    f"https://sheets.googleapis.com/v4/spreadsheets/{GENERIC_TRACKER_ID}",
-                    {
-                        "spreadsheetId": GENERIC_TRACKER_ID,
-                        "properties": {"title": "Ops Tracker"},
-                        "sheets": [
-                            {"properties": {"title": "Leads"}},
-                            {"properties": {"title": "Tasks"}},
-                            {"properties": {"title": "Archive"}},
-                        ],
-                    },
-                ),
-            },
+            _generic_tracker_metadata_rule(),
         ),
         expected_http_requests=(
             HttpRequestExpectation(
@@ -247,6 +271,8 @@ GOOGLE_SHEETS_NATIVE_CASES = (
                     },
                 ),
             },
+            _generic_tracker_leads_values_rule(),
+            _generic_tracker_metadata_rule(),
         ),
         expected_http_requests=(
             HttpRequestExpectation(

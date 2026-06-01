@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from django.test import SimpleTestCase, tag
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.agent.core.event_processing import _eval_mock_rule_matches
 from api.evals.registry import ScenarioRegistry
 from api.evals.scenarios.google_sheets_native import (
     FORBIDDEN_DISCOVERY_TOOL_NAMES,
@@ -15,6 +16,7 @@ from api.evals.scenarios.google_sheets_native import (
     HttpRequestExpectation,
     _call_has_partial_drive_query,
     _call_matches_expectation,
+    _drive_spreadsheet_rule,
 )
 from api.evals.suites import SuiteRegistry
 
@@ -79,6 +81,32 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
         self.assertEqual(len(known_id_cases), 3)
         for case in known_id_cases.values():
             self.assertNotIn(("www.googleapis.com/drive/v3/files",), case.forbidden_url_terms)
+
+    def test_append_case_mocks_harmless_sheets_preflight(self):
+        append_case = next(case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_APPEND_ROW)
+        rule_terms = [rule["url_contains"] for rule in append_case.mock_config()["http_request"]["rules"]]
+
+        self.assertIn("sheets.googleapis.com/v4/spreadsheets/sheet-123", rule_terms)
+        self.assertIn(
+            ("sheets.googleapis.com/v4/spreadsheets/sheet-123/values", "leads"),
+            rule_terms,
+        )
+
+    def test_drive_mock_requires_exact_spreadsheet_mime_type(self):
+        rule = _drive_spreadsheet_rule([])
+        good_query = (
+            "https://www.googleapis.com/drive/v3/files?"
+            "q=mimeType%20%3D%20%27application%2Fvnd.google-apps.spreadsheet%27"
+            "%20and%20trashed%20%3D%20false"
+        )
+        bad_query = (
+            "https://www.googleapis.com/drive/v3/files?"
+            "q=mimeType%20%3D%20%27application%2Fvnd%2Fgoogle-apps%2Espreadsheet%27"
+            "%20and%20trashed%20%3D%20false"
+        )
+
+        self.assertTrue(_eval_mock_rule_matches(rule, {"url": good_query}))
+        self.assertFalse(_eval_mock_rule_matches(rule, {"url": bad_query}))
 
     def test_expected_http_request_requires_completed_tool_call(self):
         expectation = HttpRequestExpectation(
