@@ -43,6 +43,7 @@ class NativeIntegrationProvider:
     token_endpoint: str
     scopes: tuple[str, ...]
     api_hosts: tuple[str, ...]
+    api_url_prefixes: tuple[str, ...]
     icon: str
     authorization_params: dict[str, str]
 
@@ -63,7 +64,8 @@ GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
     authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
     token_endpoint="https://oauth2.googleapis.com/token",
     scopes=("https://www.googleapis.com/auth/drive.file",),
-    api_hosts=("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com", "www.googleapis.com"),
+    api_hosts=("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com"),
+    api_url_prefixes=("https://www.googleapis.com/drive/",),
     icon="google_drive",
     authorization_params={
         "access_type": "offline",
@@ -209,6 +211,7 @@ def build_oauth_credentials_bundle(
         "expires_at": expires_at,
         "metadata": {
             "api_hosts": list(provider.api_hosts),
+            "api_url_prefixes": list(provider.api_url_prefixes),
             "scopes": list(provider.scopes),
             "last_token_response": {
                 key: value
@@ -227,6 +230,12 @@ def provider_matches_url(provider: NativeIntegrationProvider, url: str) -> bool:
     host = (parsed.hostname or "").lower()
     if not host:
         return False
+    normalized_path = parsed.path or "/"
+    normalized_url = f"{parsed.scheme.lower()}://{host}{normalized_path}"
+    for allowed_prefix in provider.api_url_prefixes:
+        normalized_prefix = allowed_prefix.lower()
+        if normalized_url == normalized_prefix.rstrip("/") or normalized_url.startswith(normalized_prefix):
+            return True
     for allowed_host in provider.api_hosts:
         normalized_allowed = allowed_host.lower()
         if host == normalized_allowed or host.endswith(f".{normalized_allowed}"):

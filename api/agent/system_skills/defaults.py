@@ -72,17 +72,21 @@ def _app_integrations_url() -> str:
 def _google_sheets_native_prompt_instructions(agent) -> str:
     integrations_url = _app_integrations_url()
     return (
-        "Use `http_request` for Google Sheets API calls. Native Google Drive OAuth is applied automatically for "
-        "`https://sheets.googleapis.com/` requests when the owner has connected Google Drive.\n"
-        "Use the Drive API discovery call below to list spreadsheets the native integration can access before "
-        "assuming a spreadsheet ID. The native integration uses Google `drive.file`, so missing spreadsheets may "
-        "need to be selected in Google Picker first.\n"
+        "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
+        "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
+        "List accessible spreadsheets before assuming a spreadsheet ID. This integration uses Google `drive.file`, "
+        "so missing spreadsheets may need to be selected in Google Picker first.\n"
+        "When the user asks to find or search for one of their sheets by name, use Drive file discovery over "
+        "connected files. Do not use web search or public `docs.google.com` results to choose a private sheet.\n"
         "If setup is needed, tell the user to open `" + integrations_url + "`, connect Google Drive, "
         "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        "Drive `q` filters must be complete and URL-encoded; never call partial URLs like `?q=mimeType%3D` "
+        "or `?q=name%20contains%20`.\n"
         "Common calls:\n"
-        "- List accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files?"
-        "q=mimeType%3D'application%2Fvnd.google-apps.spreadsheet'%20and%20trashed%3Dfalse"
-        "&fields=files(id%2Cname%2CmimeType%2CwebViewLink)&pageSize=100\n"
+        "- Search/list accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files with "
+        "fields=files(id,name,mimeType,webViewLink), pageSize=100, and a complete `q` filter such as "
+        "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false; add name contains 'text' "
+        "when searching by title.\n"
         "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
         "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
         "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
@@ -230,6 +234,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
     use_when=(
         "the user asks to read a Google Sheet",
         "the user asks to update, append, or write spreadsheet rows",
+        "the user asks to find or search for one of their Google Sheets by name",
         "the user asks to inspect worksheets, tabs, ranges, cells, or formulas in Google Sheets",
         "the work references a spreadsheet selected through the native Google Drive integration",
     ),
@@ -239,6 +244,8 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "spreadsheet",
         "worksheet",
         "google sheet",
+        "find my spreadsheet",
+        "search my sheets",
         "sheets api",
         "drive file spreadsheet",
     ),

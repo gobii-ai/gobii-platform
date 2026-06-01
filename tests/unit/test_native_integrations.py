@@ -134,8 +134,9 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(provider.auth_type, "oauth2")
         self.assertEqual(
             provider.api_hosts,
-            ("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com", "www.googleapis.com"),
+            ("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com"),
         )
+        self.assertEqual(provider.api_url_prefixes, ("https://www.googleapis.com/drive/",))
         self.assertEqual(provider.scopes, ("https://www.googleapis.com/auth/drive.file",))
 
     def test_provider_registry_accepts_google_sheets_alias(self):
@@ -191,6 +192,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(payload["provider_key"], "google_drive")
         self.assertIn("https://accounts.google.com/o/oauth2/v2/auth", payload["authorization_url"])
         self.assertIn("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file", payload["authorization_url"])
+        self.assertIn("redirect_uri=http%3A%2F%2Ftestserver%2Fintegrations%2Foauth%2Fcallback%2F", payload["authorization_url"])
         self.assertIn("state=", payload["authorization_url"])
 
     @override_settings(GOOGLE_DRIVE_CLIENT_ID="", GOOGLE_DRIVE_CLIENT_SECRET="")
@@ -270,6 +272,10 @@ class NativeIntegrationTests(TestCase):
         stored = json.loads(secret.get_value())
         self.assertEqual(stored["access_token"], "new-access-token")
         self.assertEqual(stored["refresh_token"], "new-refresh-token")
+        self.assertEqual(
+            mock_post.call_args.kwargs["data"]["redirect_uri"],
+            "http://testserver/integrations/oauth/callback/",
+        )
 
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_accepts_matching_organization_context_override(self, mock_post):
@@ -377,6 +383,17 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(headers["Authorization"], "Bearer access-token")
 
+    def test_native_integration_auth_matches_only_drive_path_on_www_googleapis(self):
+        self._create_integration_secret(owner_user=self.user)
+
+        headers = apply_native_integration_auth(
+            self.agent,
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            {},
+        )
+
+        self.assertNotIn("Authorization", headers)
+
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     @patch("api.services.native_integrations.httpx.post")
@@ -469,6 +486,8 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(definition.tool_names, ("http_request",))
         search_results = shortlist_system_skills("read google sheets rows", available_tool_names={"http_request"})
         self.assertIn(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, [result.skill_key for result in search_results])
+        search_results = shortlist_system_skills("search my test spreadsheet", available_tool_names={"http_request"})
+        self.assertIn(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, [result.skill_key for result in search_results])
 
         result = enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
 
@@ -486,10 +505,15 @@ class NativeIntegrationTests(TestCase):
 
         self.assertIn("System Skill: Google Sheets", block)
         self.assertIn("Tools: http_request", block)
-        self.assertIn("Use the Drive API discovery call below", block)
+        self.assertIn("List accessible spreadsheets", block)
+        self.assertIn("Do not use web search or public `docs.google.com` results", block)
         self.assertIn("https://www.googleapis.com/drive/v3/files", block)
-        self.assertIn("mimeType%3D'application%2Fvnd.google-apps.spreadsheet'", block)
-        self.assertIn("files(id%2Cname%2CmimeType%2CwebViewLink)", block)
+        self.assertIn("https://www.googleapis.com/drive/", block)
+        self.assertIn("mimeType = 'application/vnd.google-apps.spreadsheet'", block)
+        self.assertIn("name contains 'text'", block)
+        self.assertIn("fields=files(id,name,mimeType,webViewLink)", block)
+        self.assertIn("never call partial URLs", block)
+        self.assertIn("?q=mimeType%3D", block)
         self.assertIn("drive.file", block)
         self.assertIn("https://app.example.test/app/integrations", block)
         self.assertNotIn("{integrations_url}", block)

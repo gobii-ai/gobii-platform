@@ -367,7 +367,7 @@ urlpatterns = [
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
     path(
-        "console/native-integrations/oauth/callback/",
+        "integrations/oauth/callback/",
         NativeIntegrationOAuthCallbackPageView.as_view(),
         name="console-native-integration-oauth-callback-view",
     ),

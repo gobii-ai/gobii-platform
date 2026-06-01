@@ -410,6 +410,23 @@ describe('AgentChatLayout upgrade modal gating', () => {
     expect(handleOpenAgentSecretRequests).toHaveBeenCalledTimes(1)
   })
 
+  it('routes app shell message links to the current gallery shell', () => {
+    const handleOpenIntegrations = vi.fn()
+
+    render(
+      <AgentChatLayout
+        agentId="agent-123"
+        agentFirstName="Agent"
+        events={[{ cursor: 'message-1', kind: 'message', messageLinkHref: '/app/integrations' } as any]}
+        onOpenIntegrations={handleOpenIntegrations}
+      />,
+    )
+
+    fireEvent.click(screen.getByTestId('timeline-message-link'))
+
+    expect(handleOpenIntegrations).toHaveBeenCalledTimes(1)
+  })
+
   it('does not intercept app message links for a different agent', () => {
     const handleOpenAgentSecretRequests = vi.fn()
 
