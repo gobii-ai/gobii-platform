@@ -55,16 +55,16 @@ class NativeIntegrationProvider:
         return " ".join(self.scopes)
 
 
-GOOGLE_SHEETS_PROVIDER = NativeIntegrationProvider(
-    key="google_sheets",
-    display_name="Google Sheets",
-    description="Read and edit spreadsheets through the Google Sheets API.",
+GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
+    key="google_drive",
+    display_name="Google Drive",
+    description="Grant file access for Google Sheets and Google Docs.",
     auth_type="oauth2",
     authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
     token_endpoint="https://oauth2.googleapis.com/token",
     scopes=("https://www.googleapis.com/auth/drive.file",),
-    api_hosts=("sheets.googleapis.com",),
-    icon="google_sheets",
+    api_hosts=("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com"),
+    icon="google_drive",
     authorization_params={
         "access_type": "offline",
         "include_granted_scopes": "true",
@@ -72,8 +72,12 @@ GOOGLE_SHEETS_PROVIDER = NativeIntegrationProvider(
     },
 )
 
+GOOGLE_SHEETS_PROVIDER = GOOGLE_DRIVE_PROVIDER
+GOOGLE_DRIVE_PROVIDER_ALIASES = ("google_sheets",)
+GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
+
 NATIVE_INTEGRATION_PROVIDERS = {
-    GOOGLE_SHEETS_PROVIDER.key: GOOGLE_SHEETS_PROVIDER,
+    GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
 }
 
 
@@ -82,15 +86,18 @@ def list_native_integration_providers() -> list[NativeIntegrationProvider]:
 
 
 def get_native_integration_provider(provider_key: str) -> NativeIntegrationProvider:
-    provider = NATIVE_INTEGRATION_PROVIDERS.get(str(provider_key or "").strip())
+    normalized_key = str(provider_key or "").strip()
+    if normalized_key in GOOGLE_DRIVE_PROVIDER_ALIASES:
+        normalized_key = GOOGLE_DRIVE_PROVIDER.key
+    provider = NATIVE_INTEGRATION_PROVIDERS.get(normalized_key)
     if provider is None:
         raise KeyError(provider_key)
     return provider
 
 
 def native_integration_client_credentials(provider: NativeIntegrationProvider) -> tuple[str, str]:
-    if provider.key == GOOGLE_SHEETS_PROVIDER.key:
-        return settings.GOOGLE_CLIENT_ID, settings.GOOGLE_CLIENT_SECRET
+    if provider.key == GOOGLE_DRIVE_PROVIDER.key:
+        return settings.GOOGLE_DRIVE_CLIENT_ID, settings.GOOGLE_DRIVE_CLIENT_SECRET
     return "", ""
 
 
@@ -109,9 +116,21 @@ def native_integration_secret_queryset(owner_user, owner_org):
     )
 
 
+def _native_integration_secret_keys(provider: NativeIntegrationProvider) -> list[str]:
+    keys = [provider.secret_key]
+    if provider.key == GOOGLE_DRIVE_PROVIDER.key:
+        keys.extend(GOOGLE_DRIVE_LEGACY_SECRET_KEYS)
+    return keys
+
+
 def get_native_integration_secret(provider_key: str, owner_user, owner_org) -> GlobalSecret | None:
     provider = get_native_integration_provider(provider_key)
-    return native_integration_secret_queryset(owner_user, owner_org).filter(key=provider.secret_key).first()
+    queryset = native_integration_secret_queryset(owner_user, owner_org)
+    for key in _native_integration_secret_keys(provider):
+        secret = queryset.filter(key=key).first()
+        if secret is not None:
+            return secret
+    return None
 
 
 def load_native_integration_credentials(secret: GlobalSecret) -> dict[str, Any]:
@@ -145,6 +164,7 @@ def save_native_integration_credentials(
     else:
         secret.name = provider.display_name
         secret.description = provider.description
+        secret.key = provider.secret_key
 
     secret.set_value(json.dumps(credentials, separators=(",", ":"), sort_keys=True))
     secret.save()
@@ -152,11 +172,11 @@ def save_native_integration_credentials(
 
 
 def delete_native_integration_credentials(provider_key: str, owner_user, owner_org) -> bool:
-    secret = get_native_integration_secret(provider_key, owner_user, owner_org)
-    if secret is None:
-        return False
-    secret.delete()
-    return True
+    provider = get_native_integration_provider(provider_key)
+    deleted_count, _ = native_integration_secret_queryset(owner_user, owner_org).filter(
+        key__in=_native_integration_secret_keys(provider),
+    ).delete()
+    return deleted_count > 0
 
 
 def build_oauth_credentials_bundle(

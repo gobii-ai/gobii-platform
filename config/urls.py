@@ -198,6 +198,7 @@ from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
     NativeIntegrationConnectAPIView,
     NativeIntegrationListAPIView,
+    NativeIntegrationPickerTokenAPIView,
     NativeIntegrationRevokeAPIView,
 )
 from console.system_skill_profiles_api_views import (
@@ -626,6 +627,11 @@ urlpatterns = [
         "console/api/native-integrations/<slug:provider_key>/callback/",
         NativeIntegrationCallbackAPIView.as_view(),
         name="console-native-integration-callback",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/picker-token/",
+        NativeIntegrationPickerTokenAPIView.as_view(),
+        name="console-native-integration-picker-token",
     ),
     path(
         "console/api/native-integrations/<slug:provider_key>/revoke/",

@@ -12,6 +12,7 @@ type NativeIntegrationProviderDTO = {
   scope: string
   expires_at: string | null
   connect_url: string
+  picker_token_url: string
   revoke_url: string
 }
 
@@ -28,6 +29,14 @@ type NativeIntegrationConnectResponseDTO = {
   expires_at: string
 }
 
+type NativeIntegrationPickerTokenResponseDTO = {
+  access_token: string
+  developer_key: string
+  app_id: string
+  scope: string
+  expires_at: string | null
+}
+
 export type NativeIntegrationProvider = {
   providerKey: string
   displayName: string
@@ -40,6 +49,7 @@ export type NativeIntegrationProvider = {
   scope: string
   expiresAt: string | null
   connectUrl: string
+  pickerTokenUrl: string
   revokeUrl: string
 }
 
@@ -56,6 +66,14 @@ export type NativeIntegrationConnectResponse = {
   expiresAt: string
 }
 
+export type NativeIntegrationPickerTokenResponse = {
+  accessToken: string
+  developerKey: string
+  appId: string
+  scope: string
+  expiresAt: string | null
+}
+
 const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
   providerKey: provider.provider_key,
   displayName: provider.display_name,
@@ -68,6 +86,7 @@ const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationP
   scope: provider.scope ?? '',
   expiresAt: provider.expires_at ?? null,
   connectUrl: provider.connect_url,
+  pickerTokenUrl: provider.picker_token_url,
   revokeUrl: provider.revoke_url,
 })
 
@@ -90,6 +109,19 @@ export async function startNativeIntegrationConnect(connectUrl: string): Promise
     providerKey: payload.provider_key,
     authorizationUrl: payload.authorization_url,
     state: payload.state,
+    expiresAt: payload.expires_at,
+  }
+}
+
+export async function fetchNativeIntegrationPickerToken(
+  pickerTokenUrl: string,
+): Promise<NativeIntegrationPickerTokenResponse> {
+  const payload = await jsonFetch<NativeIntegrationPickerTokenResponseDTO>(pickerTokenUrl)
+  return {
+    accessToken: payload.access_token,
+    developerKey: payload.developer_key,
+    appId: payload.app_id,
+    scope: payload.scope,
     expiresAt: payload.expires_at,
   }
 }

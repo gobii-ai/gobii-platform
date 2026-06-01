@@ -1,15 +1,58 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Loader2, Plug, Table2, Unplug } from 'lucide-react'
+import { CheckCircle2, FolderOpen, HardDrive, Loader2, Plug, Unplug } from 'lucide-react'
 
 import {
+  fetchNativeIntegrationPickerToken,
   fetchNativeIntegrations,
   revokeNativeIntegration,
   startNativeIntegrationConnect,
+  type NativeIntegrationPickerTokenResponse,
   type NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
 import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'
+
+type GoogleDocsView = {
+  setMimeTypes: (mimeTypes: string) => GoogleDocsView
+}
+
+type GooglePickerInstance = {
+  setVisible: (visible: boolean) => void
+}
+
+type GooglePickerBuilder = {
+  addView: (view: GoogleDocsView) => GooglePickerBuilder
+  setOAuthToken: (token: string) => GooglePickerBuilder
+  setDeveloperKey: (key: string) => GooglePickerBuilder
+  setAppId: (appId: string) => GooglePickerBuilder
+  enableFeature: (feature: string) => GooglePickerBuilder
+  setCallback: (callback: (data: Record<string, unknown>) => void) => GooglePickerBuilder
+  build: () => GooglePickerInstance
+}
+
+type GooglePickerNamespace = {
+  Action: { PICKED: string; CANCEL?: string }
+  DocsView: new (viewId: string) => GoogleDocsView
+  Document: { ID: string; NAME: string }
+  Feature: { MULTISELECT_ENABLED: string }
+  PickerBuilder: new () => GooglePickerBuilder
+  Response: { ACTION: string; DOCUMENTS: string }
+  ViewId: { DOCS: string }
+}
+
+declare global {
+  interface Window {
+    gapi?: {
+      load: (apiName: string, config: { callback: () => void }) => void
+    }
+    google?: {
+      picker?: GooglePickerNamespace
+    }
+  }
+}
+
+let googlePickerApiPromise: Promise<void> | null = null
 
 type NativeAppsPanelProps = {
   listUrl: string
@@ -58,6 +101,21 @@ export function NativeAppsPanel({
     },
   })
 
+  const pickerMutation = useMutation({
+    mutationFn: async (provider: NativeIntegrationProvider) => {
+      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+      return openGoogleDrivePicker(token)
+    },
+    onSuccess: (selectedCount) => {
+      if (selectedCount > 0) {
+        onSuccess(`${selectedCount} Google Drive file${selectedCount === 1 ? '' : 's'} selected.`)
+      }
+    },
+    onError: (error) => {
+      onError(safeErrorMessage(error))
+    },
+  })
+
   const sectionClassName = embedded
     ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
     : 'gobii-card-base overflow-hidden'
@@ -87,6 +145,9 @@ export function NativeAppsPanel({
   const disconnectButtonClassName = embedded
     ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200/20 bg-slate-950/20 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-100/35 hover:bg-slate-900/40 disabled:cursor-not-allowed disabled:opacity-60'
     : 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+  const pickerButtonClassName = embedded
+    ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/35 px-4 py-2 text-sm font-semibold text-emerald-50 transition hover:border-emerald-200/40 hover:bg-emerald-900/55 disabled:cursor-not-allowed disabled:opacity-60'
+    : 'inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60'
   const loadingClassName = embedded
     ? 'flex items-center gap-2 px-6 py-8 text-sm text-slate-400'
     : 'flex items-center gap-2 px-6 py-8 text-sm text-slate-500'
@@ -94,7 +155,11 @@ export function NativeAppsPanel({
     ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
     : 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'
 
-  const pendingProviderKey = connectMutation.variables?.providerKey ?? revokeMutation.variables?.providerKey ?? null
+  const pendingProviderKey =
+    (connectMutation.isPending ? connectMutation.variables?.providerKey : null) ??
+    (revokeMutation.isPending ? revokeMutation.variables?.providerKey : null) ??
+    (pickerMutation.isPending ? pickerMutation.variables?.providerKey : null) ??
+    null
 
   return (
     <section className={sectionClassName}>
@@ -147,17 +212,36 @@ export function NativeAppsPanel({
                     <p className={providerDescriptionClassName}>{provider.description}</p>
                   </div>
                 </div>
-                <div className="flex shrink-0">
+                <div className="flex shrink-0 flex-wrap gap-2">
                   {provider.connected ? (
-                    <button
-                      type="button"
-                      className={disconnectButtonClassName}
-                      onClick={() => revokeMutation.mutate(provider)}
-                      disabled={isBusy}
-                    >
-                      {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Unplug className="h-4 w-4" />}
-                      Disconnect
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        className={pickerButtonClassName}
+                        onClick={() => pickerMutation.mutate(provider)}
+                        disabled={isBusy}
+                      >
+                        {isBusy && pickerMutation.variables?.providerKey === provider.providerKey ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <FolderOpen className="h-4 w-4" />
+                        )}
+                        Choose files
+                      </button>
+                      <button
+                        type="button"
+                        className={disconnectButtonClassName}
+                        onClick={() => revokeMutation.mutate(provider)}
+                        disabled={isBusy}
+                      >
+                        {isBusy && revokeMutation.variables?.providerKey === provider.providerKey ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Unplug className="h-4 w-4" />
+                        )}
+                        Disconnect
+                      </button>
+                    </>
                   ) : (
                     <button
                       type="button"
@@ -180,8 +264,8 @@ export function NativeAppsPanel({
 }
 
 function ProviderIcon({ provider }: { provider: NativeIntegrationProvider }) {
-  if (provider.icon === 'google_sheets') {
-    return <Table2 className="h-5 w-5" aria-hidden="true" />
+  if (provider.icon === 'google_drive') {
+    return <HardDrive className="h-5 w-5" aria-hidden="true" />
   }
   return <Plug className="h-5 w-5" aria-hidden="true" />
 }
@@ -192,4 +276,75 @@ function storePendingNativeOAuth(state: string, payload: Record<string, unknown>
   } catch (error) {
     console.warn('Failed to persist native integration OAuth state', error)
   }
+}
+
+function loadGooglePickerApi(): Promise<void> {
+  if (googlePickerApiPromise) {
+    return googlePickerApiPromise
+  }
+  googlePickerApiPromise = new Promise((resolve, reject) => {
+    const loadPicker = () => {
+      if (!window.gapi) {
+        reject(new Error('Google Picker failed to load.'))
+        return
+      }
+      window.gapi.load('picker', {
+        callback: () => resolve(),
+      })
+    }
+
+    if (window.gapi) {
+      loadPicker()
+      return
+    }
+
+    const existingScript = document.querySelector<HTMLScriptElement>('script[data-google-api-script="true"]')
+    if (existingScript) {
+      existingScript.addEventListener('load', loadPicker, { once: true })
+      existingScript.addEventListener('error', () => reject(new Error('Google Picker failed to load.')), { once: true })
+      return
+    }
+
+    const script = document.createElement('script')
+    script.src = 'https://apis.google.com/js/api.js'
+    script.async = true
+    script.defer = true
+    script.dataset.googleApiScript = 'true'
+    script.onload = loadPicker
+    script.onerror = () => reject(new Error('Google Picker failed to load.'))
+    document.head.appendChild(script)
+  })
+  return googlePickerApiPromise
+}
+
+async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<number> {
+  await loadGooglePickerApi()
+  const picker = window.google?.picker
+  if (!picker) {
+    throw new Error('Google Picker is unavailable.')
+  }
+
+  return new Promise((resolve) => {
+    const view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes(
+      'application/vnd.google-apps.spreadsheet,application/vnd.google-apps.document',
+    )
+    const pickerInstance = new picker.PickerBuilder()
+      .addView(view)
+      .setOAuthToken(token.accessToken)
+      .setDeveloperKey(token.developerKey)
+      .setAppId(token.appId)
+      .enableFeature(picker.Feature.MULTISELECT_ENABLED)
+      .setCallback((data) => {
+        const action = data[picker.Response.ACTION]
+        if (action === picker.Action.PICKED) {
+          const docs = data[picker.Response.DOCUMENTS]
+          resolve(Array.isArray(docs) ? docs.length : 0)
+        } else if (picker.Action.CANCEL && action === picker.Action.CANCEL) {
+          resolve(0)
+        }
+      })
+      .build()
+
+    pickerInstance.setVisible(true)
+  })
 }

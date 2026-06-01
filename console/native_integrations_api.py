@@ -4,6 +4,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 import httpx
+from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core import signing
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -14,6 +15,7 @@ from django.utils import timezone
 from django.views import View
 
 from api.services.native_integrations import (
+    GOOGLE_DRIVE_PROVIDER,
     NativeIntegrationAuthError,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
@@ -23,6 +25,7 @@ from api.services.native_integrations import (
     load_native_integration_credentials,
     native_integration_client_credentials,
     new_oauth_state,
+    refresh_oauth_credentials_if_needed,
     save_native_integration_credentials,
 )
 from console.context_helpers import build_console_context
@@ -66,6 +69,7 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "scope": credentials.get("scope") or "",
         "expires_at": credentials.get("expires_at"),
         "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
+        "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
         "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
     }
 
@@ -281,3 +285,46 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
         _, owner_user, owner_org = _resolve_native_integration_owner(request)
         deleted = delete_native_integration_credentials(provider_key, owner_user, owner_org)
         return JsonResponse({"revoked": deleted})
+
+
+class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, provider_key: str, *args: Any, **kwargs: Any):
+        try:
+            provider = get_native_integration_provider(provider_key)
+        except KeyError:
+            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
+
+        if provider.key != GOOGLE_DRIVE_PROVIDER.key:
+            return JsonResponse({"error": f"{provider.display_name} does not support file picking."}, status=400)
+
+        if not settings.GOOGLE_PICKER_API_KEY or not settings.GOOGLE_PICKER_APP_ID:
+            return JsonResponse({"error": "Google Picker is not configured."}, status=400)
+
+        _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+        if secret is None:
+            return JsonResponse({"error": f"{provider.display_name} is not connected."}, status=404)
+
+        try:
+            credentials = load_native_integration_credentials(secret)
+            credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
+        except NativeIntegrationAuthError as exc:
+            return JsonResponse({"error": str(exc)}, status=401)
+
+        access_token = str(credentials.get("access_token") or "")
+        if not access_token:
+            return JsonResponse({"error": f"{provider.display_name} must be reconnected."}, status=401)
+
+        response = JsonResponse(
+            {
+                "access_token": access_token,
+                "developer_key": settings.GOOGLE_PICKER_API_KEY,
+                "app_id": settings.GOOGLE_PICKER_APP_ID,
+                "scope": credentials.get("scope") or provider.scope_string,
+                "expires_at": credentials.get("expires_at"),
+            }
+        )
+        response["Cache-Control"] = "no-store"
+        return response

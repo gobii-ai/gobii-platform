@@ -13,7 +13,11 @@ from waffle.models import Flag
 from api.agent.core.prompt_context import _get_secrets_block
 from api.agent.tools.http_request import execute_http_request
 from api.models import BrowserUseAgent, GlobalSecret, Organization, OrganizationMembership, PersistentAgent, PersistentAgentSecret
-from api.services.native_integrations import GOOGLE_SHEETS_PROVIDER, get_native_integration_provider
+from api.services.native_integrations import (
+    GOOGLE_DRIVE_PROVIDER,
+    apply_native_integration_auth,
+    get_native_integration_provider,
+)
 
 
 User = get_user_model()
@@ -44,8 +48,10 @@ def _mock_response(content: bytes = b"{}", content_type: str = "application/json
 
 @tag("batch_native_integrations")
 @override_settings(
-    GOOGLE_CLIENT_ID="google-client-id",
-    GOOGLE_CLIENT_SECRET="google-client-secret",
+    GOOGLE_DRIVE_CLIENT_ID="google-client-id",
+    GOOGLE_DRIVE_CLIENT_SECRET="google-client-secret",
+    GOOGLE_PICKER_API_KEY="picker-api-key",
+    GOOGLE_PICKER_APP_ID="123456789",
     SEGMENT_WRITE_KEY="",
     SEGMENT_WEB_WRITE_KEY="",
 )
@@ -87,34 +93,39 @@ class NativeIntegrationTests(TestCase):
 
     def _create_integration_secret(self, *, owner_user=None, owner_org=None, credentials=None):
         payload = credentials or {
-            "provider_key": GOOGLE_SHEETS_PROVIDER.key,
+            "provider_key": GOOGLE_DRIVE_PROVIDER.key,
             "auth_type": "oauth2",
             "access_token": "access-token",
             "refresh_token": "refresh-token",
             "token_type": "Bearer",
-            "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
             "expires_at": (timezone.now() + timedelta(hours=1)).isoformat(),
         }
         secret = GlobalSecret(
             user=owner_user,
             organization=owner_org,
-            name=GOOGLE_SHEETS_PROVIDER.display_name,
-            description=GOOGLE_SHEETS_PROVIDER.description,
+            name=GOOGLE_DRIVE_PROVIDER.display_name,
+            description=GOOGLE_DRIVE_PROVIDER.description,
             secret_type=GlobalSecret.SecretType.INTEGRATION,
             domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key=GOOGLE_SHEETS_PROVIDER.secret_key,
+            key=GOOGLE_DRIVE_PROVIDER.secret_key,
         )
         secret.set_value(json.dumps(payload))
         secret.save()
         return secret
 
-    def test_provider_registry_serializes_google_sheets(self):
+    def test_provider_registry_serializes_google_drive(self):
+        provider = get_native_integration_provider("google_drive")
+
+        self.assertEqual(provider.display_name, "Google Drive")
+        self.assertEqual(provider.auth_type, "oauth2")
+        self.assertEqual(provider.api_hosts, ("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com"))
+        self.assertEqual(provider.scopes, ("https://www.googleapis.com/auth/drive.file",))
+
+    def test_provider_registry_accepts_google_sheets_alias(self):
         provider = get_native_integration_provider("google_sheets")
 
-        self.assertEqual(provider.display_name, "Google Sheets")
-        self.assertEqual(provider.auth_type, "oauth2")
-        self.assertEqual(provider.api_hosts, ("sheets.googleapis.com",))
-        self.assertEqual(provider.scopes, ("https://www.googleapis.com/auth/drive.file",))
+        self.assertEqual(provider.key, "google_drive")
 
     def test_list_reports_connected_state_for_user_context(self):
         self._create_integration_secret(owner_user=self.user)
@@ -125,9 +136,24 @@ class NativeIntegrationTests(TestCase):
         payload = response.json()
         self.assertEqual(payload["owner_scope"], "user")
         provider = payload["providers"][0]
-        self.assertEqual(provider["provider_key"], "google_sheets")
+        self.assertEqual(provider["provider_key"], "google_drive")
         self.assertTrue(provider["connected"])
-        self.assertEqual(provider["connect_url"], reverse("console-native-integration-connect", args=["google_sheets"]))
+        self.assertEqual(provider["connect_url"], reverse("console-native-integration-connect", args=["google_drive"]))
+        self.assertEqual(
+            provider["picker_token_url"],
+            reverse("console-native-integration-picker-token", args=["google_drive"]),
+        )
+
+    def test_list_treats_legacy_google_sheets_secret_as_connected(self):
+        self._create_integration_secret(owner_user=self.user)
+        GlobalSecret.objects.update(key="native_google_sheets")
+
+        response = self.client.get(reverse("console-native-integration-list"))
+
+        self.assertEqual(response.status_code, 200)
+        provider = response.json()["providers"][0]
+        self.assertEqual(provider["provider_key"], "google_drive")
+        self.assertTrue(provider["connected"])
 
     def test_list_uses_organization_context(self):
         self._set_org_context()
@@ -142,25 +168,47 @@ class NativeIntegrationTests(TestCase):
         self.assertTrue(payload["providers"][0]["connected"])
 
     def test_connect_returns_google_authorization_url(self):
-        response = self.client.post(reverse("console-native-integration-connect", args=["google_sheets"]))
+        response = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))
 
         self.assertEqual(response.status_code, 201, response.content)
         payload = response.json()
-        self.assertEqual(payload["provider_key"], "google_sheets")
+        self.assertEqual(payload["provider_key"], "google_drive")
         self.assertIn("https://accounts.google.com/o/oauth2/v2/auth", payload["authorization_url"])
         self.assertIn("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file", payload["authorization_url"])
         self.assertIn("state=", payload["authorization_url"])
 
-    @override_settings(GOOGLE_CLIENT_ID="", GOOGLE_CLIENT_SECRET="")
+    @override_settings(GOOGLE_DRIVE_CLIENT_ID="", GOOGLE_DRIVE_CLIENT_SECRET="")
     def test_connect_returns_configuration_error_without_google_oauth_credentials(self):
-        response = self.client.post(reverse("console-native-integration-connect", args=["google_sheets"]))
+        response = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))
 
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json(), {"error": "Google Sheets OAuth is not configured."})
+        self.assertEqual(response.json(), {"error": "Google Drive OAuth is not configured."})
+
+    def test_picker_token_returns_access_token_for_connected_provider(self):
+        self._create_integration_secret(owner_user=self.user)
+
+        response = self.client.get(reverse("console-native-integration-picker-token", args=["google_drive"]))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response["Cache-Control"], "no-store")
+        payload = response.json()
+        self.assertEqual(payload["access_token"], "access-token")
+        self.assertEqual(payload["developer_key"], "picker-api-key")
+        self.assertEqual(payload["app_id"], "123456789")
+        self.assertEqual(payload["scope"], GOOGLE_DRIVE_PROVIDER.scope_string)
+
+    @override_settings(GOOGLE_PICKER_API_KEY="", GOOGLE_PICKER_APP_ID="")
+    def test_picker_token_requires_picker_configuration(self):
+        self._create_integration_secret(owner_user=self.user)
+
+        response = self.client.get(reverse("console-native-integration-picker-token", args=["google_drive"]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Google Picker is not configured."})
 
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
-        start = self.client.post(reverse("console-native-integration-connect", args=["google_sheets"]))
+        start = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))
         state = start.json()["state"]
         token_response = MagicMock()
         token_response.status_code = 200
@@ -169,19 +217,19 @@ class NativeIntegrationTests(TestCase):
             "refresh_token": "new-refresh-token",
             "token_type": "Bearer",
             "expires_in": 3600,
-            "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
         }
         mock_post.return_value = token_response
 
         response = self.client.post(
-            reverse("console-native-integration-callback", args=["google_sheets"]),
+            reverse("console-native-integration-callback", args=["google_drive"]),
             data=json.dumps({"authorization_code": "auth-code", "state": state}),
             content_type="application/json",
         )
 
         self.assertEqual(response.status_code, 200, response.content)
         secret = GlobalSecret.objects.get(user=self.user, secret_type=GlobalSecret.SecretType.INTEGRATION)
-        self.assertEqual(secret.key, "native_google_sheets")
+        self.assertEqual(secret.key, "native_google_drive")
         self.assertEqual(secret.domain_pattern, GlobalSecret.INTEGRATION_DOMAIN_SENTINEL)
         stored = json.loads(secret.get_value())
         self.assertEqual(stored["access_token"], "new-access-token")
@@ -194,7 +242,7 @@ class NativeIntegrationTests(TestCase):
             "X-Gobii-Context-Id": str(self.org.id),
         }
         start = self.client.post(
-            reverse("console-native-integration-connect", args=["google_sheets"]),
+            reverse("console-native-integration-connect", args=["google_drive"]),
             headers=headers,
         )
         state = start.json()["state"]
@@ -205,12 +253,12 @@ class NativeIntegrationTests(TestCase):
             "refresh_token": "org-refresh-token",
             "token_type": "Bearer",
             "expires_in": 3600,
-            "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
         }
         mock_post.return_value = token_response
 
         response = self.client.post(
-            reverse("console-native-integration-callback", args=["google_sheets"]),
+            reverse("console-native-integration-callback", args=["google_drive"]),
             data=json.dumps({"authorization_code": "auth-code", "state": state}),
             content_type="application/json",
             headers=headers,
@@ -233,7 +281,7 @@ class NativeIntegrationTests(TestCase):
         credential.set_value("visible-value")
         credential.save()
 
-        response = self.client.post(reverse("console-native-integration-revoke", args=["google_sheets"]))
+        response = self.client.post(reverse("console-native-integration-revoke", args=["google_drive"]))
 
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["revoked"])
@@ -247,9 +295,9 @@ class NativeIntegrationTests(TestCase):
             name="Agent Integration",
             secret_type=PersistentAgentSecret.SecretType.INTEGRATION,
             domain_pattern=PersistentAgentSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key="native_google_sheets",
+            key="native_google_drive",
         )
-        agent_integration.set_value(json.dumps({"provider_key": "google_sheets"}))
+        agent_integration.set_value(json.dumps({"provider_key": "google_drive"}))
         agent_integration.save()
 
         global_response = self.client.get(reverse("console-global-secret-list"))
@@ -263,7 +311,7 @@ class NativeIntegrationTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
-    def test_http_request_injects_google_sheets_auth(self, mock_request, mock_proxy):
+    def test_http_request_injects_google_drive_auth_for_sheets(self, mock_request, mock_proxy):
         self._create_integration_secret(owner_user=self.user)
         mock_proxy.return_value = None
         mock_request.return_value = _mock_response(b'{"ok": true}')
@@ -280,6 +328,17 @@ class NativeIntegrationTests(TestCase):
         request_kwargs = mock_request.call_args.kwargs
         self.assertEqual(request_kwargs["headers"]["Authorization"], "Bearer access-token")
 
+    def test_native_integration_auth_matches_google_docs_api(self):
+        self._create_integration_secret(owner_user=self.user)
+
+        headers = apply_native_integration_auth(
+            self.agent,
+            "https://docs.googleapis.com/v1/documents/test",
+            {},
+        )
+
+        self.assertEqual(headers["Authorization"], "Bearer access-token")
+
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     @patch("api.services.native_integrations.httpx.post")
@@ -287,12 +346,12 @@ class NativeIntegrationTests(TestCase):
         self._create_integration_secret(
             owner_user=self.user,
             credentials={
-                "provider_key": GOOGLE_SHEETS_PROVIDER.key,
+                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
                 "auth_type": "oauth2",
                 "access_token": "expired-token",
                 "refresh_token": "refresh-token",
                 "token_type": "Bearer",
-                "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
                 "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
             },
         )
@@ -315,16 +374,16 @@ class NativeIntegrationTests(TestCase):
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     @patch("api.services.native_integrations.httpx.post")
-    def test_http_request_refreshes_expired_google_sheets_token(self, mock_refresh, mock_request, mock_proxy):
+    def test_http_request_refreshes_expired_google_drive_token(self, mock_refresh, mock_request, mock_proxy):
         secret = self._create_integration_secret(
             owner_user=self.user,
             credentials={
-                "provider_key": GOOGLE_SHEETS_PROVIDER.key,
+                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
                 "auth_type": "oauth2",
                 "access_token": "expired-token",
                 "refresh_token": "refresh-token",
                 "token_type": "Bearer",
-                "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
                 "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
             },
         )
@@ -334,7 +393,7 @@ class NativeIntegrationTests(TestCase):
             "access_token": "refreshed-token",
             "token_type": "Bearer",
             "expires_in": 3600,
-            "scope": GOOGLE_SHEETS_PROVIDER.scope_string,
+            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
         }
         mock_refresh.return_value = token_response
         mock_proxy.return_value = None
@@ -360,5 +419,6 @@ class NativeIntegrationTests(TestCase):
         block = _get_secrets_block(self.agent)
 
         self.assertIn("Native integrations available through tools", block)
-        self.assertIn("Google Sheets", block)
+        self.assertIn("Google Drive", block)
+        self.assertNotIn("native_google_drive", block)
         self.assertNotIn("native_google_sheets", block)
