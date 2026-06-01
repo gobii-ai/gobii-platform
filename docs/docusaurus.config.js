@@ -200,6 +200,7 @@ const config = {
           {
             title: 'Gobii',
             items: [
+              { label: 'Homepage', href: 'https://gobii.ai/' },
               { label: 'Console', href: 'https://gobii.ai/console/' },
               { label: 'Sign up', href: 'https://gobii.ai/accounts/signup/' },
               { label: 'GitHub', href: 'https://github.com/gobii-ai/gobii-platform' },
@@ -217,7 +218,7 @@ const config = {
             ],
           },
         ],
-        copyright: `Copyright ${new Date().getFullYear()} Gobii, Inc.`,
+        copyright: `Copyright ${new Date().getFullYear()} <a href="https://gobii.ai">Gobii, Inc.</a>`,
       },
       prism: {
         theme: lightCodeTheme,

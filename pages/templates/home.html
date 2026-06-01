@@ -787,6 +787,14 @@
   <!-- Value proposition sections (proprietary only) -->
   {% if settings.GOBII_PROPRIETARY_MODE %}
     {% include "home/_flow_strip.html" %}
+    <section id="what-is-gobii" class="relative py-10 sm:py-12" aria-labelledby="what-is-gobii-heading" data-animate>
+      <div class="max-w-3xl mx-auto px-6 text-center">
+        <h2 id="what-is-gobii-heading" class="text-2xl sm:text-3xl font-light text-slate-900 tracking-tight">What is Gobii?</h2>
+        <p class="mt-4 text-base sm:text-lg leading-relaxed text-slate-600">
+          Gobii is an AI agent platform that gives businesses always-on virtual coworkers capable of browser automation, web research, data collection, and workflow execution.
+        </p>
+      </div>
+    </section>
     {% include "home/_value_sections.html" %}
     {% include "home/_vision_and_trust.html" %}
   {% endif %}

@@ -4,28 +4,77 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Learn how Gobii automates web workflows for modern teams with AI-powered browser agents.">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "AboutPage",
+      "@id": "https://gobii.ai/about/#aboutpage",
+      "url": "https://gobii.ai/about/",
+      "name": "About Gobii",
+      "description": "Learn how Gobii helps teams use AI agents for real work.",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://gobii.ai/#website",
+        "name": "Gobii"
+      },
+      "mainEntity": {
+        "@type": "Organization",
+        "@id": "https://gobii.ai/#organization",
+        "name": "Gobii",
+        "url": "https://gobii.ai/"
+      }
+    }
+  </script>
 {% endblock %}
 
 {% block content %}
-<section class="py-20 bg-white text-slate-900">
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <h1 class="text-4xl font-semibold mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h1>
+<section class="relative overflow-hidden bg-white text-slate-900">
+  <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+    <div class="max-w-3xl">
+      <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">About Gobii</h1>
+      <p class="mt-5 max-w-2xl text-2xl font-light leading-snug text-slate-700 sm:text-3xl">
+        AI coworkers for teams with real work to do.
+      </p>
+      {% if settings.GOBII_PROPRIETARY_MODE %}
+      {% url 'account_signup' as about_signup_url %}
+      {% url 'account_signup_modal' as about_signup_modal_url %}
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        <a
+          href="/"
+          data-analytics-cta-id="about_start_free_trial"
+          data-analytics-placement="about_hero"
+          data-analytics-intent="start_trial"
+          data-analytics-label="Try Gobii Today"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+        >
+          Try Gobii Today
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="bg-white pb-20 text-slate-900">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <h2 class="text-3xl font-semibold tracking-tight mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h2>
     <p class="text-lg leading-relaxed mb-4">
       <a href="{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}" aria-label="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}"
-         title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage">Gobii</a> envisions a future where intelligent agents collaborate seamlessly
-      with humans to automate the countless web-based tasks that slow us down today. From gathering research to filling
-      forms to orchestrating multi-step workflows, our cloud-hosted browser agents combine modern large-language models with
-      resilient browser automation to act exactly where the APIs stop.
+         title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage" style="text-decoration: underline; font-weight: bold;">Gobii</a> is an AI agent platform for teams with real work to do.
     </p>
-    <p class="text-lg leading-relaxed mb-4">
-      We're starting by making <em>browser-use&nbsp;agents in the cloud</em> ridiculously easy: instant instances,
-      built-in proxy rotation, live previews, and a single API call to spin up as many agents as your ideas demand.
-      As models grow more capable, Gobii will give them the infrastructure—and guardrails—to work safely alongside
-      users, turning clicks and keystrokes into pure leverage.
-    </p>
-    <p class="text-lg leading-relaxed mb-4">
-      If you believe the browser should be as programmable as an API, we'd love to hear from you.
-    </p>
+
+    <p class="text-lg leading-relaxed mb-4">Our agents are virtual coworkers: they can browse the web, gather research, organize data, complete forms, use connected apps, and deliver reports. You can chat with them, email them, or text them, and they keep working in the background while you focus on higher-value decisions.</p>
+
+    <p class="text-lg leading-relaxed mb-4">We believe AI agents should not just answer questions. They should help move work forward.</p>
+
+    <p class="text-lg leading-relaxed mb-4">That means giving agents the infrastructure they need to operate reliably: cloud-hosted browsers, persistent memory, built-in tools, structured data, integrations, live previews, audit trails, and guardrails for safe execution. Gobii turns web-based work into something you can delegate.</p>
+
+    <p class="text-lg leading-relaxed mb-4">Today, teams use Gobii for recruiting, sales research, operations, competitive intelligence, compliance monitoring, and other workflows where the work is important but painfully repetitive.</p>
+
+    <p class="text-lg leading-relaxed mb-4">Our vision is simple: humans and AI agents working together, each doing what they do best.</p>
+
+    <p class="text-lg leading-relaxed mb-4">If you believe the future of work includes always-on AI coworkers, we’d love to hear from you.</p>
     <p class="text-lg leading-relaxed">
       {% if settings.GOBII_PROPRIETARY_MODE %}
       <a href="{% url 'proprietary:contact' %}" class="text-blue-600 hover:underline">Say hello ↗</a>
