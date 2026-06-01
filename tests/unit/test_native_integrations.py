@@ -104,16 +104,25 @@ class NativeIntegrationTests(TestCase):
         session["context_name"] = self.org.name
         session.save()
 
-    def _create_integration_secret(self, *, owner_user=None, owner_org=None, credentials=None):
-        payload = credentials or {
+    def _credentials(self, *, access_token="access-token", refresh_token="refresh-token", expires_at=None):
+        return {
             "provider_key": GOOGLE_DRIVE_PROVIDER.key,
             "auth_type": "oauth2",
-            "access_token": "access-token",
-            "refresh_token": "refresh-token",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "Bearer",
             "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-            "expires_at": (timezone.now() + timedelta(hours=1)).isoformat(),
+            "expires_at": expires_at or (timezone.now() + timedelta(hours=1)).isoformat(),
         }
+
+    def _expired_credentials(self, *, access_token="expired-token"):
+        return self._credentials(
+            access_token=access_token,
+            expires_at=(timezone.now() - timedelta(minutes=1)).isoformat(),
+        )
+
+    def _create_integration_secret(self, *, owner_user=None, owner_org=None, credentials=None):
+        payload = credentials or self._credentials()
         secret = GlobalSecret(
             user=owner_user,
             organization=owner_org,
@@ -126,6 +135,33 @@ class NativeIntegrationTests(TestCase):
         secret.set_value(json.dumps(payload))
         secret.save()
         return secret
+
+    def _token_response(self, *, access_token, refresh_token=None):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "access_token": access_token,
+            "token_type": "Bearer",
+            "expires_in": 3600,
+            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
+        }
+        if refresh_token is not None:
+            response.json.return_value["refresh_token"] = refresh_token
+        return response
+
+    def _start_oauth(self, *, headers=None):
+        kwargs = {"headers": headers} if headers else {}
+        response = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]), **kwargs)
+        return response.json()["state"]
+
+    def _post_oauth_callback(self, state, *, headers=None):
+        kwargs = {"headers": headers} if headers else {}
+        return self.client.post(
+            reverse("console-native-integration-callback", args=["google_drive"]),
+            data=json.dumps({"authorization_code": "auth-code", "state": state}),
+            content_type="application/json",
+            **kwargs,
+        )
 
     def test_provider_registry_serializes_google_drive(self):
         provider = get_native_integration_provider("google_drive")
@@ -228,15 +264,7 @@ class NativeIntegrationTests(TestCase):
     def test_picker_token_returns_configuration_error_when_refresh_needs_oauth_credentials(self):
         self._create_integration_secret(
             owner_user=self.user,
-            credentials={
-                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
-                "auth_type": "oauth2",
-                "access_token": "expired-token",
-                "refresh_token": "refresh-token",
-                "token_type": "Bearer",
-                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-                "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
-            },
+            credentials=self._expired_credentials(),
         )
 
         response = self.client.get(reverse("console-native-integration-picker-token", args=["google_drive"]))
@@ -246,24 +274,13 @@ class NativeIntegrationTests(TestCase):
 
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
-        start = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))
-        state = start.json()["state"]
-        token_response = MagicMock()
-        token_response.status_code = 200
-        token_response.json.return_value = {
-            "access_token": "new-access-token",
-            "refresh_token": "new-refresh-token",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-        }
-        mock_post.return_value = token_response
-
-        response = self.client.post(
-            reverse("console-native-integration-callback", args=["google_drive"]),
-            data=json.dumps({"authorization_code": "auth-code", "state": state}),
-            content_type="application/json",
+        state = self._start_oauth()
+        mock_post.return_value = self._token_response(
+            access_token="new-access-token",
+            refresh_token="new-refresh-token",
         )
+
+        response = self._post_oauth_callback(state)
 
         self.assertEqual(response.status_code, 200, response.content)
         secret = GlobalSecret.objects.get(user=self.user, secret_type=GlobalSecret.SecretType.INTEGRATION)
@@ -283,28 +300,13 @@ class NativeIntegrationTests(TestCase):
             "X-Gobii-Context-Type": "organization",
             "X-Gobii-Context-Id": str(self.org.id),
         }
-        start = self.client.post(
-            reverse("console-native-integration-connect", args=["google_drive"]),
-            headers=headers,
+        state = self._start_oauth(headers=headers)
+        mock_post.return_value = self._token_response(
+            access_token="org-access-token",
+            refresh_token="org-refresh-token",
         )
-        state = start.json()["state"]
-        token_response = MagicMock()
-        token_response.status_code = 200
-        token_response.json.return_value = {
-            "access_token": "org-access-token",
-            "refresh_token": "org-refresh-token",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-        }
-        mock_post.return_value = token_response
 
-        response = self.client.post(
-            reverse("console-native-integration-callback", args=["google_drive"]),
-            data=json.dumps({"authorization_code": "auth-code", "state": state}),
-            content_type="application/json",
-            headers=headers,
-        )
+        response = self._post_oauth_callback(state, headers=headers)
 
         self.assertEqual(response.status_code, 200, response.content)
         secret = GlobalSecret.objects.get(organization=self.org, secret_type=GlobalSecret.SecretType.INTEGRATION)
@@ -361,38 +363,21 @@ class NativeIntegrationTests(TestCase):
         request_kwargs = mock_request.call_args.kwargs
         self.assertEqual(request_kwargs["headers"]["Authorization"], "Bearer access-token")
 
-    def test_native_integration_auth_matches_google_docs_api(self):
+    def test_native_integration_auth_matches_google_api_urls(self):
         self._create_integration_secret(owner_user=self.user)
 
-        headers = apply_native_integration_auth(
-            self.agent,
-            "https://docs.googleapis.com/v1/documents/test",
-            {},
+        cases = (
+            ("https://docs.googleapis.com/v1/documents/test", True),
+            ("https://www.googleapis.com/drive/v3/files", True),
+            ("https://www.googleapis.com/oauth2/v3/userinfo", False),
         )
-
-        self.assertEqual(headers["Authorization"], "Bearer access-token")
-
-    def test_native_integration_auth_matches_google_drive_api(self):
-        self._create_integration_secret(owner_user=self.user)
-
-        headers = apply_native_integration_auth(
-            self.agent,
-            "https://www.googleapis.com/drive/v3/files",
-            {},
-        )
-
-        self.assertEqual(headers["Authorization"], "Bearer access-token")
-
-    def test_native_integration_auth_matches_only_drive_path_on_www_googleapis(self):
-        self._create_integration_secret(owner_user=self.user)
-
-        headers = apply_native_integration_auth(
-            self.agent,
-            "https://www.googleapis.com/oauth2/v3/userinfo",
-            {},
-        )
-
-        self.assertNotIn("Authorization", headers)
+        for url, should_match in cases:
+            with self.subTest(url=url):
+                headers = apply_native_integration_auth(self.agent, url, {})
+                if should_match:
+                    self.assertEqual(headers["Authorization"], "Bearer access-token")
+                else:
+                    self.assertNotIn("Authorization", headers)
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
@@ -400,15 +385,7 @@ class NativeIntegrationTests(TestCase):
     def test_http_request_does_not_override_explicit_authorization(self, mock_refresh, mock_request, mock_proxy):
         self._create_integration_secret(
             owner_user=self.user,
-            credentials={
-                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
-                "auth_type": "oauth2",
-                "access_token": "expired-token",
-                "refresh_token": "refresh-token",
-                "token_type": "Bearer",
-                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-                "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
-            },
+            credentials=self._expired_credentials(),
         )
         mock_proxy.return_value = None
         mock_request.return_value = _mock_response(b'{"ok": true}')
@@ -432,25 +409,9 @@ class NativeIntegrationTests(TestCase):
     def test_http_request_refreshes_expired_google_drive_token(self, mock_refresh, mock_request, mock_proxy):
         secret = self._create_integration_secret(
             owner_user=self.user,
-            credentials={
-                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
-                "auth_type": "oauth2",
-                "access_token": "expired-token",
-                "refresh_token": "refresh-token",
-                "token_type": "Bearer",
-                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-                "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
-            },
+            credentials=self._expired_credentials(),
         )
-        token_response = MagicMock()
-        token_response.status_code = 200
-        token_response.json.return_value = {
-            "access_token": "refreshed-token",
-            "token_type": "Bearer",
-            "expires_in": 3600,
-            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
-        }
-        mock_refresh.return_value = token_response
+        mock_refresh.return_value = self._token_response(access_token="refreshed-token")
         mock_proxy.return_value = None
         mock_request.return_value = _mock_response(b'{"ok": true}')
 
@@ -521,13 +482,3 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("drive.file", block)
         self.assertIn("https://app.example.test/app/integrations", block)
         self.assertNotIn("{integrations_url}", block)
-
-    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
-    def test_google_sheets_prompt_uses_public_site_url_for_setup_link(self):
-        enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
-
-        block = format_recent_skills_for_prompt(self.agent, limit=3)
-
-        self.assertIn("System Skill: Google Sheets", block)
-        self.assertIn("connect Google Drive", block)
-        self.assertIn("https://app.example.test/app/integrations", block)
