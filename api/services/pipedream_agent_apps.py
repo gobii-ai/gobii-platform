@@ -10,10 +10,9 @@ from api.models import MCPServerConfig, PersistentAgent
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.services.pipedream_apps import (
     PipedreamCatalogService,
-    filter_deprecated_pipedream_apps_for_agent,
     get_platform_pipedream_app_slugs,
     get_owner_apps_state,
-    is_pipedream_app_visible_to_agent,
+    get_pipedream_app_visibility_for_agent,
     owner_agents_queryset,
     set_owner_selected_app_slugs,
 )
@@ -103,14 +102,11 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
         connected_accounts = []
     connected_by_app = group_pipedream_connected_accounts_by_app(connected_accounts)
     connected_app_slugs = set(connected_by_app)
+    visibility = get_pipedream_app_visibility_for_agent(agent, connected_app_slugs=connected_app_slugs)
 
     if normalized_query:
         search_results = catalog.search_apps(normalized_query, limit=30)
-        search_results = filter_deprecated_pipedream_apps_for_agent(
-            agent,
-            search_results,
-            connected_app_slugs=connected_app_slugs,
-        )
+        search_results = visibility.filter_apps(search_results)
         apps = {app.slug: app.to_dict() for app in search_results}
         ordered_slugs = normalize_app_slugs(app.slug for app in search_results)
     else:
@@ -122,7 +118,7 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
 
     rows = []
     for slug in ordered_slugs:
-        if not is_pipedream_app_visible_to_agent(agent, slug, connected_app_slugs=connected_app_slugs):
+        if not visibility.is_app_visible(slug):
             continue
         app = apps.get(slug)
         if app is None:
@@ -187,7 +183,7 @@ def start_agent_pipedream_app_connect(agent: PersistentAgent, app_slug: str) -> 
     if not normalized_slug:
         raise ValueError("app_slug is required.")
 
-    if not is_pipedream_app_visible_to_agent(agent, normalized_slug):
+    if not get_pipedream_app_visibility_for_agent(agent).is_app_visible(normalized_slug):
         raise ValueError("This Pipedream app is deprecated and cannot be newly connected.")
 
     catalog = PipedreamCatalogService()

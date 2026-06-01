@@ -354,6 +354,8 @@ class AgentSecretDetailAPIView(LoginRequiredMixin, View):
         if "domain_pattern" in payload:
             secret.domain_pattern = (payload["domain_pattern"] or "").strip()
         if "secret_type" in payload:
+            if payload["secret_type"] not in VISIBLE_SECRET_TYPES:
+                return JsonResponse({"errors": {"secret_type": ["Unsupported secret type."]}}, status=400)
             secret.secret_type = payload["secret_type"]
         if "value" in payload and payload["value"]:
             secret.set_value(payload["value"])

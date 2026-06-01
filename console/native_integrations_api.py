@@ -17,6 +17,7 @@ from django.views import View
 from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
     NativeIntegrationAuthError,
+    NativeIntegrationConfigurationError,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
     get_native_integration_provider,
@@ -310,6 +311,8 @@ class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):
         try:
             credentials = load_native_integration_credentials(secret)
             credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
+        except NativeIntegrationConfigurationError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
         except NativeIntegrationAuthError as exc:
             return JsonResponse({"error": str(exc)}, status=401)
 

@@ -51,6 +51,52 @@ type GooglePickerNamespace = {
 
 const GOOGLE_SHEETS_MIME_TYPE = 'application/vnd.google-apps.spreadsheet'
 const GOOGLE_DOCS_MIME_TYPE = 'application/vnd.google-apps.document'
+const BUTTON_CLASS_NAME =
+  'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60'
+const ROW_CLASS_NAME = 'flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between'
+
+const PANEL_CLASSES = {
+  embedded: {
+    section: 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20',
+    header: 'flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between',
+    badge:
+      'inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-950/45 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100',
+    title: 'text-lg font-semibold text-slate-50',
+    caption: 'text-sm text-slate-400',
+    body: 'divide-y divide-slate-200/10',
+    iconShell:
+      'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-300/25 bg-emerald-950/35 text-emerald-100',
+    providerTitle: 'text-sm font-semibold text-slate-100',
+    providerDescription: 'text-sm text-slate-400',
+    status:
+      'inline-flex items-center gap-1.5 rounded-full border border-slate-200/20 bg-slate-950/25 px-2.5 py-1 text-xs font-semibold text-slate-200',
+    connectButton: `${BUTTON_CLASS_NAME} border border-emerald-300/25 bg-emerald-900/55 text-emerald-50 hover:border-emerald-200/40 hover:bg-emerald-900/75`,
+    disconnectButton: `${BUTTON_CLASS_NAME} border border-slate-200/20 bg-slate-950/20 text-slate-200 hover:border-slate-100/35 hover:bg-slate-900/40`,
+    pickerButton: `${BUTTON_CLASS_NAME} border border-emerald-300/25 bg-emerald-900/35 text-emerald-50 hover:border-emerald-200/40 hover:bg-emerald-900/55`,
+    loading: 'flex items-center gap-2 px-6 py-8 text-sm text-slate-400',
+    error: 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100',
+  },
+  standalone: {
+    section: 'gobii-card-base overflow-hidden',
+    header: 'flex flex-col gap-3 border-b border-gray-200/70 px-6 py-4 sm:flex-row sm:items-center sm:justify-between',
+    badge:
+      'inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700',
+    title: 'text-lg font-semibold text-gray-800',
+    caption: 'text-sm text-gray-600',
+    body: 'divide-y divide-gray-200/70',
+    iconShell:
+      'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700',
+    providerTitle: 'text-sm font-semibold text-slate-900',
+    providerDescription: 'text-sm text-slate-600',
+    status:
+      'inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700',
+    connectButton: `${BUTTON_CLASS_NAME} bg-emerald-600 text-white shadow hover:bg-emerald-700`,
+    disconnectButton: `${BUTTON_CLASS_NAME} border border-slate-200 text-slate-700 hover:bg-slate-50`,
+    pickerButton: `${BUTTON_CLASS_NAME} border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100`,
+    loading: 'flex items-center gap-2 px-6 py-8 text-sm text-slate-500',
+    error: 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700',
+  },
+} as const
 
 declare global {
   interface Window {
@@ -130,44 +176,7 @@ export function NativeAppsPanel({
     },
   })
 
-  const sectionClassName = embedded
-    ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
-    : 'gobii-card-base overflow-hidden'
-  const headerClassName = embedded
-    ? 'flex flex-col gap-3 px-6 py-4 sm:flex-row sm:items-center sm:justify-between'
-    : 'flex flex-col gap-3 border-b border-gray-200/70 px-6 py-4 sm:flex-row sm:items-center sm:justify-between'
-  const badgeClassName = embedded
-    ? 'inline-flex items-center gap-2 rounded-full border border-emerald-300/25 bg-emerald-950/45 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-100'
-    : 'inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold uppercase tracking-wide text-emerald-700'
-  const titleClassName = embedded ? 'text-lg font-semibold text-slate-50' : 'text-lg font-semibold text-gray-800'
-  const captionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-gray-600'
-  const bodyClassName = embedded ? 'divide-y divide-slate-200/10' : 'divide-y divide-gray-200/70'
-  const rowClassName = embedded
-    ? 'flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between'
-    : 'flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between'
-  const iconShellClassName = embedded
-    ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-300/25 bg-emerald-950/35 text-emerald-100'
-    : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700'
-  const providerTitleClassName = embedded ? 'text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-slate-900'
-  const providerDescriptionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-600'
-  const statusClassName = embedded
-    ? 'inline-flex items-center gap-1.5 rounded-full border border-slate-200/20 bg-slate-950/25 px-2.5 py-1 text-xs font-semibold text-slate-200'
-    : 'inline-flex items-center gap-1.5 rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-700'
-  const connectButtonClassName = embedded
-    ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/55 px-4 py-2 text-sm font-semibold text-emerald-50 transition hover:border-emerald-200/40 hover:bg-emerald-900/75 disabled:cursor-not-allowed disabled:opacity-60'
-    : 'inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60'
-  const disconnectButtonClassName = embedded
-    ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200/20 bg-slate-950/20 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:border-slate-100/35 hover:bg-slate-900/40 disabled:cursor-not-allowed disabled:opacity-60'
-    : 'inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
-  const pickerButtonClassName = embedded
-    ? 'inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-300/25 bg-emerald-900/35 px-4 py-2 text-sm font-semibold text-emerald-50 transition hover:border-emerald-200/40 hover:bg-emerald-900/55 disabled:cursor-not-allowed disabled:opacity-60'
-    : 'inline-flex items-center justify-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60'
-  const loadingClassName = embedded
-    ? 'flex items-center gap-2 px-6 py-8 text-sm text-slate-400'
-    : 'flex items-center gap-2 px-6 py-8 text-sm text-slate-500'
-  const errorClassName = embedded
-    ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
-    : 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'
+  const classes = embedded ? PANEL_CLASSES.embedded : PANEL_CLASSES.standalone
   const pendingProviderKey =
     (connectMutation.isPending ? connectMutation.variables?.providerKey : null) ??
     (revokeMutation.isPending ? revokeMutation.variables?.providerKey : null) ??
@@ -175,46 +184,46 @@ export function NativeAppsPanel({
     null
 
   return (
-    <section className={sectionClassName}>
-      <div className={headerClassName}>
+    <section className={classes.section}>
+      <div className={classes.header}>
         <div className="space-y-1">
-          <div className={badgeClassName}>
+          <div className={classes.badge}>
             <Plug className="h-3.5 w-3.5" aria-hidden="true" />
             Native Apps
           </div>
           <div>
-            <h2 className={titleClassName}>Native apps</h2>
-            <p className={captionClassName}>Connect first-party app credentials for agent API calls.</p>
+            <h2 className={classes.title}>Native apps</h2>
+            <p className={classes.caption}>Connect first-party app credentials for agent API calls.</p>
           </div>
         </div>
       </div>
 
       {integrationsQuery.isLoading ? (
-        <div className={loadingClassName}>
+        <div className={classes.loading}>
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading native apps...
         </div>
       ) : integrationsQuery.isError ? (
         <div className="px-6 py-5">
-          <div className={errorClassName}>
+          <div className={classes.error}>
             {integrationsQuery.error instanceof Error ? integrationsQuery.error.message : 'Unable to load native apps.'}
           </div>
         </div>
       ) : (
-        <div className={bodyClassName}>
+        <div className={classes.body}>
           {(integrationsQuery.data?.providers ?? []).map((provider) => {
             const isBusy = pendingProviderKey === provider.providerKey
             return (
               <div key={provider.providerKey}>
-                <div className={rowClassName}>
+                <div className={ROW_CLASS_NAME}>
                   <div className="flex min-w-0 gap-3">
-                    <div className={iconShellClassName}>
+                    <div className={classes.iconShell}>
                       <ProviderIcon provider={provider} />
                     </div>
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className={providerTitleClassName}>{provider.displayName}</h3>
-                        <span className={statusClassName}>
+                        <h3 className={classes.providerTitle}>{provider.displayName}</h3>
+                        <span className={classes.status}>
                           {provider.connected ? (
                             <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
                           ) : (
@@ -223,7 +232,7 @@ export function NativeAppsPanel({
                           {provider.connected ? 'Connected' : 'Not connected'}
                         </span>
                       </div>
-                      <p className={providerDescriptionClassName}>{provider.description}</p>
+                      <p className={classes.providerDescription}>{provider.description}</p>
                     </div>
                   </div>
                   <div className="flex shrink-0 flex-wrap gap-2">
@@ -231,7 +240,7 @@ export function NativeAppsPanel({
                       <>
                         <button
                           type="button"
-                          className={pickerButtonClassName}
+                          className={classes.pickerButton}
                           onClick={() => pickerMutation.mutate(provider)}
                           disabled={isBusy}
                         >
@@ -244,7 +253,7 @@ export function NativeAppsPanel({
                         </button>
                         <button
                           type="button"
-                          className={disconnectButtonClassName}
+                          className={classes.disconnectButton}
                           onClick={() => revokeMutation.mutate(provider)}
                           disabled={isBusy}
                         >
@@ -259,7 +268,7 @@ export function NativeAppsPanel({
                     ) : (
                       <button
                         type="button"
-                        className={connectButtonClassName}
+                        className={classes.connectButton}
                         onClick={() => connectMutation.mutate(provider)}
                         disabled={isBusy}
                       >

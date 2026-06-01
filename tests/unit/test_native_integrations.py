@@ -223,6 +223,26 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"error": "Google Picker is not configured."})
 
+    @override_settings(GOOGLE_DRIVE_CLIENT_ID="", GOOGLE_DRIVE_CLIENT_SECRET="")
+    def test_picker_token_returns_configuration_error_when_refresh_needs_oauth_credentials(self):
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials={
+                "provider_key": GOOGLE_DRIVE_PROVIDER.key,
+                "auth_type": "oauth2",
+                "access_token": "expired-token",
+                "refresh_token": "refresh-token",
+                "token_type": "Bearer",
+                "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
+                "expires_at": (timezone.now() - timedelta(minutes=1)).isoformat(),
+            },
+        )
+
+        response = self.client.get(reverse("console-native-integration-picker-token", args=["google_drive"]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"error": "Google Drive OAuth is not configured."})
+
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
         start = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))

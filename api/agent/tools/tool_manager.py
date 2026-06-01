@@ -34,6 +34,7 @@ from ...services.sandbox_compute import (
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
 from ...services.pipedream_apps import (
     filter_deprecated_pipedream_tools_for_agent,
+    get_pipedream_app_visibility_for_agent,
     is_pipedream_tool_visible_to_agent,
 )
 from ...services.tool_blacklist import (
@@ -1117,10 +1118,11 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
         .values_list("tool_full_name", flat=True)
     )
+    pipedream_visibility = get_pipedream_app_visibility_for_agent(agent)
     hidden_deprecated_pipedream_tool_names = {
         tool_name
         for tool_name in enabled_pipedream_tool_names
-        if not is_pipedream_tool_visible_to_agent(agent, tool_name)
+        if not pipedream_visibility.is_tool_visible(tool_name)
     }
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
