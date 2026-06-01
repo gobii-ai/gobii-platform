@@ -100,13 +100,23 @@ def serialize_owner_apps_state(
     catalog: Optional["PipedreamCatalogService"] = None,
 ) -> dict[str, object]:
     catalog_service = catalog or PipedreamCatalogService()
+    visibility = PipedreamAppVisibility(frozenset(get_deprecated_pipedream_app_slugs()))
+    visible_platform_app_slugs = [
+        slug for slug in state.platform_app_slugs if visibility.is_app_visible(slug)
+    ]
+    visible_selected_app_slugs = [
+        slug for slug in state.selected_app_slugs if visibility.is_app_visible(slug)
+    ]
+    visible_effective_app_slugs = [
+        slug for slug in state.effective_app_slugs if visibility.is_app_visible(slug)
+    ]
     app_lookup: dict[str, dict[str, str]] = {}
     for app in catalog_service.get_apps(
         normalize_app_slugs(
             [
-                *state.platform_app_slugs,
-                *state.selected_app_slugs,
-                *state.effective_app_slugs,
+                *visible_platform_app_slugs,
+                *visible_selected_app_slugs,
+                *visible_effective_app_slugs,
             ]
         )
     ):
@@ -117,9 +127,9 @@ def serialize_owner_apps_state(
     return {
         "owner_scope": state.owner_scope,
         "owner_label": state.owner_label,
-        "platform_apps": [app_lookup[slug] for slug in state.platform_app_slugs if slug in app_lookup],
-        "selected_apps": [app_lookup[slug] for slug in state.selected_app_slugs if slug in app_lookup],
-        "effective_apps": [app_lookup[slug] for slug in state.effective_app_slugs if slug in app_lookup],
+        "platform_apps": [app_lookup[slug] for slug in visible_platform_app_slugs if slug in app_lookup],
+        "selected_apps": [app_lookup[slug] for slug in visible_selected_app_slugs if slug in app_lookup],
+        "effective_apps": [app_lookup[slug] for slug in visible_effective_app_slugs if slug in app_lookup],
     }
 
 

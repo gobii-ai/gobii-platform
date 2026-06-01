@@ -1073,6 +1073,27 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_sheets", "google_docs", "trello"])
 
     @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
+    def test_get_hides_deprecated_platform_apps(self, mock_get_apps):
+        self._set_deprecated_apps("google_sheets")
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["trello"],
+        )
+        mock_get_apps.side_effect = lambda slugs: [
+            type("App", (), {"to_dict": lambda self, slug=slug: PipedreamAppsAPITests._app(slug)})()
+            for slug in slugs
+        ]
+
+        response = self.client.get(self.settings_url)
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual([app["slug"] for app in payload["platform_apps"]], ["google_docs"])
+        self.assertEqual([app["slug"] for app in payload["selected_apps"]], ["trello"])
+        self.assertEqual([app["slug"] for app in payload["effective_apps"]], ["google_docs", "trello"])
+        mock_get_apps.assert_called_once_with(["google_docs", "trello"])
+
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.get_apps")
     @patch("console.pipedream_apps_api.get_mcp_manager")
     def test_patch_updates_user_scope_apps(self, mock_get_mcp_manager, mock_get_apps):
         mock_get_apps.side_effect = lambda slugs: [
