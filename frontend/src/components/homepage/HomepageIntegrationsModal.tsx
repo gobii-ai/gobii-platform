@@ -577,8 +577,8 @@ function HomepageNativeProviderRow({
 
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-        <div className="flex min-w-0 items-start gap-3">
+      <div className="flex flex-wrap items-start gap-3">
+        <div className="flex min-w-72 flex-1 items-start gap-3">
           <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
             <NativeProviderIcon provider={provider} />
           </span>
@@ -598,7 +598,7 @@ function HomepageNativeProviderRow({
             {provider.description ? <p className="mt-1 text-sm text-slate-600">{provider.description}</p> : null}
           </div>
         </div>
-        <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+        <div className="ml-auto flex shrink-0 flex-wrap justify-end gap-2">
           {pickerEnabled ? (
             <button
               type="button"

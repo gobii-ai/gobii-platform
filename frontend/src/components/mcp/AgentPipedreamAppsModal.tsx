@@ -302,7 +302,7 @@ function AgentNativeAppRowItem({
 
   return (
     <div className="px-4 py-3">
-      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] sm:items-start">
         <NativeIntegrationSummaryCell provider={provider} />
         <div>
           {provider.connected ? (
