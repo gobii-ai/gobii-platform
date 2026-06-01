@@ -153,10 +153,6 @@ export function NativeAppsPanel({
 
       queryClient.invalidateQueries({ queryKey })
       if (payload.ok) {
-        const provider = integrationsQuery.data?.providers.find(
-          (candidate) => candidate.providerKey === payload.providerKey,
-        )
-        onSuccess(`${provider?.displayName ?? 'Native app'} connected.`)
         return
       }
       onError(String(payload.error || 'Unable to complete the native app connection.'))
@@ -184,7 +180,7 @@ export function NativeAppsPanel({
       window.removeEventListener('message', handleMessage)
       window.removeEventListener('storage', handleStorage)
     }
-  }, [integrationsQuery.data?.providers, onError, onSuccess, queryClient, queryKey])
+  }, [onError, queryClient, queryKey])
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -194,16 +190,14 @@ export function NativeAppsPanel({
     }
 
     queryClient.invalidateQueries({ queryKey })
-    if (result === 'success') {
-      onSuccess('Native app connected.')
-    } else if (result === 'error') {
-      onError('Unable to complete the native app connection.')
+    if (result === 'error') {
+      onError('Unable to complete the app connection.')
     }
     params.delete('native_oauth')
     const nextSearch = params.toString()
     const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
     window.history.replaceState(window.history.state, '', nextUrl)
-  }, [onError, onSuccess, queryClient, queryKey])
+  }, [onError, queryClient, queryKey])
 
   const connectMutation = useMutation({
     mutationFn: ({ provider }: NativeConnectVariables) => startNativeIntegrationConnect(provider.connectUrl),
@@ -236,9 +230,8 @@ export function NativeAppsPanel({
 
   const revokeMutation = useMutation({
     mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
-    onSuccess: (provider) => {
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey })
-      onSuccess(`${provider.displayName} disconnected.`)
     },
     onError: (error) => {
       onError(safeErrorMessage(error))
