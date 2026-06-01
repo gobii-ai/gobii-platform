@@ -259,10 +259,7 @@ import litellm
 
 from api.agent.core.llm_config import invalidate_llm_bootstrap_cache
 from api.agent.core.llm_utils import run_completion
-from api.agent.core.prompt_context import build_prompt_context_preview, get_agent_tools
 from api.agent.core.token_usage import extract_token_usage
-from api.agent.tools.sqlite_agent_config import seed_sqlite_agent_config
-from api.agent.tools.sqlite_skills import seed_sqlite_skills
 from api.pipedream_app_utils import normalize_app_slugs
 from api.evals.tasks import gc_eval_runs_task
 from api.evals.catalog import serialize_scenario_catalog_item, scenario_to_suite_slugs
@@ -963,42 +960,41 @@ def _run_completion_test(endpoint, provider: LLMProvider, *, model_attr: str, ba
     }
 
 
-_LLM_PERFORMANCE_MAX_ENDPOINTS = 8
 _LLM_PERFORMANCE_MAX_SAMPLES = 10
+_LLM_PERFORMANCE_INPUT_TOKEN_SIZES = {10_000, 60_000, 120_000}
+_LLM_PERFORMANCE_FILLER = (
+    "Benchmark context line with stable neutral content for measuring model latency, "
+    "throughput, and cost at different prompt sizes. "
+)
+_LLM_PERFORMANCE_SYSTEM_MESSAGE = (
+    "You are participating in a deterministic LLM performance benchmark. "
+    "Use the supplied synthetic context only to acknowledge the request briefly."
+)
+_LLM_PERFORMANCE_USER_PREFIX = (
+    "Synthetic benchmark context follows. Reply with exactly one concise sentence that says "
+    "the benchmark payload was received.\n\n"
+)
 
 
-def _coerce_llm_performance_samples(value: Any) -> int:
+def _coerce_llm_performance_sample_number(value: Any) -> int:
     try:
-        samples = int(value)
+        sample_number = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("samples_per_endpoint must be an integer") from exc
-    if samples < 1 or samples > _LLM_PERFORMANCE_MAX_SAMPLES:
-        raise ValueError(f"samples_per_endpoint must be between 1 and {_LLM_PERFORMANCE_MAX_SAMPLES}")
-    return samples
+        raise ValueError("sample_number must be an integer") from exc
+    if sample_number < 1 or sample_number > _LLM_PERFORMANCE_MAX_SAMPLES:
+        raise ValueError(f"sample_number must be between 1 and {_LLM_PERFORMANCE_MAX_SAMPLES}")
+    return sample_number
 
 
-def _coerce_llm_performance_endpoint_ids(value: Any) -> list[uuid.UUID]:
-    if not isinstance(value, list):
-        raise ValueError("endpoint_ids must be a list")
-    if not value:
-        raise ValueError("Select at least one endpoint")
-    if len(value) > _LLM_PERFORMANCE_MAX_ENDPOINTS:
-        raise ValueError(f"Select no more than {_LLM_PERFORMANCE_MAX_ENDPOINTS} endpoints")
-
-    endpoint_ids: list[uuid.UUID] = []
-    seen: set[uuid.UUID] = set()
-    for raw_id in value:
-        try:
-            endpoint_id = uuid.UUID(str(raw_id))
-        except (TypeError, ValueError) as exc:
-            raise ValueError("endpoint_ids must contain valid UUIDs") from exc
-        if endpoint_id in seen:
-            continue
-        seen.add(endpoint_id)
-        endpoint_ids.append(endpoint_id)
-    if not endpoint_ids:
-        raise ValueError("Select at least one endpoint")
-    return endpoint_ids
+def _coerce_llm_performance_input_token_size(value: Any) -> int:
+    try:
+        size = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("input_token_size must be an integer") from exc
+    if size not in _LLM_PERFORMANCE_INPUT_TOKEN_SIZES:
+        allowed = ", ".join(str(token_size) for token_size in sorted(_LLM_PERFORMANCE_INPUT_TOKEN_SIZES))
+        raise ValueError(f"input_token_size must be one of {allowed}")
+    return size
 
 
 def _extract_llm_performance_message(response: Any) -> tuple[str, str]:
@@ -1052,6 +1048,47 @@ def _serialize_llm_performance_endpoint(endpoint: PersistentModelEndpoint) -> di
         "provider": provider_name,
         "model": endpoint.litellm_model,
     }
+
+
+def _estimate_llm_performance_tokens(model: str, text: str) -> int:
+    try:
+        count = litellm.token_counter(model=model, text=text)
+    except Exception:
+        # Token counting is best effort; unsupported model aliases should not block benchmarks.
+        return max(1, math.ceil(len(text) / 4))
+    if isinstance(count, int) and count > 0:
+        return count
+    return max(1, math.ceil(len(text) / 4))
+
+
+def _estimate_llm_performance_message_tokens(model: str, messages: list[dict[str, str]]) -> int:
+    text = "\n".join(str(message.get("content") or "") for message in messages)
+    return _estimate_llm_performance_tokens(model, text)
+
+
+def _build_llm_performance_messages(*, model: str, requested_input_tokens: int) -> tuple[list[dict[str, str]], int]:
+    base_messages = [
+        {"role": "system", "content": _LLM_PERFORMANCE_SYSTEM_MESSAGE},
+        {"role": "user", "content": _LLM_PERFORMANCE_USER_PREFIX},
+    ]
+    base_tokens = _estimate_llm_performance_message_tokens(model, base_messages)
+    target_filler_tokens = max(0, requested_input_tokens - base_tokens)
+    filler_token_estimate = max(1, _estimate_llm_performance_tokens(model, _LLM_PERFORMANCE_FILLER))
+    repeat_count = max(1, math.ceil(target_filler_tokens / filler_token_estimate)) if target_filler_tokens else 0
+    filler = _LLM_PERFORMANCE_FILLER * repeat_count
+    messages = [
+        {"role": "system", "content": _LLM_PERFORMANCE_SYSTEM_MESSAGE},
+        {
+            "role": "user",
+            "content": (
+                f"{_LLM_PERFORMANCE_USER_PREFIX}"
+                f"Requested input token target: {requested_input_tokens}\n\n"
+                f"{filler}"
+            ),
+        },
+    ]
+    estimated_tokens = _estimate_llm_performance_message_tokens(model, messages)
+    return messages, estimated_tokens
 
 
 def _percentile(values: list[int], percentile: float) -> int | None:
@@ -1167,7 +1204,6 @@ def _run_llm_performance_sample(
     *,
     endpoint: PersistentModelEndpoint,
     messages: list[dict[str, Any]],
-    tools: list[dict[str, Any]],
     sample_number: int,
 ) -> dict[str, Any]:
     model, params = _build_completion_params(
@@ -1183,7 +1219,6 @@ def _run_llm_performance_sample(
             model=model,
             messages=messages,
             params=params,
-            tools=tools,
             drop_params=True,
         )
     except Exception as exc:
@@ -5479,97 +5514,60 @@ class LLMPerformanceTestAPIView(SystemAdminAPIView):
     def post(self, request: HttpRequest, *args: Any, **kwargs: Any):
         try:
             payload = _parse_json_body(request)
-            agent_id = uuid.UUID(str(payload.get("agent_id")))
-            endpoint_ids = _coerce_llm_performance_endpoint_ids(payload.get("endpoint_ids"))
-            samples_per_endpoint = _coerce_llm_performance_samples(payload.get("samples_per_endpoint", 3))
+            endpoint_id = payload.get("endpoint_id")
+            if not endpoint_id:
+                return HttpResponseBadRequest("endpoint_id is required")
+            try:
+                endpoint_uuid = uuid.UUID(str(endpoint_id))
+            except (TypeError, ValueError):
+                return HttpResponseBadRequest("endpoint_id must be a valid UUID")
+            input_token_size = _coerce_llm_performance_input_token_size(payload.get("input_token_size"))
+            sample_number = _coerce_llm_performance_sample_number(payload.get("sample_number", 1))
         except (TypeError, ValueError) as exc:
             return HttpResponseBadRequest(str(exc))
 
-        agent = (
-            PersistentAgent.objects.non_eval()
-            .alive()
-            .select_related("user", "organization", "preferred_contact_endpoint")
-            .filter(pk=agent_id)
-            .first()
+        endpoint = get_object_or_404(
+            PersistentModelEndpoint.objects.select_related("provider"),
+            pk=endpoint_uuid,
         )
-        if agent is None:
-            return JsonResponse({"ok": False, "message": "Agent not found"}, status=404)
-
-        endpoints = list(
-            PersistentModelEndpoint.objects.select_related("provider")
-            .filter(id__in=endpoint_ids)
-        )
-        endpoints_by_id = {endpoint.id: endpoint for endpoint in endpoints}
-        missing_ids = [str(endpoint_id) for endpoint_id in endpoint_ids if endpoint_id not in endpoints_by_id]
-        if missing_ids:
-            return HttpResponseBadRequest(f"Unknown endpoint_id: {missing_ids[0]}")
-
-        ordered_endpoints = [endpoints_by_id[endpoint_id] for endpoint_id in endpoint_ids]
-        for endpoint in ordered_endpoints:
-            try:
-                _build_completion_params(
-                    endpoint,
-                    endpoint.provider,
-                    model_attr="litellm_model",
-                    base_attr="api_base",
-                    default_max_tokens=256,
-                )
-            except ValueError as exc:
-                return JsonResponse(
-                    {
-                        "ok": False,
-                        "message": f"{endpoint.key}: {exc}",
-                    },
-                    status=400,
-                )
 
         try:
-            seed_sqlite_agent_config(agent)
-            seed_sqlite_skills(agent)
-            messages, prompt_tokens, prompt_metadata = build_prompt_context_preview(
-                agent,
-                current_iteration=1,
-                is_first_run=False,
+            model, _params = _build_completion_params(
+                endpoint,
+                endpoint.provider,
+                model_attr="litellm_model",
+                base_attr="api_base",
+                default_max_tokens=256,
             )
-            tools = get_agent_tools(agent)
-        except Exception as exc:
-            logger.warning("Failed to render LLM performance prompt for agent %s", agent.id, exc_info=True)
-            return JsonResponse({"ok": False, "message": f"{type(exc).__name__}: {exc}"}, status=400)
-
-        endpoint_results: list[dict[str, Any]] = []
-        for endpoint in ordered_endpoints:
-            samples = [
-                _run_llm_performance_sample(
-                    endpoint=endpoint,
-                    messages=messages,
-                    tools=tools,
-                    sample_number=sample_number,
-                )
-                for sample_number in range(1, samples_per_endpoint + 1)
-            ]
-            endpoint_results.append(
+        except ValueError as exc:
+            return JsonResponse(
                 {
-                    "endpoint": _serialize_llm_performance_endpoint(endpoint),
-                    "samples": samples,
-                    "summary": _build_llm_performance_summary(samples),
-                }
+                    "ok": False,
+                    "message": f"{endpoint.key}: {exc}",
+                },
+                status=400,
             )
+
+        messages, estimated_prompt_tokens = _build_llm_performance_messages(
+            model=model,
+            requested_input_tokens=input_token_size,
+        )
+        sample = _run_llm_performance_sample(
+            endpoint=endpoint,
+            messages=messages,
+            sample_number=sample_number,
+        )
 
         return JsonResponse(
             {
                 "ok": True,
-                "agent": {
-                    "id": str(agent.id),
-                    "name": agent.name or "",
-                },
-                "prompt": {
-                    "tokens": prompt_tokens,
+                "endpoint": _serialize_llm_performance_endpoint(endpoint),
+                "input_size": {
+                    "requested_input_tokens": input_token_size,
+                    "estimated_prompt_tokens": estimated_prompt_tokens,
                     "message_count": len(messages),
-                    "tool_count": len(tools),
-                    "allows_implied_send": bool(prompt_metadata.get("prompt_allows_implied_send", True)),
                 },
-                "samples_per_endpoint": samples_per_endpoint,
-                "endpoints": endpoint_results,
+                "sample": sample,
             }
         )
 

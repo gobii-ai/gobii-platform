@@ -365,11 +365,6 @@ type EndpointTestStatus = {
   updatedAt: number
 }
 
-type PerformanceAgentSelection = {
-  id: string
-  name: string
-}
-
 type EndpointFormValues = {
   model: string
   temperature?: string
@@ -756,7 +751,13 @@ const parseNumber = (value?: string) => {
   return Number.isNaN(parsed) ? undefined : parsed
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const PERFORMANCE_INPUT_TOKEN_SIZE_OPTIONS = [
+  { value: 10000, label: '10k' },
+  { value: 60000, label: '60k' },
+  { value: 120000, label: '120k' },
+]
+const DEFAULT_PERFORMANCE_INPUT_TOKEN_SIZES = [120000]
+const LLM_PERFORMANCE_REQUEST_CONCURRENCY = 3
 
 const formatNullableNumber = (value?: number | null, suffix = '') => {
   if (typeof value !== 'number' || Number.isNaN(value)) return '—'
@@ -773,6 +774,171 @@ const formatCost = (value?: number | null) => {
   if (value === 0) return '$0.00'
   if (Math.abs(value) < 0.01) return `$${value.toFixed(6)}`
   return `$${value.toFixed(2)}`
+}
+
+const percentile = (values: number[], percent: number) => {
+  if (!values.length) return null
+  const sorted = [...values].sort((a, b) => a - b)
+  const index = Math.max(0, Math.min(sorted.length - 1, Math.ceil((percent / 100) * sorted.length) - 1))
+  return sorted[index]
+}
+
+const average = (values: number[]) => {
+  if (!values.length) return null
+  return Math.round((values.reduce((sum, value) => sum + value, 0) / values.length) * 100) / 100
+}
+
+const sumNumberMetric = (samples: llmApi.LlmPerformanceSample[], key: keyof llmApi.LlmPerformanceSample) => (
+  samples.reduce((sum, sample) => {
+    const value = sample[key]
+    return typeof value === 'number' && Number.isFinite(value) ? sum + value : sum
+  }, 0)
+)
+
+const buildPerformanceSummary = (samples: llmApi.LlmPerformanceSample[]): llmApi.LlmPerformanceEndpointSummary => {
+  const completedSamples = samples.filter((sample) => sample.status !== 'pending' && sample.status !== 'running')
+  const successfulSamples = completedSamples.filter((sample) => sample.ok)
+  const latencies = successfulSamples
+    .map((sample) => sample.latency_ms)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const tokensPerSecond = successfulSamples
+    .map((sample) => sample.completion_tokens_per_second)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const promptTokens = successfulSamples
+    .map((sample) => sample.prompt_tokens)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const completionTokens = successfulSamples
+    .map((sample) => sample.completion_tokens)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const totalTokens = successfulSamples
+    .map((sample) => sample.total_tokens)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const inputCosts = successfulSamples
+    .map((sample) => sample.input_cost_total)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const outputCosts = successfulSamples
+    .map((sample) => sample.output_cost)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+  const totalCosts = successfulSamples
+    .map((sample) => sample.total_cost)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
+
+  return {
+    success_count: successfulSamples.length,
+    error_count: completedSamples.length - successfulSamples.length,
+    latency_ms: {
+      min: latencies.length ? Math.min(...latencies) : null,
+      avg: average(latencies),
+      p50: percentile(latencies, 50),
+      p95: percentile(latencies, 95),
+      max: latencies.length ? Math.max(...latencies) : null,
+    },
+    avg_completion_tokens_per_second: average(tokensPerSecond),
+    avg_prompt_tokens: average(promptTokens),
+    avg_completion_tokens: average(completionTokens),
+    avg_total_tokens: average(totalTokens),
+    avg_input_cost_total: average(inputCosts),
+    avg_output_cost: average(outputCosts),
+    avg_total_cost: average(totalCosts),
+    total_prompt_tokens: sumNumberMetric(successfulSamples, 'prompt_tokens'),
+    total_completion_tokens: sumNumberMetric(successfulSamples, 'completion_tokens'),
+    total_tokens: sumNumberMetric(successfulSamples, 'total_tokens'),
+    total_input_cost: Number(sumNumberMetric(successfulSamples, 'input_cost_total').toFixed(6)),
+    total_output_cost: Number(sumNumberMetric(successfulSamples, 'output_cost').toFixed(6)),
+    total_cost: Number(sumNumberMetric(successfulSamples, 'total_cost').toFixed(6)),
+  }
+}
+
+const buildPendingPerformanceSample = (sampleNumber: number): llmApi.LlmPerformanceSample => ({
+  sample: sampleNumber,
+  ok: false,
+  status: 'pending',
+})
+
+const buildPerformanceResultShell = (
+  endpoints: llmApi.ProviderEndpoint[],
+  inputTokenSizes: number[],
+  samplesPerEndpoint: number,
+): llmApi.LlmPerformanceTestResponse => ({
+  ok: true,
+  input_token_sizes: inputTokenSizes,
+  samples_per_endpoint: samplesPerEndpoint,
+  endpoints: endpoints.map((endpoint) => ({
+    endpoint: {
+      id: endpoint.id,
+      key: endpoint.key,
+      label: endpoint.label,
+      provider: '',
+      model: endpoint.model,
+    },
+    input_sizes: inputTokenSizes.map((inputTokenSize) => {
+      const samples = Array.from({ length: samplesPerEndpoint }, (_, index) => buildPendingPerformanceSample(index + 1))
+      return {
+        requested_input_tokens: inputTokenSize,
+        estimated_prompt_tokens: null,
+        message_count: null,
+        samples,
+        summary: buildPerformanceSummary(samples),
+      }
+    }),
+  })),
+})
+
+const updatePerformanceResultSample = (
+  result: llmApi.LlmPerformanceTestResponse,
+  endpointId: string,
+  inputTokenSize: number,
+  sampleNumber: number,
+  sample: llmApi.LlmPerformanceSample,
+  metadata?: {
+    endpoint?: llmApi.LlmPerformanceEndpointResult['endpoint']
+    inputSize?: llmApi.LlmPerformanceInputSizeMetadata
+  },
+): llmApi.LlmPerformanceTestResponse => ({
+  ...result,
+  endpoints: result.endpoints.map((endpointResult) => {
+    if (endpointResult.endpoint.id !== endpointId) return endpointResult
+    const endpoint = metadata?.endpoint ?? endpointResult.endpoint
+    return {
+      ...endpointResult,
+      endpoint,
+      input_sizes: endpointResult.input_sizes.map((inputSizeResult) => {
+        if (inputSizeResult.requested_input_tokens !== inputTokenSize) return inputSizeResult
+        const samples = inputSizeResult.samples.map((existingSample) => (
+          existingSample.sample === sampleNumber ? sample : existingSample
+        ))
+        return {
+          ...inputSizeResult,
+          estimated_prompt_tokens: metadata?.inputSize?.estimated_prompt_tokens ?? inputSizeResult.estimated_prompt_tokens,
+          message_count: metadata?.inputSize?.message_count ?? inputSizeResult.message_count,
+          samples,
+          summary: buildPerformanceSummary(samples),
+        }
+      }),
+    }
+  }),
+})
+
+const performanceErrorMessage = (error: unknown) => {
+  if (error instanceof HttpError) {
+    if (typeof error.body === 'object' && error.body && 'message' in error.body) {
+      return String((error.body as { message?: unknown }).message || error.message)
+    }
+    return error.message
+  }
+  return error instanceof Error ? error.message : 'Sample failed'
+}
+
+async function runWithConcurrency(tasks: Array<() => Promise<void>>, concurrency: number) {
+  let nextIndex = 0
+  const workerCount = Math.min(concurrency, tasks.length)
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < tasks.length) {
+      const task = tasks[nextIndex]
+      nextIndex += 1
+      await task()
+    }
+  }))
 }
 
 function mapProviders(input: llmApi.Provider[] = []): ProviderCardData[] {
@@ -2698,24 +2864,14 @@ function PerformanceTestingPanel({
   persistentEndpoints: llmApi.ProviderEndpoint[]
   result: llmApi.LlmPerformanceTestResponse | null
   isRunning: boolean
-  onRun: (payload: { agent_id: string; endpoint_ids: string[]; samples_per_endpoint: number }) => Promise<void>
+  onRun: (payload: { endpoint_ids: string[]; samples_per_endpoint: number; input_token_sizes: number[] }) => Promise<void>
 }) {
-  const [agentQuery, setAgentQuery] = useState('')
   const [endpointQuery, setEndpointQuery] = useState('')
-  const [selectedAgent, setSelectedAgent] = useState<PerformanceAgentSelection | null>(null)
   const [selectedEndpointIds, setSelectedEndpointIds] = useState<string[]>([])
-  const [samplesInput, setSamplesInput] = useState('3')
+  const [inputTokenSizes, setInputTokenSizes] = useState<number[]>(DEFAULT_PERFORMANCE_INPUT_TOKEN_SIZES)
+  const [samplesInput, setSamplesInput] = useState('1')
   const [validationMessage, setValidationMessage] = useState<string | null>(null)
-  const [expandedEndpointIds, setExpandedEndpointIds] = useState<Set<string>>(new Set())
-  const searchTerm = agentQuery.trim()
-  const directAgentId = UUID_PATTERN.test(searchTerm) ? searchTerm : ''
-
-  const agentSearchQuery = useQuery({
-    queryKey: ['llm-performance-agent-search', searchTerm],
-    queryFn: () => llmApi.searchPerformanceAgents(searchTerm, { limit: 8 }),
-    enabled: searchTerm.length >= 2,
-    refetchOnWindowFocus: false,
-  })
+  const [expandedRowKeys, setExpandedRowKeys] = useState<Set<string>>(new Set())
 
   const enabledEndpoints = useMemo(
     () => persistentEndpoints.filter((endpoint) => endpoint.enabled),
@@ -2737,10 +2893,18 @@ function PerformanceTestingPanel({
   }, [enabledEndpoints, endpointSearchTerm])
 
   const sortedResults = useMemo(() => {
-    const endpointResults = result?.endpoints ?? []
-    return [...endpointResults].sort((a, b) => {
-      const aLatency = a.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
-      const bLatency = b.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
+    const rows = (result?.endpoints ?? []).flatMap((entry) => (
+      entry.input_sizes.map((inputSize) => ({
+        endpoint: entry.endpoint,
+        inputSize,
+      }))
+    ))
+    return rows.sort((a, b) => {
+      if (a.inputSize.requested_input_tokens !== b.inputSize.requested_input_tokens) {
+        return a.inputSize.requested_input_tokens - b.inputSize.requested_input_tokens
+      }
+      const aLatency = a.inputSize.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
+      const bLatency = b.inputSize.summary.latency_ms.avg ?? Number.POSITIVE_INFINITY
       return aLatency - bLatency
     })
   }, [result?.endpoints])
@@ -2753,33 +2917,36 @@ function PerformanceTestingPanel({
     ))
   }
 
-  const toggleExpanded = (endpointId: string) => {
-    setExpandedEndpointIds((current) => {
+  const toggleExpanded = (rowKey: string) => {
+    setExpandedRowKeys((current) => {
       const next = new Set(current)
-      if (next.has(endpointId)) {
-        next.delete(endpointId)
+      if (next.has(rowKey)) {
+        next.delete(rowKey)
       } else {
-        next.add(endpointId)
+        next.add(rowKey)
       }
       return next
     })
   }
 
-  const handleAgentInputChange = (value: string) => {
-    setAgentQuery(value)
-    if (selectedAgent && value !== selectedAgent.name && value !== selectedAgent.id) {
-      setSelectedAgent(null)
+  const toggleInputTokenSize = (size: number) => {
+    setInputTokenSizes((current) => (
+      current.includes(size)
+        ? current.filter((entry) => entry !== size)
+        : [...current, size].sort((a, b) => a - b)
+    ))
+  }
+
+  const parseInputTokenSizes = () => {
+    if (!inputTokenSizes.length) {
+      return { message: 'Select at least one input token size.' }
     }
+    return { sizes: inputTokenSizes }
   }
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault()
     const samples = Number(samplesInput)
-    const agentId = selectedAgent?.id || directAgentId
-    if (!agentId) {
-      setValidationMessage('Select an agent or paste a valid agent ID.')
-      return
-    }
     if (!Number.isInteger(samples) || samples < 1 || samples > 10) {
       setValidationMessage('Samples must be a whole number from 1 to 10.')
       return
@@ -2788,62 +2955,26 @@ function PerformanceTestingPanel({
       setValidationMessage('Select at least one persistent endpoint.')
       return
     }
+    const tokenSizeResult = parseInputTokenSizes()
+    if (tokenSizeResult.message || !tokenSizeResult.sizes) {
+      setValidationMessage(tokenSizeResult.message || 'Enter valid input token sizes.')
+      return
+    }
     setValidationMessage(null)
     await onRun({
-      agent_id: agentId,
       endpoint_ids: selectedEndpointIds,
       samples_per_endpoint: samples,
+      input_token_sizes: tokenSizeResult.sizes,
     })
   }
 
   return (
     <SectionCard
       title="Performance testing"
-      description="Run the selected agent prompt against persistent endpoints and compare response metrics."
+      description="Run synthetic input-size benchmarks against persistent endpoints and compare response metrics."
     >
       <form className="space-y-5" onSubmit={handleSubmit}>
-        <div className="grid gap-4 xl:grid-cols-[minmax(360px,1.25fr)_minmax(320px,1fr)_180px]">
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-slate-800" htmlFor="llm-performance-agent">
-              Agent
-            </label>
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-3 size-4 text-blue-500" />
-              <input
-                id="llm-performance-agent"
-                value={agentQuery}
-                onChange={(event) => handleAgentInputChange(event.target.value)}
-                placeholder="Search by name or paste an agent ID"
-                className="w-full rounded-xl border border-slate-200 bg-white py-2.5 pl-9 pr-3 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-              />
-            </div>
-            {selectedAgent ? (
-              <p className="text-xs font-medium text-emerald-700">Selected: {selectedAgent.name || selectedAgent.id}</p>
-            ) : directAgentId ? (
-              <p className="text-xs font-medium text-blue-700">Using pasted agent ID.</p>
-            ) : null}
-            {agentSearchQuery.data?.agents.length ? (
-              <div className="max-h-44 overflow-y-auto rounded-xl border border-blue-100 bg-white p-1 shadow-sm">
-                {agentSearchQuery.data.agents.map((agent) => (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    className="flex w-full flex-col rounded-lg px-3 py-2 text-left text-sm transition hover:bg-blue-50"
-                    onClick={() => {
-                      setSelectedAgent(agent)
-                      setAgentQuery(agent.name || agent.id)
-                    }}
-                  >
-                    <span className="font-medium text-slate-900">{agent.name || 'Unnamed agent'}</span>
-                    <span className="font-mono text-xs text-slate-500">{agent.id}</span>
-                  </button>
-                ))}
-              </div>
-            ) : searchTerm.length >= 2 && !agentSearchQuery.isFetching && !selectedAgent && !directAgentId ? (
-              <p className="text-xs text-amber-700">No matching agents found.</p>
-            ) : null}
-          </div>
-
+        <div className="grid gap-4 xl:grid-cols-[minmax(320px,1fr)_minmax(300px,0.9fr)_180px]">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-3">
               <label className="text-sm font-semibold text-slate-800">Persistent endpoints</label>
@@ -2884,6 +3015,33 @@ function PerformanceTestingPanel({
           </div>
 
           <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <label className="text-sm font-semibold text-slate-800">Input token sizes</label>
+              <span className="text-xs text-slate-500">{inputTokenSizes.length}/3 selected</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {PERFORMANCE_INPUT_TOKEN_SIZE_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-center justify-center gap-2 rounded-xl border px-3 py-2.5 text-sm font-semibold transition ${
+                    inputTokenSizes.includes(option.value)
+                      ? 'border-blue-500 bg-blue-50 text-blue-800 ring-1 ring-blue-500/20'
+                      : 'border-slate-200 bg-white text-slate-700 hover:bg-blue-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={inputTokenSizes.includes(option.value)}
+                    onChange={() => toggleInputTokenSize(option.value)}
+                    className="size-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
             <label className="text-sm font-semibold text-slate-800" htmlFor="llm-performance-samples">
               Samples
             </label>
@@ -2919,9 +3077,9 @@ function PerformanceTestingPanel({
         <div className="mt-6 space-y-4">
           <div className="flex flex-col gap-2 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <p className="text-sm font-semibold text-blue-950">{result.agent.name || result.agent.id}</p>
+              <p className="text-sm font-semibold text-blue-950">Synthetic input benchmark</p>
               <p className="text-xs text-blue-800">
-                {formatTokenCount(result.prompt.tokens)} prompt tokens · {result.prompt.message_count} messages · {result.prompt.tool_count} tools · {result.samples_per_endpoint} samples per endpoint
+                {result.input_token_sizes.map((size) => formatTokenCount(size)).join(', ')} input tokens · {result.samples_per_endpoint} samples per endpoint
               </p>
             </div>
           </div>
@@ -2931,6 +3089,7 @@ function PerformanceTestingPanel({
               <thead className="bg-blue-50">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Endpoint</th>
+                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Requested input</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Latency avg</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">p95</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Tok/sec</th>
@@ -2942,15 +3101,17 @@ function PerformanceTestingPanel({
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sortedResults.map((entry) => {
-                  const expanded = expandedEndpointIds.has(entry.endpoint.id)
+                  const rowKey = `${entry.endpoint.id}:${entry.inputSize.requested_input_tokens}`
+                  const expanded = expandedRowKeys.has(rowKey)
+                  const pendingCount = entry.inputSize.samples.filter((sample) => sample.status === 'pending' || sample.status === 'running').length
                   return (
-                    <Fragment key={entry.endpoint.id}>
+                    <Fragment key={rowKey}>
                       <tr className="align-top">
                         <td className="px-4 py-3">
                           <button
                             type="button"
                             className="flex items-start gap-2 text-left"
-                            onClick={() => toggleExpanded(entry.endpoint.id)}
+                            onClick={() => toggleExpanded(rowKey)}
                           >
                             {expanded ? <ChevronUp className="mt-0.5 size-4 text-blue-600" /> : <ChevronDown className="mt-0.5 size-4 text-blue-600" />}
                             <span>
@@ -2959,21 +3120,25 @@ function PerformanceTestingPanel({
                             </span>
                           </button>
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.latency_ms.avg, ' ms')}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.latency_ms.p95, ' ms')}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.summary.avg_completion_tokens_per_second)}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.summary.total_prompt_tokens)}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.summary.total_completion_tokens)}</td>
-                        <td className="px-4 py-3 text-slate-700">{formatCost(entry.summary.total_cost)}</td>
+                        <td className="px-4 py-3 text-slate-700">
+                          <span className="block font-semibold text-slate-800">{formatTokenCount(entry.inputSize.requested_input_tokens)}</span>
+                          <span className="block text-xs text-slate-500">est. {formatTokenCount(entry.inputSize.estimated_prompt_tokens)}</span>
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.inputSize.summary.latency_ms.avg, ' ms')}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.inputSize.summary.latency_ms.p95, ' ms')}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatNullableNumber(entry.inputSize.summary.avg_completion_tokens_per_second)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.inputSize.summary.total_prompt_tokens)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatTokenCount(entry.inputSize.summary.total_completion_tokens)}</td>
+                        <td className="px-4 py-3 text-slate-700">{formatCost(entry.inputSize.summary.total_cost)}</td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${entry.summary.error_count ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
-                            {entry.summary.success_count} ok / {entry.summary.error_count} failed
+                          <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${entry.inputSize.summary.error_count || pendingCount ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'}`}>
+                            {entry.inputSize.summary.success_count} ok / {entry.inputSize.summary.error_count} failed{pendingCount ? ` / ${pendingCount} pending` : ''}
                           </span>
                         </td>
                       </tr>
                       {expanded && (
                         <tr>
-                          <td colSpan={8} className="px-4 pb-4">
+                          <td colSpan={9} className="px-4 pb-4">
                             <div className="overflow-x-auto rounded-xl border border-blue-100">
                               <table className="min-w-full divide-y divide-blue-100 text-xs">
                                 <thead className="bg-white">
@@ -2988,8 +3153,8 @@ function PerformanceTestingPanel({
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-blue-50 bg-white">
-                                  {entry.samples.map((sample) => (
-                                    <tr key={`${entry.endpoint.id}:${sample.sample}`}>
+                                  {entry.inputSize.samples.map((sample) => (
+                                    <tr key={`${rowKey}:${sample.sample}`}>
                                       <td className="px-3 py-2 font-mono text-slate-600">#{sample.sample}</td>
                                       <td className="px-3 py-2 text-slate-700">{formatNullableNumber(sample.latency_ms, ' ms')}</td>
                                       <td className="px-3 py-2 text-slate-700">{formatNullableNumber(sample.completion_tokens_per_second)}</td>
@@ -3000,7 +3165,9 @@ function PerformanceTestingPanel({
                                       <td className="px-3 py-2 text-slate-700">{formatTokenCount(sample.completion_tokens)}</td>
                                       <td className="px-3 py-2 text-slate-700">{formatCost(sample.total_cost)}</td>
                                       <td className="max-w-xl px-3 py-2 text-slate-700">
-                                        {sample.ok ? (
+                                        {sample.status === 'pending' || sample.status === 'running' ? (
+                                          <span className="font-semibold text-amber-700">{sample.status === 'running' ? 'Running...' : 'Pending'}</span>
+                                        ) : sample.ok ? (
                                           <span>
                                             <span className="font-semibold text-slate-800">{sample.response_type || 'content'}:</span>{' '}
                                             {sample.preview || 'No preview'}
@@ -3299,9 +3466,69 @@ export function LlmConfigScreen() {
     }
   }
 
-  const handleRunPerformanceTest = async (payload: { agent_id: string; endpoint_ids: string[]; samples_per_endpoint: number }) => {
-    const result = await runWithFeedback(
-      () => llmApi.runPerformanceTest(payload),
+  const handleRunPerformanceTest = async (payload: { endpoint_ids: string[]; samples_per_endpoint: number; input_token_sizes: number[] }) => {
+    const selectedEndpoints = payload.endpoint_ids
+      .map((endpointId) => endpointChoices.persistent_endpoints.find((endpoint) => endpoint.id === endpointId))
+      .filter((endpoint): endpoint is llmApi.ProviderEndpoint => Boolean(endpoint))
+    const initialResult = buildPerformanceResultShell(
+      selectedEndpoints,
+      payload.input_token_sizes,
+      payload.samples_per_endpoint,
+    )
+    setPerformanceResult(initialResult)
+
+    await runWithFeedback(
+      () => {
+        const tasks: Array<() => Promise<void>> = []
+        for (const endpoint of selectedEndpoints) {
+          for (const inputTokenSize of payload.input_token_sizes) {
+            for (let sampleNumber = 1; sampleNumber <= payload.samples_per_endpoint; sampleNumber += 1) {
+              tasks.push(async () => {
+                setPerformanceResult((current) => current ? updatePerformanceResultSample(
+                  current,
+                  endpoint.id,
+                  inputTokenSize,
+                  sampleNumber,
+                  { sample: sampleNumber, ok: false, status: 'running' },
+                ) : current)
+
+                try {
+                  const response = await llmApi.runPerformanceTest({
+                    endpoint_id: endpoint.id,
+                    input_token_size: inputTokenSize,
+                    sample_number: sampleNumber,
+                  })
+                  setPerformanceResult((current) => current ? updatePerformanceResultSample(
+                    current,
+                    response.endpoint.id,
+                    response.input_size.requested_input_tokens,
+                    response.sample.sample,
+                    response.sample,
+                    {
+                      endpoint: response.endpoint,
+                      inputSize: response.input_size,
+                    },
+                  ) : current)
+                } catch (error) {
+                  setPerformanceResult((current) => current ? updatePerformanceResultSample(
+                    current,
+                    endpoint.id,
+                    inputTokenSize,
+                    sampleNumber,
+                    {
+                      sample: sampleNumber,
+                      ok: false,
+                      error: performanceErrorMessage(error),
+                      usage_returned: false,
+                    },
+                  ) : current)
+                }
+              })
+            }
+          }
+        }
+        return runWithConcurrency(tasks, LLM_PERFORMANCE_REQUEST_CONCURRENCY)
+      },
       {
         successMessage: 'Performance test complete',
         label: 'Running performance test…',
@@ -3309,7 +3536,6 @@ export function LlmConfigScreen() {
         context: 'Performance testing',
       },
     )
-    setPerformanceResult(result)
   }
 
   const handleProviderToggle = (provider: ProviderCardData, enabled: boolean) => {
