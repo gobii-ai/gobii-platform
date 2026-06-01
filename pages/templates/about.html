@@ -4,6 +4,27 @@
 {% block head_extras %}
   {{ block.super }}
   <meta name="description" content="Learn how Gobii automates web workflows for modern teams with AI-powered browser agents.">
+  <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "AboutPage",
+      "@id": "https://gobii.ai/about/#aboutpage",
+      "url": "https://gobii.ai/about/",
+      "name": "About Gobii",
+      "description": "Learn how Gobii helps teams use AI agents for real work.",
+      "isPartOf": {
+        "@type": "WebSite",
+        "@id": "https://gobii.ai/#website",
+        "name": "Gobii"
+      },
+      "mainEntity": {
+        "@type": "Organization",
+        "@id": "https://gobii.ai/#organization",
+        "name": "Gobii",
+        "url": "https://gobii.ai/"
+      }
+    }
+  </script>
 {% endblock %}
 
 {% block content %}
