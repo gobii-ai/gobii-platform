@@ -146,7 +146,7 @@ class HomepageIntegrationsCacheTests(TestCase):
     def test_build_payload_returns_disabled_when_platform_server_is_inactive(self, _mock_is_active):
         result = _build_homepage_integrations_payload()
 
-        self.assertEqual(result, {"enabled": False, "builtins": []})
+        self.assertEqual(result, {"enabled": True, "builtins": []})
 
     @override_settings(
         PIPEDREAM_CLIENT_ID="",
@@ -157,4 +157,4 @@ class HomepageIntegrationsCacheTests(TestCase):
     def test_build_payload_returns_disabled_when_pipedream_is_not_configured(self, _mock_is_active):
         result = _build_homepage_integrations_payload()
 
-        self.assertEqual(result, {"enabled": False, "builtins": []})
+        self.assertEqual(result, {"enabled": True, "builtins": []})

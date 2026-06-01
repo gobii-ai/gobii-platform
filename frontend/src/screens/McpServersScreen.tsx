@@ -11,7 +11,6 @@ import { McpServerFormModal } from '../components/mcp/McpServerFormModal'
 import { AssignServerModal } from '../components/mcp/AssignServerModal'
 import { DeleteServerDialog } from '../components/mcp/DeleteServerDialog'
 import { McpServerTestModal } from '../components/mcp/McpServerTestModal'
-import { NativeAppsPanel } from '../components/mcp/NativeAppsPanel'
 import { PipedreamAppsPanel } from '../components/mcp/PipedreamAppsPanel'
 import { useModal } from '../hooks/useModal'
 import { SettingsBanner } from '../components/agentSettings/SettingsBanner'
@@ -281,19 +280,11 @@ export function McpServersScreen({
           {errorBanner}
         </div>
       )}
-      {nativeIntegrationsUrl ? (
-        <NativeAppsPanel
-          listUrl={nativeIntegrationsUrl}
-          onSuccess={handleSuccess}
-          onError={handleError}
-          embedded={isEmbedded}
-        />
-      ) : null}
-      {pipedreamAppsUrl && pipedreamAppSearchUrl ? (
+      {(pipedreamAppsUrl && pipedreamAppSearchUrl) || nativeIntegrationsUrl ? (
         <PipedreamAppsPanel
           settingsUrl={pipedreamAppsUrl}
           searchUrl={pipedreamAppSearchUrl}
-          onSuccess={handleSuccess}
+          nativeIntegrationsUrl={nativeIntegrationsUrl}
           onError={handleError}
           embedded={isEmbedded}
         />

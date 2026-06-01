@@ -59,6 +59,7 @@ type ImmersiveAppProps = {
   maxChatUploadSizeBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
 }
 
 type AgentShellPage = Extract<SelectionShellPage, 'billing' | 'profile' | 'organization' | 'secrets' | 'usage' | 'integrations' | 'api-keys'>
@@ -68,6 +69,7 @@ type AgentShellPageRenderContext = {
   refreshKey: number
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
 }
 type AgentShellPageConfig = {
   path: string
@@ -98,10 +100,11 @@ const AGENT_SHELL_PAGE_CONFIG: Record<AgentShellPage, AgentShellPageConfig> = {
   },
   integrations: {
     path: '/app/integrations',
-    render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl }) => (
+    render: ({ layout, refreshKey, pipedreamAppsSettingsUrl, pipedreamAppSearchUrl, nativeIntegrationsUrl }) => (
       <ImmersiveMcpServersPage
         layout={layout}
         refreshKey={refreshKey}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
         pipedreamAppsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
       />
@@ -639,6 +642,7 @@ export function ImmersiveApp({
   maxChatUploadSizeBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
 }: ImmersiveAppProps) {
   const location = useAppLocation()
   const route = useMemo(() => parseRoute(location.pathname), [location.pathname])
@@ -881,7 +885,8 @@ export function ImmersiveApp({
     refreshKey: selectionRefreshKey,
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
-  }), [pipedreamAppSearchUrl, pipedreamAppsSettingsUrl, selectionRefreshKey])
+    nativeIntegrationsUrl,
+  }), [nativeIntegrationsUrl, pipedreamAppSearchUrl, pipedreamAppsSettingsUrl, selectionRefreshKey])
   const { selectionShellPanel, selectionMainPanel } = useMemo(
     () => getSelectionPanels({ route, selectionPage, renderContext: shellPanelRenderContext }),
     [route, selectionPage, shellPanelRenderContext],
@@ -893,6 +898,7 @@ export function ImmersiveApp({
     viewerEmail,
     pipedreamAppsSettingsUrl,
     pipedreamAppSearchUrl,
+    nativeIntegrationsUrl,
     onClose: embed ? handleEmbeddedClose : handleClose,
     onCreateAgent: handleNavigateToNewAgent,
     onAgentCreated: handleAgentCreated,

@@ -10,6 +10,7 @@ from api.services.pipedream_apps import (
     PipedreamCatalogService,
     get_platform_pipedream_app_slugs,
 )
+from api.services.native_integrations import list_native_integration_providers
 from util.integrations import pipedream_status
 
 logger = logging.getLogger(__name__)
@@ -132,8 +133,9 @@ def _platform_pipedream_server_is_active() -> bool:
 
 
 def _build_homepage_integrations_payload() -> dict[str, object]:
+    native_enabled = bool(list_native_integration_providers())
     if not pipedream_status().enabled or not _platform_pipedream_server_is_active():
-        return {"enabled": False, "builtins": []}
+        return {"enabled": native_enabled, "builtins": []}
 
     app_slugs = get_platform_pipedream_app_slugs()
     if not app_slugs:

@@ -1,6 +1,6 @@
 import { jsonFetch, jsonRequest } from './http'
 
-type NativeIntegrationProviderDTO = {
+export type NativeIntegrationProviderDTO = {
   provider_key: string
   display_name: string
   description: string
@@ -74,7 +74,7 @@ export type NativeIntegrationPickerTokenResponse = {
   expiresAt: string | null
 }
 
-const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
+export const mapNativeIntegrationProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
   providerKey: provider.provider_key,
   displayName: provider.display_name,
   description: provider.description ?? '',
@@ -95,7 +95,7 @@ export async function fetchNativeIntegrations(listUrl: string): Promise<NativeIn
   return {
     ownerScope: payload.owner_scope,
     ownerLabel: payload.owner_label,
-    providers: (payload.providers ?? []).map(mapProvider),
+    providers: (payload.providers ?? []).map(mapNativeIntegrationProvider),
   }
 }
 

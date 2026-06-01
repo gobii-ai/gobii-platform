@@ -1,11 +1,31 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useQuery } from '@tanstack/react-query'
-import { Check, Loader2, Search, Sparkles, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, CheckCircle2, FolderOpen, Loader2, Plug, Search, Sparkles, Unplug, X } from 'lucide-react'
 
+import { scheduleLoginRedirect } from '../../api/http'
 import { mapPipedreamApp, searchPipedreamApps, type PipedreamAppSummary } from '../../api/mcp'
+import {
+  fetchNativeIntegrationPickerToken,
+  fetchNativeIntegrations,
+  mapNativeIntegrationProvider,
+  revokeNativeIntegration,
+  startNativeIntegrationConnect,
+  type NativeIntegrationProvider,
+  type NativeIntegrationProviderDTO,
+} from '../../api/nativeIntegrations'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
 import { Modal } from '../common/Modal'
+import {
+  NativeProviderIcon,
+  nativeOAuthContextPayload,
+  openGoogleDrivePicker,
+  openNativeOAuthPopup,
+  storePendingNativeOAuth,
+  supportsNativeIntegrationPicker,
+  useNativeIntegrationRefreshEffects,
+} from '../mcp/NativeIntegrationShared'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from '../mcp/PipedreamAppsShared'
 
 type HomepageIntegrationsModalAppDTO = {
@@ -19,6 +39,9 @@ export type HomepageIntegrationsModalProps = {
   builtins: HomepageIntegrationsModalAppDTO[]
   initialSearchTerm: string
   initialSelectedAppSlugs: string[]
+  nativeIntegrationsUrl: string
+  nativeProviders: NativeIntegrationProviderDTO[]
+  isAuthenticated: boolean
   searchUrl: string
   selectedFieldsContainerId: string
   initialOpen?: boolean
@@ -33,23 +56,51 @@ function fallbackAppForSlug(slug: string): PipedreamAppSummary {
   }
 }
 
+async function ensureHomepageCsrf(): Promise<void> {
+  await fetch('/api/homepage/csrf-token/', {
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json' },
+  })
+}
+
 export function HomepageIntegrationsModal({
   builtins,
   initialSearchTerm,
   initialSelectedAppSlugs,
+  nativeIntegrationsUrl,
+  nativeProviders,
+  isAuthenticated,
   searchUrl,
   selectedFieldsContainerId,
   initialOpen = false,
 }: HomepageIntegrationsModalProps) {
+  const queryClient = useQueryClient()
   const [open, setOpen] = useState(Boolean(initialOpen || initialSearchTerm))
   const [isMobile, setIsMobile] = useState(false)
   const [searchTerm, setSearchTerm] = useState(initialSearchTerm)
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(initialSearchTerm.trim())
   const [selectedSlugs, setSelectedSlugs] = useState<string[]>(() => initialSelectedAppSlugs)
+  const [pendingNativeAction, setPendingNativeAction] = useState<{
+    providerKey: string
+    kind: 'connect' | 'disconnect' | 'picker'
+  } | null>(null)
+  const [nativeErrorMessage, setNativeErrorMessage] = useState<string | null>(null)
+  const nativeQueryKey = useMemo(
+    () => ['native-integrations', nativeIntegrationsUrl] as const,
+    [nativeIntegrationsUrl],
+  )
+  useNativeIntegrationRefreshEffects({
+    queryKey: nativeQueryKey,
+    onError: setNativeErrorMessage,
+  })
   const [knownApps, setKnownApps] = useState<Record<string, PipedreamAppSummary>>(() => {
     const builtinApps = builtins.map(mapPipedreamApp)
     return Object.fromEntries(builtinApps.map((app) => [app.slug, app]))
   })
+  const seededNativeProviders = useMemo(
+    () => nativeProviders.map(mapNativeIntegrationProvider),
+    [nativeProviders],
+  )
 
   useEffect(() => {
     const checkMobile = () => {
@@ -93,8 +144,90 @@ export function HomepageIntegrationsModal({
     queryFn: () => searchPipedreamApps(searchUrl, debouncedSearchTerm),
     enabled: debouncedSearchTerm.length > 0,
   })
+  const nativeIntegrationsQuery = useQuery({
+    queryKey: nativeQueryKey,
+    queryFn: () => fetchNativeIntegrations(nativeIntegrationsUrl),
+    enabled: isAuthenticated && nativeIntegrationsUrl.length > 0,
+  })
 
   const searchResults = searchQuery.data ?? []
+  const currentNativeProviders = nativeIntegrationsQuery.data?.providers ?? seededNativeProviders
+  const visibleNativeProviders = useMemo(() => {
+    const normalizedSearch = debouncedSearchTerm.toLowerCase()
+    if (!normalizedSearch) {
+      return currentNativeProviders
+    }
+    return currentNativeProviders.filter((provider) => [
+      provider.providerKey,
+      provider.displayName,
+      provider.description,
+    ].some((value) => value.toLowerCase().includes(normalizedSearch)))
+  }, [currentNativeProviders, debouncedSearchTerm])
+
+  const nativeConnectMutation = useMutation({
+    mutationFn: async ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) => {
+      await ensureHomepageCsrf()
+      return startNativeIntegrationConnect(provider.connectUrl)
+    },
+    onMutate: ({ provider }) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setNativeErrorMessage(null)
+    },
+    onSuccess: (payload, { popup }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(payload.providerKey, payload.state, popup))
+      if (popup && !popup.closed) {
+        popup.location.href = payload.authorizationUrl
+        popup.focus()
+        return
+      }
+      if (popup?.closed) {
+        setNativeErrorMessage('Connection window was closed before Google opened.')
+        return
+      }
+      window.location.href = payload.authorizationUrl
+    },
+    onError: (error, { popup }) => {
+      if (popup && !popup.closed) {
+        popup.close()
+      }
+      setNativeErrorMessage(safeErrorMessage(error))
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const nativeDisconnectMutation = useMutation({
+    mutationFn: async (provider: NativeIntegrationProvider) => {
+      await ensureHomepageCsrf()
+      return revokeNativeIntegration(provider.revokeUrl).then(() => provider)
+    },
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
+      setNativeErrorMessage(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
+    },
+    onError: (error) => {
+      setNativeErrorMessage(safeErrorMessage(error))
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const nativePickerMutation = useMutation({
+    mutationFn: async (provider: NativeIntegrationProvider) => {
+      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+      const selectedCount = await openGoogleDrivePicker(token)
+      return { provider, selectedCount }
+    },
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
+      setNativeErrorMessage(null)
+    },
+    onError: (error) => {
+      setNativeErrorMessage(safeErrorMessage(error))
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
 
   useEffect(() => {
     const nextEntries = [...builtinApps, ...searchResults]
@@ -164,6 +297,54 @@ export function HomepageIntegrationsModal({
 
   const body = (
     <div className="space-y-5 p-1">
+      <section className="space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h3 className="text-sm font-semibold text-slate-900">Native apps</h3>
+            <p className="text-sm text-slate-600">Connected credentials are shared across your workspace.</p>
+          </div>
+        </div>
+        {nativeErrorMessage ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {nativeErrorMessage}
+          </div>
+        ) : null}
+        {nativeIntegrationsQuery.isLoading ? (
+          <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading native apps…
+          </div>
+        ) : nativeIntegrationsQuery.isError ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {safeErrorMessage(nativeIntegrationsQuery.error)}
+          </div>
+        ) : visibleNativeProviders.length > 0 ? (
+          <div className="space-y-2">
+            {visibleNativeProviders.map((provider) => (
+              <HomepageNativeProviderRow
+                key={provider.providerKey}
+                provider={provider}
+                pendingAction={pendingNativeAction}
+                disabled={nativeConnectMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
+                onConnect={() => {
+                  if (!isAuthenticated) {
+                    scheduleLoginRedirect()
+                    return
+                  }
+                  nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
+                }}
+                onDisconnect={() => nativeDisconnectMutation.mutate(provider)}
+                onPicker={() => nativePickerMutation.mutate(provider)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-4 text-sm text-slate-600">
+            No native apps matched your search.
+          </div>
+        )}
+      </section>
+
       <section className="space-y-3">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -367,5 +548,96 @@ export function HomepageIntegrationsModal({
         </Modal>
       ) : null}
     </>
+  )
+}
+
+function HomepageNativeProviderRow({
+  provider,
+  pendingAction,
+  disabled,
+  onConnect,
+  onDisconnect,
+  onPicker,
+}: {
+  provider: NativeIntegrationProvider
+  pendingAction: { providerKey: string; kind: 'connect' | 'disconnect' | 'picker' } | null
+  disabled: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onPicker: () => void
+}) {
+  const isPending = pendingAction?.providerKey === provider.providerKey
+  const pendingKind = isPending ? pendingAction?.kind : null
+  const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
+
+  return (
+    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+      <div className="flex min-w-0 items-start gap-3">
+        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
+          <NativeProviderIcon provider={provider} />
+        </span>
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-slate-900">{provider.displayName}</p>
+            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+              Native
+            </span>
+            {provider.connected ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                Connected
+              </span>
+            ) : null}
+          </div>
+          {provider.description ? <p className="mt-1 text-sm text-slate-600">{provider.description}</p> : null}
+        </div>
+      </div>
+      <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+        {pickerEnabled ? (
+          <button
+            type="button"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+            onClick={onPicker}
+            disabled={disabled}
+          >
+            {pendingKind === 'picker' ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <FolderOpen className="h-4 w-4" aria-hidden="true" />
+            )}
+            Choose files
+          </button>
+        ) : null}
+        {provider.connected ? (
+          <button
+            type="button"
+            className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            onClick={onDisconnect}
+            disabled={disabled}
+          >
+            {pendingKind === 'disconnect' ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Unplug className="h-4 w-4" aria-hidden="true" />
+            )}
+            Disconnect
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+            onClick={onConnect}
+            disabled={disabled}
+          >
+            {pendingKind === 'connect' ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <Plug className="h-4 w-4" aria-hidden="true" />
+            )}
+            Connect
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

@@ -12,12 +12,16 @@ type ComposerPipedreamAppsControlRenderProps = {
 
 type ComposerPipedreamAppsControlProps = {
   agentId: string
+  enablePipedreamApps?: boolean
+  nativeIntegrationsUrl?: string | null
   disabled?: boolean
   children: (props: ComposerPipedreamAppsControlRenderProps) => ReactNode
 }
 
 export function ComposerPipedreamAppsControl({
   agentId,
+  enablePipedreamApps = true,
+  nativeIntegrationsUrl = null,
   disabled = false,
   children,
 }: ComposerPipedreamAppsControlProps) {
@@ -28,9 +32,14 @@ export function ComposerPipedreamAppsControl({
       return
     }
     showModal((onClose) => (
-      <AgentPipedreamAppsModal agentId={agentId} onClose={onClose} />
+      <AgentPipedreamAppsModal
+        agentId={agentId}
+        enablePipedreamApps={enablePipedreamApps}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
+        onClose={onClose}
+      />
     ))
-  }, [agentId, disabled, showModal])
+  }, [agentId, enablePipedreamApps, nativeIntegrationsUrl, disabled, showModal])
 
   const triggerDisabled = disabled
 

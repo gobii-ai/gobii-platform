@@ -349,6 +349,7 @@ type AgentComposerProps = {
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -403,6 +404,7 @@ export const AgentComposer = memo(function AgentComposer({
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -469,9 +471,8 @@ export const AgentComposer = memo(function AgentComposer({
   const MAX_COMPOSER_HEIGHT = 320
 
   const showIntelligenceSelector = Boolean(intelligenceConfig && intelligenceTier && onIntelligenceChange)
-  const showPipedreamAppsControl = Boolean(
-    canManageAgent && agentId && pipedreamAppsSettingsUrl && pipedreamAppSearchUrl,
-  )
+  const hasPipedreamApps = Boolean(pipedreamAppsSettingsUrl && pipedreamAppSearchUrl)
+  const showAppsControl = Boolean(canManageAgent && agentId && (hasPipedreamApps || nativeIntegrationsUrl))
   const isPlanningMode = planningState === 'planning'
   const isStopping = Boolean(isProcessing && stopProcessingRequested)
   const showStopProcessing = Boolean(isProcessing && !isPlanningMode && !isStopping && agentId && canManageAgent && onStopProcessing)
@@ -1737,9 +1738,11 @@ export const AgentComposer = memo(function AgentComposer({
                   ref={textareaRef}
                 />
               </div>
-              {showPipedreamAppsControl ? (
+              {showAppsControl ? (
                 <ComposerPipedreamAppsControl
                   agentId={agentId as string}
+                  enablePipedreamApps={hasPipedreamApps}
+                  nativeIntegrationsUrl={nativeIntegrationsUrl}
                   disabled={composerActionsDisabled}
                 >
                   {(appsAction) => renderComposerUtilityRow(appsAction)}

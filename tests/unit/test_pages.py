@@ -441,7 +441,7 @@ class HomePageTests(TestCase):
         PIPEDREAM_CLIENT_SECRET="",
         PIPEDREAM_PROJECT_ID="",
     )
-    def test_home_page_hides_integrations_when_pipedream_server_exists_but_config_is_missing(self):
+    def test_home_page_keeps_native_integrations_when_pipedream_config_is_missing(self):
         MCPServerConfig.objects.create(
             scope=MCPServerConfig.Scope.PLATFORM,
             name="pipedream",
@@ -454,8 +454,8 @@ class HomePageTests(TestCase):
         response = self.client.get("/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertFalse(response.context.get("homepage_integrations_enabled"))
-        self.assertNotContains(response, "Search more integrations")
+        self.assertTrue(response.context.get("homepage_integrations_enabled"))
+        self.assertContains(response, "Search more integrations")
 
     @patch(
         "pages.views.get_homepage_integrations_payload",
@@ -510,6 +510,9 @@ class HomePageTests(TestCase):
                 "initialSearchTerm": "",
                 "initialSelectedAppSlugs": [],
                 "searchUrl": reverse("pages:homepage_integrations_search"),
+                "nativeIntegrationsUrl": reverse("console-native-integration-list"),
+                "nativeProviders": page_views._homepage_native_integration_providers(),
+                "isAuthenticated": False,
                 "selectedFieldsContainerId": "homepage-integrations-selected-fields",
             },
         )
@@ -997,6 +1000,9 @@ class HomePageTests(TestCase):
                 "initialSearchTerm": "",
                 "initialSelectedAppSlugs": ["slack", "trello"],
                 "searchUrl": reverse("pages:homepage_integrations_search"),
+                "nativeIntegrationsUrl": reverse("console-native-integration-list"),
+                "nativeProviders": page_views._homepage_native_integration_providers(),
+                "isAuthenticated": False,
                 "selectedFieldsContainerId": "homepage-integrations-selected-fields",
             },
         )
@@ -1040,6 +1046,9 @@ class HomePageTests(TestCase):
                 "initialSearchTerm": "",
                 "initialSelectedAppSlugs": ["notion", "slack", "trello"],
                 "searchUrl": reverse("pages:homepage_integrations_search"),
+                "nativeIntegrationsUrl": reverse("console-native-integration-list"),
+                "nativeProviders": page_views._homepage_native_integration_providers(),
+                "isAuthenticated": True,
                 "selectedFieldsContainerId": "homepage-integrations-selected-fields",
             },
         )

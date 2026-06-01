@@ -72,6 +72,7 @@ function readJsonScript<T>(scriptId?: string): T {
 const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
 const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
 const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
+const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
 
 switch (appName) {
   case 'diagnostics':
@@ -124,7 +125,6 @@ switch (appName) {
     const oauthStartUrl = mountNode.dataset.oauthStartUrl
     const oauthMetadataUrl = mountNode.dataset.oauthMetadataUrl
     const oauthCallbackPath = mountNode.dataset.oauthCallbackPath
-    const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
     const allowCommands = mountNode.dataset.allowCommands === 'true'
     if (!oauthStartUrl || !oauthMetadataUrl || !oauthCallbackPath) {
       throw new Error('MCP OAuth endpoints are required')
@@ -199,6 +199,7 @@ switch (appName) {
         maxChatUploadSizeBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
       />
     )
     break

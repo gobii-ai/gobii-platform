@@ -335,6 +335,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -521,6 +522,7 @@ export function AgentChatLayout({
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1889,6 +1891,7 @@ export function AgentChatLayout({
               maxAttachmentBytes={maxAttachmentBytes}
               pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+              nativeIntegrationsUrl={nativeIntegrationsUrl}
             />
           )}
           </div>
