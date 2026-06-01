@@ -890,7 +890,7 @@ class PromptContextBuilderTests(TestCase):
         self.assertIn("If there is no concrete task to do yet, your first action should be one concise welcome message", system_message["content"])
         self.assertIn("After the welcome, continue Planning Mode", system_message["content"])
         self.assertIn("Stay in planning only until planning is completed or skipped", system_message["content"])
-        self.assertIn("Read-only research is allowed and often useful during planning", system_message["content"])
+        self.assertIn("Use read-only research during planning only when the scope is unclear", system_message["content"])
         self.assertIn("substantive execution or deliverable work before planning ends", system_message["content"])
         self.assertIn(
             "Do not ask planning questions about communication channels, delivery methods, integrations, accounts, or implementation approach unless the user explicitly asks to configure or choose them",

@@ -139,9 +139,12 @@ class PersistentAgentPlanningModeTests(TestCase):
         tool = get_end_planning_tool()
         function = tool["function"]
 
-        self.assertIn("When the user asks to execute now and the scope is clear", function["description"])
         self.assertIn(
-            "planning mode should not execute or discover task tools until this has been used",
+            "For clear one-off research, factual answers, or execute-now requests",
+            function["description"],
+        )
+        self.assertIn(
+            "call this before search_tools, web/search tools, or result delivery",
             function["description"],
         )
         self.assertIn(
@@ -235,8 +238,8 @@ class PersistentAgentPlanningModeTests(TestCase):
         self.assertIn("update_plan, request_contact_permission", prompt)
         self.assertNotIn("spawn_agent", prompt)
         self.assertNotIn("Normal tools are available", prompt)
-        self.assertIn("Read-only research is allowed and often useful during planning", prompt)
-        self.assertIn("search, web, file-reading, and other non-mutating tools", prompt)
+        self.assertIn("Use read-only research during planning only when the scope is unclear", prompt)
+        self.assertIn("do not search, fetch, parse, or summarize sources to answer a clear task before end_planning", prompt)
         self.assertIn("Do not do substantive task execution before planning ends", prompt)
         self.assertNotIn("no research for the deliverable", prompt)
         self.assertIn("no implementation", prompt)
@@ -280,7 +283,7 @@ class PersistentAgentPlanningModeTests(TestCase):
             prompt,
         )
         self.assertIn("Keep planning non-technical and focused on what the user wants", prompt)
-        self.assertIn("Read-only research is allowed and often useful during planning", prompt)
+        self.assertIn("Use read-only research during planning only when the scope is unclear", prompt)
         self.assertIn("Do not call search_tools as the first meaningful action", prompt)
         self.assertIn("Use request_human_input for every planning question or blocker", prompt)
         self.assertIn("call end_planning first and only begin the work after planning has ended", prompt)
