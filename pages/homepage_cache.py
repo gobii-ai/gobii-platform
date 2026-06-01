@@ -135,12 +135,13 @@ def _platform_pipedream_server_is_active() -> bool:
 
 def _build_homepage_integrations_payload() -> dict[str, object]:
     native_enabled = bool(list_native_integration_providers())
-    if not pipedream_status().enabled or not _platform_pipedream_server_is_active():
-        return {"enabled": native_enabled, "builtins": []}
+    pipedream_enabled = pipedream_status().enabled and _platform_pipedream_server_is_active()
+    if not pipedream_enabled:
+        return {"enabled": native_enabled, "pipedream_enabled": False, "builtins": []}
 
     app_slugs = get_platform_pipedream_app_slugs()
     if not app_slugs:
-        return {"enabled": True, "builtins": []}
+        return {"enabled": True, "pipedream_enabled": True, "builtins": []}
 
     builtins = [
         app.to_dict()
@@ -151,6 +152,7 @@ def _build_homepage_integrations_payload() -> dict[str, object]:
 
     return {
         "enabled": True,
+        "pipedream_enabled": True,
         "builtins": builtins,
     }
 

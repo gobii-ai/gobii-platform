@@ -88,7 +88,7 @@ from util.subscription_helper import (
     get_or_create_stripe_customer,
     reconcile_user_plan_from_stripe,
 )
-from util.integrations import pipedream_status, stripe_status, IntegrationDisabledError
+from util.integrations import stripe_status, IntegrationDisabledError
 from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_API_KEYS,
@@ -1439,7 +1439,8 @@ class HomepageIntegrationsSearchView(View):
             return JsonResponse({"results": []})
 
         integrations_payload = get_homepage_integrations_payload()
-        if not integrations_payload.get("enabled") or not pipedream_status().enabled:
+        pipedream_enabled = integrations_payload.get("pipedream_enabled", integrations_payload.get("enabled"))
+        if not integrations_payload.get("enabled") or not pipedream_enabled:
             return JsonResponse({"results": []})
 
         builtin_slugs = {
