@@ -272,7 +272,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"error": "Google Drive OAuth is not configured."})
 
-    @patch("console.native_integrations_api.httpx.post")
+    @patch("api.services.native_integrations.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
         state = self._start_oauth()
         mock_post.return_value = self._token_response(
@@ -294,7 +294,7 @@ class NativeIntegrationTests(TestCase):
             "http://testserver/integrations/oauth/callback/",
         )
 
-    @patch("console.native_integrations_api.httpx.post")
+    @patch("api.services.native_integrations.httpx.post")
     def test_callback_accepts_matching_organization_context_override(self, mock_post):
         headers = {
             "X-Gobii-Context-Type": "organization",

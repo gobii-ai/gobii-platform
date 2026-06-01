@@ -33,6 +33,23 @@ class NativeIntegrationAuthError(NativeIntegrationError):
     """Raised when a stored integration cannot authenticate a request."""
 
 
+class NativeIntegrationTokenRequestError(NativeIntegrationAuthError):
+    """Raised when an OAuth token endpoint request fails."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 502,
+        response_body: str = "",
+        detail: str = "",
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.response_body = response_body
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class NativeIntegrationProvider:
     key: str
@@ -222,6 +239,39 @@ def build_oauth_credentials_bundle(
     }
 
 
+def request_oauth_token(
+    provider: NativeIntegrationProvider,
+    data: dict[str, Any],
+    *,
+    request_error_message: str,
+    endpoint_error_message: str,
+    invalid_json_message: str,
+) -> dict[str, Any]:
+    try:
+        response = httpx.post(provider.token_endpoint, data=data, timeout=15.0)
+    except httpx.HTTPError as exc:
+        raise NativeIntegrationTokenRequestError(
+            request_error_message,
+            status_code=502,
+            detail=str(exc),
+        ) from exc
+
+    if response.status_code >= 400:
+        raise NativeIntegrationTokenRequestError(
+            endpoint_error_message,
+            status_code=response.status_code,
+            response_body=response.text,
+        )
+
+    try:
+        token_payload = response.json()
+    except ValueError as exc:
+        raise NativeIntegrationTokenRequestError(invalid_json_message, status_code=502) from exc
+    if not isinstance(token_payload, dict):
+        raise NativeIntegrationTokenRequestError(invalid_json_message, status_code=502)
+    return token_payload
+
+
 def provider_matches_url(provider: NativeIntegrationProvider, url: str) -> bool:
     try:
         parsed = urlparse(url)
@@ -284,27 +334,18 @@ def refresh_oauth_credentials_if_needed(
     if not client_id or not client_secret:
         raise NativeIntegrationConfigurationError(f"{provider.display_name} OAuth is not configured.")
 
-    try:
-        response = httpx.post(
-            provider.token_endpoint,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-            },
-            timeout=15.0,
-        )
-    except httpx.HTTPError as exc:
-        raise NativeIntegrationAuthError(f"{provider.display_name} token refresh failed.") from exc
-
-    if response.status_code >= 400:
-        raise NativeIntegrationAuthError(f"{provider.display_name} token refresh failed. Reconnect the app.")
-
-    try:
-        token_payload = response.json()
-    except ValueError as exc:
-        raise NativeIntegrationAuthError(f"{provider.display_name} token refresh returned invalid data.") from exc
+    token_payload = request_oauth_token(
+        provider,
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        },
+        request_error_message=f"{provider.display_name} token refresh failed.",
+        endpoint_error_message=f"{provider.display_name} token refresh failed. Reconnect the app.",
+        invalid_json_message=f"{provider.display_name} token refresh returned invalid data.",
+    )
 
     updated = build_oauth_credentials_bundle(
         provider,

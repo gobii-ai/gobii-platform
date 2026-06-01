@@ -3,7 +3,6 @@ from datetime import timedelta
 from typing import Any
 from urllib.parse import urlencode
 
-import httpx
 from django.conf import settings
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core import signing
@@ -18,6 +17,7 @@ from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
     NativeIntegrationAuthError,
     NativeIntegrationConfigurationError,
+    NativeIntegrationTokenRequestError,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
     get_native_integration_provider,
@@ -27,6 +27,7 @@ from api.services.native_integrations import (
     native_integration_client_credentials,
     new_oauth_state,
     refresh_oauth_credentials_if_needed,
+    request_oauth_token,
     save_native_integration_credentials,
 )
 from console.context_helpers import build_console_context
@@ -214,34 +215,27 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
 
         redirect_uri = request.build_absolute_uri(reverse("console-native-integration-oauth-callback-view"))
         try:
-            response = httpx.post(
-                provider.token_endpoint,
-                data={
+            token_payload = request_oauth_token(
+                provider,
+                {
                     "grant_type": "authorization_code",
                     "code": code,
                     "redirect_uri": redirect_uri,
                     "client_id": client_id,
                     "client_secret": client_secret,
                 },
-                timeout=15.0,
+                request_error_message="Token exchange failed",
+                endpoint_error_message="Token endpoint returned an error",
+                invalid_json_message="Token endpoint returned non-JSON payload",
             )
-        except httpx.HTTPError as exc:
-            return JsonResponse({"error": "Token exchange failed", "detail": str(exc)}, status=502)
-
-        if response.status_code >= 400:
-            return JsonResponse(
-                {
-                    "error": "Token endpoint returned an error",
-                    "status_code": response.status_code,
-                    "body": response.text,
-                },
-                status=response.status_code,
-            )
-
-        try:
-            token_payload = response.json()
-        except ValueError:
-            return JsonResponse({"error": "Token endpoint returned non-JSON payload"}, status=502)
+        except NativeIntegrationTokenRequestError as exc:
+            error_payload = {"error": str(exc)}
+            if exc.detail:
+                error_payload["detail"] = exc.detail
+            if exc.response_body:
+                error_payload["status_code"] = exc.status_code
+                error_payload["body"] = exc.response_body
+            return JsonResponse(error_payload, status=exc.status_code)
 
         existing_credentials = {}
         existing_secret = get_native_integration_secret(provider.key, owner_user, owner_org)

@@ -14,7 +14,6 @@ import {
   fetchNativeIntegrations,
   revokeNativeIntegration,
   startNativeIntegrationConnect,
-  type NativeIntegrationFileSelection,
   type NativeIntegrationPickerTokenResponse,
   type NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
@@ -241,8 +240,8 @@ export function NativeAppsPanel({
   const pickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedFiles = await openGoogleDrivePicker(token)
-      return { provider, selectedCount: selectedFiles.length }
+      const selectedCount = await openGoogleDrivePicker(token)
+      return { provider, selectedCount }
     },
     onSuccess: ({ provider, selectedCount }) => {
       if (selectedCount > 0) {
@@ -451,7 +450,7 @@ function loadGooglePickerApi(): Promise<void> {
   return googlePickerApiPromise
 }
 
-async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<NativeIntegrationFileSelection[]> {
+async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<number> {
   await loadGooglePickerApi()
   const picker = window.google?.picker
   if (!picker) {
@@ -459,6 +458,16 @@ async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse
   }
 
   return new Promise((resolve) => {
+    let settled = false
+    const finish = (selectedCount: number) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      window.clearTimeout(timeoutId)
+      resolve(selectedCount)
+    }
+    const timeoutId = window.setTimeout(() => finish(0), 5 * 60 * 1000)
     const view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes(
       `${GOOGLE_SHEETS_MIME_TYPE},${GOOGLE_DOCS_MIME_TYPE}`,
     )
@@ -472,32 +481,31 @@ async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse
         const action = data[picker.Response.ACTION]
         if (action === picker.Action.PICKED) {
           const docs = data[picker.Response.DOCUMENTS]
-          if (!Array.isArray(docs)) {
-            resolve([])
-            return
-          }
-          resolve(
-            docs.flatMap((doc) => {
-              if (!doc || typeof doc !== 'object') {
-                return []
-              }
-              const rawDoc = doc as Record<string, unknown>
-              const externalFileId = String(rawDoc[picker.Document.ID] ?? '').trim()
-              const name = String(rawDoc[picker.Document.NAME] ?? '').trim()
-              const mimeType = String(rawDoc[picker.Document.MIME_TYPE] ?? '').trim()
-              const url = String(rawDoc[picker.Document.URL] ?? '').trim()
-              if (!externalFileId || !name || !mimeType) {
-                return []
-              }
-              return [{ externalFileId, name, mimeType, url }]
-            }),
-          )
+          finish(countSelectedPickerDocs(docs, picker))
         } else if (picker.Action.CANCEL && action === picker.Action.CANCEL) {
-          resolve([])
+          finish(0)
+        } else if (typeof action === 'string' && action) {
+          finish(0)
         }
       })
       .build()
 
     pickerInstance.setVisible(true)
   })
+}
+
+function countSelectedPickerDocs(docs: unknown, picker: GooglePickerNamespace): number {
+  if (!Array.isArray(docs)) {
+    return 0
+  }
+  return docs.reduce((count, doc) => {
+    if (!doc || typeof doc !== 'object') {
+      return count
+    }
+    const rawDoc = doc as Record<string, unknown>
+    const externalFileId = String(rawDoc[picker.Document.ID] ?? '').trim()
+    const name = String(rawDoc[picker.Document.NAME] ?? '').trim()
+    const mimeType = String(rawDoc[picker.Document.MIME_TYPE] ?? '').trim()
+    return externalFileId && name && mimeType ? count + 1 : count
+  }, 0)
 }

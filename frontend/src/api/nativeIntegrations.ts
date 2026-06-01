@@ -74,13 +74,6 @@ export type NativeIntegrationPickerTokenResponse = {
   expiresAt: string | null
 }
 
-export type NativeIntegrationFileSelection = {
-  externalFileId: string
-  name: string
-  mimeType: string
-  url: string
-}
-
 const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
   providerKey: provider.provider_key,
   displayName: provider.display_name,
