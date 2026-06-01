@@ -1,11 +1,14 @@
-import { useEffect } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
-import { HardDrive, Plug } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, ChevronRight, FileText, HardDrive, Loader2, Plug, Table2 } from 'lucide-react'
 
 import type {
+  NativeIntegrationAccessibleFile,
   NativeIntegrationPickerTokenResponse,
   NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
+import { fetchNativeIntegrationFiles } from '../../api/nativeIntegrations'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { readStoredConsoleContext } from '../../util/consoleContextStorage'
 
 type GoogleDocsView = {
@@ -178,11 +181,110 @@ export function supportsNativeIntegrationPicker(provider: NativeIntegrationProvi
   return provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
 }
 
+export function supportsNativeIntegrationFileList(provider: NativeIntegrationProvider): boolean {
+  return provider.providerKey === 'google_drive' && provider.connected && Boolean(provider.filesUrl)
+}
+
+export function nativeIntegrationFilesQueryKey(provider: NativeIntegrationProvider) {
+  return ['native-integration-files', provider.providerKey, provider.filesUrl] as const
+}
+
 export function NativeProviderIcon({ provider }: { provider: NativeIntegrationProvider }) {
   if (provider.icon === 'google_drive') {
     return <HardDrive className="h-5 w-5" aria-hidden="true" />
   }
   return <Plug className="h-5 w-5" aria-hidden="true" />
+}
+
+export function NativeIntegrationFilesDisclosure({ provider }: { provider: NativeIntegrationProvider }) {
+  const [expanded, setExpanded] = useState(false)
+  const fileListEnabled = supportsNativeIntegrationFileList(provider)
+  const filesQuery = useQuery({
+    queryKey: nativeIntegrationFilesQueryKey(provider),
+    queryFn: () => fetchNativeIntegrationFiles(provider.filesUrl),
+    enabled: expanded && fileListEnabled,
+  })
+
+  if (!fileListEnabled) {
+    return null
+  }
+
+  const files = filesQuery.data?.files ?? []
+
+  return (
+    <div className="mt-3 pl-12">
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 transition hover:text-slate-950"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4" aria-hidden="true" />
+        ) : (
+          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+        )}
+        Accessible files
+      </button>
+      {expanded ? (
+        <div className="mt-3">
+          {filesQuery.isLoading ? (
+            <div className="inline-flex items-center gap-2 text-sm text-slate-500">
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              Loading files...
+            </div>
+          ) : filesQuery.isError ? (
+            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {safeErrorMessage(filesQuery.error)}
+            </div>
+          ) : files.length > 0 ? (
+            <ul className="space-y-1">
+              {files.map((file) => (
+                <NativeIntegrationFileItem key={file.externalId} file={file} />
+              ))}
+            </ul>
+          ) : (
+            <div className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+              No selected Google Docs or Sheets files found.
+            </div>
+          )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function NativeIntegrationFileItem({ file }: { file: NativeIntegrationAccessibleFile }) {
+  const icon = file.mimeType === GOOGLE_SHEETS_MIME_TYPE
+    ? <Table2 className="h-4 w-4 text-emerald-700" aria-hidden="true" />
+    : <FileText className="h-4 w-4 text-blue-700" aria-hidden="true" />
+  const content = (
+    <>
+      {icon}
+      <span className="truncate">{file.name}</span>
+    </>
+  )
+
+  if (file.webUrl) {
+    return (
+      <li>
+        <a
+          href={file.webUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700 transition hover:text-slate-950"
+        >
+          {content}
+        </a>
+      </li>
+    )
+  }
+
+  return (
+    <li className="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-sm text-slate-700">
+      {content}
+    </li>
+  )
 }
 
 async function loadGooglePickerApi(): Promise<void> {

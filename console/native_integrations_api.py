@@ -17,6 +17,7 @@ from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
     NativeIntegrationAuthError,
     NativeIntegrationConfigurationError,
+    NativeIntegrationFileListError,
     NativeIntegrationTokenRequestError,
     build_oauth_credentials_bundle,
     delete_native_integration_credentials,
@@ -24,6 +25,7 @@ from api.services.native_integrations import (
     get_native_integration_secret,
     list_native_integration_providers,
     load_native_integration_credentials,
+    list_google_drive_accessible_files,
     native_integration_client_credentials,
     new_oauth_state,
     refresh_oauth_credentials_if_needed,
@@ -77,6 +79,7 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "scope": credentials.get("scope") or "",
         "expires_at": credentials.get("expires_at"),
         "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
+        "files_url": reverse("console-native-integration-files", args=[provider.key]),
         "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
         "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
     }
@@ -343,5 +346,39 @@ class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):
                 "expires_at": credentials.get("expires_at"),
             }
         )
+        response["Cache-Control"] = "no-store"
+        return response
+
+
+class NativeIntegrationFilesAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get"]
+
+    def get(self, request: HttpRequest, provider_key: str, *args: Any, **kwargs: Any):
+        try:
+            provider = get_native_integration_provider(provider_key)
+        except KeyError:
+            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
+
+        if provider.key != GOOGLE_DRIVE_PROVIDER.key:
+            return JsonResponse({"error": f"{provider.display_name} does not expose files."}, status=400)
+
+        try:
+            _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
+        secret = get_native_integration_secret(provider.key, owner_user, owner_org)
+        if secret is None:
+            return JsonResponse({"error": f"{provider.display_name} is not connected."}, status=404)
+
+        try:
+            files = list_google_drive_accessible_files(secret)
+        except NativeIntegrationConfigurationError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        except NativeIntegrationFileListError as exc:
+            return JsonResponse({"error": str(exc)}, status=exc.status_code)
+        except NativeIntegrationAuthError as exc:
+            return JsonResponse({"error": str(exc)}, status=401)
+
+        response = JsonResponse({"provider_key": provider.key, "files": [file.to_dict() for file in files]})
         response["Cache-Control"] = "no-store"
         return response

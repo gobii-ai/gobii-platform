@@ -19,6 +19,8 @@ import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
 import { Modal } from '../common/Modal'
 import {
   NativeProviderIcon,
+  NativeIntegrationFilesDisclosure,
+  nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
   openGoogleDrivePicker,
   openNativeOAuthPopup,
@@ -222,6 +224,9 @@ export function HomepageIntegrationsModal({
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
       setNativeErrorMessage(null)
+    },
+    onSuccess: ({ provider }) => {
+      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
     },
     onError: (error) => {
       setNativeErrorMessage(safeErrorMessage(error))
@@ -571,73 +576,76 @@ function HomepageNativeProviderRow({
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
   return (
-    <div className="grid gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-      <div className="flex min-w-0 items-start gap-3">
-        <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
-          <NativeProviderIcon provider={provider} />
-        </span>
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold text-slate-900">{provider.displayName}</p>
-            <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
-              Native
-            </span>
-            {provider.connected ? (
-              <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
-                <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
-                Connected
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+        <div className="flex min-w-0 items-start gap-3">
+          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
+            <NativeProviderIcon provider={provider} />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="text-sm font-semibold text-slate-900">{provider.displayName}</p>
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+                Native
               </span>
-            ) : null}
+              {provider.connected ? (
+                <span className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                  <CheckCircle2 className="h-3 w-3" aria-hidden="true" />
+                  Connected
+                </span>
+              ) : null}
+            </div>
+            {provider.description ? <p className="mt-1 text-sm text-slate-600">{provider.description}</p> : null}
           </div>
-          {provider.description ? <p className="mt-1 text-sm text-slate-600">{provider.description}</p> : null}
+        </div>
+        <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+          {pickerEnabled ? (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+              onClick={onPicker}
+              disabled={disabled}
+            >
+              {pendingKind === 'picker' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <FolderOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+              Select Files
+            </button>
+          ) : null}
+          {provider.connected ? (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+              onClick={onDisconnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'disconnect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Unplug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Disconnect
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+              onClick={onConnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'connect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Connect
+            </button>
+          )}
         </div>
       </div>
-      <div className="flex flex-wrap justify-start gap-2 md:justify-end">
-        {pickerEnabled ? (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-            onClick={onPicker}
-            disabled={disabled}
-          >
-            {pendingKind === 'picker' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <FolderOpen className="h-4 w-4" aria-hidden="true" />
-            )}
-            Choose files
-          </button>
-        ) : null}
-        {provider.connected ? (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
-            onClick={onDisconnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'disconnect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-            onClick={onConnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'connect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Plug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Connect
-          </button>
-        )}
-      </div>
+      <NativeIntegrationFilesDisclosure provider={provider} />
     </div>
   )
 }

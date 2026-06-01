@@ -36,6 +36,8 @@ import {
 } from './PipedreamAppsShared'
 import {
   NativeProviderIcon,
+  NativeIntegrationFilesDisclosure,
+  nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
   openGoogleDrivePicker,
   openNativeOAuthPopup,
@@ -198,6 +200,9 @@ export function AgentPipedreamAppsModal({
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
       setStatusMessage(null)
     },
+    onSuccess: ({ provider }) => {
+      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
+    },
     onError: (error) => {
       setStatusMessage({ text: safeErrorMessage(error), tone: 'error' })
     },
@@ -296,68 +301,71 @@ function AgentNativeAppRowItem({
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
   return (
-    <div className="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
-      <NativeIntegrationSummaryCell provider={provider} />
-      <div>
-        {provider.connected ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
-            <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
-            Connected
-          </span>
-        ) : (
-          <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
-            Workspace
-          </span>
-        )}
+    <div className="px-4 py-3">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_7rem_8rem_8rem] md:items-center">
+        <NativeIntegrationSummaryCell provider={provider} />
+        <div>
+          {provider.connected ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Connected
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+              Workspace
+            </span>
+          )}
+        </div>
+        <div className="flex justify-start md:justify-end">
+          {pickerEnabled ? (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+              onClick={onPicker}
+              disabled={disabled}
+            >
+              {pendingKind === 'picker' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <FolderOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+              Select Files
+            </button>
+          ) : null}
+        </div>
+        <div className="flex justify-start md:justify-end">
+          {provider.connected ? (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+              onClick={onDisconnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'disconnect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Unplug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Disconnect
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+              onClick={onConnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'connect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Connect
+            </button>
+          )}
+        </div>
       </div>
-      <div className="flex justify-start md:justify-end">
-        {pickerEnabled ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
-            onClick={onPicker}
-            disabled={disabled}
-          >
-            {pendingKind === 'picker' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <FolderOpen className="h-4 w-4" aria-hidden="true" />
-            )}
-            Files
-          </button>
-        ) : null}
-      </div>
-      <div className="flex justify-start md:justify-end">
-        {provider.connected ? (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
-            onClick={onDisconnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'disconnect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Unplug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Disconnect
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
-            onClick={onConnect}
-            disabled={disabled}
-          >
-            {pendingKind === 'connect' ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-              <Plug className="h-4 w-4" aria-hidden="true" />
-            )}
-            Connect
-          </button>
-        )}
-      </div>
+      <NativeIntegrationFilesDisclosure provider={provider} />
     </div>
   )
 }

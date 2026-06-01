@@ -12,6 +12,7 @@ export type NativeIntegrationProviderDTO = {
   scope: string
   expires_at: string | null
   connect_url: string
+  files_url: string
   picker_token_url: string
   revoke_url: string
 }
@@ -37,6 +38,18 @@ type NativeIntegrationPickerTokenResponseDTO = {
   expires_at: string | null
 }
 
+type NativeIntegrationAccessibleFileDTO = {
+  external_id: string
+  name: string
+  mime_type: string
+  web_url: string
+}
+
+type NativeIntegrationFilesResponseDTO = {
+  provider_key: string
+  files: NativeIntegrationAccessibleFileDTO[]
+}
+
 export type NativeIntegrationProvider = {
   providerKey: string
   displayName: string
@@ -49,6 +62,7 @@ export type NativeIntegrationProvider = {
   scope: string
   expiresAt: string | null
   connectUrl: string
+  filesUrl: string
   pickerTokenUrl: string
   revokeUrl: string
 }
@@ -74,6 +88,18 @@ export type NativeIntegrationPickerTokenResponse = {
   expiresAt: string | null
 }
 
+export type NativeIntegrationAccessibleFile = {
+  externalId: string
+  name: string
+  mimeType: string
+  webUrl: string
+}
+
+export type NativeIntegrationFilesResponse = {
+  providerKey: string
+  files: NativeIntegrationAccessibleFile[]
+}
+
 export const mapNativeIntegrationProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
   providerKey: provider.provider_key,
   displayName: provider.display_name,
@@ -86,8 +112,16 @@ export const mapNativeIntegrationProvider = (provider: NativeIntegrationProvider
   scope: provider.scope ?? '',
   expiresAt: provider.expires_at ?? null,
   connectUrl: provider.connect_url,
+  filesUrl: provider.files_url,
   pickerTokenUrl: provider.picker_token_url,
   revokeUrl: provider.revoke_url,
+})
+
+const mapNativeIntegrationFile = (file: NativeIntegrationAccessibleFileDTO): NativeIntegrationAccessibleFile => ({
+  externalId: file.external_id,
+  name: file.name,
+  mimeType: file.mime_type,
+  webUrl: file.web_url,
 })
 
 export async function fetchNativeIntegrations(listUrl: string): Promise<NativeIntegrationListResponse> {
@@ -123,6 +157,14 @@ export async function fetchNativeIntegrationPickerToken(
     appId: payload.app_id,
     scope: payload.scope,
     expiresAt: payload.expires_at,
+  }
+}
+
+export async function fetchNativeIntegrationFiles(filesUrl: string): Promise<NativeIntegrationFilesResponse> {
+  const payload = await jsonFetch<NativeIntegrationFilesResponseDTO>(filesUrl)
+  return {
+    providerKey: payload.provider_key,
+    files: (payload.files ?? []).map(mapNativeIntegrationFile),
   }
 }
 

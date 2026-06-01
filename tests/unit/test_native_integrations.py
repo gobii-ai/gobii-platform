@@ -192,6 +192,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(provider["provider_key"], "google_drive")
         self.assertTrue(provider["connected"])
         self.assertEqual(provider["connect_url"], reverse("console-native-integration-connect", args=["google_drive"]))
+        self.assertEqual(provider["files_url"], reverse("console-native-integration-files", args=["google_drive"]))
         self.assertEqual(
             provider["picker_token_url"],
             reverse("console-native-integration-picker-token", args=["google_drive"]),
@@ -265,6 +266,68 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(payload["developer_key"], "picker-api-key")
         self.assertEqual(payload["app_id"], "123456789")
         self.assertEqual(payload["scope"], GOOGLE_DRIVE_PROVIDER.scope_string)
+
+    @patch("api.services.native_integrations.httpx.get")
+    def test_files_returns_accessible_google_drive_files(self, mock_get):
+        self._create_integration_secret(owner_user=self.user)
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = {
+            "files": [
+                {
+                    "id": "sheet-123",
+                    "name": "Pipeline",
+                    "mimeType": "application/vnd.google-apps.spreadsheet",
+                    "webViewLink": "https://docs.google.com/spreadsheets/d/sheet-123/edit",
+                },
+                {
+                    "id": "doc-123",
+                    "name": "Brief",
+                    "mimeType": "application/vnd.google-apps.document",
+                    "webViewLink": "https://docs.google.com/document/d/doc-123/edit",
+                },
+                {
+                    "id": "pdf-123",
+                    "name": "Ignored PDF",
+                    "mimeType": "application/pdf",
+                    "webViewLink": "https://drive.google.com/file/d/pdf-123/view",
+                },
+            ]
+        }
+        mock_get.return_value = response
+
+        files_response = self.client.get(reverse("console-native-integration-files", args=["google_drive"]))
+
+        self.assertEqual(files_response.status_code, 200, files_response.content)
+        self.assertEqual(files_response["Cache-Control"], "no-store")
+        payload = files_response.json()
+        self.assertEqual(payload["provider_key"], "google_drive")
+        self.assertEqual(
+            payload["files"],
+            [
+                {
+                    "external_id": "sheet-123",
+                    "name": "Pipeline",
+                    "mime_type": "application/vnd.google-apps.spreadsheet",
+                    "web_url": "https://docs.google.com/spreadsheets/d/sheet-123/edit",
+                },
+                {
+                    "external_id": "doc-123",
+                    "name": "Brief",
+                    "mime_type": "application/vnd.google-apps.document",
+                    "web_url": "https://docs.google.com/document/d/doc-123/edit",
+                },
+            ],
+        )
+        request_kwargs = mock_get.call_args.kwargs
+        self.assertEqual(request_kwargs["headers"]["Authorization"], "Bearer access-token")
+        self.assertIn("mimeType", request_kwargs["params"]["q"])
+
+    def test_files_requires_connected_provider(self):
+        response = self.client.get(reverse("console-native-integration-files", args=["google_drive"]))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"error": "Google Drive is not connected."})
 
     @override_settings(GOOGLE_PICKER_API_KEY="", GOOGLE_PICKER_APP_ID="")
     def test_picker_token_requires_picker_configuration(self):

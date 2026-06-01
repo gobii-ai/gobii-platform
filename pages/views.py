@@ -249,6 +249,7 @@ def _homepage_native_integration_providers() -> list[dict[str, object]]:
             "scope": "",
             "expires_at": None,
             "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
+            "files_url": reverse("console-native-integration-files", args=[provider.key]),
             "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
             "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
         }

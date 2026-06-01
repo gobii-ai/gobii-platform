@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 
 NATIVE_INTEGRATION_SECRET_PREFIX = "native_"
 TOKEN_REFRESH_SKEW = timedelta(minutes=5)
+GOOGLE_DRIVE_FILES_URL = "https://www.googleapis.com/drive/v3/files"
+GOOGLE_SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+GOOGLE_DOCS_MIME_TYPE = "application/vnd.google-apps.document"
 
 
 class NativeIntegrationError(Exception):
@@ -50,6 +53,15 @@ class NativeIntegrationTokenRequestError(NativeIntegrationAuthError):
         self.detail = detail
 
 
+class NativeIntegrationFileListError(NativeIntegrationAuthError):
+    """Raised when an accessible-file list cannot be loaded from a provider."""
+
+    def __init__(self, message: str, *, status_code: int = 502, detail: str = ""):
+        super().__init__(message)
+        self.status_code = status_code
+        self.detail = detail
+
+
 @dataclass(frozen=True)
 class NativeIntegrationProvider:
     key: str
@@ -71,6 +83,22 @@ class NativeIntegrationProvider:
     @property
     def scope_string(self) -> str:
         return " ".join(self.scopes)
+
+
+@dataclass(frozen=True)
+class NativeIntegrationAccessibleFile:
+    external_id: str
+    name: str
+    mime_type: str
+    web_url: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "external_id": self.external_id,
+            "name": self.name,
+            "mime_type": self.mime_type,
+            "web_url": self.web_url,
+        }
 
 
 GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
@@ -354,6 +382,72 @@ def refresh_oauth_credentials_if_needed(
     )
     save_native_integration_credentials(provider, secret.user, secret.organization, updated)
     return updated
+
+
+def list_google_drive_accessible_files(
+    secret: GlobalSecret,
+    *,
+    page_size: int = 50,
+) -> list[NativeIntegrationAccessibleFile]:
+    provider = GOOGLE_DRIVE_PROVIDER
+    credentials = load_native_integration_credentials(secret)
+    credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
+    access_token = str(credentials.get("access_token") or "")
+    if not access_token:
+        raise NativeIntegrationAuthError(f"{provider.display_name} must be reconnected.")
+
+    try:
+        response = httpx.get(
+            GOOGLE_DRIVE_FILES_URL,
+            params={
+                "pageSize": max(1, min(int(page_size), 100)),
+                "fields": "files(id,name,mimeType,webViewLink)",
+                "orderBy": "modifiedTime desc",
+                "q": (
+                    "trashed = false and "
+                    f"(mimeType = '{GOOGLE_SHEETS_MIME_TYPE}' or mimeType = '{GOOGLE_DOCS_MIME_TYPE}')"
+                ),
+            },
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15.0,
+        )
+    except httpx.HTTPError as exc:
+        raise NativeIntegrationFileListError("Unable to load Google Drive files.", detail=str(exc)) from exc
+
+    if response.status_code in {401, 403}:
+        raise NativeIntegrationAuthError(f"{provider.display_name} must be reconnected.")
+    if response.status_code >= 400:
+        raise NativeIntegrationFileListError("Unable to load Google Drive files.", status_code=response.status_code)
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise NativeIntegrationFileListError("Google Drive returned invalid file data.") from exc
+    if not isinstance(payload, dict):
+        raise NativeIntegrationFileListError("Google Drive returned invalid file data.")
+
+    files = payload.get("files") or []
+    if not isinstance(files, list):
+        raise NativeIntegrationFileListError("Google Drive returned invalid file data.")
+
+    results: list[NativeIntegrationAccessibleFile] = []
+    for file_item in files:
+        if not isinstance(file_item, dict):
+            continue
+        external_id = str(file_item.get("id") or "").strip()
+        name = str(file_item.get("name") or "").strip()
+        mime_type = str(file_item.get("mimeType") or "").strip()
+        if not external_id or not name or mime_type not in {GOOGLE_SHEETS_MIME_TYPE, GOOGLE_DOCS_MIME_TYPE}:
+            continue
+        results.append(
+            NativeIntegrationAccessibleFile(
+                external_id=external_id,
+                name=name,
+                mime_type=mime_type,
+                web_url=str(file_item.get("webViewLink") or "").strip(),
+            )
+        )
+    return results
 
 
 def apply_native_integration_auth(agent: PersistentAgent, url: str, headers: dict[str, str]) -> dict[str, str]:
