@@ -1,6 +1,22 @@
 import random, time
 from django.conf import settings
 
+FBP_EXCLUDED_PATHS = frozenset(
+    {
+        "/install.sh",
+        "/llms-full.txt",
+        "/llms.txt",
+        "/manifest.json",
+        "/robots.txt",
+        "/sitemap.xml",
+    }
+)
+
+
+def _should_skip_fbp(request):
+    return getattr(request, "path_info", "") in FBP_EXCLUDED_PATHS
+
+
 def get_or_make_fbp(request):
     """
     Generates or retrieves the Facebook Browser Pixel (fbp) identifier.
@@ -57,6 +73,9 @@ class FbpMiddleware:
                 The modified HTTP response object that includes the necessary 'fbp'
                 cookie settings, if applicable.
         """
+        if _should_skip_fbp(request):
+            return self.get_response(request)
+
         # Check consent before generating/setting
         had_cookie = settings.FBP_COOKIE_NAME in request.COOKIES
 

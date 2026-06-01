@@ -397,7 +397,11 @@
             <input type="hidden" name="source_page" value="home_hero">
             <input type="hidden" name="trial_onboarding" value="1">
             <input type="hidden" name="trial_onboarding_target" value="agent_ui">
-            <div id="homepage-integrations-selected-fields"></div>
+            <div id="homepage-integrations-selected-fields">
+              {% for app_slug in homepage_integrations_initial_selected_app_slugs %}
+                <input type="hidden" name="selected_pipedream_app_slugs" value="{{ app_slug }}" />
+              {% endfor %}
+            </div>
             
             <!-- Charter Input with inline CTA button -->
             <div>

@@ -1,5 +1,6 @@
 import hashlib
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings, tag
 from django.urls import reverse
@@ -199,6 +200,32 @@ class GoogleAnalyticsRenderingTests(TestCase):
 
 @tag("batch_pages_signals")
 class WebManifestRenderingTests(TestCase):
+    def test_manifest_is_publicly_cacheable_without_tracking_cookies(self):
+        response = self.client.get(reverse("pages:web_manifest"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "public, max-age=3600")
+        self.assertFalse(response.has_header("Vary"))
+        self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies)
+
+    def test_manifest_cache_headers_do_not_depend_on_existing_cookies(self):
+        user = User.objects.create_user(
+            username="manifest-user",
+            email="manifest@example.com",
+            password="pw",
+        )
+        self.client.force_login(user)
+        self.client.cookies[settings.FBP_COOKIE_NAME] = "fb.1.1780155105587.5000808142"
+
+        response = self.client.get(reverse("pages:web_manifest"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Cache-Control"], "public, max-age=3600")
+        self.assertFalse(response.has_header("Vary"))
+        self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
+        self.assertNotIn(settings.SESSION_COOKIE_NAME, response.cookies)
+
     def test_manifest_uses_legacy_icons_when_switch_is_off(self):
         with override_switch("fish_collateral", active=False):
             response = self.client.get(reverse("pages:web_manifest"))

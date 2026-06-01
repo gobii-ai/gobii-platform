@@ -1,32 +1,74 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-
-import './index.css'
-
-import { HomepageIntegrationsModal, type HomepageIntegrationsModalProps } from './components/homepage/HomepageIntegrationsModal'
+type HomepageIntegrationsModalModule = typeof import('./homepageIntegrationsModal')
 
 const mountNode = document.getElementById('homepage-integrations-root')
 
 if (mountNode) {
-  const propsId = mountNode.dataset.propsJsonId
-  if (!propsId) {
-    throw new Error('Homepage integrations props script identifier is required')
+  let modalModulePromise: Promise<HomepageIntegrationsModalModule> | null = null
+
+  const loadModalModule = () => {
+    if (!modalModulePromise) {
+      modalModulePromise = import('./homepageIntegrationsModal')
+    }
+    return modalModulePromise
   }
-  const script = document.getElementById(propsId)
-  if (!script || !script.textContent) {
-    throw new Error(`Homepage integrations props script ${propsId} was not found`)
+
+  const parseInitialSearchTerm = () => {
+    const propsId = mountNode.dataset.propsJsonId
+    if (!propsId) {
+      return ''
+    }
+    const script = document.getElementById(propsId)
+    if (!script?.textContent) {
+      return ''
+    }
+    try {
+      const props = JSON.parse(script.textContent) as Record<string, unknown> | null
+      return props && typeof props.initialSearchTerm === 'string' ? props.initialSearchTerm.trim() : ''
+    } catch (error) {
+      console.error('Failed to parse homepage integrations props.', error)
+      return ''
+    }
   }
 
-  const props = JSON.parse(script.textContent) as HomepageIntegrationsModalProps
+  const setLoadingState = (loading: boolean) => {
+    document.querySelectorAll<HTMLElement>('[data-integrations-open]').forEach((button) => {
+      if (loading) {
+        button.setAttribute('aria-busy', 'true')
+      } else {
+        button.removeAttribute('aria-busy')
+      }
+    })
+  }
 
-  const queryClient = new QueryClient()
+  const preloadModal = () => {
+    loadModalModule().catch((error) => {
+      console.error('Failed to load homepage integrations.', error)
+      modalModulePromise = null
+    })
+  }
 
-  createRoot(mountNode).render(
-    <StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <HomepageIntegrationsModal {...props} />
-      </QueryClientProvider>
-    </StrictMode>,
-  )
+  const openModal = async (event?: Event) => {
+    event?.preventDefault()
+    setLoadingState(true)
+    try {
+      const module = await loadModalModule()
+      module.mountHomepageIntegrations({ openOnMount: true })
+    } catch (error) {
+      console.error('Failed to open homepage integrations.', error)
+      modalModulePromise = null
+    } finally {
+      setLoadingState(false)
+    }
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-integrations-open]').forEach((button) => {
+    button.addEventListener('click', openModal)
+    button.addEventListener('pointerdown', preloadModal, { passive: true })
+    button.addEventListener('pointerenter', preloadModal, { passive: true })
+    button.addEventListener('focus', preloadModal)
+  })
+
+  if (parseInitialSearchTerm()) {
+    void openModal()
+  }
 }

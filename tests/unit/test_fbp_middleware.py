@@ -15,8 +15,8 @@ class FbpMiddlewareTests(TestCase):
         self.middleware = FbpMiddleware(lambda request: HttpResponse("ok"))
         self.session_middleware = SessionMiddleware(lambda req: HttpResponse("noop"))
 
-    def _build_request(self, cookies=None):
-        request = self.factory.get("/")
+    def _build_request(self, cookies=None, path="/"):
+        request = self.factory.get(path)
         self.session_middleware.process_request(request)
         if cookies:
             request.COOKIES.update(cookies)
@@ -75,3 +75,22 @@ class FbpMiddlewareTests(TestCase):
         self.assertEqual(request.fbp, cookie_value)
         self.assertNotIn(settings.FBP_COOKIE_NAME, request.session)
         self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
+
+    @tag("batch_fbp_middleware")
+    def test_middleware_skips_public_metadata_paths(self):
+        for path in (
+            "/install.sh",
+            "/llms-full.txt",
+            "/llms.txt",
+            "/manifest.json",
+            "/robots.txt",
+            "/sitemap.xml",
+        ):
+            with self.subTest(path=path):
+                request = self._build_request(path=path)
+
+                response = self.middleware(request)
+
+                self.assertFalse(hasattr(request, "fbp"))
+                self.assertNotIn(settings.FBP_COOKIE_NAME, request.COOKIES)
+                self.assertNotIn(settings.FBP_COOKIE_NAME, response.cookies)
