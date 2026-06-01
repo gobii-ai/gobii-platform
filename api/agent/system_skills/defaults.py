@@ -7,6 +7,9 @@ from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_G
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
 
 
+GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
+
+
 RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
     skill_key="runtime_planning",
     name="Runtime Planning",
@@ -121,6 +124,50 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "'Do not repeat manually; verify read-only; do not append/add/update again.'\n"
         "Useful pattern: fetch/call tools -> normalize -> write SQLite tables -> return summary, counts, outputs, "
         "remaining work, and verification. Once stable, save the workflow as a skill referencing the canonical `custom_*` tool id."
+    ),
+)
+
+
+GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+    name="Google Sheets",
+    search_summary="Read and update selected Google Sheets through the native Google Drive integration.",
+    tool_names=("http_request",),
+    enables=(
+        "read Google Sheets metadata and worksheet names",
+        "read spreadsheet ranges and rows",
+        "append rows to selected spreadsheets",
+        "update ranges in selected spreadsheets",
+        "use native Google Drive OAuth with drive.file access",
+    ),
+    use_when=(
+        "the user asks to read a Google Sheet",
+        "the user asks to update, append, or write spreadsheet rows",
+        "the user asks to inspect worksheets, tabs, ranges, cells, or formulas in Google Sheets",
+        "the work references a spreadsheet selected through the native Google Drive integration",
+    ),
+    query_aliases=(
+        "google sheets",
+        "sheets",
+        "spreadsheet",
+        "worksheet",
+        "google sheet",
+        "sheets api",
+        "drive file spreadsheet",
+    ),
+    prompt_instructions=(
+        "Use `http_request` for Google Sheets API calls. Native Google Drive OAuth is applied automatically for "
+        "`https://sheets.googleapis.com/` requests when the owner has connected Google Drive.\n"
+        "Only assume access to spreadsheets listed in the Accessible Google Sheets section below. The native "
+        "integration uses Google `drive.file`, so unlisted spreadsheets may fail unless the app created them or the "
+        "user selected them in the Google Drive integration.\n"
+        "Common calls:\n"
+        "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
+        "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
+        "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
+        "integration before making Sheets API calls for that file."
     ),
 )
 
@@ -483,6 +530,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
+    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

@@ -1,12 +1,28 @@
 import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FolderOpen, HardDrive, Loader2, Plug, Unplug } from 'lucide-react'
+import {
+  CheckCircle2,
+  ExternalLink,
+  FileSpreadsheet,
+  FileText,
+  FolderOpen,
+  HardDrive,
+  Loader2,
+  Plug,
+  Trash2,
+  Unplug,
+} from 'lucide-react'
 
 import {
+  deleteNativeIntegrationFile,
+  fetchNativeIntegrationFiles,
   fetchNativeIntegrationPickerToken,
   fetchNativeIntegrations,
   revokeNativeIntegration,
+  saveNativeIntegrationFiles,
   startNativeIntegrationConnect,
+  type NativeIntegrationFileSelection,
+  type NativeIntegrationGrantedFile,
   type NativeIntegrationPickerTokenResponse,
   type NativeIntegrationProvider,
 } from '../../api/nativeIntegrations'
@@ -34,12 +50,15 @@ type GooglePickerBuilder = {
 type GooglePickerNamespace = {
   Action: { PICKED: string; CANCEL?: string }
   DocsView: new (viewId: string) => GoogleDocsView
-  Document: { ID: string; NAME: string }
+  Document: { ID: string; NAME: string; MIME_TYPE: string; URL: string }
   Feature: { MULTISELECT_ENABLED: string }
   PickerBuilder: new () => GooglePickerBuilder
   Response: { ACTION: string; DOCUMENTS: string }
   ViewId: { DOCS: string }
 }
+
+const GOOGLE_SHEETS_MIME_TYPE = 'application/vnd.google-apps.spreadsheet'
+const GOOGLE_DOCS_MIME_TYPE = 'application/vnd.google-apps.document'
 
 declare global {
   interface Window {
@@ -73,6 +92,27 @@ export function NativeAppsPanel({
     queryKey,
     queryFn: () => fetchNativeIntegrations(listUrl),
   })
+  const connectedFileProviders = useMemo(
+    () => (integrationsQuery.data?.providers ?? []).filter((provider) => provider.connected && provider.filesUrl),
+    [integrationsQuery.data?.providers],
+  )
+  const filesQueryKey = useMemo(
+    () => ['native-integration-files', listUrl, connectedFileProviders.map((provider) => provider.filesUrl).join('|')],
+    [connectedFileProviders, listUrl],
+  )
+  const filesQuery = useQuery({
+    queryKey: filesQueryKey,
+    enabled: connectedFileProviders.length > 0,
+    queryFn: async () => {
+      const entries = await Promise.all(
+        connectedFileProviders.map(async (provider) => [
+          provider.providerKey,
+          await fetchNativeIntegrationFiles(provider.filesUrl),
+        ] as const),
+      )
+      return Object.fromEntries(entries) as Record<string, NativeIntegrationGrantedFile[]>
+    },
+  })
 
   const connectMutation = useMutation({
     mutationFn: (provider: NativeIntegrationProvider) => startNativeIntegrationConnect(provider.connectUrl),
@@ -94,6 +134,7 @@ export function NativeAppsPanel({
     mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
     onSuccess: (provider) => {
       queryClient.invalidateQueries({ queryKey })
+      queryClient.invalidateQueries({ queryKey: filesQueryKey })
       onSuccess(`${provider.displayName} disconnected.`)
     },
     onError: (error) => {
@@ -104,12 +145,31 @@ export function NativeAppsPanel({
   const pickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
       const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      return openGoogleDrivePicker(token)
+      const selectedFiles = await openGoogleDrivePicker(token)
+      if (selectedFiles.length > 0) {
+        await saveNativeIntegrationFiles(provider.filesUrl, selectedFiles)
+      }
+      return { provider, selectedCount: selectedFiles.length }
     },
-    onSuccess: (selectedCount) => {
+    onSuccess: ({ selectedCount }) => {
+      queryClient.invalidateQueries({ queryKey: filesQueryKey })
       if (selectedCount > 0) {
         onSuccess(`${selectedCount} Google Drive file${selectedCount === 1 ? '' : 's'} selected.`)
       }
+    },
+    onError: (error) => {
+      onError(safeErrorMessage(error))
+    },
+  })
+
+  const deleteFileMutation = useMutation({
+    mutationFn: async ({ provider, file }: { provider: NativeIntegrationProvider; file: NativeIntegrationGrantedFile }) => {
+      await deleteNativeIntegrationFile(`${provider.filesUrl}${file.id}/`)
+      return { provider, file }
+    },
+    onSuccess: ({ file }) => {
+      queryClient.invalidateQueries({ queryKey: filesQueryKey })
+      onSuccess(`${file.name} removed from the agent-visible list.`)
     },
     onError: (error) => {
       onError(safeErrorMessage(error))
@@ -154,6 +214,21 @@ export function NativeAppsPanel({
   const errorClassName = embedded
     ? 'rounded-xl border border-rose-300/25 bg-rose-950/30 px-4 py-3 text-sm text-rose-100'
     : 'rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700'
+  const fileListShellClassName = embedded
+    ? 'px-6 pb-5 sm:pl-[4.75rem]'
+    : 'px-6 pb-5 sm:pl-[4.75rem]'
+  const fileListClassName = embedded
+    ? 'space-y-2 border-l border-slate-200/10 pl-4'
+    : 'space-y-2 border-l border-slate-200 pl-4'
+  const fileListCaptionClassName = embedded ? 'text-xs font-semibold text-slate-300' : 'text-xs font-semibold text-slate-700'
+  const fileRowClassName = embedded
+    ? 'flex min-w-0 items-center gap-2 text-sm text-slate-300'
+    : 'flex min-w-0 items-center gap-2 text-sm text-slate-700'
+  const fileNameClassName = embedded ? 'truncate font-medium text-slate-100' : 'truncate font-medium text-slate-900'
+  const fileMetaClassName = embedded ? 'shrink-0 text-xs text-slate-500' : 'shrink-0 text-xs text-slate-500'
+  const fileActionClassName = embedded
+    ? 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200/15 text-slate-300 transition hover:border-slate-100/30 hover:text-slate-50 disabled:cursor-not-allowed disabled:opacity-60'
+    : 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:border-slate-300 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60'
 
   const pendingProviderKey =
     (connectMutation.isPending ? connectMutation.variables?.providerKey : null) ??
@@ -191,69 +266,121 @@ export function NativeAppsPanel({
         <div className={bodyClassName}>
           {(integrationsQuery.data?.providers ?? []).map((provider) => {
             const isBusy = pendingProviderKey === provider.providerKey
+            const files = filesQuery.data?.[provider.providerKey] ?? []
             return (
-              <div className={rowClassName} key={provider.providerKey}>
-                <div className="flex min-w-0 gap-3">
-                  <div className={iconShellClassName}>
-                    <ProviderIcon provider={provider} />
-                  </div>
-                  <div className="min-w-0 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className={providerTitleClassName}>{provider.displayName}</h3>
-                      <span className={statusClassName}>
-                        {provider.connected ? (
-                          <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
-                        ) : (
-                          <Plug className="h-3.5 w-3.5" aria-hidden="true" />
-                        )}
-                        {provider.connected ? 'Connected' : 'Not connected'}
-                      </span>
+              <div key={provider.providerKey}>
+                <div className={rowClassName}>
+                  <div className="flex min-w-0 gap-3">
+                    <div className={iconShellClassName}>
+                      <ProviderIcon provider={provider} />
                     </div>
-                    <p className={providerDescriptionClassName}>{provider.description}</p>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className={providerTitleClassName}>{provider.displayName}</h3>
+                        <span className={statusClassName}>
+                          {provider.connected ? (
+                            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-300" aria-hidden="true" />
+                          ) : (
+                            <Plug className="h-3.5 w-3.5" aria-hidden="true" />
+                          )}
+                          {provider.connected ? 'Connected' : 'Not connected'}
+                        </span>
+                      </div>
+                      <p className={providerDescriptionClassName}>{provider.description}</p>
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    {provider.connected ? (
+                      <>
+                        <button
+                          type="button"
+                          className={pickerButtonClassName}
+                          onClick={() => pickerMutation.mutate(provider)}
+                          disabled={isBusy}
+                        >
+                          {isBusy && pickerMutation.variables?.providerKey === provider.providerKey ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <FolderOpen className="h-4 w-4" />
+                          )}
+                          Choose files
+                        </button>
+                        <button
+                          type="button"
+                          className={disconnectButtonClassName}
+                          onClick={() => revokeMutation.mutate(provider)}
+                          disabled={isBusy}
+                        >
+                          {isBusy && revokeMutation.variables?.providerKey === provider.providerKey ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Unplug className="h-4 w-4" />
+                          )}
+                          Disconnect
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className={connectButtonClassName}
+                        onClick={() => connectMutation.mutate(provider)}
+                        disabled={isBusy}
+                      >
+                        {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
+                        Connect
+                      </button>
+                    )}
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  {provider.connected ? (
-                    <>
-                      <button
-                        type="button"
-                        className={pickerButtonClassName}
-                        onClick={() => pickerMutation.mutate(provider)}
-                        disabled={isBusy}
-                      >
-                        {isBusy && pickerMutation.variables?.providerKey === provider.providerKey ? (
+                {provider.connected ? (
+                  <div className={fileListShellClassName}>
+                    <div className={fileListClassName}>
+                      <div className={fileListCaptionClassName}>Agent-visible files</div>
+                      {filesQuery.isLoading ? (
+                        <div className={fileRowClassName}>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <FolderOpen className="h-4 w-4" />
-                        )}
-                        Choose files
-                      </button>
-                      <button
-                        type="button"
-                        className={disconnectButtonClassName}
-                        onClick={() => revokeMutation.mutate(provider)}
-                        disabled={isBusy}
-                      >
-                        {isBusy && revokeMutation.variables?.providerKey === provider.providerKey ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <Unplug className="h-4 w-4" />
-                        )}
-                        Disconnect
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className={connectButtonClassName}
-                      onClick={() => connectMutation.mutate(provider)}
-                      disabled={isBusy}
-                    >
-                      {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
-                      Connect
-                    </button>
-                  )}
-                </div>
+                          Loading selected files...
+                        </div>
+                      ) : files.length === 0 ? (
+                        <div className={fileRowClassName}>No files selected yet.</div>
+                      ) : (
+                        files.map((file) => (
+                          <div className={fileRowClassName} key={file.id}>
+                            <FileTypeIcon file={file} />
+                            <span className={fileNameClassName}>{file.name}</span>
+                            <span className={fileMetaClassName}>{fileTypeLabel(file)}</span>
+                            {file.url ? (
+                              <a
+                                className={fileActionClassName}
+                                href={file.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                title={`Open ${file.name}`}
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                                <span className="sr-only">Open {file.name}</span>
+                              </a>
+                            ) : null}
+                            <button
+                              type="button"
+                              className={fileActionClassName}
+                              onClick={() => deleteFileMutation.mutate({ provider, file })}
+                              disabled={deleteFileMutation.isPending && deleteFileMutation.variables?.file.id === file.id}
+                              title={`Remove ${file.name}`}
+                            >
+                              {deleteFileMutation.isPending && deleteFileMutation.variables?.file.id === file.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                              )}
+                              <span className="sr-only">Remove {file.name}</span>
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )
           })}
@@ -261,6 +388,23 @@ export function NativeAppsPanel({
       )}
     </section>
   )
+}
+
+function FileTypeIcon({ file }: { file: NativeIntegrationGrantedFile }) {
+  if (file.mimeType === GOOGLE_SHEETS_MIME_TYPE) {
+    return <FileSpreadsheet className="h-4 w-4 shrink-0 text-emerald-500" aria-hidden="true" />
+  }
+  return <FileText className="h-4 w-4 shrink-0 text-sky-500" aria-hidden="true" />
+}
+
+function fileTypeLabel(file: NativeIntegrationGrantedFile) {
+  if (file.mimeType === GOOGLE_SHEETS_MIME_TYPE) {
+    return 'Sheet'
+  }
+  if (file.mimeType === GOOGLE_DOCS_MIME_TYPE) {
+    return 'Doc'
+  }
+  return 'File'
 }
 
 function ProviderIcon({ provider }: { provider: NativeIntegrationProvider }) {
@@ -317,7 +461,7 @@ function loadGooglePickerApi(): Promise<void> {
   return googlePickerApiPromise
 }
 
-async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<number> {
+async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse): Promise<NativeIntegrationFileSelection[]> {
   await loadGooglePickerApi()
   const picker = window.google?.picker
   if (!picker) {
@@ -326,7 +470,7 @@ async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse
 
   return new Promise((resolve) => {
     const view = new picker.DocsView(picker.ViewId.DOCS).setMimeTypes(
-      'application/vnd.google-apps.spreadsheet,application/vnd.google-apps.document',
+      `${GOOGLE_SHEETS_MIME_TYPE},${GOOGLE_DOCS_MIME_TYPE}`,
     )
     const pickerInstance = new picker.PickerBuilder()
       .addView(view)
@@ -338,9 +482,28 @@ async function openGoogleDrivePicker(token: NativeIntegrationPickerTokenResponse
         const action = data[picker.Response.ACTION]
         if (action === picker.Action.PICKED) {
           const docs = data[picker.Response.DOCUMENTS]
-          resolve(Array.isArray(docs) ? docs.length : 0)
+          if (!Array.isArray(docs)) {
+            resolve([])
+            return
+          }
+          resolve(
+            docs.flatMap((doc) => {
+              if (!doc || typeof doc !== 'object') {
+                return []
+              }
+              const rawDoc = doc as Record<string, unknown>
+              const externalFileId = String(rawDoc[picker.Document.ID] ?? '').trim()
+              const name = String(rawDoc[picker.Document.NAME] ?? '').trim()
+              const mimeType = String(rawDoc[picker.Document.MIME_TYPE] ?? '').trim()
+              const url = String(rawDoc[picker.Document.URL] ?? '').trim()
+              if (!externalFileId || !name || !mimeType) {
+                return []
+              }
+              return [{ externalFileId, name, mimeType, url }]
+            }),
+          )
         } else if (picker.Action.CANCEL && action === picker.Action.CANCEL) {
-          resolve(0)
+          resolve([])
         }
       })
       .build()

@@ -29,6 +29,7 @@ from api.agent.system_skills.service import (
     get_enabled_system_skill_states,
     refresh_system_skills_for_tool,
 )
+from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.services.skill_analytics import (
     SKILL_ORIGIN_FORKED_FROM_GLOBAL,
@@ -563,6 +564,10 @@ def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillStat
         state_text = _format_custom_tool_development_state(agent)
         if state_text:
             lines.extend(["", state_text])
+    elif definition.skill_key == GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY:
+        from api.services.native_integration_files import format_google_sheets_access_for_prompt
+
+        lines.extend(["", format_google_sheets_access_for_prompt(agent)])
     return "\n".join(lines)
 
 

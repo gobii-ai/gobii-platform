@@ -197,6 +197,8 @@ from console.secrets_api_views import (
 from console.native_integrations_api import (
     NativeIntegrationCallbackAPIView,
     NativeIntegrationConnectAPIView,
+    NativeIntegrationFileDetailAPIView,
+    NativeIntegrationFilesAPIView,
     NativeIntegrationListAPIView,
     NativeIntegrationPickerTokenAPIView,
     NativeIntegrationRevokeAPIView,
@@ -632,6 +634,16 @@ urlpatterns = [
         "console/api/native-integrations/<slug:provider_key>/picker-token/",
         NativeIntegrationPickerTokenAPIView.as_view(),
         name="console-native-integration-picker-token",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/files/",
+        NativeIntegrationFilesAPIView.as_view(),
+        name="console-native-integration-files",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/files/<uuid:file_id>/",
+        NativeIntegrationFileDetailAPIView.as_view(),
+        name="console-native-integration-file-detail",
     ),
     path(
         "console/api/native-integrations/<slug:provider_key>/revoke/",

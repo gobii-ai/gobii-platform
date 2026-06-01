@@ -10,9 +10,22 @@ from django.urls import reverse
 from django.utils import timezone
 from waffle.models import Flag
 
+from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
+from api.agent.system_skills.service import enable_system_skills
 from api.agent.core.prompt_context import _get_secrets_block
 from api.agent.tools.http_request import execute_http_request
-from api.models import BrowserUseAgent, GlobalSecret, Organization, OrganizationMembership, PersistentAgent, PersistentAgentSecret
+from api.agent.tools.sqlite_skills import format_recent_skills_for_prompt
+from api.models import (
+    BrowserUseAgent,
+    GlobalSecret,
+    NativeIntegrationGrantedFile,
+    Organization,
+    OrganizationMembership,
+    PersistentAgent,
+    PersistentAgentEnabledTool,
+    PersistentAgentSecret,
+)
 from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
     apply_native_integration_auth,
@@ -21,6 +34,8 @@ from api.services.native_integrations import (
 
 
 User = get_user_model()
+GOOGLE_SHEETS_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+GOOGLE_DOCS_MIME_TYPE = "application/vnd.google-apps.document"
 
 
 def _ensure_encryption_key():
@@ -52,6 +67,8 @@ def _mock_response(content: bytes = b"{}", content_type: str = "application/json
     GOOGLE_DRIVE_CLIENT_SECRET="google-client-secret",
     GOOGLE_PICKER_API_KEY="picker-api-key",
     GOOGLE_PICKER_APP_ID="123456789",
+    GOBII_PROPRIETARY_MODE=False,
+    PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
     SEGMENT_WRITE_KEY="",
     SEGMENT_WEB_WRITE_KEY="",
 )
@@ -143,6 +160,7 @@ class NativeIntegrationTests(TestCase):
             provider["picker_token_url"],
             reverse("console-native-integration-picker-token", args=["google_drive"]),
         )
+        self.assertEqual(provider["files_url"], reverse("console-native-integration-files", args=["google_drive"]))
 
     def test_list_treats_legacy_google_sheets_secret_as_connected(self):
         self._create_integration_secret(owner_user=self.user)
@@ -205,6 +223,132 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json(), {"error": "Google Picker is not configured."})
+
+    def test_files_api_upserts_picker_files_for_user_context(self):
+        self._create_integration_secret(owner_user=self.user)
+        files_url = reverse("console-native-integration-files", args=["google_drive"])
+
+        response = self.client.post(
+            files_url,
+            data=json.dumps(
+                {
+                    "files": [
+                        {
+                            "external_file_id": "sheet-1",
+                            "name": "Pipeline",
+                            "mime_type": GOOGLE_SHEETS_MIME_TYPE,
+                            "url": "https://docs.google.com/spreadsheets/d/sheet-1/edit",
+                        },
+                        {
+                            "external_file_id": "doc-1",
+                            "name": "Notes",
+                            "mime_type": GOOGLE_DOCS_MIME_TYPE,
+                            "url": "https://docs.google.com/document/d/doc-1/edit",
+                        },
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["upserted_count"], 2)
+        self.assertEqual(NativeIntegrationGrantedFile.objects.filter(user=self.user).count(), 2)
+
+        update_response = self.client.post(
+            files_url,
+            data=json.dumps(
+                {
+                    "files": [
+                        {
+                            "external_file_id": "sheet-1",
+                            "name": "Pipeline Updated",
+                            "mime_type": GOOGLE_SHEETS_MIME_TYPE,
+                            "url": "https://docs.google.com/spreadsheets/d/sheet-1/edit#gid=0",
+                        }
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(update_response.status_code, 201, update_response.content)
+        self.assertEqual(NativeIntegrationGrantedFile.objects.filter(user=self.user).count(), 2)
+        file_record = NativeIntegrationGrantedFile.objects.get(user=self.user, external_file_id="sheet-1")
+        self.assertEqual(file_record.name, "Pipeline Updated")
+
+        list_response = self.client.get(files_url)
+
+        self.assertEqual(list_response.status_code, 200)
+        listed_names = {file_payload["name"] for file_payload in list_response.json()["files"]}
+        self.assertEqual(listed_names, {"Pipeline Updated", "Notes"})
+
+    def test_files_api_requires_connected_provider_for_save(self):
+        response = self.client.post(
+            reverse("console-native-integration-files", args=["google_drive"]),
+            data=json.dumps(
+                {
+                    "files": [
+                        {
+                            "external_file_id": "sheet-1",
+                            "name": "Pipeline",
+                            "mime_type": GOOGLE_SHEETS_MIME_TYPE,
+                        }
+                    ]
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json(), {"error": "Google Drive is not connected."})
+
+    def test_files_api_isolates_user_and_organization_context(self):
+        self._create_integration_secret(owner_user=self.user)
+        NativeIntegrationGrantedFile.objects.create(
+            user=self.user,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="user-sheet",
+            name="User Sheet",
+            mime_type=GOOGLE_SHEETS_MIME_TYPE,
+        )
+        NativeIntegrationGrantedFile.objects.create(
+            organization=self.org,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="org-sheet",
+            name="Org Sheet",
+            mime_type=GOOGLE_SHEETS_MIME_TYPE,
+        )
+
+        user_response = self.client.get(reverse("console-native-integration-files", args=["google_drive"]))
+
+        self.assertEqual(user_response.status_code, 200)
+        self.assertEqual([file_payload["name"] for file_payload in user_response.json()["files"]], ["User Sheet"])
+
+        self._set_org_context()
+        self._create_integration_secret(owner_org=self.org)
+        org_response = self.client.get(reverse("console-native-integration-files", args=["google_drive"]))
+
+        self.assertEqual(org_response.status_code, 200)
+        self.assertEqual([file_payload["name"] for file_payload in org_response.json()["files"]], ["Org Sheet"])
+
+    def test_files_api_delete_removes_registry_file_not_secret(self):
+        self._create_integration_secret(owner_user=self.user)
+        granted_file = NativeIntegrationGrantedFile.objects.create(
+            user=self.user,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="sheet-1",
+            name="Pipeline",
+            mime_type=GOOGLE_SHEETS_MIME_TYPE,
+        )
+
+        response = self.client.delete(
+            reverse("console-native-integration-file-detail", args=["google_drive", granted_file.id])
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(NativeIntegrationGrantedFile.objects.filter(id=granted_file.id).exists())
+        self.assertTrue(GlobalSecret.objects.filter(user=self.user, key=GOOGLE_DRIVE_PROVIDER.secret_key).exists())
 
     @patch("console.native_integrations_api.httpx.post")
     def test_callback_stores_hidden_integration_secret(self, mock_post):
@@ -271,6 +415,13 @@ class NativeIntegrationTests(TestCase):
 
     def test_revoke_deletes_only_provider_integration_secret(self):
         self._create_integration_secret(owner_user=self.user)
+        NativeIntegrationGrantedFile.objects.create(
+            user=self.user,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="sheet-1",
+            name="Pipeline",
+            mime_type=GOOGLE_SHEETS_MIME_TYPE,
+        )
         credential = GlobalSecret(
             user=self.user,
             name="Visible Credential",
@@ -286,6 +437,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["revoked"])
         self.assertFalse(GlobalSecret.objects.filter(secret_type=GlobalSecret.SecretType.INTEGRATION).exists())
+        self.assertFalse(NativeIntegrationGrantedFile.objects.filter(user=self.user).exists())
         self.assertTrue(GlobalSecret.objects.filter(id=credential.id).exists())
 
     def test_secret_apis_exclude_integration_secrets(self):
@@ -422,3 +574,58 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Google Drive", block)
         self.assertNotIn("native_google_drive", block)
         self.assertNotIn("native_google_sheets", block)
+
+    def test_google_sheets_native_system_skill_is_registered_and_enables_http_request(self):
+        definition = get_system_skill_definition(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)
+
+        self.assertIsNotNone(definition)
+        self.assertEqual(definition.name, "Google Sheets")
+        self.assertEqual(definition.tool_names, ("http_request",))
+        search_results = shortlist_system_skills("read google sheets rows", available_tool_names={"http_request"})
+        self.assertIn(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, [result.skill_key for result in search_results])
+
+        result = enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["invalid"], [])
+        self.assertIn(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, result["enabled"])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").exists()
+        )
+
+    def test_google_sheets_prompt_lists_selected_spreadsheets_only(self):
+        NativeIntegrationGrantedFile.objects.create(
+            user=self.user,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="sheet-1",
+            name="Pipeline",
+            mime_type=GOOGLE_SHEETS_MIME_TYPE,
+            url="https://docs.google.com/spreadsheets/d/sheet-1/edit",
+        )
+        NativeIntegrationGrantedFile.objects.create(
+            user=self.user,
+            provider_key=GOOGLE_DRIVE_PROVIDER.key,
+            external_file_id="doc-1",
+            name="Planning Doc",
+            mime_type=GOOGLE_DOCS_MIME_TYPE,
+            url="https://docs.google.com/document/d/doc-1/edit",
+        )
+        enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
+
+        block = format_recent_skills_for_prompt(self.agent, limit=3)
+
+        self.assertIn("System Skill: Google Sheets", block)
+        self.assertIn("Tools: http_request", block)
+        self.assertIn("Accessible Google Sheets selected through Google Drive", block)
+        self.assertIn("Pipeline (id: sheet-1", block)
+        self.assertIn("https://docs.google.com/spreadsheets/d/sheet-1/edit", block)
+        self.assertNotIn("Planning Doc", block)
+        self.assertIn("drive.file", block)
+
+    def test_google_sheets_prompt_has_empty_state_when_no_spreadsheets_are_selected(self):
+        enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
+
+        block = format_recent_skills_for_prompt(self.agent, limit=3)
+
+        self.assertIn("System Skill: Google Sheets", block)
+        self.assertIn("None recorded", block)
+        self.assertIn("choose the spreadsheet in the Google Drive native integration", block)

@@ -9154,6 +9154,87 @@ class GlobalSecret(SecretModelMixin, models.Model):
         return f"Global Secret '{self.name}' ({self.key}) for {owner} on {self.domain_pattern}"
 
 
+class NativeIntegrationGrantedFile(models.Model):
+    """A file selected through a native integration and made visible to agents in the owner scope."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="native_integration_granted_files",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="native_integration_granted_files",
+    )
+    provider_key = models.CharField(max_length=128)
+    external_file_id = models.CharField(max_length=255)
+    name = models.CharField(max_length=512)
+    mime_type = models.CharField(max_length=255)
+    url = models.TextField(blank=True)
+    selected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="native_integration_file_selections",
+    )
+    last_selected_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    (models.Q(user__isnull=False, organization__isnull=True))
+                    | (models.Q(user__isnull=True, organization__isnull=False))
+                ),
+                name="native_file_exactly_one_owner",
+            ),
+            UniqueConstraint(
+                fields=["user", "provider_key", "external_file_id"],
+                name="unique_native_file_user_provider_ext",
+                condition=models.Q(user__isnull=False),
+            ),
+            UniqueConstraint(
+                fields=["organization", "provider_key", "external_file_id"],
+                name="unique_native_file_org_provider_ext",
+                condition=models.Q(organization__isnull=False),
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["user", "provider_key", "mime_type"], name="nif_user_provider_mime_idx"),
+            models.Index(fields=["organization", "provider_key", "mime_type"], name="nif_org_provider_mime_idx"),
+            models.Index(fields=["provider_key", "-last_selected_at"], name="nif_provider_selected_idx"),
+        ]
+        ordering = ["name", "external_file_id"]
+
+    @property
+    def owner_scope(self) -> str:
+        return "organization" if self.organization_id else "user"
+
+    def clean(self):
+        super().clean()
+        if not self.user_id and not self.organization_id:
+            raise ValidationError("A native integration granted file must belong to either a user or an organization.")
+        if self.user_id and self.organization_id:
+            raise ValidationError("A native integration granted file cannot belong to both a user and an organization.")
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
+
+    def __str__(self):
+        owner = self.organization.name if self.organization_id else f"user {self.user_id}"
+        return f"{self.name} ({self.provider_key}:{self.external_file_id}) for {owner}"
+
+
 class SystemSkillProfile(models.Model):
     """Owner-scoped reusable configuration profile for a code-defined system skill."""
 

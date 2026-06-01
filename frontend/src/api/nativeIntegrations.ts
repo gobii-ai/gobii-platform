@@ -12,6 +12,7 @@ type NativeIntegrationProviderDTO = {
   scope: string
   expires_at: string | null
   connect_url: string
+  files_url: string
   picker_token_url: string
   revoke_url: string
 }
@@ -37,6 +38,26 @@ type NativeIntegrationPickerTokenResponseDTO = {
   expires_at: string | null
 }
 
+type NativeIntegrationGrantedFileDTO = {
+  id: string
+  provider_key: string
+  external_file_id: string
+  name: string
+  mime_type: string
+  url: string
+  last_selected_at: string
+  selected_by_id: string | null
+}
+
+type NativeIntegrationFilesResponseDTO = {
+  provider_key: string
+  files: NativeIntegrationGrantedFileDTO[]
+}
+
+type NativeIntegrationFilesSaveResponseDTO = NativeIntegrationFilesResponseDTO & {
+  upserted_count: number
+}
+
 export type NativeIntegrationProvider = {
   providerKey: string
   displayName: string
@@ -49,6 +70,7 @@ export type NativeIntegrationProvider = {
   scope: string
   expiresAt: string | null
   connectUrl: string
+  filesUrl: string
   pickerTokenUrl: string
   revokeUrl: string
 }
@@ -74,6 +96,26 @@ export type NativeIntegrationPickerTokenResponse = {
   expiresAt: string | null
 }
 
+export type NativeIntegrationFileSelection = {
+  externalFileId: string
+  name: string
+  mimeType: string
+  url: string
+}
+
+export type NativeIntegrationGrantedFile = NativeIntegrationFileSelection & {
+  id: string
+  providerKey: string
+  lastSelectedAt: string
+  selectedById: string | null
+}
+
+export type NativeIntegrationFilesSaveResponse = {
+  providerKey: string
+  upsertedCount: number
+  files: NativeIntegrationGrantedFile[]
+}
+
 const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationProvider => ({
   providerKey: provider.provider_key,
   displayName: provider.display_name,
@@ -86,8 +128,20 @@ const mapProvider = (provider: NativeIntegrationProviderDTO): NativeIntegrationP
   scope: provider.scope ?? '',
   expiresAt: provider.expires_at ?? null,
   connectUrl: provider.connect_url,
+  filesUrl: provider.files_url,
   pickerTokenUrl: provider.picker_token_url,
   revokeUrl: provider.revoke_url,
+})
+
+const mapGrantedFile = (file: NativeIntegrationGrantedFileDTO): NativeIntegrationGrantedFile => ({
+  id: file.id,
+  providerKey: file.provider_key,
+  externalFileId: file.external_file_id,
+  name: file.name,
+  mimeType: file.mime_type,
+  url: file.url ?? '',
+  lastSelectedAt: file.last_selected_at,
+  selectedById: file.selected_by_id ?? null,
 })
 
 export async function fetchNativeIntegrations(listUrl: string): Promise<NativeIntegrationListResponse> {
@@ -124,6 +178,41 @@ export async function fetchNativeIntegrationPickerToken(
     scope: payload.scope,
     expiresAt: payload.expires_at,
   }
+}
+
+export async function fetchNativeIntegrationFiles(filesUrl: string): Promise<NativeIntegrationGrantedFile[]> {
+  const payload = await jsonFetch<NativeIntegrationFilesResponseDTO>(filesUrl)
+  return (payload.files ?? []).map(mapGrantedFile)
+}
+
+export async function saveNativeIntegrationFiles(
+  filesUrl: string,
+  files: NativeIntegrationFileSelection[],
+): Promise<NativeIntegrationFilesSaveResponse> {
+  const payload = await jsonRequest<NativeIntegrationFilesSaveResponseDTO>(filesUrl, {
+    method: 'POST',
+    includeCsrf: true,
+    json: {
+      files: files.map((file) => ({
+        external_file_id: file.externalFileId,
+        name: file.name,
+        mime_type: file.mimeType,
+        url: file.url,
+      })),
+    },
+  })
+  return {
+    providerKey: payload.provider_key,
+    upsertedCount: payload.upserted_count,
+    files: (payload.files ?? []).map(mapGrantedFile),
+  }
+}
+
+export async function deleteNativeIntegrationFile(fileUrl: string): Promise<{ deleted: boolean }> {
+  return jsonRequest<{ deleted: boolean }>(fileUrl, {
+    method: 'DELETE',
+    includeCsrf: true,
+  })
 }
 
 export async function revokeNativeIntegration(revokeUrl: string): Promise<{ revoked: boolean }> {
