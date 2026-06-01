@@ -421,14 +421,12 @@ def run_completion(
     - Removes internal hints (``supports_temperature``, ``supports_tool_choice``, ``use_parallel_tool_calls``, ``allow_implied_send``, ``supports_vision``, and ``supports_reasoning``).
     - Allows ``reasoning_effort`` through LiteLLM's OpenAI parameter filter when reasoning is supported.
     - Adds ``tool_choice`` when tools are provided and supported.
-    - Propagates ``parallel_tool_calls`` when tools are provided *or* the endpoint
-      supplied an explicit hint.
+    - Propagates ``parallel_tool_calls`` only when tools are provided.
     - Allows callers to control ``drop_params`` while keeping consistent defaults.
     - Enforces non-empty responses when not streaming.
     """
     params = dict(params or {})
 
-    parallel_hint_provided = "use_parallel_tool_calls" in params
     hints: dict[str, Any] = {key: params.pop(key, None) for key in _HINT_KEYS}
 
     supports_temperature_hint = hints.get("supports_temperature")
@@ -482,9 +480,7 @@ def run_completion(
         # Ensure we don't pass tool-choice hints when tools are absent
         kwargs.pop("tool_choice", None)
 
-    if use_parallel_tool_calls is not None and (tools or parallel_hint_provided):
-        # Respect explicit hints even when no tools are provided; some providers
-        # validate the flag independently of tool availability.
+    if tools and use_parallel_tool_calls is not None:
         kwargs["parallel_tool_calls"] = bool(use_parallel_tool_calls)
     else:
         kwargs.pop("parallel_tool_calls", None)
