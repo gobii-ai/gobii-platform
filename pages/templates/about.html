@@ -28,12 +28,41 @@
 {% endblock %}
 
 {% block content %}
-<section class="py-20 bg-white text-slate-900">
-  <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-    <h1 class="text-4xl font-semibold mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h1>
+<section class="relative overflow-hidden bg-white text-slate-900">
+  <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
+    <div class="max-w-3xl">
+      <h1 class="text-4xl font-semibold tracking-tight sm:text-5xl">About Gobii</h1>
+      <p class="mt-5 max-w-2xl text-2xl font-light leading-snug text-slate-700 sm:text-3xl">
+        AI coworkers for teams with real work to do.
+      </p>
+      {% if settings.GOBII_PROPRIETARY_MODE %}
+      {% url 'account_signup' as about_signup_url %}
+      {% url 'account_signup_modal' as about_signup_modal_url %}
+      <div class="mt-8 flex flex-col gap-3 sm:flex-row">
+        <a
+          href="/"
+          data-analytics-cta-id="about_start_free_trial"
+          data-analytics-placement="about_hero"
+          data-analytics-intent="start_trial"
+          data-analytics-label="Try Gobii Today"
+          class="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+        >
+          Try Gobii Today
+          <i data-lucide="arrow-right" class="h-4 w-4"></i>
+        </a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="bg-white pb-20 text-slate-900">
+  <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+    <h2 class="text-3xl font-semibold tracking-tight mb-6">Empowering AI&nbsp;agents to browse&nbsp;the web for&nbsp;you.</h2>
     <p class="text-lg leading-relaxed mb-4">
       <a href="{{ settings.PUBLIC_SITE_URL|default:'https://gobii.ai' }}" aria-label="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }}"
          title="{{ settings.PUBLIC_BRAND_NAME|default:'Gobii' }} Homepage" style="text-decoration: underline; font-weight: bold;">Gobii</a> is an AI agent platform for teams with real work to do.
+    </p>
 
     <p class="text-lg leading-relaxed mb-4">Our agents are virtual coworkers: they can browse the web, gather research, organize data, complete forms, use connected apps, and deliver reports. You can chat with them, email them, or text them, and they keep working in the background while you focus on higher-value decisions.</p>
 
