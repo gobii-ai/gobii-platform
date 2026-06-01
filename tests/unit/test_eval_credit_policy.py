@@ -132,6 +132,9 @@ class EvalCreditPolicyTests(TestCase):
             GOBII_PROPRIETARY_MODE=True,
             GOBII_ENABLE_COMMUNITY_UNLIMITED=False,
         ), patch(
+            "api.agent.core.event_processing.settings.GOBII_PROPRIETARY_MODE",
+            True,
+        ), patch(
             "api.agent.core.event_processing.is_eval_credit_exempt_context",
             return_value=False,
         ), patch(
