@@ -146,6 +146,46 @@ class RunCompletionReasoningTests(TestCase):
         )
 
     @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_parallel_tool_calls_omitted_when_tools_absent(self, mock_completion):
+        mock_completion.return_value = make_completion_response(content="ok")
+
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={"use_parallel_tool_calls": True},
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertNotIn("parallel_tool_calls", kwargs)
+        self.assertNotIn("use_parallel_tool_calls", kwargs)
+
+    @tag("batch_event_llm")
+    @patch("api.agent.core.llm_utils.litellm.completion")
+    def test_parallel_tool_calls_forwarded_when_tools_present(self, mock_completion):
+        mock_completion.return_value = make_completion_response(content="ok")
+
+        run_completion(
+            model="mock-model",
+            messages=[],
+            params={"use_parallel_tool_calls": True},
+            tools=[
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "search",
+                        "description": "Search",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        )
+
+        _, kwargs = mock_completion.call_args
+        self.assertTrue(kwargs["parallel_tool_calls"])
+        self.assertNotIn("use_parallel_tool_calls", kwargs)
+
+    @tag("batch_event_llm")
     @override_settings(LITELLM_TIMEOUT_SECONDS=321)
     @patch("api.agent.core.llm_utils.litellm.completion")
     def test_timeout_defaults_to_settings_value(self, mock_completion):

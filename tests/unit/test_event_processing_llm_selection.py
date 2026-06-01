@@ -75,7 +75,16 @@ class TestEventProcessingLLMSelection(TestCase):
         mock_completion.return_value = mock_response
 
         messages = [{"role": "user", "content": "hello"}]
-        tools = []
+        tools = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "Lookup information",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ]
         # Provide endpoint params with our hint
         failover_configs = [
             (
