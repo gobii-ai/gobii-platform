@@ -847,7 +847,7 @@ class FirstRunPromptCalibrationTests(TestCase):
             context, _, _ = build_prompt_context_preview(agent, is_first_run=True)
 
         system_prompt = next(message["content"] for message in context if message["role"] == "system")
-        self.assertIn("For clear setup requests, especially scheduled digests", system_prompt)
+        self.assertIn("For clear requests, including one-off factual/research questions", system_prompt)
         self.assertIn("Do not validate, fetch, parse, or test provided URLs", system_prompt)
         self.assertIn("call end_planning in the same response as any welcome", system_prompt)
         self.assertIn("Do not say you will check, validate, test, fetch, or inspect a provided feed", system_prompt)

@@ -1,5 +1,6 @@
 from copy import deepcopy
 from dataclasses import dataclass, field
+import json
 
 from api.agent.comms.human_input_requests import dismiss_human_input_request
 from api.agent.core.processing_flags import get_human_inbound_generation
@@ -39,6 +40,7 @@ from api.models import (
 PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS = "planning_first_turn_asks_bounded_questions"
 PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST = "planning_clear_task_ends_planning_first"
 PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_planning"
+PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST = "planning_one_off_research_report_ends_planning_first"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
@@ -335,6 +337,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_FIRST_TURN_ASKS_BOUNDED_QUESTIONS,
     PLANNING_CLEAR_TASK_ENDS_PLANNING_FIRST,
     PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING,
+    PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST,
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
 ]
@@ -862,6 +865,233 @@ class PlanningExecuteRequestStaysInPlanningScenario(BehaviorMicroScenario):
             inbound.timestamp,
             "verify_no_execution_before_planning_exit",
             SUBSTANTIVE_WORK_TOOL_NAMES,
+        )
+
+
+@register_scenario
+class PlanningOneOffResearchReportEndsPlanningFirstScenario(BehaviorMicroScenario):
+    slug = PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST
+    description = "A one-off research answer in planning mode should not deliver a final report before end_planning."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "guardrail", "llm_judge")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_end_planning_before_final_report", assertion_type="manual"),
+        ScenarioTask(name="judge_no_final_report_before_end_planning", assertion_type="llm_judge"),
+    ]
+
+    MESSAGE_DELIVERY_TOOL_NAMES = {
+        "send_chat_message",
+        "send_email",
+        "send_sms",
+    }
+
+    def _one_off_research_mock_config(self):
+        mocks = self._planning_guardrail_mocks()
+        mocks.update({
+            "mcp_brightdata_search_engine": {
+                "status": "success",
+                "result": {
+                    "kind": "serp",
+                    "items": [
+                        {
+                            "t": "Wireless Wire Cube Pro - MikroTik",
+                            "u": "https://mikrotik.com/product/wireless_wire_cube_pro",
+                            "p": 1,
+                        },
+                        {
+                            "t": "Cube 60Pro ac - MikroTik",
+                            "u": "https://mikrotik.com/product/cube_60pro_ac",
+                            "p": 2,
+                        },
+                    ],
+                },
+            },
+            "mcp_brightdata_scrape_as_markdown": {
+                "status": "success",
+                "result": (
+                    "# MikroTik 60 GHz products\n\n"
+                    "Cube 60Pro ac remains listed as the current 60 GHz point-to-point Cube product. "
+                    "Wireless Wire Cube Pro is a kit containing two Cube 60Pro ac units, not a successor. "
+                    "No official MikroTik successor announcement is present in this mocked source data."
+                ),
+            },
+            "sqlite_batch": {
+                "status": "warning",
+                "message": "Planning eval allows reading previous mocked tool results only; do not use SQLite to continue research before end_planning.",
+                "results": [],
+            },
+        })
+        return mocks
+
+    @classmethod
+    def _message_body_from_call(cls, call):
+        params = call.tool_params or {}
+        if call.tool_name == "send_email":
+            return "\n\n".join(
+                str(params.get(key) or "")
+                for key in ("subject", "mobile_first_html", "text_body", "body")
+                if params.get(key)
+            )
+        if call.tool_name == "send_sms":
+            return str(params.get("message") or params.get("body") or "")
+        if call.tool_name == "send_chat_message":
+            return str(params.get("body") or "")
+        return ""
+
+    @staticmethod
+    def _message_call_was_skipped(call):
+        try:
+            payload = json.loads(call.result or "{}")
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict) and payload.get("skipped") is True
+
+    def _delivered_message_calls_before_end_planning(self, run_id, *, after):
+        calls = []
+        for call in get_tool_calls_for_run(run_id, after=after):
+            if call.tool_name == "end_planning":
+                break
+            if call.tool_name in self.MESSAGE_DELIVERY_TOOL_NAMES and not self._message_call_was_skipped(call):
+                calls.append(call)
+        return calls
+
+    def _first_end_planning_call(self, run_id, *, after):
+        return (
+            PersistentAgentToolCall.objects
+            .filter(
+                step__eval_run_id=run_id,
+                step__created_at__gte=after,
+                tool_name="end_planning",
+            )
+            .select_related("step")
+            .order_by("step__created_at", "step_id")
+            .first()
+        )
+
+    def _judge_final_report_call(self, run_id, inbound, call):
+        body = self._message_body_from_call(call)
+        choice, reasoning = self.llm_judge(
+            question=(
+                "Is this message a final substantive answer/report to the user's MikroTik Cube 60 Pro successor "
+                "question, rather than a planning question, planning note, or brief status update?"
+            ),
+            context=(
+                f"User request:\n{inbound.body}\n\n"
+                f"Tool name: {call.tool_name}\n\n"
+                f"Tool params/message body:\n{body}"
+            ),
+            options=["FinalReport", "NotFinalReport"],
+        )
+        return choice, reasoning, body
+
+    def run(self, run_id, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.PLANNING)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                "Is there any successor to the Cube 60 Pro by MikroTik? Please check and send me the answer.",
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=self._one_off_research_mock_config(),
+                eval_stop_policy={
+                    "ignore_sqlite_agent_config_mutations": False,
+                    "ignored_tool_names": list(PLANNING_READ_ONLY_TOOL_NAMES),
+                    "stop_on_sqlite_agent_config_mutation": True,
+                    "stop_on_tool_names_after_finish": [
+                        "end_planning",
+                        "send_chat_message",
+                        "send_email",
+                        "send_sms",
+                        "sleep_until_next_trigger",
+                    ],
+                    "max_relevant_tool_calls": 12,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        message_calls_before_end = self._delivered_message_calls_before_end_planning(run_id, after=inbound.timestamp)
+        end_call = self._first_end_planning_call(run_id, after=inbound.timestamp)
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_end_planning_before_final_report",
+        )
+        if end_call and not message_calls_before_end:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_end_planning_before_final_report",
+                observed_summary="Agent called end_planning before any non-skipped outbound message delivery.",
+                artifacts={"step": end_call.step},
+            )
+        else:
+            seen = [call.tool_name for call in message_calls_before_end]
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_end_planning_before_final_report",
+                observed_summary=(
+                    "Expected end_planning before any final-answer delivery; "
+                    f"end_planning_seen={bool(end_call)}, pre_end_delivered_message_tools={seen}."
+                ),
+                artifacts={"step": (message_calls_before_end[0].step if message_calls_before_end else None)},
+            )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="judge_no_final_report_before_end_planning",
+        )
+        if not message_calls_before_end:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="judge_no_final_report_before_end_planning",
+                observed_summary="No non-skipped outbound message was sent before end_planning.",
+            )
+            return
+
+        judged = []
+        for call in message_calls_before_end:
+            choice, reasoning, body = self._judge_final_report_call(run_id, inbound, call)
+            judged.append((call, choice, reasoning, body))
+            if choice == "FinalReport":
+                self.record_task_result(
+                    run_id,
+                    None,
+                    EvalRunTask.Status.FAILED,
+                    task_name="judge_no_final_report_before_end_planning",
+                    observed_summary=f"LLM judge classified a pre-end_planning {call.tool_name} as FinalReport. Reasoning: {reasoning}",
+                    artifacts={"step": call.step, "body_preview": body[:1200]},
+                )
+                return
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="judge_no_final_report_before_end_planning",
+            observed_summary=(
+                "Pre-end_planning outbound message(s) were not final reports: "
+                + "; ".join(f"{call.tool_name}={choice}: {reasoning}" for call, choice, reasoning, _body in judged)
+            ),
+            artifacts={"step": message_calls_before_end[0].step},
         )
 
 
