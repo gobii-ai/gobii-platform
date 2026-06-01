@@ -480,7 +480,7 @@ def run_completion(
         # Ensure we don't pass tool-choice hints when tools are absent
         kwargs.pop("tool_choice", None)
 
-    if tools and use_parallel_tool_calls is not None:
+    if tools:
         kwargs["parallel_tool_calls"] = bool(use_parallel_tool_calls)
     else:
         kwargs.pop("parallel_tool_calls", None)
