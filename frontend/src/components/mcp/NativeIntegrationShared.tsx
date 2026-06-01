@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, ChevronRight, FileText, HardDrive, Loader2, Plug, Table2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Loader2, Plug, Table2 } from 'lucide-react'
 
 import type {
   NativeIntegrationAccessibleFile,
@@ -191,7 +191,14 @@ export function nativeIntegrationFilesQueryKey(provider: NativeIntegrationProvid
 
 export function NativeProviderIcon({ provider }: { provider: NativeIntegrationProvider }) {
   if (provider.icon === 'google_drive') {
-    return <HardDrive className="h-5 w-5" aria-hidden="true" />
+    return (
+      <img
+        src="/static/images/integrations/native/google_drive.svg"
+        alt=""
+        className="h-5 w-5 object-contain"
+        loading="lazy"
+      />
+    )
   }
   return <Plug className="h-5 w-5" aria-hidden="true" />
 }
