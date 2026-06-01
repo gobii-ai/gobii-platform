@@ -21,21 +21,4 @@ class Migration(migrations.Migration):
                 max_length=16,
             ),
         ),
-        migrations.AlterField(
-            model_name="persistentagentsecret",
-            name="secret_type",
-            field=models.CharField(
-                choices=[
-                    ("credential", "Credential"),
-                    ("env_var", "Environment Variable"),
-                    ("integration", "Integration"),
-                ],
-                default="credential",
-                help_text=(
-                    "Secret behavior type: credential (domain-scoped), env_var "
-                    "(global sandbox env), or integration (hidden native app auth)."
-                ),
-                max_length=16,
-            ),
-        ),
     ]

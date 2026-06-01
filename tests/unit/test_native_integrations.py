@@ -23,7 +23,6 @@ from api.models import (
     OrganizationMembership,
     PersistentAgent,
     PersistentAgentEnabledTool,
-    PersistentAgentSecret,
 )
 from api.services.native_integrations import (
     GOOGLE_DRIVE_PROVIDER,
@@ -327,15 +326,6 @@ class NativeIntegrationTests(TestCase):
 
     def test_secret_apis_exclude_integration_secrets(self):
         self._create_integration_secret(owner_user=self.user)
-        agent_integration = PersistentAgentSecret(
-            agent=self.agent,
-            name="Agent Integration",
-            secret_type=PersistentAgentSecret.SecretType.INTEGRATION,
-            domain_pattern=PersistentAgentSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key="native_google_drive",
-        )
-        agent_integration.set_value(json.dumps({"provider_key": "google_drive"}))
-        agent_integration.save()
 
         global_response = self.client.get(reverse("console-global-secret-list"))
         agent_response = self.client.get(reverse("console-agent-secret-list", args=[self.agent.id]))
