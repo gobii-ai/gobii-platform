@@ -187,6 +187,7 @@ MESSAGE_QUALITY_SCENARIO_SLUGS = tuple(case.slug for case in MESSAGE_QUALITY_CAS
 
 
 MESSAGE_TOOL_NAMES = {"send_email", "send_chat_message", "send_sms", "send_agent_message"}
+EMAIL_ALLOWED_CONFIRMATION_TOOLS = {"send_chat_message"}
 class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
     tier = "extended"
     category = "message_quality"
@@ -219,7 +220,7 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
                 eval_stop_policy={
                     "stop_on_tool_names_after_finish": [case.expected_tool],
                     "stop_on_unexpected_relevant_tool": True,
-                    "allowed_tool_names": ["update_plan", case.expected_tool],
+                    "allowed_tool_names": self._allowed_tool_names(case),
                     "ignored_tool_names": ["update_plan"],
                     "max_relevant_tool_calls": 6,
                 },
@@ -325,16 +326,22 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             if call.tool_name in MESSAGE_TOOL_NAMES
         ]
         expected_calls = [call for call in send_calls if call.tool_name == case.expected_tool]
-        unexpected_calls = [call for call in send_calls if call.tool_name != case.expected_tool]
+        unexpected_calls = self._unexpected_message_calls(case, send_calls)
 
         if len(expected_calls) == 1 and not unexpected_calls:
             sent_message = self._sent_message_for_call(expected_calls[0])
+            confirmation_count = len(self._allowed_confirmation_calls(case, send_calls))
+            confirmation_note = (
+                f" with {confirmation_count} web chat confirmation call(s)"
+                if confirmation_count
+                else ""
+            )
             self.record_task_result(
                 run_id,
                 None,
                 EvalRunTask.Status.PASSED,
                 task_name="verify_expected_send_tool",
-                observed_summary=f"Agent called {case.expected_tool} exactly once.",
+                observed_summary=f"Agent called {case.expected_tool} exactly once{confirmation_note}.",
                 artifacts=self._task_artifacts(expected_calls[0], sent_message),
             )
             return expected_calls[0]
@@ -352,6 +359,32 @@ class MessageQualityScenario(EvalScenario, ScenarioExecutionTools):
             artifacts={"step": send_calls[0].step} if send_calls else {},
         )
         return None
+
+    @staticmethod
+    def _allowed_tool_names(case: MessageQualityCase) -> list[str]:
+        tool_names = ["update_plan", case.expected_tool]
+        if case.channel == "email":
+            tool_names.extend(sorted(EMAIL_ALLOWED_CONFIRMATION_TOOLS))
+        return tool_names
+
+    @staticmethod
+    def _allowed_confirmation_calls(
+        case: MessageQualityCase,
+        send_calls: list[PersistentAgentToolCall],
+    ) -> list[PersistentAgentToolCall]:
+        if case.channel != "email":
+            return []
+        return [call for call in send_calls if call.tool_name in EMAIL_ALLOWED_CONFIRMATION_TOOLS]
+
+    @staticmethod
+    def _unexpected_message_calls(
+        case: MessageQualityCase,
+        send_calls: list[PersistentAgentToolCall],
+    ) -> list[PersistentAgentToolCall]:
+        allowed_tools = {case.expected_tool}
+        if case.channel == "email":
+            allowed_tools.update(EMAIL_ALLOWED_CONFIRMATION_TOOLS)
+        return [call for call in send_calls if call.tool_name not in allowed_tools]
 
     @staticmethod
     def _tool_calls_for_run(run_id: str, *, after=None) -> list[PersistentAgentToolCall]:

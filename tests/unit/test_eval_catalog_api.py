@@ -5,6 +5,7 @@ from django.test import TestCase, tag
 from django.urls import reverse
 
 import api.evals.loader  # noqa: F401 - registers scenarios and suites
+from api.evals.owner import EVAL_RUNNER_ORG_SLUG, EVAL_RUNNER_USERNAME
 from api.models import EvalRun, EvalSuiteRun
 
 
@@ -52,7 +53,12 @@ class EvalCatalogAPITests(TestCase):
         suite_run = EvalSuiteRun.objects.get()
         self.assertEqual(suite_run.suite_slug, "single::echo_response")
         self.assertEqual(suite_run.requested_runs, 1)
-        run = EvalRun.objects.get()
+        run = EvalRun.objects.select_related("agent__user", "agent__organization").get()
         self.assertEqual(run.scenario_slug, "echo_response")
+        self.assertEqual(run.initiated_by, self.user)
+        self.assertEqual(run.agent.user.username, EVAL_RUNNER_USERNAME)
+        self.assertEqual(run.agent.organization.slug, EVAL_RUNNER_ORG_SLUG)
+        self.assertEqual(run.agent.execution_environment, "eval")
+        self.assertGreaterEqual(run.agent.organization.billing.purchased_seats, 1)
         mock_run_eval_delay.assert_called_once_with(str(run.id))
         mock_gc_delay.assert_called_once()

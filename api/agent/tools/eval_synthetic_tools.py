@@ -65,6 +65,17 @@ _GENERIC_WEB_DATA_SCHEMA = {
     "additionalProperties": True,
 }
 
+_GENERIC_BATCH_WORK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "batch_size": {"type": "integer"},
+        "limit": {"type": "integer"},
+        "status": {"type": "string"},
+        "query": {"type": "string"},
+    },
+    "additionalProperties": True,
+}
+
 _WEB_SEARCH_SCHEMA = {
     "type": "object",
     "properties": {
@@ -190,6 +201,31 @@ EVAL_SYNTHETIC_TOOL_DEFINITIONS: Dict[str, Dict[str, Any]] = {
         "description": "Fetch structured Yahoo Finance business data.",
         "parameters": _GENERIC_WEB_DATA_SCHEMA,
     },
+    "eval_send_outreach_batch": {
+        "description": (
+            "Deterministic eval tool for sending the next bounded outreach batch from an already-approved queue. "
+            "Use this directly; do not call search_tools first. "
+            "The result may include remaining_work or next_cursor; if work remains and no schedule exists, continue "
+            "bounded work or set a resume schedule before stopping."
+        ),
+        "parameters": _GENERIC_BATCH_WORK_SCHEMA,
+    },
+    "eval_verify_candidate_batch": {
+        "description": (
+            "Deterministic eval tool for verifying a bounded batch of sourcing candidates against location, company, "
+            "and tenure constraints. Use this directly; do not call search_tools first. Partial results may include "
+            "remaining_work or next_cursor."
+        ),
+        "parameters": _GENERIC_BATCH_WORK_SCHEMA,
+    },
+    "eval_prepare_next_batch": {
+        "description": (
+            "Deterministic eval tool for preparing a bounded follow-up batch. Use this directly; do not call "
+            "search_tools first. If it says to wait for the next scheduled run while returning remaining_work, "
+            "that guidance only makes sense when a schedule exists or is being set."
+        ),
+        "parameters": _GENERIC_BATCH_WORK_SCHEMA,
+    },
     **{
         tool_name: {
             "description": (
@@ -273,6 +309,9 @@ def get_eval_synthetic_tool_fallback_result(tool_name: str, params: Dict[str, An
     elif tool_name.startswith("mcp_brightdata_web_data_"):
         content.update({"items": [], "results": [], "match_count": 0})
         message = "No deterministic web-data eval fixture returned data."
+    elif tool_name.startswith("eval_"):
+        content.update({"items": [], "remaining_work": 0, "next_cursor": None})
+        message = "No deterministic batch-work eval fixture returned data."
     else:
         content.update({"items": [], "match_count": 0})
         message = f"No deterministic eval fixture returned data for {tool_name}."

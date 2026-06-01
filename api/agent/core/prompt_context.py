@@ -2765,7 +2765,11 @@ def add_budget_awareness_sections(
                 burn_status = (
                     f"{burn_emoji}Burn rate: {burn_rate} credits/hour over the last {burn_window} minutes "
                     f"(threshold: {burn_threshold}). "
-                    + ("Slow down—take a breath between tool calls." if over_threshold else "")
+                    + (
+                        "Use smaller chunks; report useful partials; set a resume schedule if durable work remains."
+                        if over_threshold
+                        else ""
+                    )
                 )
                 sections.append(("burn_rate_status", burn_status, 2, True))
         except Exception:
@@ -2793,7 +2797,7 @@ def add_budget_awareness_sections(
                     "pacing_guidance",
                     (
                         "Batch related SQLite updates into one sqlite_batch when possible. "
-                        "Before sleeping: keep working until the current user request is handled, or set a schedule when work must continue later."
+                        "Before sleeping: finish the request, keep bounded work moving, or schedule unfinished durable work."
                     ),
                 2,
                 True,
@@ -3450,8 +3454,9 @@ def _get_system_instruction(
     )
     stop_continue_examples = (
         "## When to stop vs continue\n\n"
-        "**ALWAYS set will_continue_work explicitly on every tool call.** STOP means no result, question, or work remains; continue means at least one action remains. "
+        "**ALWAYS set will_continue_work explicitly on every tool call.** STOP means no current-turn result, question, or work remains; continue means another immediate action remains. "
         f"Brief replies, finished config changes, empty cron runs, and sent final reports stop with will_continue_work=false.{stop_examples_schedule}\n"
+        "- Future scheduled work does not count as continuing now; after configuring a schedule and sending any requested confirmation/report, stop.\n"
         f"- Fetched data but {fetched_note} → will_continue_work=true, keep going.\n"
         "- This tool sends the final answer/report and no work remains after it → will_continue_work=false, STOP.\n"
         "- Requested count/distinctness/constraints not yet verified on the final set → will_continue_work=true, keep going.\n"
@@ -3484,6 +3489,7 @@ def _get_system_instruction(
         f"{stop_explicit_note}"
         "Missing recipient or required content for an email/SMS/outbound send is a blocker: use request_human_input with will_continue_work=false, not chat-only questions. "
         "Fetching data is step one; reporting completes the task. "
+        "Use exactly the requested delivery channel; if asked to email, send_email and stop without a chat confirmation unless both channels were requested. "
         "Never announce what you're about to do—announcements terminate you before delivery. "
         "Wrong: 'Let me fetch that data...' Right: [just make the tool call with no text]\n\n"
         "Scheduled/background triggers without implied send still need explicit delivery: after an exact feed/API fetch, call send_chat_message(body=brief sourced report, will_continue_work=false). Plain text is invisible and update_plan is not delivery.\n\n"

@@ -96,6 +96,7 @@ from .llm_config import (
     is_llm_bootstrap_required,
 )
 from api.agent.events import publish_agent_event, AgentEventType
+from api.evals.credit_policy import is_eval_credit_exempt_context
 from api.evals.execution import get_current_eval_routing_profile
 from . import internal_reasoning
 from .daily_limit_mode import (
@@ -2572,6 +2573,7 @@ def _prepare_tool_batch(
                     tool_name,
                     span=tool_span,
                     credit_snapshot=credit_snapshot,
+                    eval_run_id=eval_run_id,
                 )
                 if not credit_info:
                     abort_after_execution = True
@@ -2833,6 +2835,7 @@ def _prepare_tool_batch(
                 tool_name,
                 span=tool_span,
                 credit_snapshot=credit_snapshot,
+                eval_run_id=eval_run_id,
             )
             if not credit_info:
                 abort_after_execution = True
@@ -4366,6 +4369,7 @@ def _ensure_credit_for_tool(
     tool_name: str,
     span=None,
     credit_snapshot: Optional[Dict[str, Any]] = None,
+    eval_run_id: Optional[str] = None,
 ) -> dict[str, Any] | Literal[False]:
     """Ensure the agent's owner has a task credit and consume it just-in-time.
 
@@ -4374,6 +4378,15 @@ def _ensure_credit_for_tool(
     them to persisted steps for accurate usage attribution.
     """
     if tool_name == "send_chat_message":
+        return {"cost": None, "credit": None}
+
+    if is_eval_credit_exempt_context(agent=agent, eval_run_id=eval_run_id):
+        if span is not None:
+            try:
+                span.add_event("Eval credit bypass active")
+                span.set_attribute("credit_check.eval_bypass", True)
+            except Exception:
+                pass
         return {"cost": None, "credit": None}
 
     owner = getattr(agent, "organization", None) or getattr(agent, "user", None)
@@ -5245,7 +5258,11 @@ def _process_agent_events_locked(
                 persistent_agent_id,
             )
 
-        if settings.GOBII_PROPRIETARY_MODE:
+        if is_eval_credit_exempt_context(agent=agent, eval_run_id=getattr(budget_ctx, "eval_run_id", None)):
+            credit_snapshot = {"available": None, "daily_state": {}}
+            span.add_event("Eval credit gate bypassed")
+            span.set_attribute("credit_check.eval_bypass", True)
+        elif settings.GOBII_PROPRIETARY_MODE:
             owner_user = getattr(agent, "user", None)
             owner_is_org = TaskCreditService._is_organization_owner(owner) if owner is not None else False
             if owner is not None:

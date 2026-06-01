@@ -13,6 +13,7 @@ from api.evals.global_skill_evals import (
     GLOBAL_SKILL_EVAL_SCENARIO_SLUG,
     GLOBAL_SKILL_EVAL_SUITE_SLUG,
 )
+from api.evals.owner import EVAL_RUNNER_ORG_SLUG, EVAL_RUNNER_USERNAME
 from api.models import (
     EvalRun,
     EvalSuiteRun,
@@ -158,7 +159,13 @@ class GlobalSkillEvalAPITests(TestCase):
         self.assertEqual(suite_run.launch_config["task_prompt"], "Get the current weather in Boston and summarize it.")
         self.assertEqual(suite_run.launch_config["effective_tool_ids"], ["weather"])
         self.assertEqual(EvalRun.objects.count(), 2)
-        self.assertTrue(all(run.scenario_slug == GLOBAL_SKILL_EVAL_SCENARIO_SLUG for run in EvalRun.objects.all()))
+        runs = list(EvalRun.objects.select_related("agent__user", "agent__organization").order_by("created_at"))
+        self.assertTrue(all(run.scenario_slug == GLOBAL_SKILL_EVAL_SCENARIO_SLUG for run in runs))
+        self.assertTrue(all(run.initiated_by == self.user for run in runs))
+        self.assertTrue(all(run.agent.user.username == EVAL_RUNNER_USERNAME for run in runs))
+        self.assertTrue(all(run.agent.organization.slug == EVAL_RUNNER_ORG_SLUG for run in runs))
+        self.assertTrue(all(run.agent.execution_environment == "eval" for run in runs))
+        self.assertGreaterEqual(runs[0].agent.organization.billing.purchased_seats, 2)
         self.assertEqual(mock_run_eval_delay.call_count, 2)
         mock_gc_delay.assert_called_once()
 

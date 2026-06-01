@@ -21,7 +21,7 @@ from django.db.models import Count, Q, Sum, UniqueConstraint
 from django.db.models.functions import Lower
 from django.db.models.functions.datetime import TruncMonth
 from django.utils import timezone
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.utils.text import get_valid_filename
 from django.db.utils import InternalError, OperationalError, ProgrammingError
 
@@ -96,6 +96,7 @@ from observability import traced
 from email.utils import parseaddr
 
 from tasks.services import TaskCreditService
+from api.evals.credit_policy import is_eval_credit_exempt_context, is_eval_credit_exempt_step
 
 from util.subscription_helper import (
     get_active_subscription, )
@@ -2745,7 +2746,7 @@ class BrowserUseAgentTask(models.Model):
         if self.agent:
             try:
                 pa = self.agent.persistent_agent
-            except Exception:
+            except ObjectDoesNotExist:
                 pa = None
             else:
                 if pa and getattr(pa, 'organization', None):
@@ -2763,6 +2764,19 @@ class BrowserUseAgentTask(models.Model):
         owner = owner_org or self.user
         if self._state.adding and owner is not None and is_owner_execution_paused(owner):
             raise ValidationError(EXECUTION_PAUSE_MESSAGE)
+
+        persistent_agent = None
+        if self.agent_id:
+            try:
+                persistent_agent = self.agent.persistent_agent
+            except ObjectDoesNotExist:
+                persistent_agent = None
+
+        if self._state.adding and is_eval_credit_exempt_context(
+            agent=persistent_agent,
+            eval_run_id=self.eval_run_id,
+        ):
+            return
 
         if self._state.adding:
             if owner_org:
@@ -2795,7 +2809,7 @@ class BrowserUseAgentTask(models.Model):
                 if owner is None and self.agent:
                     try:
                         pa = self.agent.persistent_agent
-                    except Exception:
+                    except ObjectDoesNotExist:
                         pa = None
                     else:
                         if pa and getattr(pa, 'organization', None):
@@ -2811,8 +2825,11 @@ class BrowserUseAgentTask(models.Model):
                 if self.agent_id:
                     try:
                         persistent_agent = self.agent.persistent_agent
-                    except Exception:
+                    except ObjectDoesNotExist:
                         persistent_agent = None
+
+                if is_eval_credit_exempt_context(agent=persistent_agent, eval_run_id=self.eval_run_id):
+                    return super().save(*args, **kwargs)
 
                 if self.credits_cost is not None:
                     amount = self.credits_cost
@@ -12372,6 +12389,9 @@ class PersistentAgentStep(models.Model):
                     # Do NOT consume again; keep the existing linkage for audit.
                     if completion_to_mark is not None and self.credits_cost is not None:
                         completion_mark_amount = self.credits_cost
+                elif is_eval_credit_exempt_step(self):
+                    # Eval usage keeps credits_cost for metrics but never consumes product task credits.
+                    completion_mark_amount = None
                 elif can_bypass_task_credit_for_signup_preview(self.agent):
                     # Signup preview's first reply window is intentionally free. Persist the
                     # step/completion without consuming credits so the preview can finish.

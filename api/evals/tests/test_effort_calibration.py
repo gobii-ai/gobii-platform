@@ -18,10 +18,16 @@ from api.agent.tools.request_contact_permission import get_request_contact_permi
 from api.agent.tools.request_human_input import execute_request_human_input, get_request_human_input_tool
 from api.agent.tools.web_chat_sender import execute_send_chat_message
 from api.evals.scenarios.effort_calibration import (
+    ARTIFACT_TOOL_NAMES,
     EFFORT_CALIBRATION_SCENARIO_SLUGS,
     EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE,
+    EFFORT_OVERWORK_TOOL_NAMES,
+    EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+    RESEARCH_TOOL_NAMES,
     EFFORT_SIMPLE_CURRENT_COMPANY_REPORT,
     EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT,
+    EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE,
+    EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME,
     EffortCalibrationScenario,
     EffortTrivialAnswerStopsScenario,
     _find_near_duplicate_texts,
@@ -37,6 +43,7 @@ from api.models import (
     BrowserUseAgent,
     CommsChannel,
     EvalRun,
+    EvalRunTask,
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
@@ -55,6 +62,9 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn(EFFORT_SIMPLE_CURRENT_YC_BATCH_REPORT, suite.scenario_slugs)
         self.assertIn(EFFORT_SIMPLE_CURRENT_COMPANY_REPORT, suite.scenario_slugs)
         self.assertIn(EFFORT_EXPLICIT_DEEP_RESEARCH_REMAINS_CAPABLE, suite.scenario_slugs)
+        self.assertIn(EFFORT_UNSCHEDULED_REMAINING_WORK_SETS_RESUME, suite.scenario_slugs)
+        self.assertIn(EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES, suite.scenario_slugs)
+        self.assertIn(EFFORT_TOOL_WAIT_NEXT_SCHEDULE_REQUIRES_SCHEDULE, suite.scenario_slugs)
 
     def test_near_duplicate_query_detector_flags_repetitive_searches(self):
         duplicates = _find_near_duplicate_texts(
@@ -304,6 +314,14 @@ class EffortCalibrationSuiteTests(SimpleTestCase):
         self.assertIn("representative category such as a fintech company", description)
         self.assertIn("instead of asking which company", description)
 
+    def test_batch_work_synthetic_tools_surface_remaining_work_guidance(self):
+        outreach_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_send_outreach_batch"]["description"]
+        schedule_description = EVAL_SYNTHETIC_TOOL_DEFINITIONS["eval_prepare_next_batch"]["description"]
+
+        self.assertIn("remaining_work", outreach_description)
+        self.assertIn("set a resume schedule", outreach_description)
+        self.assertIn("only makes sense when a schedule exists", schedule_description)
+
     def test_fresh_full_tool_result_wrapper_discourages_redundant_sqlite_rereads(self):
         wrapped = _wrap_as_sqlite_result('{"answer": "ready"}', 19)
 
@@ -354,6 +372,49 @@ class EvalStopPolicyBudgetTests(TestCase):
 
         self.assertTrue(should_stop)
         self.assertIn("relevant tool call budget reached: 1/1", reason)
+
+    def test_partial_source_policy_allows_plan_before_candidate_batch(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="partial_source_policy_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Partial Source Policy Browser")
+        agent = PersistentAgent.objects.create(
+            name="Partial Source Policy Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug=EFFORT_PARTIAL_SOURCE_BLOCK_REPORTS_AND_RESUMES,
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="update_plan",
+            tool_params={"plan": [{"step": "Verify batch", "status": "doing"}], "will_continue_work": True},
+            result="",
+            status="pending",
+        )
+
+        should_stop, reason = should_stop_for_eval_policy(
+            str(run.id),
+            {
+                "stop_on_tool_names": list(
+                    (EFFORT_OVERWORK_TOOL_NAMES - {"update_plan"})
+                    | ARTIFACT_TOOL_NAMES
+                    | RESEARCH_TOOL_NAMES
+                ),
+                "stop_on_unexpected_relevant_tool": True,
+                "allowed_tool_names": ["eval_verify_candidate_batch", "sqlite_batch", "update_plan"],
+                "max_relevant_tool_calls": 6,
+            },
+        )
+
+        self.assertFalse(should_stop)
+        self.assertEqual(reason, "")
 
 
 @tag("eval_sim")
@@ -418,6 +479,80 @@ class EffortCalibrationHarnessTests(TestCase):
         self.assertEqual(result["status"], "error")
         self.assertIn("raw tool-call markup", result["message"])
         self.assertFalse(PersistentAgentMessage.objects.filter(owner_agent=agent, is_outbound=True).exists())
+
+    def test_future_work_preserved_accepts_resume_schedule(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="0 9 * * *",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_send_outreach_batch"},
+        )
+
+        self.assertTrue(passed)
+        self.assertEqual(
+            run.tasks.get(name="verify_future_work_preserved").status,
+            EvalRunTask.Status.PASSED,
+        )
+
+    def test_future_work_preserved_rejects_single_unscheduled_batch(self):
+        User = get_user_model()
+        user = User.objects.create_user(username="future_work_missing_schedule_user")
+        browser_agent = BrowserUseAgent.objects.create(user=user, name="Future Work Missing Browser")
+        agent = PersistentAgent.objects.create(
+            name="Future Work Missing Agent",
+            user=user,
+            browser_use_agent=browser_agent,
+            execution_environment="eval",
+            charter="Test agent.",
+            schedule="",
+        )
+        run = EvalRun.objects.create(
+            scenario_slug="future_work_missing_test",
+            scenario_version="1.0.0",
+            agent=agent,
+            initiated_by=user,
+        )
+        EvalRunTask.objects.create(run=run, name="verify_future_work_preserved", sequence=1)
+        step = PersistentAgentStep.objects.create(agent=agent, eval_run=run)
+        PersistentAgentToolCall.objects.create(
+            step=step,
+            tool_name="eval_send_outreach_batch",
+            tool_params={"batch_size": 4, "will_continue_work": True},
+            result='{"status":"ok","remaining_work":999}',
+        )
+
+        passed = EffortCalibrationScenario()._record_future_work_preserved(
+            str(run.id),
+            agent_id=str(agent.id),
+            after=agent.created_at,
+            task_name="verify_future_work_preserved",
+            work_tool_names={"eval_send_outreach_batch"},
+        )
+
+        self.assertFalse(passed)
+        task = run.tasks.get(name="verify_future_work_preserved")
+        self.assertEqual(task.status, EvalRunTask.Status.FAILED)
+        self.assertIn("schedule is empty", task.observed_summary)
 
     def test_send_chat_rejects_leaked_thinking_tag(self):
         User = get_user_model()
