@@ -28,11 +28,6 @@ from api.services.native_integrations import (
     refresh_oauth_credentials_if_needed,
     save_native_integration_credentials,
 )
-from api.services.native_integration_files import (
-    native_integration_granted_file_queryset,
-    serialize_native_integration_granted_file,
-    upsert_native_integration_granted_files,
-)
 from console.context_helpers import build_console_context
 
 NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"
@@ -74,7 +69,6 @@ def _serialize_provider(provider, owner_user, owner_org) -> dict[str, Any]:
         "scope": credentials.get("scope") or "",
         "expires_at": credentials.get("expires_at"),
         "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
-        "files_url": reverse("console-native-integration-files", args=[provider.key]),
         "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
         "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
     }
@@ -290,94 +284,7 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
 
         _, owner_user, owner_org = _resolve_native_integration_owner(request)
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
-        native_integration_granted_file_queryset(owner_user, owner_org, provider.key).delete()
         return JsonResponse({"revoked": deleted})
-
-
-class NativeIntegrationFilesAPIView(LoginRequiredMixin, View):
-    http_method_names = ["get", "post"]
-
-    def get(self, request: HttpRequest, provider_key: str, *args: Any, **kwargs: Any):
-        try:
-            provider = get_native_integration_provider(provider_key)
-        except KeyError:
-            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
-
-        _, owner_user, owner_org = _resolve_native_integration_owner(request)
-        files = [
-            serialize_native_integration_granted_file(granted_file)
-            for granted_file in native_integration_granted_file_queryset(owner_user, owner_org, provider.key).order_by(
-                "name",
-                "external_file_id",
-            )
-        ]
-        return JsonResponse({"provider_key": provider.key, "files": files})
-
-    def post(self, request: HttpRequest, provider_key: str, *args: Any, **kwargs: Any):
-        try:
-            provider = get_native_integration_provider(provider_key)
-        except KeyError:
-            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
-
-        if provider.key != GOOGLE_DRIVE_PROVIDER.key:
-            return JsonResponse({"error": f"{provider.display_name} does not support selected files."}, status=400)
-
-        try:
-            body = request.body.decode("utf-8")
-        except UnicodeDecodeError:
-            return HttpResponseBadRequest("Invalid request body")
-
-        try:
-            payload = json.loads(body or "{}")
-        except json.JSONDecodeError:
-            return HttpResponseBadRequest("Invalid JSON body")
-
-        files_payload = payload.get("files")
-        if not isinstance(files_payload, list):
-            return JsonResponse({"errors": {"files": "This field must be a list."}}, status=400)
-
-        _, owner_user, owner_org = _resolve_native_integration_owner(request)
-        if get_native_integration_secret(provider.key, owner_user, owner_org) is None:
-            return JsonResponse({"error": f"{provider.display_name} is not connected."}, status=404)
-
-        try:
-            saved_files = upsert_native_integration_granted_files(
-                provider.key,
-                owner_user,
-                owner_org,
-                files_payload,
-                selected_by=request.user,
-            )
-        except ValidationError as exc:
-            error_payload = exc.message_dict if hasattr(exc, "message_dict") else {"files": exc.messages}
-            return JsonResponse({"errors": error_payload}, status=400)
-
-        return JsonResponse(
-            {
-                "provider_key": provider.key,
-                "upserted_count": len(saved_files),
-                "files": [serialize_native_integration_granted_file(granted_file) for granted_file in saved_files],
-            },
-            status=201,
-        )
-
-
-class NativeIntegrationFileDetailAPIView(LoginRequiredMixin, View):
-    http_method_names = ["delete"]
-
-    def delete(self, request: HttpRequest, provider_key: str, file_id: str, *args: Any, **kwargs: Any):
-        try:
-            provider = get_native_integration_provider(provider_key)
-        except KeyError:
-            return JsonResponse({"error": "Unknown native integration provider."}, status=404)
-
-        _, owner_user, owner_org = _resolve_native_integration_owner(request)
-        deleted_count, _ = native_integration_granted_file_queryset(owner_user, owner_org, provider.key).filter(
-            id=file_id,
-        ).delete()
-        if deleted_count == 0:
-            return JsonResponse({"error": "Selected file not found."}, status=404)
-        return JsonResponse({"deleted": True})
 
 
 class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):

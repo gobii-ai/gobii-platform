@@ -1,5 +1,7 @@
 """Default code-defined system skill definitions."""
 
+from django.conf import settings
+
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
@@ -8,6 +10,88 @@ from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillFiel
 
 
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
+
+
+def _format_runtime_planning_context(agent) -> str:
+    from api.models import PersistentAgentKanbanCard
+
+    cards = list(
+        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
+        .only("title", "status", "priority", "created_at")
+        .order_by("-priority", "created_at")
+    )
+    if not cards:
+        return "Current plan: none"
+
+    groups = {
+        PersistentAgentKanbanCard.Status.DOING: [],
+        PersistentAgentKanbanCard.Status.TODO: [],
+        PersistentAgentKanbanCard.Status.DONE: [],
+    }
+    for card in cards:
+        if card.status in groups:
+            groups[card.status].append(card.title)
+
+    lines = [
+        "Current plan:",
+        f"- Doing: {len(groups[PersistentAgentKanbanCard.Status.DOING])}",
+        f"- Todo: {len(groups[PersistentAgentKanbanCard.Status.TODO])}",
+        f"- Done: {len(groups[PersistentAgentKanbanCard.Status.DONE])}",
+    ]
+    for label, status in (
+        ("Doing", PersistentAgentKanbanCard.Status.DOING),
+        ("Todo", PersistentAgentKanbanCard.Status.TODO),
+        ("Done", PersistentAgentKanbanCard.Status.DONE),
+    ):
+        titles = groups[status]
+        if titles:
+            lines.append(f"{label}:")
+            lines.extend(f"- {title}" for title in titles[:20])
+    return "\n".join(lines)
+
+
+def _custom_tool_development_prompt_available(agent) -> bool:
+    from api.agent.system_skills.service import get_available_system_skill_tool_names
+
+    return CREATE_CUSTOM_TOOL_NAME in get_available_system_skill_tool_names(agent)
+
+
+def _format_custom_tool_development_context(agent) -> str:
+    from api.agent.tools.custom_tools import format_custom_tools_state_for_prompt
+
+    summary = format_custom_tools_state_for_prompt(agent, recent_limit=3)
+    if not summary:
+        return ""
+    return "Current custom-tool state:\n" + summary
+
+
+def _app_integrations_url() -> str:
+    return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
+
+
+def _google_sheets_native_prompt_instructions(agent) -> str:
+    integrations_url = _app_integrations_url()
+    return (
+        "Use `http_request` for Google Sheets API calls. Native Google Drive OAuth is applied automatically for "
+        "`https://sheets.googleapis.com/` requests when the owner has connected Google Drive.\n"
+        "Use the Drive API discovery call below to list spreadsheets the native integration can access before "
+        "assuming a spreadsheet ID. The native integration uses Google `drive.file`, so missing spreadsheets may "
+        "need to be selected in Google Picker first.\n"
+        "If setup is needed, tell the user to open `" + integrations_url + "`, connect Google Drive, "
+        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        "Common calls:\n"
+        "- List accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files?"
+        "q=mimeType%3D'application%2Fvnd.google-apps.spreadsheet'%20and%20trashed%3Dfalse"
+        "&fields=files(id%2Cname%2CmimeType%2CwebViewLink)&pageSize=100\n"
+        "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
+        "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
+        "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
+        "{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
+        "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
+        "integration at `" + integrations_url + "` before making Sheets API calls for that file."
+    )
 
 
 RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
@@ -35,6 +119,7 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
         "Keep plans short, current, and verifiable; each call replaces the full active plan. "
         "Send the final user-facing report before any final completion update."
     ),
+    prompt_context_renderer=_format_runtime_planning_context,
     default_enabled=True,
 )
 
@@ -125,6 +210,8 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "Useful pattern: fetch/call tools -> normalize -> write SQLite tables -> return summary, counts, outputs, "
         "remaining work, and verification. Once stable, save the workflow as a skill referencing the canonical `custom_*` tool id."
     ),
+    prompt_available=_custom_tool_development_prompt_available,
+    prompt_context_renderer=_format_custom_tool_development_context,
 )
 
 
@@ -155,22 +242,7 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "sheets api",
         "drive file spreadsheet",
     ),
-    prompt_instructions=(
-        "Use `http_request` for Google Sheets API calls. Native Google Drive OAuth is applied automatically for "
-        "`https://sheets.googleapis.com/` requests when the owner has connected Google Drive.\n"
-        "Only assume access to spreadsheets listed in the Accessible Google Sheets section below. The native "
-        "integration uses Google `drive.file`, so unlisted spreadsheets may fail unless the app created them or the "
-        "user selected them in the Google Drive integration.\n"
-        "If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
-        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
-        "Common calls:\n"
-        "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
-        "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
-        "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
-        "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
-        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
-        "integration at `{integrations_url}` before making Sheets API calls for that file."
-    ),
+    prompt_instructions_renderer=_google_sheets_native_prompt_instructions,
 )
 
 

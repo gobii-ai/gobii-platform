@@ -1,7 +1,7 @@
 """Code-defined system skill definitions and search-time matching."""
 
 from dataclasses import dataclass, field
-from typing import Mapping, Optional
+from typing import Callable, Mapping, Optional
 
 
 SYSTEM_SKILL_KEY_ALIASES = {
@@ -44,6 +44,9 @@ class SystemSkillDefinition:
     query_aliases: tuple[str, ...] = ()
     pipedream_app_slugs: tuple[str, ...] = ()
     prompt_instructions: str = ""
+    prompt_instructions_renderer: Optional[Callable[[object], str]] = None
+    prompt_context_renderer: Optional[Callable[[object], str]] = None
+    prompt_available: Optional[Callable[[object], bool]] = None
     default_enabled: bool = False
     required_profile_fields: tuple[SystemSkillField, ...] = ()
     optional_profile_fields: tuple[SystemSkillField, ...] = ()
@@ -57,6 +60,21 @@ class SystemSkillDefinition:
 
     def profile_fields(self) -> tuple[SystemSkillField, ...]:
         return tuple(self.required_profile_fields) + tuple(self.optional_profile_fields)
+
+    def should_render_prompt(self, agent) -> bool:
+        if self.prompt_available is None:
+            return True
+        return bool(self.prompt_available(agent))
+
+    def render_prompt_instructions(self, agent) -> str:
+        if self.prompt_instructions_renderer is not None:
+            return str(self.prompt_instructions_renderer(agent) or "")
+        return str(self.prompt_instructions or "")
+
+    def render_prompt_context(self, agent) -> str:
+        if self.prompt_context_renderer is None:
+            return ""
+        return str(self.prompt_context_renderer(agent) or "")
 
     def search_terms(self) -> tuple[str, ...]:
         terms = [

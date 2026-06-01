@@ -63,7 +63,7 @@ GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
     authorization_endpoint="https://accounts.google.com/o/oauth2/v2/auth",
     token_endpoint="https://oauth2.googleapis.com/token",
     scopes=("https://www.googleapis.com/auth/drive.file",),
-    api_hosts=("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com"),
+    api_hosts=("sheets.googleapis.com", "docs.googleapis.com", "drive.googleapis.com", "www.googleapis.com"),
     icon="google_drive",
     authorization_params={
         "access_type": "offline",
