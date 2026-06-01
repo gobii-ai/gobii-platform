@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Iterable
 
+from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
@@ -142,13 +143,19 @@ def count_google_sheets_for_agent(agent: PersistentAgent) -> int:
     ).count()
 
 
+def _app_integrations_url() -> str:
+    return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
+
+
 def format_google_sheets_access_for_prompt(agent: PersistentAgent, *, limit: int = GOOGLE_SHEETS_PROMPT_LIMIT) -> str:
     sheets = list_google_sheets_for_agent(agent, limit=limit)
+    integrations_url = _app_integrations_url()
     if not sheets:
         return (
             "Accessible Google Sheets selected through Google Drive:\n"
             "- None recorded. With `drive.file` access, ask the user to choose the spreadsheet in the Google Drive "
-            "native integration before trying to access an unlisted spreadsheet."
+            f"native integration at `{integrations_url}` before trying to access an unlisted "
+            "spreadsheet."
         )
 
     lines = ["Accessible Google Sheets selected through Google Drive:"]

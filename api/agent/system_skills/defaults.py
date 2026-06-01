@@ -161,13 +161,15 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "Only assume access to spreadsheets listed in the Accessible Google Sheets section below. The native "
         "integration uses Google `drive.file`, so unlisted spreadsheets may fail unless the app created them or the "
         "user selected them in the Google Drive integration.\n"
+        "If setup is needed, tell the user to open `{integrations_url}`, connect Google Drive, "
+        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
         "Common calls:\n"
         "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
         "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
         "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
         "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
         "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
-        "integration before making Sheets API calls for that file."
+        "integration at `{integrations_url}` before making Sheets API calls for that file."
     ),
 )
 

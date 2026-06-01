@@ -592,6 +592,7 @@ class NativeIntegrationTests(TestCase):
             PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").exists()
         )
 
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_google_sheets_prompt_lists_selected_spreadsheets_only(self):
         NativeIntegrationGrantedFile.objects.create(
             user=self.user,
@@ -620,7 +621,9 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("https://docs.google.com/spreadsheets/d/sheet-1/edit", block)
         self.assertNotIn("Planning Doc", block)
         self.assertIn("drive.file", block)
+        self.assertIn("https://app.example.test/app/integrations", block)
 
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
     def test_google_sheets_prompt_has_empty_state_when_no_spreadsheets_are_selected(self):
         enable_system_skills(self.agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
 
@@ -629,3 +632,4 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("System Skill: Google Sheets", block)
         self.assertIn("None recorded", block)
         self.assertIn("choose the spreadsheet in the Google Drive native integration", block)
+        self.assertIn("https://app.example.test/app/integrations", block)

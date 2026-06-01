@@ -11,6 +11,7 @@ import sqlite3
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import F, Q
 from django.utils import timezone
@@ -542,6 +543,10 @@ def _format_custom_tool_development_state(agent) -> str:
     return "Current custom-tool state:\n" + summary
 
 
+def _app_integrations_url() -> str:
+    return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
+
+
 def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillState) -> str | None:
     definition = get_system_skill_definition(state.skill_key)
     if definition is None or not definition.prompt_instructions:
@@ -556,7 +561,10 @@ def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillStat
         f"Key: {definition.skill_key}",
         f"Tools: {tool_text}",
         "Instructions:",
-        definition.prompt_instructions.strip(),
+        definition.prompt_instructions.strip().replace(
+            "{integrations_url}",
+            _app_integrations_url(),
+        ),
     ]
     if definition.skill_key == "runtime_planning":
         lines.extend(["", _format_current_plan_state(agent)])
