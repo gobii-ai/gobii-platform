@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CheckCircle2,
@@ -51,6 +51,8 @@ type GooglePickerNamespace = {
 
 const GOOGLE_SHEETS_MIME_TYPE = 'application/vnd.google-apps.spreadsheet'
 const GOOGLE_DOCS_MIME_TYPE = 'application/vnd.google-apps.document'
+const NATIVE_OAUTH_COMPLETE_MESSAGE = 'gobii:native-oauth-complete'
+const NATIVE_OAUTH_COMPLETE_PREFIX = 'gobii:native_oauth_complete:'
 const BUTTON_CLASS_NAME =
   'inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60'
 const ROW_CLASS_NAME = 'flex flex-col gap-4 px-6 py-5 sm:flex-row sm:items-center sm:justify-between'
@@ -118,6 +120,18 @@ type NativeAppsPanelProps = {
   embedded?: boolean
 }
 
+type NativeConnectVariables = {
+  provider: NativeIntegrationProvider
+  popup: Window | null
+}
+
+type NativeOAuthCompleteMessage = {
+  type?: unknown
+  providerKey?: unknown
+  ok?: unknown
+  error?: unknown
+}
+
 export function NativeAppsPanel({
   listUrl,
   onSuccess,
@@ -131,18 +145,91 @@ export function NativeAppsPanel({
     queryFn: () => fetchNativeIntegrations(listUrl),
   })
 
+  useEffect(() => {
+    const handleComplete = (payload: NativeOAuthCompleteMessage) => {
+      if (!payload || payload.type !== NATIVE_OAUTH_COMPLETE_MESSAGE) {
+        return
+      }
+
+      queryClient.invalidateQueries({ queryKey })
+      if (payload.ok) {
+        const provider = integrationsQuery.data?.providers.find(
+          (candidate) => candidate.providerKey === payload.providerKey,
+        )
+        onSuccess(`${provider?.displayName ?? 'Native app'} connected.`)
+        return
+      }
+      onError(String(payload.error || 'Unable to complete the native app connection.'))
+    }
+    const handleMessage = (event: MessageEvent<NativeOAuthCompleteMessage>) => {
+      if (event.origin === window.location.origin) {
+        handleComplete(event.data)
+      }
+    }
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key?.startsWith(NATIVE_OAUTH_COMPLETE_PREFIX) || !event.newValue) {
+        return
+      }
+      try {
+        handleComplete(JSON.parse(event.newValue))
+        localStorage.removeItem(event.key)
+      } catch (error) {
+        console.warn('Invalid native integration OAuth completion payload', error)
+      }
+    }
+
+    window.addEventListener('message', handleMessage)
+    window.addEventListener('storage', handleStorage)
+    return () => {
+      window.removeEventListener('message', handleMessage)
+      window.removeEventListener('storage', handleStorage)
+    }
+  }, [integrationsQuery.data?.providers, onError, onSuccess, queryClient, queryKey])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const result = params.get('native_oauth')
+    if (!result) {
+      return
+    }
+
+    queryClient.invalidateQueries({ queryKey })
+    if (result === 'success') {
+      onSuccess('Native app connected.')
+    } else if (result === 'error') {
+      onError('Unable to complete the native app connection.')
+    }
+    params.delete('native_oauth')
+    const nextSearch = params.toString()
+    const nextUrl = `${window.location.pathname}${nextSearch ? `?${nextSearch}` : ''}${window.location.hash}`
+    window.history.replaceState(window.history.state, '', nextUrl)
+  }, [onError, onSuccess, queryClient, queryKey])
+
   const connectMutation = useMutation({
-    mutationFn: (provider: NativeIntegrationProvider) => startNativeIntegrationConnect(provider.connectUrl),
-    onSuccess: (payload) => {
+    mutationFn: ({ provider }: NativeConnectVariables) => startNativeIntegrationConnect(provider.connectUrl),
+    onSuccess: (payload, { popup }) => {
       storePendingNativeOAuth(payload.state, {
         providerKey: payload.providerKey,
         returnUrl: window.location.href,
         createdAt: Date.now(),
         context: readStoredConsoleContext(),
+        popup: Boolean(popup),
       })
+      if (popup && !popup.closed) {
+        popup.location.href = payload.authorizationUrl
+        popup.focus()
+        return
+      }
+      if (popup?.closed) {
+        onError('Connection window was closed before Google opened.')
+        return
+      }
       window.location.href = payload.authorizationUrl
     },
-    onError: (error) => {
+    onError: (error, { popup }) => {
+      if (popup && !popup.closed) {
+        popup.close()
+      }
       onError(safeErrorMessage(error))
     },
   })
@@ -178,7 +265,7 @@ export function NativeAppsPanel({
 
   const classes = embedded ? PANEL_CLASSES.embedded : PANEL_CLASSES.standalone
   const pendingProviderKey =
-    (connectMutation.isPending ? connectMutation.variables?.providerKey : null) ??
+    (connectMutation.isPending ? connectMutation.variables?.provider.providerKey : null) ??
     (revokeMutation.isPending ? revokeMutation.variables?.providerKey : null) ??
     (pickerMutation.isPending ? pickerMutation.variables?.providerKey : null) ??
     null
@@ -269,7 +356,7 @@ export function NativeAppsPanel({
                       <button
                         type="button"
                         className={classes.connectButton}
-                        onClick={() => connectMutation.mutate(provider)}
+                        onClick={() => connectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })}
                         disabled={isBusy}
                       >
                         {isBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plug className="h-4 w-4" />}
@@ -300,6 +387,36 @@ function storePendingNativeOAuth(state: string, payload: Record<string, unknown>
   } catch (error) {
     console.warn('Failed to persist native integration OAuth state', error)
   }
+}
+
+function openNativeOAuthPopup(provider: NativeIntegrationProvider): Window | null {
+  const width = 520
+  const height = 720
+  const left = Math.max(0, window.screenX + (window.outerWidth - width) / 2)
+  const top = Math.max(0, window.screenY + (window.outerHeight - height) / 2)
+  const popup = window.open(
+    '',
+    `gobii-native-oauth-${provider.providerKey}`,
+    `popup=yes,width=${width},height=${height},left=${Math.round(left)},top=${Math.round(top)}`,
+  )
+  if (!popup) {
+    return null
+  }
+
+  try {
+    popup.document.title = `Connect ${provider.displayName}`
+    popup.document.body.style.fontFamily = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif'
+    popup.document.body.style.margin = '0'
+    popup.document.body.style.display = 'grid'
+    popup.document.body.style.minHeight = '100vh'
+    popup.document.body.style.placeItems = 'center'
+    popup.document.body.style.background = '#0f172a'
+    popup.document.body.style.color = '#e2e8f0'
+    popup.document.body.textContent = `Opening ${provider.displayName}...`
+  } catch {
+    // Some browsers restrict about:blank popup writes; the OAuth redirect still works.
+  }
+  return popup
 }
 
 function loadGooglePickerApi(): Promise<void> {
