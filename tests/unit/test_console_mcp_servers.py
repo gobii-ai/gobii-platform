@@ -22,7 +22,11 @@ from api.models import (
     PersistentAgentMCPServer,
 )
 from console.forms import MCPServerConfigForm
-from api.services.pipedream_apps import PipedreamCatalogError, enable_pipedream_apps_for_agent
+from api.services.pipedream_apps import (
+    PipedreamCatalogError,
+    enable_pipedream_apps_for_agent,
+    get_deprecated_pipedream_app_slugs,
+)
 from api.services.pipedream_connections import (
     PipedreamConnectedAccount,
     invalidate_pipedream_connected_accounts_cache,
@@ -1275,6 +1279,28 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0]["slug"], "trello")
 
+    def test_deprecated_apps_metadata_is_read_and_normalized(self):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["Trello", "google sheets", "", None, "GOOGLE_SHEETS"]}
+        )
+
+        self.assertEqual(get_deprecated_pipedream_app_slugs(), ["trello", "google_sheets"])
+
+    @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
+    def test_search_hides_deprecated_apps_without_agent_context(self, mock_search_apps):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["trello"]}
+        )
+        mock_search_apps.return_value = [
+            type("App", (), {"to_dict": lambda self: PipedreamAppsAPITests._app("trello"), "slug": "trello"})(),
+            type("App", (), {"to_dict": lambda self: PipedreamAppsAPITests._app("slack"), "slug": "slack"})(),
+        ]
+
+        response = self.client.get(self.search_url, {"q": "project"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([app["slug"] for app in response.json()["results"]], ["slack"])
+
     @patch("console.pipedream_apps_api.PipedreamCatalogService.search_apps")
     def test_search_returns_upstream_error(self, mock_search_apps):
         mock_search_apps.side_effect = PipedreamCatalogError("boom")
@@ -1405,6 +1431,60 @@ class PipedreamAppsAPITests(TestCase):
         self.assertEqual(apps[0]["source"], "available")
         mock_get_apps.assert_not_called()
 
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.search_apps")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_apps")
+    def test_agent_app_search_hides_deprecated_apps_when_unconnected(
+        self,
+        mock_get_apps,
+        mock_search_apps,
+        mock_connected_accounts,
+    ):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["slack"]}
+        )
+        agent = _create_console_test_agent(user=self.user, name="Deprecated App Search")
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", to_dict=lambda: PipedreamAppsAPITests._app("slack")),
+            SimpleNamespace(slug="trello", to_dict=lambda: PipedreamAppsAPITests._app("trello")),
+        ]
+        mock_connected_accounts.return_value = []
+
+        response = self.client.get(reverse("console-agent-pipedream-apps", args=[agent.id]), {"q": "project"})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([app["slug"] for app in response.json()["apps"]], ["trello"])
+        mock_get_apps.assert_not_called()
+
+    @patch("api.services.pipedream_agent_apps.list_pipedream_connected_accounts")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.search_apps")
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_apps")
+    def test_agent_app_search_shows_deprecated_apps_when_connected(
+        self,
+        mock_get_apps,
+        mock_search_apps,
+        mock_connected_accounts,
+    ):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["slack"]}
+        )
+        agent = _create_console_test_agent(user=self.user, name="Connected Deprecated App Search")
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", to_dict=lambda: PipedreamAppsAPITests._app("slack")),
+            SimpleNamespace(slug="trello", to_dict=lambda: PipedreamAppsAPITests._app("trello")),
+        ]
+        mock_connected_accounts.return_value = [SimpleNamespace(id="apn_slack", app_slug="slack")]
+
+        response = self.client.get(reverse("console-agent-pipedream-apps", args=[agent.id]), {"q": "project"})
+
+        self.assertEqual(response.status_code, 200)
+        apps = response.json()["apps"]
+        self.assertEqual([app["slug"] for app in apps], ["slack", "trello"])
+        slack = apps[0]
+        self.assertTrue(slack["connected"])
+        self.assertEqual(slack["account_ids"], ["apn_slack"])
+        mock_get_apps.assert_not_called()
+
     @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_app")
     @patch("api.services.pipedream_agent_apps.get_mcp_manager")
     def test_agent_app_connect_adds_non_built_in_app_and_returns_jit_url(self, mock_get_mcp_manager, mock_get_app):
@@ -1429,6 +1509,33 @@ class PipedreamAppsAPITests(TestCase):
             str(self.user.id),
             app_slugs=["trello"],
         )
+
+    @patch("api.services.pipedream_connections._list_pipedream_connected_accounts", return_value=[])
+    @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_app")
+    @patch("api.services.pipedream_agent_apps.get_mcp_manager")
+    def test_agent_app_connect_rejects_deprecated_unconnected_app(
+        self,
+        mock_get_mcp_manager,
+        mock_get_app,
+        _mock_connected_accounts,
+    ):
+        MCPServerConfig.objects.filter(scope=MCPServerConfig.Scope.PLATFORM, name="pipedream").update(
+            metadata={"deprecated_apps": ["trello"]}
+        )
+        agent = _create_console_test_agent(user=self.user, name="Reject Deprecated Connect")
+        mock_get_app.return_value = type(
+            "App",
+            (),
+            {"to_dict": lambda self: PipedreamAppsAPITests._app("trello")},
+        )()
+
+        response = self.client.post(reverse("console-agent-pipedream-app-connect", args=[agent.id, "trello"]))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("deprecated", response.content.decode())
+        self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
+        mock_get_app.assert_not_called()
+        mock_get_mcp_manager.assert_not_called()
 
     @patch("api.services.pipedream_agent_apps.PipedreamCatalogService.get_app")
     @patch("api.services.pipedream_agent_apps.get_mcp_manager")
@@ -1610,6 +1717,30 @@ class PipedreamAppEnablementServiceTests(TestCase):
         self.assertEqual(result["already_enabled"], [])
         self.assertEqual(result["invalid"], ["unknown_app"])
         self.assertEqual(result["effective_apps"], ["google_sheets", "google_docs"])
+        self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
+        manager = mock_get_mcp_manager.return_value
+        manager.invalidate_pipedream_owner_cache.assert_not_called()
+        manager.prewarm_pipedream_owner_cache.assert_not_called()
+
+    @patch("api.services.pipedream_apps.get_connected_pipedream_app_slugs_for_agent", return_value=set())
+    @patch("api.agent.tools.mcp_manager.get_mcp_manager")
+    def test_enable_pipedream_apps_rejects_deprecated_unconnected_app(
+        self,
+        mock_get_mcp_manager,
+        _mock_connected_app_slugs,
+    ):
+        self.platform_server.metadata = {"deprecated_apps": ["slack"]}
+        self.platform_server.save(update_fields=["metadata"])
+        agent = _create_console_test_agent(user=self.user, name="Deprecated Enable Agent")
+
+        result = enable_pipedream_apps_for_agent(
+            agent,
+            ["slack"],
+            available_app_slugs=["slack"],
+        )
+
+        self.assertEqual(result["enabled"], [])
+        self.assertEqual(result["invalid"], ["slack"])
         self.assertFalse(PipedreamAppSelection.objects.filter(user=self.user).exists())
         manager = mock_get_mcp_manager.return_value
         manager.invalidate_pipedream_owner_cache.assert_not_called()

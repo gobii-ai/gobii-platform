@@ -10,12 +10,15 @@ from api.models import MCPServerConfig, PersistentAgent
 from api.pipedream_app_utils import normalize_app_slug, normalize_app_slugs
 from api.services.pipedream_apps import (
     PipedreamCatalogService,
+    filter_deprecated_pipedream_apps_for_agent,
     get_platform_pipedream_app_slugs,
     get_owner_apps_state,
+    is_pipedream_app_visible_to_agent,
     owner_agents_queryset,
     set_owner_selected_app_slugs,
 )
 from api.services.pipedream_connections import (
+    PipedreamConnectionError,
     delete_pipedream_connected_accounts,
     group_pipedream_connected_accounts_by_app,
     invalidate_pipedream_connected_accounts_cache,
@@ -94,9 +97,20 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
     selected_set = set(state.selected_app_slugs)
     normalized_query = str(query or "").strip()
     catalog = PipedreamCatalogService()
+    try:
+        connected_accounts = list_pipedream_connected_accounts(agent)
+    except PipedreamConnectionError:
+        connected_accounts = []
+    connected_by_app = group_pipedream_connected_accounts_by_app(connected_accounts)
+    connected_app_slugs = set(connected_by_app)
 
     if normalized_query:
         search_results = catalog.search_apps(normalized_query, limit=30)
+        search_results = filter_deprecated_pipedream_apps_for_agent(
+            agent,
+            search_results,
+            connected_app_slugs=connected_app_slugs,
+        )
         apps = {app.slug: app.to_dict() for app in search_results}
         ordered_slugs = normalize_app_slugs(app.slug for app in search_results)
     else:
@@ -106,11 +120,10 @@ def list_agent_pipedream_app_rows(agent: PersistentAgent, *, query: str = "") ->
         }
         ordered_slugs = state.effective_app_slugs
 
-    connected_by_app = group_pipedream_connected_accounts_by_app(
-        list_pipedream_connected_accounts(agent)
-    )
     rows = []
     for slug in ordered_slugs:
+        if not is_pipedream_app_visible_to_agent(agent, slug, connected_app_slugs=connected_app_slugs):
+            continue
         app = apps.get(slug)
         if app is None:
             continue
@@ -173,6 +186,9 @@ def start_agent_pipedream_app_connect(agent: PersistentAgent, app_slug: str) -> 
     normalized_slug = normalize_app_slug(app_slug)
     if not normalized_slug:
         raise ValueError("app_slug is required.")
+
+    if not is_pipedream_app_visible_to_agent(agent, normalized_slug):
+        raise ValueError("This Pipedream app is deprecated and cannot be newly connected.")
 
     catalog = PipedreamCatalogService()
     app = catalog.get_app(normalized_slug)

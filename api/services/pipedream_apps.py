@@ -116,6 +116,151 @@ def get_platform_pipedream_app_slugs() -> list[str]:
     return normalize_app_slugs(str(settings.PIPEDREAM_PREFETCH_APPS).split(","))
 
 
+def get_deprecated_pipedream_app_slugs() -> list[str]:
+    config = (
+        MCPServerConfig.objects.filter(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name=PIPEDREAM_RUNTIME_NAME,
+            is_active=True,
+        )
+        .only("metadata")
+        .first()
+    )
+    if config is None or not isinstance(config.metadata, dict):
+        return []
+
+    raw_slugs = config.metadata.get("deprecated_apps") or []
+    if not isinstance(raw_slugs, (list, tuple, set)):
+        logger.warning("Ignoring invalid Pipedream deprecated_apps metadata; expected a JSON array.")
+        return []
+    return normalize_app_slugs(raw_slugs)
+
+
+def pipedream_app_slug_for_tool_name(tool_name: object) -> str:
+    if not isinstance(tool_name, str):
+        return ""
+    normalized = tool_name.strip()
+    if not normalized or "-" not in normalized:
+        return ""
+    return normalize_app_slug(normalized.split("-", 1)[0])
+
+
+def get_connected_pipedream_app_slugs_for_agent(agent: PersistentAgent) -> set[str]:
+    from api.services.pipedream_connections import PipedreamConnectionError, list_pipedream_connected_accounts
+
+    try:
+        return {
+            slug
+            for slug in (
+                normalize_app_slug(account.app_slug)
+                for account in list_pipedream_connected_accounts(agent)
+            )
+            if slug
+        }
+    except PipedreamConnectionError as exc:
+        logger.warning(
+            "Unable to resolve connected Pipedream apps for agent %s while applying deprecation filters: %s",
+            getattr(agent, "id", None),
+            exc,
+        )
+        return set()
+
+
+def is_pipedream_app_deprecated(app_slug: object) -> bool:
+    normalized = normalize_app_slug(app_slug)
+    return bool(normalized and normalized in set(get_deprecated_pipedream_app_slugs()))
+
+
+def is_pipedream_app_visible_to_agent(
+    agent: PersistentAgent,
+    app_slug: object,
+    *,
+    connected_app_slugs: set[str] | None = None,
+) -> bool:
+    normalized = normalize_app_slug(app_slug)
+    if not normalized:
+        return False
+    deprecated = set(get_deprecated_pipedream_app_slugs())
+    if normalized not in deprecated:
+        return True
+    connected = (
+        connected_app_slugs
+        if connected_app_slugs is not None
+        else get_connected_pipedream_app_slugs_for_agent(agent)
+    )
+    return normalized in connected
+
+
+def is_pipedream_tool_visible_to_agent(
+    agent: PersistentAgent,
+    tool_name: object,
+    *,
+    connected_app_slugs: set[str] | None = None,
+) -> bool:
+    app_slug = pipedream_app_slug_for_tool_name(tool_name)
+    if not app_slug:
+        return True
+    return is_pipedream_app_visible_to_agent(agent, app_slug, connected_app_slugs=connected_app_slugs)
+
+
+def filter_deprecated_pipedream_apps_for_agent(
+    agent: PersistentAgent,
+    apps: Iterable[Any],
+    *,
+    connected_app_slugs: set[str] | None = None,
+) -> list[Any]:
+    deprecated = set(get_deprecated_pipedream_app_slugs())
+    if not deprecated:
+        return list(apps)
+
+    connected = (
+        connected_app_slugs
+        if connected_app_slugs is not None
+        else get_connected_pipedream_app_slugs_for_agent(agent)
+    )
+    visible = []
+    for app in apps:
+        raw_slug = app.get("slug") if isinstance(app, dict) else getattr(app, "slug", "")
+        slug = normalize_app_slug(raw_slug)
+        if slug and slug in deprecated and slug not in connected:
+            continue
+        visible.append(app)
+    return visible
+
+
+def filter_deprecated_pipedream_apps_without_agent(apps: Iterable[Any]) -> list[Any]:
+    deprecated = set(get_deprecated_pipedream_app_slugs())
+    if not deprecated:
+        return list(apps)
+    return [
+        app
+        for app in apps
+        if normalize_app_slug(
+            app.get("slug") if isinstance(app, dict) else getattr(app, "slug", "")
+        ) not in deprecated
+    ]
+
+
+def filter_deprecated_pipedream_tools_for_agent(agent: PersistentAgent, tools: Iterable[Any]) -> list[Any]:
+    deprecated = set(get_deprecated_pipedream_app_slugs())
+    if not deprecated:
+        return list(tools)
+
+    connected = get_connected_pipedream_app_slugs_for_agent(agent)
+    visible = []
+    for tool in tools:
+        server_name = getattr(tool, "server_name", "")
+        if server_name != PIPEDREAM_RUNTIME_NAME:
+            visible.append(tool)
+            continue
+        tool_name = getattr(tool, "tool_name", "") or getattr(tool, "full_name", "")
+        app_slug = pipedream_app_slug_for_tool_name(tool_name)
+        if app_slug in deprecated and app_slug not in connected:
+            continue
+        visible.append(tool)
+    return visible
+
+
 def get_owner_selected_app_slugs(owner_scope: str, owner_user=None, owner_org=None) -> list[str]:
     selection = _owner_queryset(owner_scope, owner_user=owner_user, owner_org=owner_org).only("selected_app_slugs").first()
     if selection is None:
@@ -275,6 +420,14 @@ def enable_pipedream_apps_for_agent(
         requested.append(normalized)
 
     available_set = set(normalize_app_slugs(available_app_slugs))
+    deprecated_set = set(get_deprecated_pipedream_app_slugs())
+    if deprecated_set:
+        connected_set = get_connected_pipedream_app_slugs_for_agent(agent)
+        available_set = {
+            slug
+            for slug in available_set
+            if slug not in deprecated_set or slug in connected_set
+        }
 
     valid_requested = [slug for slug in requested if slug in available_set]
     invalid.extend(slug for slug in requested if slug not in available_set)

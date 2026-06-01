@@ -14,6 +14,7 @@ from api.services.pipedream_agent_apps import (
 from api.services.pipedream_apps import (
     PipedreamCatalogError,
     PipedreamCatalogService,
+    filter_deprecated_pipedream_apps_without_agent,
     get_owner_apps_state,
     serialize_owner_apps_state,
     set_owner_selected_app_slugs,
@@ -204,7 +205,8 @@ class PipedreamAppSearchAPIView(ApiLoginRequiredMixin, View):
             return JsonResponse({"results": []})
         catalog = PipedreamCatalogService()
         try:
-            results = [app.to_dict() for app in catalog.search_apps(query)]
+            apps = filter_deprecated_pipedream_apps_without_agent(catalog.search_apps(query))
+            results = [app.to_dict() for app in apps]
         except PipedreamCatalogError as exc:
             return JsonResponse({"error": str(exc)}, status=502)
         return JsonResponse({"results": results})

@@ -32,6 +32,10 @@ from ...services.sandbox_compute import (
     track_sandbox_unavailable,
 )
 from ...services.prompt_settings import get_prompt_settings, DEFAULT_STANDARD_ENABLED_TOOL_LIMIT
+from ...services.pipedream_apps import (
+    filter_deprecated_pipedream_tools_for_agent,
+    is_pipedream_tool_visible_to_agent,
+)
 from ...services.tool_blacklist import (
     get_agent_tool_blacklist,
     is_tool_blacklisted_for_agent,
@@ -510,7 +514,11 @@ def _build_available_tool_index(
     blacklisted_tools = get_agent_tool_blacklist(agent)
 
     hide_pipedream_tools = is_eval_agent(agent)
-    for info in manager.get_tools_for_agent(agent):
+    visible_mcp_tools = filter_deprecated_pipedream_tools_for_agent(
+        agent,
+        manager.get_tools_for_agent(agent),
+    )
+    for info in visible_mcp_tools:
         if info.full_name in blacklisted_tools:
             continue
         if hide_pipedream_tools and info.server_name == PIPEDREAM_TOOL_SERVER_NAME:
@@ -1104,12 +1112,23 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
             .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
             .values_list("tool_full_name", flat=True)
         )
+    enabled_pipedream_tool_names = set(
+        PersistentAgentEnabledTool.objects
+        .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
+        .values_list("tool_full_name", flat=True)
+    )
+    hidden_deprecated_pipedream_tool_names = {
+        tool_name
+        for tool_name in enabled_pipedream_tool_names
+        if not is_pipedream_tool_visible_to_agent(agent, tool_name)
+    }
     definitions = [
         _sanitize_tool_definition_for_llm(definition)
         for definition in manager.get_enabled_tools_definitions(agent)
         if _tool_definition_name(definition) not in blacklisted_tools
         and _tool_definition_name(definition) not in eval_tool_name_set
         and _tool_definition_name(definition) not in hidden_eval_mcp_tool_names
+        and _tool_definition_name(definition) not in hidden_deprecated_pipedream_tool_names
     ]
     enabled_names = list(
         PersistentAgentEnabledTool.objects.filter(agent=agent)
@@ -1228,6 +1247,11 @@ def resolve_tool_entry(agent: PersistentAgent, tool_name: str) -> Optional[ToolC
         info = manager.resolve_tool_info(tool_name)
         if info:
             if is_tool_blacklisted_for_agent(agent, info.full_name):
+                return None
+            if (
+                info.server_name == PIPEDREAM_TOOL_SERVER_NAME
+                and not is_pipedream_tool_visible_to_agent(agent, info.tool_name)
+            ):
                 return None
             logger.info(
                 "Resolved MCP tool '%s' via manager discovery (server=%s)",
