@@ -393,26 +393,10 @@ export function testEndpoint(payload: { endpoint_id: string; kind: ProviderEndpo
   return jsonRequest<EndpointTestResponse>(`${base}/test-endpoint/`, withCsrf(payload))
 }
 
-export type LlmPerformanceAgentSearchResult = {
-  id: string
-  name: string
-}
-
-export type LlmPerformanceAgentSearchResponse = {
-  agents: LlmPerformanceAgentSearchResult[]
-}
-
-export function searchPerformanceAgents(query: string, params: { limit?: number } = {}): Promise<LlmPerformanceAgentSearchResponse> {
-  const search = new URLSearchParams()
-  search.set('q', query)
-  search.set('eligible_for', 'llm_performance')
-  if (params.limit) search.set('limit', params.limit.toString())
-  return jsonFetch<LlmPerformanceAgentSearchResponse>(`/console/api/staff/agents/search/${search.toString() ? `?${search.toString()}` : ''}`)
-}
-
 export type LlmPerformanceSample = {
   sample: number
   ok: boolean
+  status?: 'pending' | 'running'
   latency_ms?: number | null
   prompt_tokens?: number | null
   completion_tokens?: number | null
@@ -463,32 +447,43 @@ export type LlmPerformanceEndpointResult = {
     provider: string
     model: string
   }
+  input_sizes: LlmPerformanceInputSizeResult[]
+}
+
+export type LlmPerformanceInputSizeMetadata = {
+  requested_input_tokens: number
+  estimated_prompt_tokens: number | null
+  message_count: number | null
+}
+
+export type LlmPerformanceInputSizeResult = {
+  requested_input_tokens: number
+  estimated_prompt_tokens: number | null
+  message_count: number | null
   samples: LlmPerformanceSample[]
   summary: LlmPerformanceEndpointSummary
 }
 
 export type LlmPerformanceTestResponse = {
   ok: boolean
-  agent: {
-    id: string
-    name: string
-  }
-  prompt: {
-    tokens: number
-    message_count: number
-    tool_count: number
-    allows_implied_send: boolean
-  }
+  input_token_sizes: number[]
   samples_per_endpoint: number
   endpoints: LlmPerformanceEndpointResult[]
 }
 
+export type LlmPerformanceSampleResponse = {
+  ok: boolean
+  endpoint: LlmPerformanceEndpointResult['endpoint']
+  input_size: LlmPerformanceInputSizeMetadata
+  sample: LlmPerformanceSample
+}
+
 export function runPerformanceTest(payload: {
-  agent_id: string
-  endpoint_ids: string[]
-  samples_per_endpoint: number
+  endpoint_id: string
+  input_token_size: number
+  sample_number: number
 }) {
-  return jsonRequest<LlmPerformanceTestResponse>(`${base}/performance-test/`, withCsrf(payload))
+  return jsonRequest<LlmPerformanceSampleResponse>(`${base}/performance-test/`, withCsrf(payload))
 }
 
 // =============================================================================

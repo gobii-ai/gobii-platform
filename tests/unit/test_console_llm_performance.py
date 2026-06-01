@@ -86,9 +86,9 @@ class ConsoleLLMPerformanceTests(TestCase):
 
     def _payload(self, **overrides):
         payload = {
-            "agent_id": str(self.agent.id),
-            "endpoint_ids": [str(self.endpoint.id)],
-            "samples_per_endpoint": 2,
+            "endpoint_id": str(self.endpoint.id),
+            "sample_number": 1,
+            "input_token_size": 120000,
         }
         payload.update(overrides)
         return json.dumps(payload)
@@ -140,60 +140,24 @@ class ConsoleLLMPerformanceTests(TestCase):
         response = self.client.get(f"/console/evals/{self.agent.id}/")
         self.assertEqual(response.status_code, 404)
 
-    def test_performance_agent_search_only_returns_eligible_agents(self):
-        deleted_agent = PersistentAgent.objects.create(
-            user=self.staff_user,
-            name="Performance Deleted Agent",
-            charter="Deleted benchmark prompt.",
-            browser_use_agent=BrowserUseAgent.objects.create(
-                user=self.staff_user,
-                name="Performance Deleted Browser Agent",
-            ),
-            is_deleted=True,
-        )
-        eval_agent = PersistentAgent.objects.create(
-            user=self.staff_user,
-            name="Performance Eval Agent",
-            charter="Eval benchmark prompt.",
-            browser_use_agent=BrowserUseAgent.objects.create(
-                user=self.staff_user,
-                name="Performance Eval Browser Agent",
-            ),
-            execution_environment="eval",
-        )
-
-        self.client.force_login(self.staff_user)
-        url = reverse("console_agent_search")
-
-        response = self.client.get(url, {"q": "Performance", "eligible_for": "llm_performance"})
-        self.assertEqual(response.status_code, 200)
-        agent_ids = {agent["id"] for agent in response.json()["agents"]}
-        self.assertIn(str(self.agent.id), agent_ids)
-        self.assertNotIn(str(deleted_agent.id), agent_ids)
-        self.assertNotIn(str(eval_agent.id), agent_ids)
-
-        response = self.client.get(url, {"q": str(deleted_agent.id)})
-        self.assertEqual(response.status_code, 200)
-        self.assertIn(str(deleted_agent.id), {agent["id"] for agent in response.json()["agents"]})
-
-    def test_rejects_invalid_agent(self):
+    def test_rejects_missing_endpoint(self):
         self.client.force_login(self.staff_user)
         response = self.client.post(
             self.url,
-            self._payload(agent_id="00000000-0000-0000-0000-000000000000"),
-            content_type="application/json",
-        )
-        self.assertEqual(response.status_code, 404)
-
-    def test_rejects_missing_endpoints(self):
-        self.client.force_login(self.staff_user)
-        response = self.client.post(
-            self.url,
-            self._payload(endpoint_ids=[]),
+            self._payload(endpoint_id=""),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("Select at least one endpoint", response.content.decode("utf-8"))
+        self.assertIn("endpoint_id is required", response.content.decode("utf-8"))
+
+    def test_rejects_unknown_endpoint(self):
+        self.client.force_login(self.staff_user)
+        response = self.client.post(
+            self.url,
+            self._payload(endpoint_id="00000000-0000-0000-0000-000000000000"),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 404)
 
     def test_rejects_disabled_endpoint(self):
         self.client.force_login(self.staff_user)
@@ -215,96 +179,87 @@ class ConsoleLLMPerformanceTests(TestCase):
         self.client.force_login(self.staff_user)
         response = self.client.post(
             self.url,
-            self._payload(samples_per_endpoint=11),
+            self._payload(sample_number=11),
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
-        self.assertIn("samples_per_endpoint must be between 1 and 10", response.content.decode("utf-8"))
+        self.assertIn("sample_number must be between 1 and 10", response.content.decode("utf-8"))
 
-    @patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"})
-    @patch("console.api_views.seed_sqlite_agent_config")
-    @patch("console.api_views.seed_sqlite_skills")
-    @patch("console.api_views.get_agent_tools", return_value=[{"type": "function", "function": {"name": "noop", "parameters": {}}}])
-    @patch("console.api_views.build_prompt_context_preview")
-    @patch("console.api_views.run_completion")
-    def test_successful_run_includes_tools_and_serial_samples(
-        self,
-        mock_run_completion,
-        mock_prompt_preview,
-        mock_get_tools,
-        _mock_seed_skills,
-        _mock_seed_config,
-    ):
+    def test_rejects_invalid_input_token_size(self):
         self.client.force_login(self.staff_user)
-        mock_prompt_preview.return_value = (
-            [{"role": "system", "content": "system"}, {"role": "user", "content": "user"}],
-            123,
-            {"prompt_allows_implied_send": True},
-        )
-        mock_run_completion.side_effect = [
-            _completion_response("one", prompt_tokens=120, completion_tokens=12),
-            _completion_response("two", prompt_tokens=121, completion_tokens=13),
-            _completion_response("three", prompt_tokens=122, completion_tokens=14),
-            _completion_response("four", prompt_tokens=123, completion_tokens=15),
+        cases = [
+            ("large", "input_token_size must be an integer"),
+            (1000, "input_token_size must be one of 10000, 60000, 120000"),
         ]
+        for input_token_size, message in cases:
+            with self.subTest(input_token_size=input_token_size):
+                response = self.client.post(
+                    self.url,
+                    self._payload(input_token_size=input_token_size),
+                    content_type="application/json",
+                )
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(message, response.content.decode("utf-8"))
 
-        response = self.client.post(
-            self.url,
-            self._payload(endpoint_ids=[str(self.endpoint.id), str(self.second_endpoint.id)]),
-            content_type="application/json",
-        )
+    def test_successful_run_uses_synthetic_messages_and_returns_single_sample(self):
+        self.client.force_login(self.staff_user)
+        with (
+            patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"}),
+            patch("api.agent.tools.sqlite_agent_config.seed_sqlite_agent_config") as mock_seed_config,
+            patch("api.agent.tools.sqlite_skills.seed_sqlite_skills") as mock_seed_skills,
+            patch("api.agent.core.prompt_context.get_agent_tools") as mock_get_tools,
+            patch("api.agent.core.prompt_context.build_prompt_context_preview") as mock_prompt_preview,
+            patch("console.api_views.litellm.token_counter", side_effect=lambda model, text: max(1, len(text.split()))),
+            patch("console.api_views.run_completion", return_value=_completion_response("one", prompt_tokens=120, completion_tokens=12)) as mock_run_completion,
+        ):
+            response = self.client.post(
+                self.url,
+                self._payload(input_token_size=10000, sample_number=3),
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertTrue(payload["ok"])
-        self.assertEqual(payload["prompt"]["tokens"], 123)
-        self.assertEqual(payload["prompt"]["tool_count"], 1)
-        self.assertEqual(len(payload["endpoints"]), 2)
-        self.assertEqual(mock_run_completion.call_count, 4)
-        for call in mock_run_completion.call_args_list:
-            self.assertEqual(call.kwargs["tools"], mock_get_tools.return_value)
-        self.assertEqual(payload["endpoints"][0]["summary"]["success_count"], 2)
-        self.assertEqual(payload["endpoints"][0]["summary"]["error_count"], 0)
-        self.assertEqual(payload["endpoints"][0]["samples"][0]["input_cost_total"], 0.001)
-        self.assertEqual(payload["endpoints"][0]["samples"][0]["output_cost"], 0.002)
-        self.assertEqual(payload["endpoints"][0]["samples"][0]["total_cost"], 0.003)
-        self.assertEqual(payload["endpoints"][0]["summary"]["total_input_cost"], 0.002)
-        self.assertEqual(payload["endpoints"][0]["summary"]["total_output_cost"], 0.004)
-        self.assertEqual(payload["endpoints"][0]["summary"]["total_cost"], 0.006)
+        self.assertEqual(payload["endpoint"]["id"], str(self.endpoint.id))
+        self.assertEqual(payload["input_size"]["requested_input_tokens"], 10000)
+        self.assertGreaterEqual(payload["input_size"]["estimated_prompt_tokens"], 1)
+        self.assertEqual(payload["input_size"]["message_count"], 2)
+        self.assertEqual(payload["sample"]["sample"], 3)
+        self.assertEqual(payload["sample"]["input_cost_total"], 0.001)
+        self.assertEqual(payload["sample"]["output_cost"], 0.002)
+        self.assertEqual(payload["sample"]["total_cost"], 0.003)
+        self.assertEqual(mock_run_completion.call_count, 1)
+        call = mock_run_completion.call_args
+        self.assertNotIn("tools", call.kwargs)
+        self.assertIn("Synthetic benchmark context follows", call.kwargs["messages"][1]["content"])
+        mock_seed_config.assert_not_called()
+        mock_seed_skills.assert_not_called()
+        mock_get_tools.assert_not_called()
+        mock_prompt_preview.assert_not_called()
 
-    @patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"})
-    @patch("console.api_views.seed_sqlite_agent_config")
-    @patch("console.api_views.seed_sqlite_skills")
-    @patch("console.api_views.get_agent_tools", return_value=[])
-    @patch("console.api_views.build_prompt_context_preview")
-    @patch("console.api_views.run_completion")
-    def test_sample_failure_does_not_abort_endpoint(
-        self,
-        mock_run_completion,
-        mock_prompt_preview,
-        _mock_get_tools,
-        _mock_seed_skills,
-        _mock_seed_config,
-    ):
+    def test_provider_sample_failure_returns_failed_sample(self):
         self.client.force_login(self.staff_user)
-        mock_prompt_preview.return_value = (
-            [{"role": "system", "content": "system"}, {"role": "user", "content": "user"}],
-            50,
-            {},
-        )
-        mock_run_completion.side_effect = [
-            RuntimeError("provider unavailable"),
-            _completion_response("recovered", prompt_tokens=60, completion_tokens=10),
-        ]
-
-        response = self.client.post(self.url, self._payload(), content_type="application/json")
+        with (
+            patch.dict("os.environ", {"PERF_PROVIDER_KEY": "test-key"}),
+            patch("console.api_views.litellm.token_counter", side_effect=lambda model, text: max(1, len(text.split()))),
+            patch("console.api_views.run_completion") as mock_run_completion,
+        ):
+            mock_run_completion.side_effect = [
+                RuntimeError("provider unavailable"),
+            ]
+            response = self.client.post(
+                self.url,
+                self._payload(input_token_size=60000),
+                content_type="application/json",
+            )
 
         self.assertEqual(response.status_code, 200)
-        endpoint_payload = response.json()["endpoints"][0]
-        self.assertEqual(endpoint_payload["summary"]["success_count"], 1)
-        self.assertEqual(endpoint_payload["summary"]["error_count"], 1)
-        self.assertFalse(endpoint_payload["samples"][0]["ok"])
-        self.assertIn("provider unavailable", endpoint_payload["samples"][0]["error"])
+        payload = response.json()
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["input_size"]["requested_input_tokens"], 60000)
+        self.assertFalse(payload["sample"]["ok"])
+        self.assertIn("provider unavailable", payload["sample"]["error"])
 
     @patch("api.agent.core.prompt_context._safe_get_prompt_failover_configs", return_value=[("provider", "model", {})])
     @patch("api.agent.tools.custom_tools.sandbox_compute_enabled_for_agent", return_value=False)
