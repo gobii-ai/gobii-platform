@@ -107,6 +107,34 @@ function finishWithError(message, sessionData) {
   }
 }
 
+async function callbackErrorMessage(response) {
+  const fallback = "Callback failed";
+  const text = await response.text();
+  if (!text) {
+    return fallback;
+  }
+  try {
+    const payload = JSON.parse(text);
+    if (payload && typeof payload === "object") {
+      if (payload.errors && typeof payload.errors === "object") {
+        const messages = Object.values(payload.errors)
+          .flatMap((value) => Array.isArray(value) ? value : [value])
+          .map((value) => String(value || "").trim())
+          .filter(Boolean);
+        if (messages.length) {
+          return messages.join(" ");
+        }
+      }
+      if (payload.error) {
+        return String(payload.error);
+      }
+    }
+  } catch {
+    return text;
+  }
+  return text;
+}
+
 async function completeOAuth() {
   const params = new URLSearchParams(window.location.search);
   const error = params.get("error");
@@ -145,8 +173,7 @@ async function completeOAuth() {
     });
 
     if (!response.ok) {
-      const detail = await response.text();
-      throw new Error(detail || "Callback failed");
+      throw new Error(await callbackErrorMessage(response));
     }
 
     localStorage.removeItem(`gobii:native_oauth_state:${state}`);

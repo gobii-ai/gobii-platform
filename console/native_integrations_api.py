@@ -36,6 +36,12 @@ NATIVE_INTEGRATION_STATE_SALT = "gobii.native_integrations.oauth_state"
 NATIVE_INTEGRATION_STATE_MAX_AGE_SECONDS = 10 * 60
 
 
+def _permission_denied_response(exc: PermissionDenied) -> JsonResponse:
+    messages = getattr(exc, "args", None)
+    message = str(messages[0]) if messages else "Permission denied."
+    return JsonResponse({"error": message}, status=403)
+
+
 def _resolve_native_integration_owner(request: HttpRequest):
     context = build_console_context(request)
     if context.current_context.type == "organization":
@@ -123,7 +129,10 @@ class NativeIntegrationListAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
 
     def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
-        owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        try:
+            owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
         providers = [
             _serialize_provider(provider, owner_user, owner_org)
             for provider in list_native_integration_providers()
@@ -154,7 +163,10 @@ class NativeIntegrationConnectAPIView(LoginRequiredMixin, View):
         if not client_id or not client_secret:
             return JsonResponse({"error": f"{provider.display_name} OAuth is not configured."}, status=400)
 
-        owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        try:
+            owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
         state = _sign_oauth_state(provider.key, request, owner_scope, owner_user, owner_org)
         redirect_uri = request.build_absolute_uri(reverse("console-native-integration-oauth-callback-view"))
 
@@ -203,11 +215,13 @@ class NativeIntegrationCallbackAPIView(LoginRequiredMixin, View):
         except KeyError:
             return JsonResponse({"error": "Unknown native integration provider."}, status=404)
 
-        owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
         try:
+            owner_scope, owner_user, owner_org = _resolve_native_integration_owner(request)
             _validate_oauth_state(request, provider.key, state, owner_scope, owner_user, owner_org)
         except ValidationError as exc:
             return JsonResponse({"errors": exc.message_dict}, status=400)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
 
         client_id, client_secret = native_integration_client_credentials(provider)
         if not client_id or not client_secret:
@@ -277,7 +291,10 @@ class NativeIntegrationRevokeAPIView(LoginRequiredMixin, View):
         except KeyError:
             return JsonResponse({"error": "Unknown native integration provider."}, status=404)
 
-        _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        try:
+            _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
         deleted = delete_native_integration_credentials(provider.key, owner_user, owner_org)
         return JsonResponse({"revoked": deleted})
 
@@ -297,7 +314,10 @@ class NativeIntegrationPickerTokenAPIView(LoginRequiredMixin, View):
         if not settings.GOOGLE_PICKER_API_KEY or not settings.GOOGLE_PICKER_APP_ID:
             return JsonResponse({"error": "Google Picker is not configured."}, status=400)
 
-        _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        try:
+            _, owner_user, owner_org = _resolve_native_integration_owner(request)
+        except PermissionDenied as exc:
+            return _permission_denied_response(exc)
         secret = get_native_integration_secret(provider.key, owner_user, owner_org)
         if secret is None:
             return JsonResponse({"error": f"{provider.display_name} is not connected."}, status=404)

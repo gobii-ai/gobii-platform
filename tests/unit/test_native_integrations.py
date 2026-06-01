@@ -220,6 +220,21 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(payload["owner_label"], self.org.name)
         self.assertTrue(payload["providers"][0]["connected"])
 
+    def test_organization_member_permission_denial_returns_json(self):
+        OrganizationMembership.objects.filter(org=self.org, user=self.user).update(
+            role=OrganizationMembership.OrgRole.MEMBER
+        )
+        self._set_org_context()
+
+        response = self.client.get(reverse("console-native-integration-list"))
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response["Content-Type"], "application/json")
+        self.assertEqual(
+            response.json(),
+            {"error": "You do not have permission to manage organization integrations."},
+        )
+
     def test_connect_returns_google_authorization_url(self):
         response = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]))
 

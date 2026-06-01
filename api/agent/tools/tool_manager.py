@@ -1106,18 +1106,12 @@ def get_enabled_tool_definitions(agent: PersistentAgent) -> List[Dict[str, Any]]
         .values_list("tool_full_name", flat=True)
     )
     eval_tool_name_set = set(enabled_eval_tool_names)
-    hidden_eval_mcp_tool_names = set()
-    if is_eval_agent(agent):
-        hidden_eval_mcp_tool_names = set(
-            PersistentAgentEnabledTool.objects
-            .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
-            .values_list("tool_full_name", flat=True)
-        )
     enabled_pipedream_tool_names = set(
         PersistentAgentEnabledTool.objects
         .filter(agent=agent, tool_server=PIPEDREAM_TOOL_SERVER_NAME)
         .values_list("tool_full_name", flat=True)
     )
+    hidden_eval_mcp_tool_names = enabled_pipedream_tool_names if is_eval_agent(agent) else set()
     pipedream_visibility = get_pipedream_app_visibility_for_agent(agent)
     hidden_deprecated_pipedream_tool_names = {
         tool_name
