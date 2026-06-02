@@ -28,8 +28,13 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
 from api.models import MCPServerConfig, PipedreamAppSelection
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+)
 from api.services.pipedream_apps import get_owner_apps_state
+from util.analytics import AnalyticsEvent
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
@@ -1911,6 +1916,7 @@ class ConsoleViewsTest(TestCase):
 
         session = self.client.session
         session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = "sales-pipeline-whisperer"
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
         session.save()
 
         with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True):
@@ -1942,6 +1948,67 @@ class ConsoleViewsTest(TestCase):
             ["slack", "notion", "trello"],
         )
         self.assertNotIn(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, session)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, session)
+
+    @override_settings(PIPEDREAM_PREFETCH_APPS="trello")
+    @override_flag(PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH, active=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @tag("batch_console_agents_management")
+    def test_trial_required_quick_create_preserves_template_draft_for_quick_spawn_resume(
+        self,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+
+        PipedreamAppSelection.objects.create(
+            user=self.user,
+            selected_app_slugs=["notion"],
+        )
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+
+        session = self.client.session
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
+        session.save()
+
+        with self.settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=True):
+            response = self.client.post(
+                "/console/api/agents/create/",
+                data=json.dumps(
+                    {
+                        "message": template.charter,
+                        "preferred_llm_tier": "premium",
+                        "charter_override": "Override template charter",
+                        "selected_pipedream_app_slugs": ["slack", "notion", "trello"],
+                    }
+                ),
+                content_type="application/json",
+            )
+
+        self.assertEqual(response.status_code, 400)
+        payload = response.json()
+        self.assertEqual(payload.get("onboarding_target"), TRIAL_ONBOARDING_TARGET_AGENT_UI)
+        self.assertTrue(payload.get("requires_plan_selection"))
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(session.get("agent_charter_source"), "template")
+        self.assertEqual(session.get("agent_preferred_llm_tier"), "premium")
+        self.assertEqual(session.get("agent_charter_override"), "Override template charter")
+        self.assertEqual(
+            session.get(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY),
+            ["slack", "notion", "trello"],
+        )
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(
+            session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
 
     @override_settings(
         PIPEDREAM_PREFETCH_APPS="trello",
@@ -1989,6 +2056,40 @@ class ConsoleViewsTest(TestCase):
             owner_user=self.user,
         )
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_spawn_created_event_includes_pretrained_worker_template_source(
+        self,
+        mock_track_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        session = self.client.session
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
+        session.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        created_event_calls = [
+            call.kwargs
+            for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.PERSISTENT_AGENT_CREATED
+        ]
+        self.assertEqual(len(created_event_calls), 1)
+        properties = created_event_calls[0]["properties"]
+        self.assertEqual(properties.get("template_code"), template.code)
+        self.assertEqual(properties.get("template_source"), AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, self.client.session)
 
     @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')

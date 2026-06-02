@@ -62,6 +62,9 @@ from util.urls import IMMERSIVE_APP_BASE_PATH, append_context_query
 
 logger = logging.getLogger(__name__)
 AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY = "agent_selected_pipedream_app_slugs"
+AGENT_TEMPLATE_SOURCE_SESSION_KEY = "agent_template_source"
+AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER = "pretrained_worker"
+AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE = "public_template"
 
 
 def _customer_account_pause_creation_message(owner) -> str:
@@ -158,6 +161,7 @@ def create_persistent_agent_from_charter(
 
     template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
     selected_template = PretrainedWorkerTemplateService.get_template_by_code(template_code) if template_code else None
+    template_source = (request.session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY) or "").strip()
 
     resolved_context = build_console_context(request)
     preview_config = resolve_personal_signup_preview(
@@ -462,6 +466,7 @@ def create_persistent_agent_from_charter(
             "agent_charter_source",
             "agent_charter_override",
             AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+            AGENT_TEMPLATE_SOURCE_SESSION_KEY,
             PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
         ):
             if key in request.session:
@@ -477,6 +482,7 @@ def create_persistent_agent_from_charter(
             "charter": initial_message or "",
             "preferred_contact_method": preferred_contact_method,
             "template_code": selected_template.code if selected_template else "",
+            "template_source": template_source if selected_template else "",
             "template_schedule_applied": applied_schedule or "",
         }
         props = Analytics.with_org_properties(base_props, organization=organization)
@@ -484,6 +490,7 @@ def create_persistent_agent_from_charter(
             {
                 "agent_id": str(persistent_agent.id),
                 "template_code": selected_template.code if selected_template else "",
+                "template_source": template_source if selected_template else "",
                 "template_schedule_applied": applied_schedule or "",
             },
             organization=organization,

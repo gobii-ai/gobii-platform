@@ -248,7 +248,11 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, enable_agent_sms_contact
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+    enable_agent_sms_contact,
+)
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
@@ -692,8 +696,16 @@ def _persist_quick_create_draft(
     charter_override: str | None,
     selected_pipedream_app_slugs: list[str],
 ) -> None:
+    template_code = request.session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY)
+    template_source = (request.session.get(AGENT_TEMPLATE_SOURCE_SESSION_KEY) or "").strip()
+    preserve_template_attribution = (
+        request.session.get("agent_charter_source") == "template" and bool(template_code)
+    )
+
     request.session["agent_charter"] = initial_message
-    request.session["agent_charter_source"] = "user"
+    request.session["agent_charter_source"] = (
+        "template" if preserve_template_attribution else "user"
+    )
 
     if preferred_llm_tier_key:
         request.session["agent_preferred_llm_tier"] = preferred_llm_tier_key
@@ -710,9 +722,17 @@ def _persist_quick_create_draft(
     else:
         request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
 
-    # Treat immersive quick-create as a fresh custom draft, not a continuation
-    # of a previously selected template.
-    request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    if preserve_template_attribution:
+        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template_code
+        if template_source:
+            request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = template_source
+        else:
+            request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
+    else:
+        # Treat immersive quick-create as a fresh custom draft, not a continuation
+        # of a previously selected template.
+        request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+        request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
     request.session.modified = True
 
 

@@ -96,6 +96,7 @@ from util.onboarding import (
     is_truthy_flag,
     normalize_trial_onboarding_target,
     set_trial_onboarding_intent,
+    set_trial_onboarding_requires_plan_selection,
 )
 from util.trial_eligibility import (
     is_user_trial_allowed_by_policy,
@@ -156,10 +157,16 @@ from .public_template_urls import (
     public_template_category_slug_from_label,
     public_template_detail_path,
     public_template_hire_path,
+    public_template_launch_path,
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+    AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+)
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -700,6 +707,7 @@ def _seed_landing_launch_session(request, landing: LandingPage) -> None:
     request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
     request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
     request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
     request.session.modified = True
 
 
@@ -1330,6 +1338,7 @@ class HomeAgentSpawnView(TemplateView):
 
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+            request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
             # Store charter in session for later use
             user_charter = form.cleaned_data['charter']
             if user_charter:
@@ -1613,17 +1622,80 @@ class PretrainedWorkerDetailView(TemplateView):
         return context
 
 
+def _get_pretrained_worker_template_or_404(code: str | None):
+    template = PretrainedWorkerTemplateService.get_template_by_code(code)
+    if not template:
+        raise Http404("This pretrained worker is no longer available.")
+    return template
+
+
+def _seed_pretrained_worker_session(request, template) -> None:
+    request.session["agent_charter"] = template.charter
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
+    request.session["agent_charter_source"] = "template"
+    request.session.modified = True
+
+
+def _template_launch_analytics_properties(request, template, *, default_source_page: str) -> dict:
+    source_page = request.POST.get("source_page") or request.GET.get("source_page") or default_source_page
+    flow = (request.POST.get("flow") or request.GET.get("flow") or "").strip().lower()
+    properties = {
+        "source_page": source_page,
+        "template_code": template.code,
+    }
+    if flow:
+        properties["flow"] = flow
+    return properties
+
+
+class PretrainedWorkerLaunchView(View):
+    def get(self, request, *args, **kwargs):
+        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
+
+        _seed_pretrained_worker_session(request, template)
+        _set_template_launch_trial_onboarding_if_needed(request)
+
+        analytics_properties = _template_launch_analytics_properties(
+            request,
+            template,
+            default_source_page="pretrained_worker_launch",
+        )
+        _track_web_event_for_request(
+            request,
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            properties=analytics_properties,
+        )
+
+        app_next_url = _build_template_launch_app_url(request)
+        if request.user.is_authenticated:
+            return redirect(app_next_url)
+
+        response = _build_anonymous_cta_auth_response(
+            request,
+            next_url=app_next_url,
+        )
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            charter_source="template",
+            template_code=template.code,
+        )
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
+            server_side_charter=True,
+        )
+        return response
+
+
 class PretrainedWorkerHireView(View):
     def post(self, request, *args, **kwargs):
-        code = kwargs.get('slug')
-        template = PretrainedWorkerTemplateService.get_template_by_code(code)
-        if not template:
-            raise Http404("This pretrained worker is no longer available.")
-
-        request.session['agent_charter'] = template.charter
-        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        request.session['agent_charter_source'] = 'template'
-        request.session.modified = True
+        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
+        _seed_pretrained_worker_session(request, template)
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
         flow = (request.POST.get("flow") or "").strip().lower()
@@ -1742,6 +1814,86 @@ def _get_active_public_template_by_legacy_path(handle: str | None, template_slug
 
 def _canonical_public_template_redirect(template):
     return redirect(public_template_detail_path(template), permanent=True)
+
+
+def _public_template_redirect_with_query(request, target_path: str):
+    query_string = request.META.get("QUERY_STRING")
+    target_url = f"{target_path}?{query_string}" if query_string else target_path
+    return redirect(target_url, permanent=True)
+
+
+def _resolve_public_template_for_route(*, handle: str | None, template_slug: str | None):
+    if handle:
+        return _get_active_public_template_by_legacy_path(handle, template_slug)
+    return _get_active_public_template_by_slug(template_slug)
+
+
+def _seed_public_template_session(request, template: PersistentAgentTemplate) -> str | None:
+    request.session["agent_charter"] = template.charter
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
+    request.session["agent_charter_source"] = "template"
+
+    # Template launches are referral attribution, so choosing one supersedes
+    # any direct referral code already staged for signup.
+    previous_referrer_code = request.session.pop("referrer_code", None)
+    request.session["signup_template_code"] = template.code
+    request.session.modified = True
+    return previous_referrer_code
+
+
+def _track_anonymous_public_template_capture(request, template: PersistentAgentTemplate, previous_referrer_code: str | None) -> None:
+    if request.user.is_authenticated:
+        return
+
+    session_key = request.session.session_key
+    if not session_key:
+        request.session.save()
+        session_key = request.session.session_key
+    Analytics.track_event_anonymous(
+        anonymous_id=str(session_key),
+        event=AnalyticsEvent.REFERRAL_TEMPLATE_CAPTURED,
+        source=AnalyticsSource.WEB,
+        properties={
+            "template_code": template.code,
+            "template_creator_id": str(template.created_by_id) if template.created_by_id else "",
+            "previous_referrer_code": previous_referrer_code or "",
+        },
+    )
+
+
+def _build_template_launch_app_url(request) -> str:
+    params = request.GET.copy()
+    params["spawn"] = "1"
+
+    raw_return_to = params.get("return_to")
+    if "return_to" in params:
+        del params["return_to"]
+    normalized_return_to = normalize_return_to(request, raw_return_to)
+    if normalized_return_to:
+        params["return_to"] = normalized_return_to
+
+    embed_requested = is_truthy_flag(params.get("embed"))
+    if "embed" in params:
+        del params["embed"]
+    if embed_requested:
+        params["embed"] = "1"
+
+    app_query = params.urlencode()
+    app_base_url = f"{IMMERSIVE_APP_BASE_PATH}/agents/new"
+    return f"{app_base_url}?{app_query}" if app_query else app_base_url
+
+
+def _set_template_launch_trial_onboarding_if_needed(request) -> None:
+    if not settings.GOBII_PROPRIETARY_MODE:
+        return
+
+    set_trial_onboarding_intent(
+        request,
+        target=TRIAL_ONBOARDING_TARGET_AGENT_UI,
+    )
+    if request.user.is_authenticated and not can_user_use_personal_agents_and_api(request.user):
+        set_trial_onboarding_requires_plan_selection(request, required=True)
 
 
 def _public_site_absolute_url(path_or_url: str) -> str:
@@ -1880,45 +2032,79 @@ class PublicTemplateDetailView(TemplateView):
         return context
 
 
+class PublicTemplateLaunchView(View):
+    def get(self, request, *args, **kwargs):
+        template = _resolve_public_template_for_route(
+            handle=kwargs.get("handle"),
+            template_slug=kwargs.get("template_slug"),
+        )
+        if not template:
+            raise Http404("This template is no longer available.")
+
+        canonical_launch_path = public_template_launch_path(template)
+        if kwargs.get("handle") or kwargs.get("category_slug") != public_template_category_slug(template):
+            return _public_template_redirect_with_query(request, canonical_launch_path)
+
+        previous_referrer_code = _seed_public_template_session(request, template)
+        _set_template_launch_trial_onboarding_if_needed(request)
+        _track_anonymous_public_template_capture(request, template, previous_referrer_code)
+
+        analytics_properties = _template_launch_analytics_properties(
+            request,
+            template,
+            default_source_page="public_template_launch",
+        )
+        emit_configured_custom_capi_event(
+            user=request.user if request.user.is_authenticated else None,
+            event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
+            plan_owner=request.user if request.user.is_authenticated else None,
+            properties={
+                "template_id": str(template.id),
+                **analytics_properties,
+            },
+            request=request,
+        )
+        _track_web_event_for_request(
+            request,
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            properties=analytics_properties,
+        )
+
+        app_next_url = _build_template_launch_app_url(request)
+        if request.user.is_authenticated:
+            return redirect(app_next_url)
+
+        response = _build_anonymous_cta_auth_response(
+            request,
+            next_url=app_next_url,
+        )
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            charter_source="template",
+            template_code=template.code,
+        )
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
+            server_side_charter=True,
+        )
+        return response
+
+
 class PublicTemplateHireView(View):
     def post(self, request, *args, **kwargs):
         template_slug = kwargs.get("template_slug")
         handle = kwargs.get("handle")
-        if handle:
-            template = _get_active_public_template_by_legacy_path(handle, template_slug)
-        else:
-            template = _get_active_public_template_by_slug(template_slug)
+        template = _resolve_public_template_for_route(handle=handle, template_slug=template_slug)
         if not template:
             raise Http404("This template is no longer available.")
 
-        request.session["agent_charter"] = template.charter
-        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        request.session["agent_charter_source"] = "template"
-
-        # Track template for referral attribution (if user signs up)
-        # "Last one wins": hiring a template clears any direct referral code
-        previous_referrer_code = request.session.pop("referrer_code", None)
-        request.session["signup_template_code"] = template.code
-
-        request.session.modified = True
-
-        # Track referral template capture for analytics
-        if not request.user.is_authenticated:
-            # Anonymous user hiring template - potential referral signup
-            session_key = request.session.session_key
-            if not session_key:
-                request.session.save()
-                session_key = request.session.session_key
-            Analytics.track_event_anonymous(
-                anonymous_id=str(session_key),
-                event=AnalyticsEvent.REFERRAL_TEMPLATE_CAPTURED,
-                source=AnalyticsSource.WEB,
-                properties={
-                    'template_code': template.code,
-                    'template_creator_id': str(template.created_by_id) if template.created_by_id else '',
-                    'previous_referrer_code': previous_referrer_code or '',
-                },
-            )
+        previous_referrer_code = _seed_public_template_session(request, template)
+        _track_anonymous_public_template_capture(request, template, previous_referrer_code)
 
         source_page = request.POST.get("source_page") or "public_template"
         flow = (request.POST.get("flow") or "").strip().lower()
@@ -1935,7 +2121,7 @@ class PublicTemplateHireView(View):
             analytics_properties["flow"] = flow
 
         emit_configured_custom_capi_event(
-            user=request.user,
+            user=request.user if request.user.is_authenticated else None,
             event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
             plan_owner=request.user if request.user.is_authenticated else None,
             properties={

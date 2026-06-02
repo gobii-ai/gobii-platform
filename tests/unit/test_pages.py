@@ -1705,6 +1705,116 @@ class PretrainedWorkerDirectoryTests(TestCase):
 
 @tag("batch_pages")
 class PretrainedWorkerHireRedirectTests(TestCase):
+    def test_launch_redirects_authenticated_user_into_app_spawn(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        user = get_user_model().objects.create_user(
+            email="pretrained-launch@test.com",
+            password="pw",
+            username="pretrained_launch_user",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["agent_charter"] = "Old draft"
+        session.save()
+
+        with patch("pages.views.Analytics.track_event"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code}),
+                {
+                    "utm_source": "shared-link",
+                    "return_to": reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code}),
+                },
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["shared-link"])
+        self.assertEqual(
+            params.get("return_to"),
+            [reverse("pages:pretrained_worker_detail", kwargs={"slug": template.code})],
+        )
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(session.get("agent_charter_source"), "template")
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(
+            session.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
+
+    def test_launch_redirects_anon_to_login_and_stashes_template(self):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with patch("pages.views.Analytics.track_event_anonymous"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code}),
+                {"utm_source": "shared-link"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(next_params.get("utm_source"), ["shared-link"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        stash_token_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        stash_token = stash_token_payload.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+        self.assertIsNotNone(stash_token)
+        cached_charter_payload = signing.loads(
+            get_redis_client().get(build_oauth_charter_stash_cache_key(stash_token))
+        )
+        self.assertEqual(cached_charter_payload.get("agent_charter"), template.charter)
+        self.assertEqual(cached_charter_payload.get("agent_charter_source"), "template")
+        self.assertEqual(
+            cached_charter_payload.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(
+            cached_charter_payload.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.can_user_use_personal_agents_and_api", return_value=False)
+    def test_launch_marks_required_trial_selection_for_blocked_authenticated_user(self, _mock_can_use):
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        user = get_user_model().objects.create_user(
+            email="pretrained-trial@test.com",
+            password="pw",
+            username="pretrained_trial_user",
+        )
+        self.client.force_login(user)
+
+        with patch("pages.views.Analytics.track_event"):
+            response = self.client.get(
+                reverse("pages:pretrained_worker_launch", kwargs={"slug": template.code})
+            )
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
     def test_hire_redirects_to_login(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
 

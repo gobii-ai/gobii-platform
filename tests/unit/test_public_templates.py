@@ -3,6 +3,7 @@ from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 from django.contrib.auth import get_user_model
+from django.core import signing
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -20,10 +21,17 @@ from api.models import (
 )
 from api.public_profiles import validate_public_handle
 from api.services.template_clone import TemplateCloneService
+from config.redis_client import get_redis_client
+from config.socialaccount_adapter import (
+    OAUTH_CHARTER_COOKIE,
+    OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY,
+    build_oauth_charter_stash_cache_key,
+)
 from pages.library_views import LIBRARY_CACHE_KEY
-from pages.public_template_urls import public_template_detail_path, public_template_hire_path
+from pages.public_template_urls import public_template_detail_path, public_template_hire_path, public_template_launch_path
 from util.onboarding import (
     TRIAL_ONBOARDING_PENDING_SESSION_KEY,
+    TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY,
     TRIAL_ONBOARDING_TARGET_AGENT_UI,
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
@@ -363,6 +371,166 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(response.url, public_template_detail_path(template))
 
     @tag("batch_public_templates")
+    def test_public_template_launch_recovers_from_stale_category_slug(self):
+        user = get_user_model().objects.create_user(username="owner-launch-recovery", email="owner-launch-recovery@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="steady-launch")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-launch-recovery",
+            public_profile=profile,
+            slug="market-launch-agent",
+            display_name="Market Launch Agent",
+            tagline="Research markets",
+            description="Researches markets.",
+            charter="Research markets.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Research",
+        )
+
+        response = self.client.get("/library/old-category/market-launch-agent/spawn/?utm_source=share")
+
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response.url, f"{public_template_launch_path(template)}?utm_source=share")
+
+    @tag("batch_public_templates")
+    def test_public_template_launch_redirects_authenticated_user_into_app_spawn(self):
+        user = get_user_model().objects.create_user(username="launch-user", email="launch-user@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="launch-profile")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-launch-auth",
+            public_profile=profile,
+            slug="weekly-launch-digest",
+            display_name="Weekly Launch Digest",
+            tagline="Weekly ops wrap",
+            description="Summarizes weekly ops updates.",
+            charter="Compile weekly ops summary.",
+            base_schedule="@weekly",
+            recommended_contact_channel="email",
+            category="Operations",
+        )
+        self.client.force_login(user)
+        session = self.client.session
+        session["agent_charter"] = "Old draft"
+        session["referrer_code"] = "old-referrer"
+        session.save()
+
+        with (
+            patch("pages.views.Analytics.track_event"),
+            patch("pages.views.emit_configured_custom_capi_event"),
+        ):
+            response = self.client.get(
+                public_template_launch_path(template),
+                {"utm_source": "newsletter", "return_to": public_template_detail_path(template)},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, "/app/agents/new")
+        params = parse_qs(parsed.query)
+        self.assertEqual(params.get("spawn"), ["1"])
+        self.assertEqual(params.get("utm_source"), ["newsletter"])
+        self.assertEqual(params.get("return_to"), [public_template_detail_path(template)])
+
+        session = self.client.session
+        self.assertEqual(session.get("agent_charter"), template.charter)
+        self.assertEqual(session.get("agent_charter_source"), "template")
+        self.assertEqual(
+            session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+        self.assertEqual(session.get("signup_template_code"), template.code)
+        self.assertNotIn("referrer_code", session)
+
+    @tag("batch_public_templates")
+    def test_public_template_launch_redirects_anon_to_login_and_stashes_template(self):
+        user = get_user_model().objects.create_user(username="launch-anon-owner", email="launch-anon-owner@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="launch-anon")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-launch-anon",
+            public_profile=profile,
+            slug="sales-launch-desk",
+            display_name="Sales Launch Desk",
+            tagline="Qualify inbound leads",
+            description="Screens leads and drafts follow-ups.",
+            charter="Qualify leads and draft next steps.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+        session = self.client.session
+        session["utm_querystring"] = "utm_medium=ads"
+        session.save()
+
+        with (
+            patch("pages.views.Analytics.track_event_anonymous"),
+            patch("pages.views.emit_configured_custom_capi_event"),
+        ):
+            response = self.client.get(
+                public_template_launch_path(template),
+                {"utm_source": "shared-link"},
+            )
+
+        self.assertEqual(response.status_code, 302)
+        parsed = urlparse(response["Location"])
+        self.assertEqual(parsed.path, reverse("account_login"))
+        params = parse_qs(parsed.query)
+        next_url = params.get("next")[0]
+        next_parts = urlparse(next_url)
+        self.assertEqual(next_parts.path, "/app/agents/new")
+        next_params = parse_qs(next_parts.query)
+        self.assertEqual(next_params.get("spawn"), ["1"])
+        self.assertEqual(next_params.get("utm_source"), ["shared-link"])
+
+        self.assertIn(OAUTH_CHARTER_COOKIE, response.cookies)
+        stash_token_payload = signing.loads(response.cookies[OAUTH_CHARTER_COOKIE].value, max_age=7200)
+        stash_token = stash_token_payload.get(OAUTH_CHARTER_SERVER_SIDE_TOKEN_KEY)
+        self.assertIsNotNone(stash_token)
+        cached_charter_payload = signing.loads(
+            get_redis_client().get(build_oauth_charter_stash_cache_key(stash_token))
+        )
+        self.assertEqual(cached_charter_payload.get("agent_charter"), template.charter)
+        self.assertEqual(cached_charter_payload.get("agent_charter_source"), "template")
+        self.assertEqual(
+            cached_charter_payload.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
+            template.code,
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    @patch("pages.views.can_user_use_personal_agents_and_api", return_value=False)
+    @tag("batch_public_templates")
+    def test_public_template_launch_marks_required_trial_selection_for_blocked_authenticated_user(self, _mock_can_use):
+        user = get_user_model().objects.create_user(username="launch-trial-user", email="launch-trial-user@example.com", password="pw")
+        profile = PublicProfile.objects.create(user=user, handle="launch-trial")
+        template = PersistentAgentTemplate.objects.create(
+            code="tpl-launch-trial",
+            public_profile=profile,
+            slug="trial-launch-desk",
+            display_name="Trial Launch Desk",
+            tagline="Qualify inbound leads",
+            description="Screens leads and drafts follow-ups.",
+            charter="Qualify leads and draft next steps.",
+            base_schedule="@daily",
+            recommended_contact_channel="email",
+            category="Sales",
+        )
+        self.client.force_login(user)
+
+        with (
+            patch("pages.views.Analytics.track_event"),
+            patch("pages.views.emit_configured_custom_capi_event"),
+        ):
+            response = self.client.get(public_template_launch_path(template))
+
+        self.assertEqual(response.status_code, 302)
+        session = self.client.session
+        self.assertTrue(session.get(TRIAL_ONBOARDING_PENDING_SESSION_KEY))
+        self.assertEqual(
+            session.get(TRIAL_ONBOARDING_TARGET_SESSION_KEY),
+            TRIAL_ONBOARDING_TARGET_AGENT_UI,
+        )
+        self.assertTrue(session.get(TRIAL_ONBOARDING_REQUIRES_PLAN_SELECTION_SESSION_KEY))
+
+    @tag("batch_public_templates")
     def test_public_template_hire_sets_session(self):
         user = get_user_model().objects.create_user(username="owner2", email="owner2@example.com", password="pw")
         profile = PublicProfile.objects.create(user=user, handle="calm-beacon")
@@ -418,6 +586,8 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         mock_emit_custom_event.assert_called_once()
         call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertIsNone(call_kwargs["user"])
+        self.assertIsNone(call_kwargs["plan_owner"])
         self.assertEqual(call_kwargs["event_name"], "TemplateLaunched")
         self.assertEqual(call_kwargs["properties"]["template_id"], str(template.id))
         self.assertEqual(call_kwargs["properties"]["template_code"], template.code)

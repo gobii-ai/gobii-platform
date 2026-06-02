@@ -26,11 +26,13 @@ from .views import (
     PretrainedWorkerDirectoryRedirectView,
     PretrainedWorkerDetailView,
     PretrainedWorkerHireView,
+    PretrainedWorkerLaunchView,
     PublicTemplateSitemap,
     PublicTemplateCategorySitemap,
     PublicTemplateDetailView,
     PublicTemplateLegacyDetailRedirectView,
     PublicTemplateHireView,
+    PublicTemplateLaunchView,
     EngineeringProSignupView,
     SolutionsIndexView,
     SolutionView,
@@ -85,6 +87,7 @@ urlpatterns = [
     path("library/<slug:category_slug>/", LibraryView.as_view(), name="library_category"),
     path("library/<slug:category_slug>/<slug:template_slug>/", PublicTemplateDetailView.as_view(), name="public_template_detail"),
     path("library/<slug:category_slug>/<slug:template_slug>/hire/", PublicTemplateHireView.as_view(), name="public_template_hire"),
+    path("library/<slug:category_slug>/<slug:template_slug>/spawn/", PublicTemplateLaunchView.as_view(), name="public_template_launch"),
     path("api/library/agents/", LibraryAgentsAPIView.as_view(), name="library_agents_api"),
     path("api/library/agents/like/", LibraryAgentLikeAPIView.as_view(), name="library_agent_like_api"),
     path("api/homepage/csrf-token/", HomepageCsrfTokenView.as_view(), name="homepage_csrf_token"),
@@ -93,6 +96,7 @@ urlpatterns = [
     path("pretrained-workers/", PretrainedWorkerDirectoryRedirectView.as_view(), name="pretrained_worker_directory"),
     path("pretrained-workers/<slug:slug>/", PretrainedWorkerDetailView.as_view(), name="pretrained_worker_detail"),
     path("pretrained-workers/<slug:slug>/hire/", PretrainedWorkerHireView.as_view(), name="pretrained_worker_hire"),
+    path("pretrained-workers/<slug:slug>/spawn/", PretrainedWorkerLaunchView.as_view(), name="pretrained_worker_launch"),
     path("solutions/", SolutionsIndexView.as_view(), name="solutions"),
     path("solutions/engineering/pro-signup/", EngineeringProSignupView.as_view(), name="engineering_pro_signup"),
     path("special-access/", SpecialAccessView.as_view(), name="special_access"),
@@ -129,6 +133,7 @@ urlpatterns = [
 
     path('<slug:handle>/<slug:template_slug>/', PublicTemplateLegacyDetailRedirectView.as_view(), name='public_template_legacy_detail'),
     path('<slug:handle>/<slug:template_slug>/hire/', PublicTemplateHireView.as_view(), name='public_template_legacy_hire'),
+    path('<slug:handle>/<slug:template_slug>/spawn/', PublicTemplateLaunchView.as_view(), name='public_template_legacy_launch'),
 
 ]
 

@@ -44,3 +44,13 @@ def public_template_hire_path(template) -> str:
             "template_slug": template.slug,
         },
     )
+
+
+def public_template_launch_path(template) -> str:
+    return reverse(
+        "pages:public_template_launch",
+        kwargs={
+            "category_slug": public_template_category_slug(template),
+            "template_slug": template.slug,
+        },
+    )
