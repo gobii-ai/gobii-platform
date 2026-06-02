@@ -48,11 +48,12 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
   return applied
 }
 
-function buildLoginUrl(): string {
+export function buildLoginUrl(nextUrl?: string): string {
   if (typeof window === 'undefined') {
-    return '/accounts/login/'
+    const params = nextUrl ? `?next=${encodeURIComponent(nextUrl)}` : ''
+    return `/accounts/login/${params}`
   }
-  const next = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
+  const next = nextUrl || `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
   return `/accounts/login/?next=${encodeURIComponent(next)}`
 }
 
@@ -65,7 +66,7 @@ function isLoginPath(url: string): boolean {
   }
 }
 
-export function scheduleLoginRedirect(): void {
+export function scheduleLoginRedirect(nextUrl?: string): void {
   if (typeof window === 'undefined') {
     return
   }
@@ -76,7 +77,7 @@ export function scheduleLoginRedirect(): void {
     return
   }
   loginRedirectScheduled = true
-  window.location.assign(buildLoginUrl())
+  window.location.assign(buildLoginUrl(nextUrl))
 }
 
 function maybeRedirectToLogin(response: Response): void {
@@ -190,16 +191,17 @@ export function getCsrfToken(): string {
 type JsonRequestInit = RequestInit & {
   json?: unknown
   includeCsrf?: boolean
+  csrfToken?: string
 }
 
 export async function jsonRequest<T>(input: RequestInfo | URL, init: JsonRequestInit = {}): Promise<T> {
-  const { json, includeCsrf = false, headers, ...rest } = init
+  const { json, includeCsrf = false, csrfToken = '', headers, ...rest } = init
   const finalHeaders = new Headers(headers ?? undefined)
   if (json !== undefined) {
     finalHeaders.set('Content-Type', 'application/json')
   }
   if (includeCsrf) {
-    finalHeaders.set('X-CSRFToken', getCsrfToken())
+    finalHeaders.set('X-CSRFToken', csrfToken || getCsrfToken())
   }
 
   const body = json !== undefined ? JSON.stringify(json) : rest.body

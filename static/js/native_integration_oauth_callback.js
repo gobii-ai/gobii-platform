@@ -24,6 +24,18 @@ function getCsrfToken() {
   return match ? decodeURIComponent(match[1]) : "";
 }
 
+async function refreshCsrfToken() {
+  const response = await fetch("/api/homepage/csrf-token/", {
+    credentials: "same-origin",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error("Unable to refresh the CSRF token.");
+  }
+  const payload = await response.json();
+  return payload && typeof payload.csrfToken === "string" ? payload.csrfToken : getCsrfToken();
+}
+
 function getPendingSession(state) {
   const raw = localStorage.getItem(`gobii:native_oauth_state:${state}`);
   if (!raw) {
@@ -37,10 +49,10 @@ function getPendingSession(state) {
   }
 }
 
-function buildCallbackHeaders(sessionData) {
+function buildCallbackHeaders(sessionData, csrfToken) {
   const headers = {
     "Content-Type": "application/json",
-    "X-CSRFToken": getCsrfToken(),
+    "X-CSRFToken": csrfToken || getCsrfToken(),
   };
   const context = sessionData && sessionData.context;
   if (context && typeof context === "object" && context.type && context.id) {
@@ -163,9 +175,11 @@ async function completeOAuth() {
   setStatus("Securely storing integration...");
 
   try {
+    const csrfToken = await refreshCsrfToken();
     const response = await fetch(`/console/api/native-integrations/${encodeURIComponent(sessionData.providerKey)}/callback/`, {
       method: "POST",
-      headers: buildCallbackHeaders(sessionData),
+      credentials: "same-origin",
+      headers: buildCallbackHeaders(sessionData, csrfToken),
       body: JSON.stringify({
         authorization_code: code,
         state,

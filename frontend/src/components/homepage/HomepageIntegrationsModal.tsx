@@ -58,11 +58,31 @@ function fallbackAppForSlug(slug: string): PipedreamAppSummary {
   }
 }
 
-async function ensureHomepageCsrf(): Promise<void> {
-  await fetch('/api/homepage/csrf-token/', {
+function scrollPageToTop() {
+  window.scrollTo(0, 0)
+  document.documentElement.scrollTop = 0
+  document.body.scrollTop = 0
+}
+
+async function ensureHomepageCsrf(): Promise<string> {
+  const response = await fetch('/api/homepage/csrf-token/', {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   })
+  if (!response.ok) {
+    throw new Error('Unable to refresh the CSRF token.')
+  }
+  const payload = await response.json() as { csrfToken?: unknown } | null
+  return typeof payload?.csrfToken === 'string' ? payload.csrfToken : ''
+}
+
+export function buildHomepageNativeIntegrationLoginReturnUrl(
+  provider: Pick<NativeIntegrationProvider, 'displayName' | 'providerKey'>,
+  currentHref = typeof window === 'undefined' ? '/' : window.location.href,
+): string {
+  const url = new URL(currentHref, typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
+  url.searchParams.set('integration_search', provider.displayName || provider.providerKey)
+  return `${url.pathname}${url.search}${url.hash}`
 }
 
 export function HomepageIntegrationsModal({
@@ -168,8 +188,8 @@ export function HomepageIntegrationsModal({
 
   const nativeConnectMutation = useMutation({
     mutationFn: async ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) => {
-      await ensureHomepageCsrf()
-      return startNativeIntegrationConnect(provider.connectUrl)
+      const csrfToken = await ensureHomepageCsrf()
+      return startNativeIntegrationConnect(provider.connectUrl, csrfToken)
     },
     onMutate: ({ provider }) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
@@ -199,8 +219,8 @@ export function HomepageIntegrationsModal({
 
   const nativeDisconnectMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
-      await ensureHomepageCsrf()
-      return revokeNativeIntegration(provider.revokeUrl).then(() => provider)
+      const csrfToken = await ensureHomepageCsrf()
+      return revokeNativeIntegration(provider.revokeUrl, csrfToken).then(() => provider)
     },
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
@@ -217,9 +237,16 @@ export function HomepageIntegrationsModal({
 
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
-      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedCount = await openGoogleDrivePicker(token)
-      return { provider, selectedCount }
+      const previousScrollX = window.scrollX
+      const previousScrollY = window.scrollY
+      try {
+        scrollPageToTop()
+        const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+        const selectedCount = await openGoogleDrivePicker(token)
+        return { provider, selectedCount }
+      } finally {
+        window.scrollTo(previousScrollX, previousScrollY)
+      }
     },
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
@@ -333,7 +360,7 @@ export function HomepageIntegrationsModal({
                 disabled={nativeConnectMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
                 onConnect={() => {
                   if (!isAuthenticated) {
-                    scheduleLoginRedirect()
+                    scheduleLoginRedirect(buildHomepageNativeIntegrationLoginReturnUrl(provider))
                     return
                   }
                   nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })
@@ -548,6 +575,7 @@ export function HomepageIntegrationsModal({
           icon={Sparkles}
           iconBgClass="bg-blue-100"
           iconColorClass="text-blue-700"
+          dismissible={!nativePickerMutation.isPending}
         >
           {body}
         </Modal>
