@@ -161,7 +161,12 @@ from .public_template_urls import (
 )
 from .examples_data import SIMPLE_EXAMPLES, RICH_EXAMPLES
 from .forms import MarketingContactForm
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+    AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+)
 from console.views import build_llm_intelligence_props
 from api.agent.core.llm_config import resolve_preferred_tier_for_owner, get_llm_tier_label
 from django.contrib import sitemaps
@@ -702,6 +707,7 @@ def _seed_landing_launch_session(request, landing: LandingPage) -> None:
     request.session.pop(PREFERRED_LLM_TIER_SESSION_KEY, None)
     request.session.pop(AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, None)
     request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
     request.session.modified = True
 
 
@@ -1332,6 +1338,7 @@ class HomeAgentSpawnView(TemplateView):
 
             # Clear any previously selected pretrained worker so we treat this as a fresh custom charter
             request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+            request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
             # Store charter in session for later use
             user_charter = form.cleaned_data['charter']
             if user_charter:
@@ -1625,6 +1632,7 @@ def _get_pretrained_worker_template_or_404(code: str | None):
 def _seed_pretrained_worker_session(request, template) -> None:
     request.session["agent_charter"] = template.charter
     request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
     request.session["agent_charter_source"] = "template"
     request.session.modified = True
 
@@ -1823,6 +1831,7 @@ def _resolve_public_template_for_route(*, handle: str | None, template_slug: str
 def _seed_public_template_session(request, template: PersistentAgentTemplate) -> str | None:
     request.session["agent_charter"] = template.charter
     request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PUBLIC_TEMPLATE
     request.session["agent_charter_source"] = "template"
 
     # Template launches are referral attribution, so choosing one supersedes

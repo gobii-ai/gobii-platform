@@ -1744,6 +1744,10 @@ class PretrainedWorkerHireRedirectTests(TestCase):
             session.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
             template.code,
         )
+        self.assertEqual(
+            session.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+        )
 
     def test_launch_redirects_anon_to_login_and_stashes_template(self):
         template = PretrainedWorkerTemplateService.get_active_templates()[0]
@@ -1780,6 +1784,10 @@ class PretrainedWorkerHireRedirectTests(TestCase):
         self.assertEqual(
             cached_charter_payload.get(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY),
             template.code,
+        )
+        self.assertEqual(
+            cached_charter_payload.get(page_views.AGENT_TEMPLATE_SOURCE_SESSION_KEY),
+            page_views.AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)

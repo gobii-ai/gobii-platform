@@ -30,6 +30,7 @@ OAUTH_CHARTER_SESSION_KEYS = (
     "agent_charter",
     "agent_charter_override",
     PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY,
+    "agent_template_source",
     "agent_charter_source",
     "agent_preferred_llm_tier",
     "agent_selected_pipedream_app_slugs",

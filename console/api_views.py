@@ -248,7 +248,11 @@ from console.daily_credit import (
     parse_daily_credit_limit,
     serialize_daily_credit_payload,
 )
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY, enable_agent_sms_contact
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+    enable_agent_sms_contact,
+)
 from console.agent_reassignment import reassign_agent_organization
 from console.views import _track_org_event_for_console, _mcp_server_event_properties
 from api.views import PersistentAgentViewSet, cancel_browser_use_task
@@ -713,6 +717,7 @@ def _persist_quick_create_draft(
     # Treat immersive quick-create as a fresh custom draft, not a continuation
     # of a previously selected template.
     request.session.pop(PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY, None)
+    request.session.pop(AGENT_TEMPLATE_SOURCE_SESSION_KEY, None)
     request.session.modified = True
 
 

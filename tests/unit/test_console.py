@@ -28,8 +28,13 @@ from util.onboarding import (
     TRIAL_ONBOARDING_TARGET_SESSION_KEY,
 )
 from api.models import MCPServerConfig, PipedreamAppSelection
-from console.agent_creation import AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY
+from console.agent_creation import (
+    AGENT_SELECTED_PIPEDREAM_APP_SLUGS_SESSION_KEY,
+    AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER,
+    AGENT_TEMPLATE_SOURCE_SESSION_KEY,
+)
 from api.services.pipedream_apps import get_owner_apps_state
+from util.analytics import AnalyticsEvent
 from util.trial_enforcement import PERSONAL_FREE_TRIAL_ENFORCEMENT_WAFFLE_SWITCH
 
 
@@ -1989,6 +1994,40 @@ class ConsoleViewsTest(TestCase):
             owner_user=self.user,
         )
         self.assertEqual(owner_state.effective_app_slugs, ["trello", "notion", "slack"])
+
+    @override_settings(PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False)
+    @patch("console.agent_creation.process_agent_events_task.delay")
+    @patch("console.agent_creation.Analytics.track_event")
+    @tag("batch_console_agents_management")
+    def test_quick_spawn_created_event_includes_pretrained_worker_template_source(
+        self,
+        mock_track_event,
+        _mock_delay,
+    ):
+        from agents.services import PretrainedWorkerTemplateService
+
+        template = PretrainedWorkerTemplateService.get_active_templates()[0]
+        session = self.client.session
+        session["agent_charter"] = template.charter
+        session["agent_charter_source"] = "template"
+        session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+        session[AGENT_TEMPLATE_SOURCE_SESSION_KEY] = AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER
+        session.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.get(reverse("agent_quick_spawn"))
+
+        self.assertEqual(response.status_code, 302)
+        created_event_calls = [
+            call.kwargs
+            for call in mock_track_event.call_args_list
+            if call.kwargs.get("event") == AnalyticsEvent.PERSISTENT_AGENT_CREATED
+        ]
+        self.assertEqual(len(created_event_calls), 1)
+        properties = created_event_calls[0]["properties"]
+        self.assertEqual(properties.get("template_code"), template.code)
+        self.assertEqual(properties.get("template_source"), AGENT_TEMPLATE_SOURCE_PRETRAINED_WORKER)
+        self.assertNotIn(AGENT_TEMPLATE_SOURCE_SESSION_KEY, self.client.session)
 
     @tag("batch_console_agents_management")
     @patch('api.services.agent_settings_resume.process_agent_events_task.delay')
