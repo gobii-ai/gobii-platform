@@ -12,6 +12,7 @@ from api.evals.scenarios.google_sheets_native import (
     GOOGLE_SHEETS_NATIVE_LIST_TABS,
     GOOGLE_SHEETS_NATIVE_READ_RANGE,
     GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
+    GOOGLE_SHEETS_NATIVE_SEARCH_TEST_BY_NAME,
     GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
     HttpRequestExpectation,
     _call_has_partial_drive_query,
@@ -23,12 +24,12 @@ from api.evals.suites import SuiteRegistry
 
 @tag("eval_sim")
 class GoogleSheetsNativeScenarioTests(SimpleTestCase):
-    def test_google_sheets_native_suite_contains_five_scenarios(self):
+    def test_google_sheets_native_suite_contains_six_scenarios(self):
         suite = SuiteRegistry.get(GOOGLE_SHEETS_NATIVE_SUITE_SLUG)
 
         self.assertIsNotNone(suite)
         self.assertEqual(tuple(suite.scenario_slugs), GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS)
-        self.assertEqual(len(suite.scenario_slugs), 5)
+        self.assertEqual(len(suite.scenario_slugs), 6)
 
     def test_generated_scenarios_have_expected_metadata(self):
         registered = ScenarioRegistry.list_all()
@@ -92,6 +93,19 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
             rule_terms,
         )
 
+    def test_search_test_case_requires_complete_drive_q_filter(self):
+        search_case = next(
+            case for case in GOOGLE_SHEETS_NATIVE_CASES if case.slug == GOOGLE_SHEETS_NATIVE_SEARCH_TEST_BY_NAME
+        )
+
+        expectation = search_case.expected_http_requests[0]
+        self.assertIn("www.googleapis.com/drive/v3/files", expectation.url_terms)
+        self.assertIn("application/vnd.google-apps.spreadsheet", expectation.url_terms)
+        self.assertIn("trashed", expectation.url_terms)
+        self.assertIn("false", expectation.url_terms)
+        self.assertIn("name", expectation.url_terms)
+        self.assertIn("test", expectation.url_terms)
+
     def test_drive_mock_requires_exact_spreadsheet_mime_type(self):
         rule = _drive_spreadsheet_rule([])
         good_query = (
@@ -149,3 +163,17 @@ class GoogleSheetsNativeScenarioTests(SimpleTestCase):
 
         self.assertTrue(_call_has_partial_drive_query(partial_call))
         self.assertFalse(_call_has_partial_drive_query(complete_call))
+
+    def test_partial_drive_query_detector_flags_repeated_malformed_q_filter(self):
+        repeated_calls = [
+            SimpleNamespace(
+                tool_name="http_request",
+                tool_params={"url": "https://www.googleapis.com/drive/v3/files?q=mimeType%20%3D%20"},
+            ),
+            SimpleNamespace(
+                tool_name="http_request",
+                tool_params={"url": "https://www.googleapis.com/drive/v3/files?q=mimeType%20%3D%20"},
+            ),
+        ]
+
+        self.assertTrue(all(_call_has_partial_drive_query(call) for call in repeated_calls))

@@ -21,6 +21,7 @@ from api.models import (
 GOOGLE_SHEETS_NATIVE_SUITE_SLUG = "google_sheets_native"
 
 GOOGLE_SHEETS_NATIVE_FIND_SHEET_BY_NAME = "google_sheets_native_find_sheet_by_name"
+GOOGLE_SHEETS_NATIVE_SEARCH_TEST_BY_NAME = "google_sheets_native_search_test_by_name"
 GOOGLE_SHEETS_NATIVE_LIST_TABS = "google_sheets_native_list_tabs"
 GOOGLE_SHEETS_NATIVE_READ_RANGE = "google_sheets_native_read_range"
 GOOGLE_SHEETS_NATIVE_APPEND_ROW = "google_sheets_native_append_row"
@@ -149,6 +150,13 @@ SALES_TRACKER_FILE = {
     "webViewLink": "https://docs.google.com/spreadsheets/d/sheet-sales-q2/edit",
 }
 
+TEST_TRACKER_FILE = {
+    "id": "sheet-test-2026",
+    "name": "Gobii Google Sheets Integration Test 2026-06-02",
+    "mimeType": "application/vnd.google-apps.spreadsheet",
+    "webViewLink": "https://docs.google.com/spreadsheets/d/sheet-test-2026/edit",
+}
+
 
 GOOGLE_SHEETS_NATIVE_CASES = (
     GoogleSheetsNativeCase(
@@ -196,6 +204,33 @@ GOOGLE_SHEETS_NATIVE_CASES = (
         ),
         response_term_groups=(("Leads",), ("Pipeline",)),
         tags=("drive_discovery", "metadata"),
+    ),
+    GoogleSheetsNativeCase(
+        slug=GOOGLE_SHEETS_NATIVE_SEARCH_TEST_BY_NAME,
+        description="Search for a selected spreadsheet named Test with a complete Drive q filter.",
+        prompt=(
+            "Search for my Google Sheet named Test and tell me which matching spreadsheets you can access. "
+            "Use the native Google Sheets integration."
+        ),
+        http_rules=(
+            _drive_spreadsheet_rule([TEST_TRACKER_FILE], "name", "test"),
+        ),
+        expected_http_requests=(
+            HttpRequestExpectation(
+                name="drive_test_spreadsheet_search",
+                url_terms=(
+                    "www.googleapis.com/drive/v3/files",
+                    "mimetype",
+                    "application/vnd.google-apps.spreadsheet",
+                    "trashed",
+                    "false",
+                    "name",
+                    "test",
+                ),
+            ),
+        ),
+        response_term_groups=(("Gobii Google Sheets Integration Test", "sheet-test-2026"),),
+        tags=("drive_discovery", "q_regression"),
     ),
     GoogleSheetsNativeCase(
         slug=GOOGLE_SHEETS_NATIVE_LIST_TABS,
