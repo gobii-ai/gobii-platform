@@ -65,6 +65,15 @@ async function ensureHomepageCsrf(): Promise<void> {
   })
 }
 
+export function buildHomepageNativeIntegrationLoginReturnUrl(
+  provider: Pick<NativeIntegrationProvider, 'displayName' | 'providerKey'>,
+  currentHref = typeof window === 'undefined' ? '/' : window.location.href,
+): string {
+  const url = new URL(currentHref, typeof window === 'undefined' ? 'http://localhost' : window.location.origin)
+  url.searchParams.set('integration_search', provider.displayName || provider.providerKey)
+  return `${url.pathname}${url.search}${url.hash}`
+}
+
 export function HomepageIntegrationsModal({
   builtins,
   initialSearchTerm,
@@ -333,7 +342,7 @@ export function HomepageIntegrationsModal({
                 disabled={nativeConnectMutation.isPending || nativeDisconnectMutation.isPending || nativePickerMutation.isPending}
                 onConnect={() => {
                   if (!isAuthenticated) {
-                    scheduleLoginRedirect()
+                    scheduleLoginRedirect(buildHomepageNativeIntegrationLoginReturnUrl(provider))
                     return
                   }
                   nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })

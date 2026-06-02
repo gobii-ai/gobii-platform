@@ -48,11 +48,12 @@ function applyConsoleContextHeaders(headers: Headers): boolean {
   return applied
 }
 
-function buildLoginUrl(): string {
+export function buildLoginUrl(nextUrl?: string): string {
   if (typeof window === 'undefined') {
-    return '/accounts/login/'
+    const params = nextUrl ? `?next=${encodeURIComponent(nextUrl)}` : ''
+    return `/accounts/login/${params}`
   }
-  const next = `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
+  const next = nextUrl || `${window.location.pathname}${window.location.search}${window.location.hash}` || '/'
   return `/accounts/login/?next=${encodeURIComponent(next)}`
 }
 
@@ -65,7 +66,7 @@ function isLoginPath(url: string): boolean {
   }
 }
 
-export function scheduleLoginRedirect(): void {
+export function scheduleLoginRedirect(nextUrl?: string): void {
   if (typeof window === 'undefined') {
     return
   }
@@ -76,7 +77,7 @@ export function scheduleLoginRedirect(): void {
     return
   }
   loginRedirectScheduled = true
-  window.location.assign(buildLoginUrl())
+  window.location.assign(buildLoginUrl(nextUrl))
 }
 
 function maybeRedirectToLogin(response: Response): void {
