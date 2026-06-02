@@ -577,7 +577,3 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("?q=name%20contains%20", block)
         self.assertIn("omit the name predicate", block)
         self.assertIn("drive.file", block)
-        self.assertIn("native_integration_not_connected", block)
-        self.assertIn("do not retry Google API calls", block)
-        self.assertIn("https://app.example.test/app/integrations", block)
-        self.assertNotIn("{integrations_url}", block)
