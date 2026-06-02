@@ -72,8 +72,8 @@ async function ensureHomepageCsrf(): Promise<string> {
   if (!response.ok) {
     throw new Error('Unable to refresh the CSRF token.')
   }
-  const payload = await response.json() as { csrfToken?: unknown }
-  return typeof payload.csrfToken === 'string' ? payload.csrfToken : ''
+  const payload = await response.json() as { csrfToken?: unknown } | null
+  return typeof payload?.csrfToken === 'string' ? payload.csrfToken : ''
 }
 
 export function buildHomepageNativeIntegrationLoginReturnUrl(

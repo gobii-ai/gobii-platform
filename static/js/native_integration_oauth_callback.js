@@ -33,7 +33,7 @@ async function refreshCsrfToken() {
     throw new Error("Unable to refresh the CSRF token.");
   }
   const payload = await response.json();
-  return typeof payload.csrfToken === "string" ? payload.csrfToken : getCsrfToken();
+  return payload && typeof payload.csrfToken === "string" ? payload.csrfToken : getCsrfToken();
 }
 
 function getPendingSession(state) {
