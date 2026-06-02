@@ -214,7 +214,7 @@ def get_send_email_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true=another action follows; false=done.",
+                        "description": "REQUIRED. true=another action follows; false=done and no current plan items remain unfinished.",
                     },
                 },
                 "required": ["to_address", "subject", "mobile_first_html", "will_continue_work"],

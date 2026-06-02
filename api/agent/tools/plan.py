@@ -40,7 +40,7 @@ MESSAGE_DELIVERABLE_GUIDANCE = (
     "lookup, briefing, or one-shot chart. Message deliverables must come from send_email, send_sms, or send_chat_message. "
     "Use the exact returned message_id UUID, or omit messages. If you are sending the final message now and a completion "
     "plan update is still needed, send it first with will_continue_work=true, then call update_plan after the send tool returns. "
-    "For explicit deep or exhaustive research with no file deliverables, send the final answer with will_continue_work=false. "
+    "For explicit deep or exhaustive research with no file deliverables and no unfinished current plan items, send the final answer with will_continue_work=false. "
     "Do not include peer messages from send_agent_message."
 )
 
@@ -168,7 +168,7 @@ def get_update_plan_tool() -> dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = continue after this plan update; false = stop because all work is done or deferred.",
+                        "description": "REQUIRED. true = continue after this plan update; false = stop because all work is done or deferred and no current plan items remain unfinished.",
                     },
                 },
                 "required": ["plan", "will_continue_work"],
@@ -364,6 +364,7 @@ def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> 
         return None
 
     incoming_steps: list[str] = []
+    incoming_statuses: list[str] = []
     for item in raw_plan:
         if not isinstance(item, dict):
             return None
@@ -372,8 +373,23 @@ def build_redundant_research_plan_skip_result(agent, params: dict[str, Any]) -> 
         if not step or status not in PLAN_STATUSES:
             return None
         incoming_steps.append(step)
+        incoming_statuses.append(status)
 
     if len(incoming_steps) != len(existing_cards):
+        return None
+
+    existing_statuses_by_key = {
+        _normalize_step_key(card.title): card.status
+        for card in existing_cards
+    }
+    incoming_statuses_by_key = {
+        _normalize_step_key(step): status
+        for step, status in zip(incoming_steps, incoming_statuses)
+    }
+    if (
+        set(existing_statuses_by_key) != set(incoming_statuses_by_key)
+        or any(incoming_statuses_by_key[key] != existing_statuses_by_key[key] for key in incoming_statuses_by_key)
+    ):
         return None
 
     plan_text = " ".join(incoming_steps).casefold()

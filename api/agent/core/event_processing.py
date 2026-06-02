@@ -127,7 +127,7 @@ from ..tools.sqlite_skills import apply_sqlite_skill_updates, refresh_skills_for
 from ..tools.custom_tools import execute_create_custom_tool
 from ..tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME
 from ..tools.file_str_replace import execute_file_str_replace
-from ..tools.plan import build_redundant_research_plan_skip_result, execute_update_plan
+from ..tools.plan import build_plan_snapshot, build_redundant_research_plan_skip_result, execute_update_plan
 from ..tools.planning import execute_end_planning
 from ..tools.runtime_execution_context import tool_execution_context
 from ..tools.sqlite_state import agent_sqlite_db, get_sqlite_db_path
@@ -1796,6 +1796,33 @@ class _FinalizedToolBatch:
     human_input_request_ok: bool = False
 
 
+def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
+    try:
+        snapshot = build_plan_snapshot(agent)
+    except Exception:
+        logger.debug("Failed to build plan snapshot for terminal-send check.", exc_info=True)
+        return False
+    return snapshot.todo_count > 0 or snapshot.doing_count > 0
+
+
+def _record_terminal_send_unfinished_plan_correction(
+    agent: PersistentAgent,
+    *,
+    attach_completion: Any,
+    attach_prompt_archive: Any,
+) -> None:
+    step_kwargs = {
+        "agent": agent,
+        "description": (
+            "Terminal message delivery requested stop, but the current plan still has unfinished items. "
+            "Call update_plan with the complete current plan state before stopping."
+        ),
+    }
+    attach_completion(step_kwargs)
+    step = PersistentAgentStep.objects.create(**step_kwargs)
+    attach_prompt_archive(step)
+
+
 def _should_skip_stale_planning_mode_after_terminal_delivery(
     agent: PersistentAgent,
     finalized_batch: _FinalizedToolBatch,
@@ -3196,6 +3223,19 @@ def _finalize_tool_batch(
         executed_calls += 1
         if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
             executed_non_message_action = True
+
+    if (
+        agent.planning_state != PersistentAgent.PlanningState.PLANNING
+        and terminal_message_delivery_ok
+        and not followup_required
+        and _plan_has_unfinished_items(agent)
+    ):
+        _record_terminal_send_unfinished_plan_correction(
+            agent,
+            attach_completion=attach_completion,
+            attach_prompt_archive=attach_prompt_archive,
+        )
+        followup_required = True
 
     return _FinalizedToolBatch(
         executed_calls=executed_calls,

@@ -418,17 +418,45 @@ class TestBatchToolCallsWithSleep(TestCase):
         resp = MagicMock(); resp.choices = [choice]
         resp.model_extra = {"usage": MagicMock(prompt_tokens=10, completion_tokens=5, total_tokens=15, prompt_tokens_details=MagicMock(cached_tokens=0))}
 
+        tc_plan = mk_tc(
+            'update_plan',
+            '{"plan": [{"step": "Finish outstanding work", "status": "done"}], "will_continue_work": false}',
+        )
+        followup_msg = MagicMock()
+        followup_msg.tool_calls = [tc_plan]
+        followup_msg.content = None
+        followup_choice = MagicMock(); followup_choice.message = followup_msg
+        followup_resp = MagicMock(); followup_resp.choices = [followup_choice]
+        followup_resp.model_extra = {"usage": MagicMock(prompt_tokens=4, completion_tokens=2, total_tokens=6, prompt_tokens_details=MagicMock(cached_tokens=0))}
+
         mock_completion.side_effect = [
             (resp, {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "model": "m", "provider": "p"}),
+            (followup_resp, {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6, "model": "m", "provider": "p"}),
         ]
 
         from api.agent.core import event_processing as ep
         with patch.object(ep, 'MAX_AGENT_LOOP_ITERATIONS', 2):
             ep._run_agent_loop(self.agent, is_first_run=False)
 
-        self.assertEqual(mock_completion.call_count, 1)
-        self.assertEqual(len(notices), 1)
+        self.assertEqual(mock_completion.call_count, 2)
+        self.assertEqual(len(notices), 2)
         self.assertIsNone(notices[0])
+        self.assertIsNone(notices[1])
+        self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="current plan still has unfinished items",
+            ).exists()
+        )
+        self.assertFalse(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent=self.agent,
+                status__in=[
+                    PersistentAgentKanbanCard.Status.TODO,
+                    PersistentAgentKanbanCard.Status.DOING,
+                ],
+            ).exists()
+        )
 
     @patch('api.agent.core.event_processing._ensure_credit_for_tool', return_value={"cost": None, "credit": None})
     @patch('api.agent.core.event_processing.execute_send_chat_message', return_value={"status": "ok", "auto_sleep_ok": True})
