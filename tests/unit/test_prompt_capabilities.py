@@ -160,15 +160,22 @@ class AgentCapabilitiesPromptTests(TestCase):
             contents,
         )
         self.assertIn(
-            "Send your final report to the user with will_continue_work=false on that final send tool",
+            "Plan-aware termination sequence",
             contents,
         )
         self.assertIn(
-            "If you still need to mark the plan done after the report is already sent, call update_plan with will_continue_work=false",
+            "Send the final report with will_continue_work=false only if no current plan items remain todo/doing",
+            contents,
+        )
+        self.assertIn(
+            "send with will_continue_work=true, then call update_plan with every finished/deferred item resolved and will_continue_work=false",
+            contents,
+        )
+        self.assertIn(
+            "After the final send and final plan update, stop with no extra message",
             contents,
         )
         self.assertIn("Plain text is invisible and update_plan is not delivery", contents)
-        self.assertIn("no extra turn, no announcement or confirmation message", contents)
         self.assertNotIn(
             "Need to send the user your answer, summary, or final report → will_continue_work=true",
             contents,
