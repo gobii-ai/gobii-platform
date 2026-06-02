@@ -3466,6 +3466,11 @@ class ClearSignupTrackingView(View):
 class SolutionsIndexView(TemplateView):
     template_name = "solutions/index.html"
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["suppress_preline"] = True
+        return context
+
 
 class SolutionView(TemplateView):
     # Solutions with dedicated landing page templates
@@ -3641,6 +3646,7 @@ class SolutionView(TemplateView):
         }
 
         context.update({
+            'suppress_preline': True,
             'solution_title': data['title'],
             'solution_tagline': data['tagline'],
             'solution_description': data['description'],

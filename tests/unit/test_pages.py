@@ -2143,6 +2143,15 @@ class SolutionCtaCopyTests(TestCase):
             )
         self.assertEqual(len(soup.find_all("script", {"type": "application/ld+json"})), 3)
 
+    def test_solution_pages_do_not_load_preline(self):
+        for path in ("/solutions/", "/solutions/recruiting/"):
+            with self.subTest(path=path):
+                response = self.client.get(path)
+
+                self.assertEqual(response.status_code, 200)
+                soup = BeautifulSoup(response.content, "html.parser")
+                self.assertIsNone(soup.find("script", {"src": re.compile("preline")}))
+
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_solutions_dropdown_links_to_solutions_index(self):
         response = self.client.get("/")
