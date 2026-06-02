@@ -191,16 +191,17 @@ export function getCsrfToken(): string {
 type JsonRequestInit = RequestInit & {
   json?: unknown
   includeCsrf?: boolean
+  csrfToken?: string
 }
 
 export async function jsonRequest<T>(input: RequestInfo | URL, init: JsonRequestInit = {}): Promise<T> {
-  const { json, includeCsrf = false, headers, ...rest } = init
+  const { json, includeCsrf = false, csrfToken = '', headers, ...rest } = init
   const finalHeaders = new Headers(headers ?? undefined)
   if (json !== undefined) {
     finalHeaders.set('Content-Type', 'application/json')
   }
   if (includeCsrf) {
-    finalHeaders.set('X-CSRFToken', getCsrfToken())
+    finalHeaders.set('X-CSRFToken', csrfToken || getCsrfToken())
   }
 
   const body = json !== undefined ? JSON.stringify(json) : rest.body

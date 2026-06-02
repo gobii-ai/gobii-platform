@@ -133,10 +133,14 @@ export async function fetchNativeIntegrations(listUrl: string): Promise<NativeIn
   }
 }
 
-export async function startNativeIntegrationConnect(connectUrl: string): Promise<NativeIntegrationConnectResponse> {
+export async function startNativeIntegrationConnect(
+  connectUrl: string,
+  csrfToken?: string,
+): Promise<NativeIntegrationConnectResponse> {
   const payload = await jsonRequest<NativeIntegrationConnectResponseDTO>(connectUrl, {
     method: 'POST',
     includeCsrf: true,
+    csrfToken,
     json: {},
   })
   return {
@@ -168,10 +172,11 @@ export async function fetchNativeIntegrationFiles(filesUrl: string): Promise<Nat
   }
 }
 
-export async function revokeNativeIntegration(revokeUrl: string): Promise<{ revoked: boolean }> {
+export async function revokeNativeIntegration(revokeUrl: string, csrfToken?: string): Promise<{ revoked: boolean }> {
   return jsonRequest<{ revoked: boolean }>(revokeUrl, {
     method: 'POST',
     includeCsrf: true,
+    csrfToken,
     json: {},
   })
 }

@@ -114,7 +114,7 @@ GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
     icon="google_drive",
     authorization_params={
         "access_type": "offline",
-        "include_granted_scopes": "true",
+        "include_granted_scopes": "false",
         "prompt": "consent",
     },
 )

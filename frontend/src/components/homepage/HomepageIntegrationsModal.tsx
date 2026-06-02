@@ -58,11 +58,16 @@ function fallbackAppForSlug(slug: string): PipedreamAppSummary {
   }
 }
 
-async function ensureHomepageCsrf(): Promise<void> {
-  await fetch('/api/homepage/csrf-token/', {
+async function ensureHomepageCsrf(): Promise<string> {
+  const response = await fetch('/api/homepage/csrf-token/', {
     credentials: 'same-origin',
     headers: { Accept: 'application/json' },
   })
+  if (!response.ok) {
+    throw new Error('Unable to refresh the CSRF token.')
+  }
+  const payload = await response.json() as { csrfToken?: unknown }
+  return typeof payload.csrfToken === 'string' ? payload.csrfToken : ''
 }
 
 export function buildHomepageNativeIntegrationLoginReturnUrl(
@@ -177,8 +182,8 @@ export function HomepageIntegrationsModal({
 
   const nativeConnectMutation = useMutation({
     mutationFn: async ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) => {
-      await ensureHomepageCsrf()
-      return startNativeIntegrationConnect(provider.connectUrl)
+      const csrfToken = await ensureHomepageCsrf()
+      return startNativeIntegrationConnect(provider.connectUrl, csrfToken)
     },
     onMutate: ({ provider }) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
@@ -208,8 +213,8 @@ export function HomepageIntegrationsModal({
 
   const nativeDisconnectMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
-      await ensureHomepageCsrf()
-      return revokeNativeIntegration(provider.revokeUrl).then(() => provider)
+      const csrfToken = await ensureHomepageCsrf()
+      return revokeNativeIntegration(provider.revokeUrl, csrfToken).then(() => provider)
     },
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
