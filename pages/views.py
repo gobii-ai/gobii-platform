@@ -1637,7 +1637,7 @@ def _seed_pretrained_worker_session(request, template) -> None:
     request.session.modified = True
 
 
-def _pretrained_worker_analytics_properties(request, template, *, default_source_page: str) -> dict:
+def _template_launch_analytics_properties(request, template, *, default_source_page: str) -> dict:
     source_page = request.POST.get("source_page") or request.GET.get("source_page") or default_source_page
     flow = (request.POST.get("flow") or request.GET.get("flow") or "").strip().lower()
     properties = {
@@ -1656,7 +1656,7 @@ class PretrainedWorkerLaunchView(View):
         _seed_pretrained_worker_session(request, template)
         _set_template_launch_trial_onboarding_if_needed(request)
 
-        analytics_properties = _pretrained_worker_analytics_properties(
+        analytics_properties = _template_launch_analytics_properties(
             request,
             template,
             default_source_page="pretrained_worker_launch",
@@ -1896,18 +1896,6 @@ def _set_template_launch_trial_onboarding_if_needed(request) -> None:
         set_trial_onboarding_requires_plan_selection(request, required=True)
 
 
-def _public_template_analytics_properties(request, template: PersistentAgentTemplate, *, default_source_page: str) -> dict:
-    source_page = request.POST.get("source_page") or request.GET.get("source_page") or default_source_page
-    flow = (request.POST.get("flow") or request.GET.get("flow") or "").strip().lower()
-    properties = {
-        "source_page": source_page,
-        "template_code": template.code,
-    }
-    if flow:
-        properties["flow"] = flow
-    return properties
-
-
 def _public_site_absolute_url(path_or_url: str) -> str:
     value = str(path_or_url or "").strip()
     if value.startswith(("http://", "https://")):
@@ -2061,7 +2049,7 @@ class PublicTemplateLaunchView(View):
         _set_template_launch_trial_onboarding_if_needed(request)
         _track_anonymous_public_template_capture(request, template, previous_referrer_code)
 
-        analytics_properties = _public_template_analytics_properties(
+        analytics_properties = _template_launch_analytics_properties(
             request,
             template,
             default_source_page="public_template_launch",
