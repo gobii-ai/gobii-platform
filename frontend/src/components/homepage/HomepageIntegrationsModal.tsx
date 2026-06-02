@@ -18,8 +18,8 @@ import { safeErrorMessage } from '../../api/safeErrorMessage'
 import { AgentChatMobileSheet } from '../agentChat/AgentChatMobileSheet'
 import { Modal } from '../common/Modal'
 import {
-  NativeProviderIcon,
   NativeIntegrationFilesDisclosure,
+  NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
   openGoogleDrivePicker,
@@ -607,9 +607,7 @@ function HomepageNativeProviderRow({
     <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
       <div className="flex flex-wrap items-start gap-3">
         <div className="flex min-w-72 flex-1 items-start gap-3">
-          <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
-            <NativeProviderIcon provider={provider} />
-          </span>
+          <NativeProviderIconTile provider={provider} />
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-sm font-semibold text-slate-900">{provider.displayName}</p>

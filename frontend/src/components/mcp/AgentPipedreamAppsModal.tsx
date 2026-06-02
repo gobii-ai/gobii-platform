@@ -35,8 +35,8 @@ import {
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
 import {
-  NativeProviderIcon,
   NativeIntegrationFilesDisclosure,
+  NativeProviderIconTile,
   nativeIntegrationFilesQueryKey,
   nativeOAuthContextPayload,
   openGoogleDrivePicker,
@@ -373,9 +373,7 @@ function AgentNativeAppRowItem({
 function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
   return (
     <div className="flex min-w-0 items-center gap-3">
-      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
-        <NativeProviderIcon provider={provider} />
-      </span>
+      <NativeProviderIconTile provider={provider} />
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
