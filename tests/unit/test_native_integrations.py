@@ -828,5 +828,6 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("Never invent webhook URLs", block)
         self.assertIn("/app/integrations", block)
         self.assertIn("mixed_people/api_search", block)
+        self.assertIn("do not use `/mixed_people/search`", block)
         self.assertIn("mixed_companies/search", block)
         self.assertIn("people/match", block)

@@ -62,6 +62,16 @@ class ApolloNativeScenarioTests(SimpleTestCase):
             for tool_name in FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES:
                 self.assertNotIn(tool_name, prompt_and_description)
 
+    def test_eval_stop_policy_allows_sqlite_batch_for_result_shaping(self):
+        scenario = ScenarioRegistry.get(APOLLO_NATIVE_SCENARIO_SLUGS[0])
+        policy = scenario._eval_stop_policy()
+
+        self.assertIn("sqlite_batch", policy["allowed_tool_names"])
+        self.assertIn("http_request", policy["allowed_tool_names"])
+        self.assertIn("send_chat_message", policy["allowed_tool_names"])
+        for tool_name in FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES:
+            self.assertIn(tool_name, policy["stop_on_tool_names"])
+
     def test_expected_http_request_requires_completed_tool_call(self):
         expectation = ApolloHttpRequestExpectation(
             name="people_search",

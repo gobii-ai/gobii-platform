@@ -330,7 +330,7 @@ class ApolloNativeScenario(EvalScenario, ScenarioExecutionTools):
 
     def _eval_stop_policy(self) -> dict[str, Any]:
         return {
-            "allowed_tool_names": ["http_request", "send_chat_message"],
+            "allowed_tool_names": ["http_request", "send_chat_message", "sqlite_batch"],
             "ignored_tool_names": ["sleep_until_next_trigger"],
             "stop_on_unexpected_relevant_tool": True,
             "stop_on_tool_names": list(FORBIDDEN_APOLLO_DISCOVERY_TOOL_NAMES),
