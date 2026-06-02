@@ -51,6 +51,19 @@
   .recruiting-content {
     position: relative;
     z-index: 10;
+    min-height: inherit;
+  }
+
+  .recruiting-content::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    height: 10rem;
+    pointer-events: none;
+    background: linear-gradient(to top, #fff 0%, rgba(255, 255, 255, 0.8) 50%, rgba(255, 255, 255, 0) 100%);
   }
 
   /* Hero image as atmospheric background element */
@@ -139,9 +152,6 @@
 
   <!-- Grid pattern overlay -->
   <div class="absolute inset-0 bg-grid-slate-100 bg-[size:var(--bg-size-x)_var(--bg-size-y)] [mask-image:linear-gradient(0deg,transparent,rgba(255,255,255,0.7),transparent)] opacity-20 z-[4]" style="--bg-size-x:40px; --bg-size-y:40px"></div>
-
-  <!-- Seamless Gradient Fade to white -->
-  <div class="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none z-[11]"></div>
 
   <section class="relative recruiting-content">
     <div class="relative max-w-7xl mx-auto px-6 sm:px-8 lg:px-12 xl:px-16 2xl:px-20 pt-24 lg:pt-32 pb-28">
