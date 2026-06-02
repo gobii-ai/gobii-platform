@@ -62,6 +62,7 @@ export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 const LINKEDIN_ICON_BG_CLASS = 'bg-sky-100'
 const LINKEDIN_ICON_COLOR_CLASS = 'text-sky-700'
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
+const APOLLO_ICON_SRC = '/static/images/integrations/native/apollo.svg'
 const GOOGLE_SHEETS_ICON_SRC = '/static/images/integrations/pipedream/google_sheets.svg'
 const GOOGLE_DRIVE_ICON_SRC = '/static/images/integrations/native/google_drive.svg'
 
@@ -167,6 +168,84 @@ function parseToolUrl(value: string | null): URL | null {
     return new URL(value)
   } catch {
     return null
+  }
+}
+
+function deriveApolloApiRequest(parameters: Record<string, unknown> | null): ToolDescriptorTransform | null {
+  const rawUrl = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
+  const parsedUrl = parseToolUrl(rawUrl)
+  if (!parsedUrl) {
+    return null
+  }
+
+  const method = (coerceString(parameters?.method) || 'GET').toUpperCase()
+  const host = parsedUrl.hostname.toLowerCase()
+  const pathname = parsedUrl.pathname.replace(/\/+$/, '')
+  const appProfilePath = '/api/v1/users/api_profile'
+  const apiPrefix = '/api/v1/'
+  const isApolloApiUrl = host === 'api.apollo.io' && pathname.startsWith(apiPrefix)
+  const isApolloProfileUrl = host === 'app.apollo.io' && pathname === appProfilePath
+  if (!isApolloApiUrl && !isApolloProfileUrl) {
+    return null
+  }
+
+  const endpointPath = isApolloProfileUrl ? 'users/api_profile' : pathname.slice(apiPrefix.length)
+  const endpointParts = endpointPath.split('/').filter(Boolean)
+  const endpointRoot = endpointParts[0] ?? ''
+  let label = 'Apollo API request'
+  let captionSubject = endpointPath || 'api request'
+
+  if (endpointPath === 'mixed_people/api_search') {
+    label = 'Search Apollo people'
+    captionSubject = 'people search'
+  } else if (endpointPath === 'mixed_companies/search') {
+    label = 'Search Apollo companies'
+    captionSubject = 'company search'
+  } else if (endpointPath === 'people/match') {
+    label = 'Enrich Apollo person'
+    captionSubject = 'person enrichment'
+  } else if (endpointRoot === 'organizations') {
+    label = 'Enrich Apollo organization'
+    captionSubject = 'organization enrichment'
+  } else if (endpointRoot === 'contacts') {
+    label = method === 'POST' ? 'Create Apollo contact' : 'Manage Apollo contacts'
+    captionSubject = 'contacts'
+  } else if (endpointRoot === 'accounts') {
+    label = 'Manage Apollo accounts'
+    captionSubject = 'accounts'
+  } else if (endpointRoot === 'sequences') {
+    label = 'Manage Apollo sequences'
+    captionSubject = 'sequences'
+  } else if (endpointRoot === 'tasks') {
+    label = 'Manage Apollo tasks'
+    captionSubject = 'tasks'
+  } else if (endpointRoot === 'deals') {
+    label = 'Manage Apollo deals'
+    captionSubject = 'deals'
+  } else if (endpointRoot === 'calls') {
+    label = 'Manage Apollo calls'
+    captionSubject = 'calls'
+  } else if (endpointRoot === 'analytics') {
+    label = 'Read Apollo analytics'
+    captionSubject = 'analytics'
+  } else if (endpointRoot === 'users') {
+    label = endpointPath === 'users/api_profile' ? 'Read Apollo profile' : 'Manage Apollo users'
+    captionSubject = endpointPath === 'users/api_profile' ? 'profile' : 'users'
+  } else if (endpointRoot === 'usage_stats') {
+    label = 'Read Apollo usage stats'
+    captionSubject = 'usage stats'
+  } else if (endpointRoot === 'email_accounts') {
+    label = 'Manage Apollo email accounts'
+    captionSubject = 'email accounts'
+  }
+
+  return {
+    label,
+    caption: [method, captionSubject].filter(Boolean).join(' • '),
+    icon: Network,
+    iconSrc: APOLLO_ICON_SRC,
+    iconBgClass: 'bg-[#F8FF2C]',
+    iconColorClass: 'text-slate-950',
   }
 }
 
@@ -540,6 +619,10 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconColorClass: 'text-cyan-600',
     detailKind: 'apiRequest',
     derive(_, parameters) {
+      const apolloApiRequest = deriveApolloApiRequest(parameters)
+      if (apolloApiRequest) {
+        return apolloApiRequest
+      }
       const googleApiRequest = deriveGoogleApiRequest(parameters)
       if (googleApiRequest) {
         return googleApiRequest

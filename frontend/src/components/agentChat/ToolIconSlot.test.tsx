@@ -42,4 +42,20 @@ describe('ToolIconSlot', () => {
     )
     expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
   })
+
+  it('keeps the Apollo branded icon visible while a tool call is pending', () => {
+    const { container } = render(<ToolIconSlot entry={entry({
+      label: 'Search Apollo people',
+      caption: 'POST • people search',
+      iconSrc: '/static/images/integrations/native/apollo.svg',
+      iconBgClass: 'bg-[#F8FF2C]',
+      iconColorClass: 'text-slate-950',
+    })} />)
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/images/integrations/native/apollo.svg',
+    )
+    expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
+  })
 })

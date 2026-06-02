@@ -82,4 +82,52 @@ describe('transformToolCluster Google API display', () => {
       iconSrc: '/static/images/integrations/native/google_drive.svg',
     })
   })
+
+  it('labels Apollo people search with the official Apollo icon', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.apollo.io/api/v1/mixed_people/api_search', 'POST'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Search Apollo people',
+      caption: 'POST • people search',
+      iconSrc: '/static/images/integrations/native/apollo.svg',
+    })
+  })
+
+  it('labels Apollo company search', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.apollo.io/api/v1/mixed_companies/search', 'POST'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Search Apollo companies',
+      caption: 'POST • company search',
+      iconSrc: '/static/images/integrations/native/apollo.svg',
+    })
+  })
+
+  it('labels Apollo person enrichment', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.apollo.io/api/v1/people/match', 'POST'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Enrich Apollo person',
+      caption: 'POST • person enrichment',
+      iconSrc: '/static/images/integrations/native/apollo.svg',
+    })
+  })
+
+  it('labels unknown Apollo endpoints as Apollo API requests', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.apollo.io/api/v1/custom/reporting', 'GET'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Apollo API request',
+      caption: 'GET • custom/reporting',
+      iconSrc: '/static/images/integrations/native/apollo.svg',
+    })
+  })
 })

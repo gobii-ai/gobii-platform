@@ -70,4 +70,14 @@ describe('ToolClusterLivePreview Google API display', () => {
     expect(screen.queryByText('Browsing')).not.toBeInTheDocument()
     expect(screen.queryByText('sheets.googleapis.com')).not.toBeInTheDocument()
   })
+
+  it('does not render Apollo API calls as browsing the API host', () => {
+    renderPreview(
+      clusterForRequest('https://api.apollo.io/api/v1/mixed_people/api_search', 'POST'),
+    )
+
+    expect(screen.getByText('Search Apollo people')).toBeInTheDocument()
+    expect(screen.queryByText('Browsing')).not.toBeInTheDocument()
+    expect(screen.queryByText('api.apollo.io')).not.toBeInTheDocument()
+  })
 })

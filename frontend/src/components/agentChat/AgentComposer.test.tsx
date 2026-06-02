@@ -37,6 +37,12 @@ vi.mock('./insights/GoogleDriveInsightPanel', () => ({
   ),
 }))
 
+vi.mock('./insights/ApolloInsightPanel', () => ({
+  ApolloInsightPanel: () => (
+    <div data-testid="apollo-panel">Apollo panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -410,6 +416,15 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
   })
 
+  it('shows the Apollo tab when the Apollo native integration is enabled', () => {
+    renderAgentComposer({
+      apolloNativeTabEnabled: true,
+    })
+
+    expect(screen.getByRole('button', { name: 'View Apollo connection' })).toBeInTheDocument()
+    expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
+  })
+
   it('auto-selects Google Drive once when Sheets becomes enabled', async () => {
     const { rerender } = renderAgentComposer({
       insights: [makeInsight()],
@@ -437,6 +452,36 @@ describe('AgentComposer pending action insights panel', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+    })
+  })
+
+  it('auto-selects Apollo once when Apollo native becomes enabled', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+      apolloNativeTabEnabled: false,
+    })
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+    expect(screen.queryByTestId('apollo-panel')).not.toBeInTheDocument()
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        apolloNativeTabEnabled
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
     })
   })
 
@@ -488,5 +533,55 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
     expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
+  })
+
+  it('does not override a manual tab choice after Apollo auto-selects', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+      apolloNativeTabEnabled: false,
+    })
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        apolloNativeTabEnabled
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'View burn rate insight' }))
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        apolloNativeTabEnabled
+      />,
+    )
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+    expect(screen.queryByTestId('apollo-panel')).not.toBeInTheDocument()
   })
 })

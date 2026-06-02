@@ -180,6 +180,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       sidebarNotificationStatus,
       onSidebarNotificationsEnabledChange,
       googleSheetsDriveTabEnabled,
+      apolloNativeTabEnabled,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
@@ -193,6 +194,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       sidebarNotificationStatus?: string
       onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
       googleSheetsDriveTabEnabled?: boolean
+      apolloNativeTabEnabled?: boolean
     }) => {
       const {
         isUpgradeModalOpen,
@@ -209,6 +211,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="notifications-enabled">{String(Boolean(sidebarNotificationsEnabled))}</div>
           <div data-testid="notification-status">{sidebarNotificationStatus ?? ''}</div>
           <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(googleSheetsDriveTabEnabled))}</div>
+          <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
           <button
             type="button"
             data-testid="configure-agent"
@@ -435,7 +438,7 @@ function buildInitialSubscriptionState() {
   }
 }
 
-function buildRosterAgent(id: string, name: string) {
+function buildRosterAgent(id: string, name: string, enabledSystemSkills: string[] = []) {
   return {
     id,
     name,
@@ -456,6 +459,7 @@ function buildRosterAgent(id: string, name: string) {
     dailyCreditRemaining: null,
     dailyCreditLow: false,
     last24hCreditBurn: null,
+    enabledSystemSkills,
   }
 }
 
@@ -822,6 +826,56 @@ describe('AgentChatPage trial onboarding', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('google-sheets-drive-tab-enabled')).toHaveTextContent('false')
+    })
+    expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('false')
+  })
+
+  it('passes Apollo tab enablement from roster system skills', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native'])]
+    window.history.pushState({}, '', '/app/agents/agent-1')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('true')
+    })
+  })
+
+  it('passes Apollo tab enablement from live tool search results', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
+    timelineState.flatEvents = [
+      {
+        kind: 'steps',
+        cursor: 'step:1',
+        entryCount: 1,
+        collapsible: false,
+        collapseThreshold: 4,
+        earliestTimestamp: '2026-01-01T00:00:00Z',
+        latestTimestamp: '2026-01-01T00:00:00Z',
+        entries: [
+          {
+            id: 'search-1',
+            cursor: 'step:1',
+            timestamp: '2026-01-01T00:00:00Z',
+            toolName: 'search_tools',
+            parameters: { query: 'apollo' },
+            result: {
+              status: 'success',
+              system_skills: {
+                enabled: ['apollo_native'],
+              },
+            },
+            status: 'complete',
+          },
+        ],
+      },
+    ]
+    window.history.pushState({}, '', '/app/agents/agent-1')
+
+    renderAgentChatPage({ agentId: 'agent-1' })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('true')
     })
   })
 
