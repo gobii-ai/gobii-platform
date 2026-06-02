@@ -91,7 +91,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
             charter="Test agent.",
         )
 
-    def test_redundant_research_status_update_is_skipped(self):
+    def test_redundant_research_progress_update_is_skipped(self):
         PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Research source set",
@@ -109,8 +109,8 @@ class UpdatePlanResearchSuppressionTests(TestCase):
             self.agent,
             {
                 "plan": [
-                    {"step": "Research source set", "status": "done"},
-                    {"step": "Synthesize investment memo", "status": "done"},
+                    {"step": "Research source set", "status": "doing"},
+                    {"step": "Synthesize investment memo", "status": "todo"},
                 ],
                 "will_continue_work": True,
             },
@@ -120,7 +120,7 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         self.assertTrue(result["skipped"])
         self.assertFalse(result["auto_sleep_ok"])
 
-    def test_redundant_research_status_update_with_retitled_steps_is_skipped(self):
+    def test_research_progress_update_with_retitled_steps_is_not_skipped(self):
         PersistentAgentKanbanCard.objects.create(
             assigned_agent=self.agent,
             title="Research the market and competitors",
@@ -139,15 +139,13 @@ class UpdatePlanResearchSuppressionTests(TestCase):
             {
                 "plan": [
                     {"step": "Research source set", "status": "done"},
-                    {"step": "Synthesize investment memo", "status": "done"},
+                    {"step": "Synthesize investment memo", "status": "todo"},
                 ],
                 "will_continue_work": True,
             },
         )
 
-        self.assertIsNotNone(result)
-        self.assertTrue(result["skipped"])
-        self.assertFalse(result["auto_sleep_ok"])
+        self.assertIsNone(result)
 
     def test_old_outbound_message_does_not_turn_redundant_plan_skip_into_sleep(self):
         agent_endpoint = PersistentAgentCommsEndpoint.objects.create(
@@ -196,8 +194,8 @@ class UpdatePlanResearchSuppressionTests(TestCase):
             self.agent,
             {
                 "plan": [
-                    {"step": "Research source set", "status": "done"},
-                    {"step": "Synthesize investment memo", "status": "done"},
+                    {"step": "Research source set", "status": "doing"},
+                    {"step": "Synthesize investment memo", "status": "todo"},
                 ],
                 "will_continue_work": True,
             },
@@ -206,6 +204,33 @@ class UpdatePlanResearchSuppressionTests(TestCase):
         self.assertIsNotNone(result)
         self.assertTrue(result["skipped"])
         self.assertFalse(result["auto_sleep_ok"])
+
+    def test_all_done_update_for_unfinished_research_plan_is_not_skipped(self):
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Research source set",
+            status=PersistentAgentKanbanCard.Status.DOING,
+            priority=2,
+        )
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize investment memo",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+
+        result = build_redundant_research_plan_skip_result(
+            self.agent,
+            {
+                "plan": [
+                    {"step": "Research source set", "status": "done"},
+                    {"step": "Synthesize investment memo", "status": "done"},
+                ],
+                "will_continue_work": False,
+            },
+        )
+
+        self.assertIsNone(result)
 
     def test_changed_research_plan_is_not_skipped(self):
         PersistentAgentKanbanCard.objects.create(

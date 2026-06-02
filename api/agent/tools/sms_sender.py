@@ -76,7 +76,7 @@ def get_send_sms_tool() -> Dict[str, Any]:
                     },
                     "will_continue_work": {
                         "type": "boolean",
-                        "description": "REQUIRED. true = you'll take another action, false = you're done. Omitting this stops you for good—choose wisely.",
+                        "description": "REQUIRED. true = you'll take another action, false = you're done and no current plan items remain unfinished.",
                     },
                 },
                 "required": ["to_number", "body", "will_continue_work"],

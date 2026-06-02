@@ -3461,11 +3461,10 @@ def _get_system_instruction(
         "- Need a blocking human answer, another tool result, or a final user-facing report → will_continue_work=true, keep going.\n"
         f"{text_only_guidance}"
         f"{mid_conversation_schedule_examples}"
-        "**CRITICAL termination sequence:** "
-        "1. Send your final report to the user with will_continue_work=false on that final send tool.\n"
-        "2. Preserve reusable workflows/feedback as skills silently when useful.\n"
-        "3. If you still need to mark the plan done after the report is already sent, call update_plan with will_continue_work=false; otherwise sleep.\n"
-        "4. You're done: no extra turn, no announcement or confirmation message.\n\n"
+        "**Plan-aware termination sequence:** "
+        "1. Send the final report with will_continue_work=false only if no current plan items remain todo/doing. "
+        "2. If the report is ready but the plan is unfinished, send with will_continue_work=true, then call update_plan with every finished/deferred item resolved and will_continue_work=false. "
+        "3. After the final send and final plan update, stop with no extra message.\n\n"
         "Recurring or truly multi-phase work may need charter/schedule updates; one-off work usually needs neither.\n"
     )
 
@@ -3624,7 +3623,7 @@ def _get_system_instruction(
         "Respect one-off preferences like 'stand by' or 'don't follow up unless I ask' in the current conversation without mutating config. When in doubt, leave config unchanged, deliver the result, and stop.\n\n"
 
         "## Plan Discipline (CRITICAL)\n\n"
-        "update_plan is for real multi-step work that benefits from a user-visible plan. Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. For deep work, use at most one initial plan update; do not update it again just to mark research done, narrate progress, or prepare the final. After the final message, stop unless an existing plan genuinely needs maintenance.\n\n"
+        "update_plan is for real multi-step work that benefits from a user-visible plan. Do not create/update one for quick lookups, simple research answers, scheduled briefings, one-shot charts, or simple latest/current reports. For deep work, use at most one initial plan update; update it again only to finish an existing visible plan before stopping.\n\n"
 
         "## Silent Work (CRITICAL)\n\n"
         "Do not announce what you're about to do. Make tool calls with no text until findings, blocker, needed human question, or final answer. Text is for results, not narration; tools execute silently.\n\n"

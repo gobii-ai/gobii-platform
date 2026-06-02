@@ -29,6 +29,7 @@ from api.models import (
     PersistentAgentConversation,
     PersistentAgentEnabledTool,
     PersistentAgentHumanInputRequest,
+    PersistentAgentKanbanCard,
     PersistentAgentMessage,
     PersistentAgentStep,
     PersistentAgentSystemStep,
@@ -43,6 +44,7 @@ PLANNING_EXECUTE_REQUEST_STAYS_IN_PLANNING = "planning_execute_request_stays_in_
 PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST = "planning_one_off_research_report_ends_planning_first"
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
+PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN = "planning_final_report_completes_visible_plan"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
@@ -340,6 +342,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST,
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
+    PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN,
 ]
 
 CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
@@ -1093,6 +1096,133 @@ class PlanningOneOffResearchReportEndsPlanningFirstScenario(BehaviorMicroScenari
             ),
             artifacts={"step": message_calls_before_end[0].step},
         )
+
+
+@register_scenario
+class PlanningFinalReportCompletesVisiblePlanScenario(BehaviorMicroScenario):
+    slug = PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN
+    description = "A final report should not leave an existing visible plan with todo/doing items."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "stop_policy", "update_plan")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_final_report_sent", assertion_type="manual"),
+        ScenarioTask(name="verify_plan_completed", assertion_type="manual"),
+    ]
+
+    def _seed_unfinished_plan(self, agent_id):
+        steps = [
+            ("Search for QuantaGrid AI and identify key sources.", PersistentAgentKanbanCard.Status.DOING),
+            ("Scrape official website and secondary sources.", PersistentAgentKanbanCard.Status.TODO),
+            ("Synthesize findings into a structured report.", PersistentAgentKanbanCard.Status.TODO),
+            ("Deliver the report in chat.", PersistentAgentKanbanCard.Status.TODO),
+        ]
+        for priority, (title, status) in enumerate(reversed(steps), start=1):
+            PersistentAgentKanbanCard.objects.create(
+                assigned_agent_id=agent_id,
+                title=title,
+                status=status,
+                priority=priority,
+            )
+
+    @staticmethod
+    def _message_call_was_delivered(call):
+        try:
+            payload = json.loads(call.result or "{}")
+        except json.JSONDecodeError:
+            return False
+        return isinstance(payload, dict) and payload.get("status") in {"ok", "sent", "success"}
+
+    def run(self, run_id, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.COMPLETED)
+        self._seed_prior_processing_run(agent_id)
+        self._enable_builtin_tools(agent_id, ["send_chat_message", "update_plan"])
+        self._seed_unfinished_plan(agent_id)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Use only these facts and send the final QuantaGrid AI report in this chat now. "
+                    "QuantaGrid AI builds capacity-planning copilots for data center operators. "
+                    "Its product predicts rack power saturation, flags cooling risks, and exports weekly risk summaries. "
+                    "Pricing is usage-based, and the best fit is infrastructure teams with fragmented telemetry."
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                eval_stop_policy={
+                    "stop_on_unexpected_relevant_tool": True,
+                    "allowed_tool_names": ["send_chat_message", "update_plan", "sleep_until_next_trigger"],
+                    "max_relevant_tool_calls": 6,
+                },
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        send_calls = [
+            call
+            for call in get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"send_chat_message"})
+            if self._message_call_was_delivered(call)
+        ]
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_final_report_sent")
+        if send_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_final_report_sent",
+                observed_summary="Agent delivered a web chat report.",
+                artifacts={"step": send_calls[0].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_final_report_sent",
+                observed_summary="Expected one delivered send_chat_message call.",
+            )
+
+        unfinished = list(
+            PersistentAgentKanbanCard.objects.filter(
+                assigned_agent_id=agent_id,
+                status__in=[
+                    PersistentAgentKanbanCard.Status.TODO,
+                    PersistentAgentKanbanCard.Status.DOING,
+                ],
+            ).order_by("-priority", "created_at")
+        )
+        update_plan_calls = get_tool_calls_for_run(run_id, after=inbound.timestamp, tool_names={"update_plan"})
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_plan_completed")
+        if send_calls and not unfinished and update_plan_calls:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_plan_completed",
+                observed_summary="Final report delivery left no todo/doing plan items.",
+                artifacts={"step": update_plan_calls[-1].step},
+            )
+        else:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.FAILED,
+                task_name="verify_plan_completed",
+                observed_summary=(
+                    f"Expected final delivery plus update_plan to leave no unfinished plan items; "
+                    f"send_calls={len(send_calls)}, update_plan_calls={len(update_plan_calls)}, "
+                    f"unfinished={[card.title for card in unfinished]}."
+                ),
+                artifacts={"step": (send_calls[0].step if send_calls else None)},
+            )
 
 
 @register_scenario
