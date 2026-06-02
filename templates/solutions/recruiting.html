@@ -122,8 +122,17 @@
   <div class="hero-image-bg" aria-hidden="true">
     <img
       src="{% static 'images/solutions/recruiting-hero.jpg' %}"
+      srcset="{% static 'images/solutions/recruiting-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/recruiting-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/recruiting-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/recruiting-hero-1920.jpg' %} 1920w,
+              {% static 'images/solutions/recruiting-hero.jpg' %} 2528w"
+      sizes="(max-width: 1023px) 100vw, 70vw"
       alt=""
+      width="2528"
+      height="1696"
       loading="eager"
+      decoding="async"
     >
   </div>
 

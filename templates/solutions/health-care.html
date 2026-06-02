@@ -121,8 +121,17 @@
   <div class="hero-image-bg" aria-hidden="true">
     <img
       src="{% static 'images/solutions/healthcare-hero.jpg' %}"
+      srcset="{% static 'images/solutions/healthcare-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/healthcare-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/healthcare-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/healthcare-hero-1920.jpg' %} 1920w,
+              {% static 'images/solutions/healthcare-hero.jpg' %} 2816w"
+      sizes="(max-width: 1023px) 110vw, 80vw"
       alt=""
+      width="2816"
+      height="1536"
       loading="eager"
+      decoding="async"
     >
   </div>
 

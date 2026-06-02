@@ -120,8 +120,17 @@
   <div class="hero-image-bg" aria-hidden="true">
     <img
       src="{% static 'images/solutions/defense-hero.jpg' %}"
+      srcset="{% static 'images/solutions/defense-hero-640.jpg' %} 640w,
+              {% static 'images/solutions/defense-hero-960.jpg' %} 960w,
+              {% static 'images/solutions/defense-hero-1280.jpg' %} 1280w,
+              {% static 'images/solutions/defense-hero-1920.jpg' %} 1920w,
+              {% static 'images/solutions/defense-hero.jpg' %} 2752w"
+      sizes="(max-width: 1023px) 110vw, 80vw"
       alt=""
+      width="2752"
+      height="1536"
       loading="eager"
+      decoding="async"
     >
   </div>
 
