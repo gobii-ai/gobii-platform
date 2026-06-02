@@ -23,6 +23,7 @@ from api.agent.core.event_processing import (
     _sanitize_tool_name,
     _should_infer_message_tool_continuation,
     _should_imply_continue,
+    _should_skip_stale_planning_mode_after_terminal_delivery,
     _ToolExecutionOutcome,
     _tool_call_likely_terminal_message,
 )
@@ -250,6 +251,66 @@ class MessageToolExplicitContinuationTests(TestCase):
         self.assertTrue(finalized.followup_required)
         self.assertIs(finalized.last_explicit_continue, False)
         self.assertTrue(
+            PersistentAgentStep.objects.filter(
+                agent=self.agent,
+                description__contains="current plan still has unfinished items",
+            ).exists()
+        )
+
+    def test_planning_mode_terminal_message_with_unfinished_plan_allows_stale_skip(self):
+        self.agent.planning_state = PersistentAgent.PlanningState.PLANNING
+        self.agent.save(update_fields=["planning_state"])
+        PersistentAgentKanbanCard.objects.create(
+            assigned_agent=self.agent,
+            title="Synthesize final report",
+            status=PersistentAgentKanbanCard.Status.TODO,
+            priority=1,
+        )
+        prepared = _PreparedToolExecution(
+            idx=1,
+            tool_name="send_chat_message",
+            tool_params={"body": "Here is the answer.", "will_continue_work": False},
+            exec_params={"body": "Here is the answer.", "will_continue_work": False},
+            pending_step=None,
+            credits_consumed=None,
+            consumed_credit=None,
+            call_id="call_1",
+            explicit_continue=False,
+            inferred_continue=False,
+            parallel_safe=False,
+            parallel_ineligible_reason=None,
+        )
+
+        finalized = _finalize_tool_batch(
+            self.agent,
+            [
+                _ToolExecutionOutcome(
+                    prepared=prepared,
+                    result={
+                        "status": "ok",
+                        "message": "Web chat message sent.",
+                        "message_id": str(uuid4()),
+                        "auto_sleep_ok": True,
+                    },
+                    duration_ms=1,
+                    updated_tools=None,
+                    variable_map={},
+                )
+            ],
+            attach_completion=lambda kwargs: None,
+            attach_prompt_archive=lambda step: None,
+        )
+
+        self.assertTrue(finalized.terminal_message_delivery_ok)
+        self.assertFalse(finalized.followup_required)
+        self.assertTrue(
+            _should_skip_stale_planning_mode_after_terminal_delivery(
+                self.agent,
+                finalized,
+                followup_required=finalized.followup_required,
+            )
+        )
+        self.assertFalse(
             PersistentAgentStep.objects.filter(
                 agent=self.agent,
                 description__contains="current plan still has unfinished items",

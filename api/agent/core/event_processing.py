@@ -3224,7 +3224,12 @@ def _finalize_tool_batch(
         if tool_name not in MESSAGE_TOOL_NAMES and tool_name != "sleep_until_next_trigger":
             executed_non_message_action = True
 
-    if terminal_message_delivery_ok and not followup_required and _plan_has_unfinished_items(agent):
+    if (
+        agent.planning_state != PersistentAgent.PlanningState.PLANNING
+        and terminal_message_delivery_ok
+        and not followup_required
+        and _plan_has_unfinished_items(agent)
+    ):
         _record_terminal_send_unfinished_plan_correction(
             agent,
             attach_completion=attach_completion,
