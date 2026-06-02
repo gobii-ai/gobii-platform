@@ -18,6 +18,7 @@ from api.models import (
     PersistentAgent,
     PersistentAgentCommsEndpoint,
     PersistentAgentMessage,
+    PersistentAgentSystemSkillState,
     UserFlags,
     UserPreference,
 )
@@ -773,6 +774,36 @@ class AgentChatAccessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         payload = response.json()
         self.assertFalse(payload.get("agent_chat_notifications_enabled"))
+
+    @tag("batch_agent_chat")
+    def test_roster_includes_only_enabled_system_skill_keys(self):
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.org_agent,
+            skill_key="google_sheets_native",
+            is_enabled=True,
+        )
+        PersistentAgentSystemSkillState.objects.create(
+            agent=self.org_agent,
+            skill_key="disabled_skill",
+            is_enabled=False,
+        )
+
+        response = self.client.get(
+            reverse("console_agent_roster"),
+            HTTP_X_GOBII_CONTEXT_TYPE="organization",
+            HTTP_X_GOBII_CONTEXT_ID=str(self.org.id),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        roster_by_id = {entry["id"]: entry for entry in response.json().get("agents", [])}
+        self.assertEqual(
+            roster_by_id[str(self.org_agent.id)]["enabled_system_skills"],
+            ["google_sheets_native"],
+        )
+        self.assertEqual(
+            roster_by_id[str(self.org_agent_two.id)]["enabled_system_skills"],
+            [],
+        )
 
     def test_roster_includes_mini_and_short_descriptions(self):
         self.org_agent.mini_description = "Revenue pipeline assistant"

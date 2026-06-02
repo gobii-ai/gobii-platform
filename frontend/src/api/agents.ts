@@ -67,6 +67,7 @@ type AgentRosterPayload = {
     latest_agent_message_id?: string | null
     latest_agent_message_at?: string | null
     latest_agent_message_read_at?: string | null
+    enabled_system_skills?: string[]
   }[]
 }
 
@@ -120,6 +121,9 @@ export async function fetchAgentRoster(
     latestAgentMessageId: agent.latest_agent_message_id ?? null,
     latestAgentMessageAt: agent.latest_agent_message_at ?? null,
     latestAgentMessageReadAt: agent.latest_agent_message_read_at ?? null,
+    enabledSystemSkills: Array.isArray(agent.enabled_system_skills)
+      ? agent.enabled_system_skills.filter((value): value is string => typeof value === 'string')
+      : [],
   }))
   return {
     context: payload.context,

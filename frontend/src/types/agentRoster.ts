@@ -44,4 +44,5 @@ export type AgentRosterEntry = {
   latestAgentMessageId?: string | null
   latestAgentMessageAt?: string | null
   latestAgentMessageReadAt?: string | null
+  enabledSystemSkills?: string[]
 }

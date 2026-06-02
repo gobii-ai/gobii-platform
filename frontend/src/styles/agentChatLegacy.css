@@ -2831,8 +2831,15 @@
   z-index: 1;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   color: var(--tab-color, #7c4ca0);
   transition: color 150ms ease;
+}
+
+.composer-insight-tab-image {
+  width: 0.78rem;
+  height: 0.78rem;
+  object-fit: contain;
 }
 
 .composer-insight-tab[data-active="true"] .composer-insight-tab-label,
@@ -2852,6 +2859,210 @@
   border-radius: 11px;
   pointer-events: none;
   transition: width 100ms linear;
+}
+
+.google-drive-insight-panel {
+  display: flex;
+  min-height: 100%;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.85rem 1.25rem;
+  color: #134e4a;
+}
+
+.google-drive-insight-panel__header,
+.google-drive-insight-panel__body,
+.google-drive-insight-panel__actions,
+.google-drive-insight-panel__inline-status,
+.google-drive-insight-panel__file,
+.google-drive-insight-panel__connected {
+  display: flex;
+  align-items: center;
+}
+
+.google-drive-insight-panel__header {
+  gap: 0.5rem;
+}
+
+.google-drive-insight-panel__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.google-drive-insight-panel__label {
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: #0f766e;
+}
+
+.google-drive-insight-panel__connected {
+  gap: 0.25rem;
+  margin-left: 0.25rem;
+  color: #047857;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.google-drive-insight-panel__body {
+  justify-content: space-between;
+  gap: 0.875rem;
+}
+
+.google-drive-insight-panel__copy {
+  min-width: 0;
+}
+
+.google-drive-insight-panel__title {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.google-drive-insight-panel__text,
+.google-drive-insight-panel__empty,
+.google-drive-insight-panel__status,
+.google-drive-insight-panel__error,
+.google-drive-insight-panel__inline-status {
+  margin: 0;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.google-drive-insight-panel__text,
+.google-drive-insight-panel__empty,
+.google-drive-insight-panel__inline-status {
+  color: #475569;
+}
+
+.google-drive-insight-panel__status {
+  color: #047857;
+}
+
+.google-drive-insight-panel__error {
+  color: #b91c1c;
+}
+
+.google-drive-insight-panel__inline-status {
+  gap: 0.45rem;
+}
+
+.google-drive-insight-panel__actions {
+  flex-shrink: 0;
+  justify-content: flex-end;
+}
+
+.google-drive-insight-panel__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  min-width: 7.5rem;
+  height: 2.15rem;
+  border-radius: 0.55rem;
+  background: #0f9d58;
+  padding: 0 0.8rem;
+  color: white;
+  font-size: 0.78rem;
+  font-weight: 750;
+  transition: background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.google-drive-insight-panel__button:hover {
+  background: #0b7f47;
+}
+
+.google-drive-insight-panel__button--secondary {
+  background: rgba(15, 157, 88, 0.14);
+  color: #047857;
+}
+
+.google-drive-insight-panel__button--secondary:hover {
+  background: rgba(15, 157, 88, 0.22);
+}
+
+.google-drive-insight-panel__button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.google-drive-insight-panel__files {
+  min-width: 0;
+}
+
+.google-drive-insight-panel__file-list {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  overflow-x: auto;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  scrollbar-width: none;
+}
+
+.google-drive-insight-panel__file-list::-webkit-scrollbar {
+  display: none;
+}
+
+.google-drive-insight-panel__file {
+  max-width: 13rem;
+  min-width: 0;
+  gap: 0.35rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.62);
+  padding: 0.35rem 0.5rem;
+  color: #0f766e;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.google-drive-insight-panel__file:hover {
+  color: #064e3b;
+}
+
+.google-drive-insight-panel__file-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: #0f9d58;
+}
+
+.google-drive-insight-panel__file-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.google-drive-insight-panel__file-more {
+  flex-shrink: 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+@container (max-width: 520px) {
+  .google-drive-insight-panel {
+    padding: 0.7rem 0.85rem;
+  }
+
+  .google-drive-insight-panel__body {
+    align-items: flex-start;
+  }
+
+  .google-drive-insight-panel__button {
+    min-width: 6.5rem;
+    padding: 0 0.65rem;
+  }
 }
 
 /* Connect working panel to input surface */
@@ -4330,6 +4541,12 @@
 .tool-cluster-live-preview__entry-icon--inline svg {
   width: 0.68rem;
   height: 0.68rem;
+}
+
+.tool-icon-slot__image {
+  width: 1.1rem;
+  height: 1.1rem;
+  object-fit: contain;
 }
 
 .tool-cluster-live-preview__profile-avatar {

@@ -31,6 +31,12 @@ vi.mock('./insights', () => ({
   ),
 }))
 
+vi.mock('./insights/GoogleDriveInsightPanel', () => ({
+  GoogleDriveInsightPanel: () => (
+    <div data-testid="google-drive-panel">Google Drive panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -217,10 +223,12 @@ describe('AgentComposer pending action insights panel', () => {
     renderAgentComposer({
       pendingActionRequests: [makeRequestedSecretsAction()],
       insights: [makeInsight()],
+      googleSheetsDriveTabEnabled: true,
     })
 
     expect(screen.getByText('Stripe API key')).toBeInTheDocument()
     expect(screen.queryByTestId('insight-card')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
   })
 
   it('keeps the normal message composer hidden for human input requests', () => {
@@ -391,5 +399,94 @@ describe('AgentComposer pending action insights panel', () => {
 
     expect(screen.getByText('4 of 4')).toBeInTheDocument()
     expect(screen.getByText('Database password')).toBeInTheDocument()
+  })
+
+  it('shows the Google Drive tab when the Sheets integration is enabled', () => {
+    renderAgentComposer({
+      googleSheetsDriveTabEnabled: true,
+    })
+
+    expect(screen.getByRole('button', { name: 'View Google Drive files' })).toBeInTheDocument()
+    expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+  })
+
+  it('auto-selects Google Drive once when Sheets becomes enabled', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+      googleSheetsDriveTabEnabled: false,
+    })
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+    expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        googleSheetsDriveTabEnabled
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+    })
+  })
+
+  it('does not override a manual tab choice after Google Drive auto-selects', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+      googleSheetsDriveTabEnabled: false,
+    })
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        googleSheetsDriveTabEnabled
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: 'View burn rate insight' }))
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        googleSheetsDriveTabEnabled
+      />,
+    )
+
+    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
+    expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
   })
 })
