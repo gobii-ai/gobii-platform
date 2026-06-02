@@ -209,7 +209,8 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(provider.token_endpoint, "https://app.apollo.io/api/v1/oauth/token")
         self.assertEqual(provider.api_url_prefixes[0], "https://api.apollo.io/")
         self.assertIn("read_user_profile", provider.scopes)
-        self.assertIn("app_scopes", provider.scopes)
+        self.assertIn("contacts_search", provider.scopes)
+        self.assertIn("person_read", provider.scopes)
 
     def test_list_reports_connected_state_for_user_context(self):
         self._create_integration_secret(owner_user=self.user)
@@ -303,7 +304,7 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(payload["provider_key"], "apollo")
         self.assertIn("https://app.apollo.io/#/oauth/authorize", payload["authorization_url"])
         self.assertIn("client_id=apollo-client-id", payload["authorization_url"])
-        self.assertIn("scope=read_user_profile+app_scopes", payload["authorization_url"])
+        self.assertIn("scope=read_user_profile+contacts_search+person_read", payload["authorization_url"])
         self.assertIn("redirect_uri=http%3A%2F%2Ftestserver%2Fintegrations%2Foauth%2Fcallback%2F", payload["authorization_url"])
         self.assertIn("state=", payload["authorization_url"])
 

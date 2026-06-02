@@ -189,16 +189,12 @@ APOLLO_NATIVE_CASES = (
             "If Apollo is not connected, tell me what to do."
         ),
         http_rules=(
-            _apollo_rule(
-                "mixed_people/api_search",
-                {"ok": False},
-                status_code=401,
-                status="error",
-            )
-            | {
+            {
+                "url_contains": ("api.apollo.io/api/v1", "mixed_people/api_search"),
                 "result": {
                     "status": "error",
                     "status_code": 401,
+                    "url": f"{APOLLO_API_BASE}/mixed_people/api_search",
                     "message": (
                         "native_integration_not_connected: Apollo is not connected. "
                         "Ask the user to open /app/integrations and connect Apollo."

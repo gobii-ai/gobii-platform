@@ -1622,7 +1622,7 @@ APOLLO_CLIENT_ID = env("APOLLO_CLIENT_ID", default="")
 APOLLO_CLIENT_SECRET = env("APOLLO_CLIENT_SECRET", default="")
 APOLLO_OAUTH_SCOPES = tuple(
     scope
-    for scope in env("APOLLO_OAUTH_SCOPES", default="read_user_profile app_scopes").replace(",", " ").split()
+    for scope in env("APOLLO_OAUTH_SCOPES", default="read_user_profile contacts_search person_read").replace(",", " ").split()
     if scope
 )
 
