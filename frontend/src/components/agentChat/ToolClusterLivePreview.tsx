@@ -80,6 +80,10 @@ export const TOOL_CLUSTER_PREVIEW_ENTRY_LIMIT = MAX_PREVIEW_ENTRIES
 const MAX_SEARCH_PREVIEW_ITEMS = 8
 const MAX_SCRAPE_TARGETS = 15
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
+const BRANDED_GOOGLE_API_ICON_SRCS = new Set([
+  '/static/images/integrations/pipedream/google_sheets.svg',
+  '/static/images/integrations/native/google_drive.svg',
+])
 
 function clampText(value: string, maxLength: number = MAX_DETAIL_LENGTH): string {
   const normalized = value.replace(/\s+/g, ' ').trim()
@@ -718,6 +722,10 @@ function extractScrapeTargets(entry: ToolEntryDisplay): ScrapeTargetItem[] {
   return items
 }
 
+function isBrandedGoogleApiEntry(entry: ToolEntryDisplay): boolean {
+  return Boolean(entry.iconSrc && BRANDED_GOOGLE_API_ICON_SRCS.has(entry.iconSrc))
+}
+
 function extractPageTitle(entry: ToolEntryDisplay): string | null {
   if (entry.status === 'pending') return null
   const parsed = parseMaybeJson(entry.result)
@@ -738,7 +746,9 @@ function extractPageTitle(entry: ToolEntryDisplay): string | null {
 
 function deriveEntryVisual(entry: ToolEntryDisplay, activity: ActivityDescriptor): EntryVisual {
   const toolName = (entry.toolName ?? '').toLowerCase()
-  const scrapeTargets = activity.kind === 'linkedin' ? [] : extractScrapeTargets(entry)
+  const scrapeTargets = activity.kind === 'linkedin' || isBrandedGoogleApiEntry(entry)
+    ? []
+    : extractScrapeTargets(entry)
 
   if (TOOL_SEARCH_TOOL_NAMES.has(toolName)) {
     const searchPreview = extractSearchPreviewItems(entry.result)
@@ -898,6 +908,7 @@ function classifyActivity(entry: ToolEntryDisplay): ActivityKind {
   const label = entry.label.toLowerCase()
   if (toolName === 'thinking') return 'thinking'
   if (toolName.includes('linkedin') || label.includes('linkedin')) return 'linkedin'
+  if (isBrandedGoogleApiEntry(entry)) return 'tool'
   if (toolName.includes('search') || label.includes('search')) return 'search'
   if (toolName === 'create_chart' || label === 'chart') return 'chart'
   if (toolName === 'create_image' || label === 'image') return 'image'

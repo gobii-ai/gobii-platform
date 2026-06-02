@@ -171,13 +171,19 @@ function parseToolUrl(value: string | null): URL | null {
 }
 
 function cleanGoogleSheetsRange(value: string): string | null {
-  const decoded = decodeURIComponent(value)
+  let decoded = value
+  try {
+    decoded = decodeURIComponent(value)
+  } catch {
+    decoded = value
+  }
+  const cleaned = decoded
     .replace(/:append$/i, '')
     .trim()
-  if (!decoded) {
+  if (!cleaned) {
     return null
   }
-  return truncate(decoded, 48)
+  return truncate(cleaned, 48)
 }
 
 function deriveGoogleApiRequest(parameters: Record<string, unknown> | null): ToolDescriptorTransform | null {

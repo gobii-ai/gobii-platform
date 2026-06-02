@@ -128,10 +128,19 @@ function timelineHasGoogleSheetsNativeSkillEnablement(events: TimelineEvent[]): 
     }
     for (const entry of event.entries) {
       const toolName = (entry.toolName ?? '').toLowerCase()
-      if (toolName !== 'search_tools') {
+      if (toolName !== 'search_tools' || entry.result === null || entry.result === undefined) {
         continue
       }
-      const outcome = parseToolSearchResult(entry.result)
+      const outcome = (() => {
+        try {
+          return parseToolSearchResult(entry.result)
+        } catch {
+          return null
+        }
+      })()
+      if (!outcome) {
+        continue
+      }
       const enabledSystemSkills = [
         ...outcome.enabledSystemSkills,
         ...outcome.alreadyEnabledSystemSkills,

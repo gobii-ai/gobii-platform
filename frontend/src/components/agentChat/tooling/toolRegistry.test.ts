@@ -57,6 +57,18 @@ describe('transformToolCluster Google API display', () => {
     })
   })
 
+  it('tolerates malformed percent escapes in Google Sheets ranges', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://sheets.googleapis.com/v4/spreadsheets/sheet-123/values/%25%20Complete!A:B%bad'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Read Google Sheets',
+      caption: 'GET • %25%20Complete!A:B%bad',
+      iconSrc: '/static/images/integrations/pipedream/google_sheets.svg',
+    })
+  })
+
   it('labels Google Drive file discovery with the official Drive icon', () => {
     const transformed = transformToolCluster(
       clusterForRequest(

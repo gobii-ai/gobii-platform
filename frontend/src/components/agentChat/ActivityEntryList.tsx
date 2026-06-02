@@ -5,6 +5,7 @@ import { slugify } from '../../util/slugify'
 import { MarkdownViewer } from '../common/MarkdownViewer'
 import { ToolIconSlot } from './ToolIconSlot'
 import { ToolProviderBadge } from './ToolProviderBadge'
+import { deriveActivityEntryPresentation } from './tooling/activityPresentation'
 import { deriveEntryCaption, deriveThinkingPreview } from './tooling/clusterPreviewText'
 import type { ToolEntryDisplay } from './tooling/types'
 
@@ -77,10 +78,14 @@ export function ActivityEntryList({
           const detailId = `tool-cluster-timeline-detail-${slugify(entry.id)}`
           const isOpen = openEntryId === entry.id
           const relativeTime = formatRelativeTimestamp(entry.timestamp)
-          const caption = deriveEntryCaption(entry)
+          const presentation = deriveActivityEntryPresentation(entry)
+          const caption = presentation.caption ?? deriveEntryCaption(entry)
           const thinkingPreview = deriveThinkingPreview(entry)
           const kind = entry.toolName === 'thinking' ? 'thinking' : 'tool'
           const DetailComponent = entry.detailComponent
+          const presentationEntry = presentation.icon === entry.icon && presentation.label === entry.label
+            ? entry
+            : { ...entry, label: presentation.label, icon: presentation.icon ?? entry.icon }
 
           return (
             <li
@@ -101,11 +106,11 @@ export function ActivityEntryList({
                 onClick={() => handleToggleEntry(entry.id)}
               >
                 <span className={`tool-cluster-timeline-icon ${entry.iconBgClass} ${entry.iconColorClass}`}>
-                  <ToolIconSlot entry={entry} />
+                  <ToolIconSlot entry={presentationEntry} />
                 </span>
                 <span className="tool-cluster-timeline-main">
                   <span className="tool-cluster-timeline-label-row">
-                    <span className="tool-cluster-timeline-label">{entry.label}</span>
+                    <span className="tool-cluster-timeline-label">{presentation.label}</span>
                     <ToolProviderBadge entry={entry} className="tool-provider-badge--timeline" />
                   </span>
                   {caption ? <span className="tool-cluster-timeline-caption">{caption}</span> : null}
@@ -130,7 +135,7 @@ export function ActivityEntryList({
                 ) : null}
               </button>
               {isOpen ? (
-                <div className="tool-cluster-timeline-detail" id={detailId} role="region" aria-label={`${entry.label} details`}>
+                <div className="tool-cluster-timeline-detail" id={detailId} role="region" aria-label={`${presentation.label} details`}>
                   <DetailComponent entry={entry} />
                 </div>
               ) : null}

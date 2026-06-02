@@ -12,11 +12,11 @@ function ToolIcon({ icon, className }: { icon: ToolEntryDisplay['icon'] | undefi
 }
 
 export function ToolIconSlot({ entry }: ToolIconSlotProps) {
-  if (entry.status === 'pending') {
-    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
-  }
   if (entry.iconSrc) {
     return <img src={entry.iconSrc} alt="" className="tool-icon-slot__image" loading="lazy" />
+  }
+  if (entry.status === 'pending') {
+    return <span className="tool-chip-spinner tool-chip-spinner--icon" aria-hidden="true" />
   }
   return <ToolIcon icon={entry.icon} className="h-5 w-5" />
 }
