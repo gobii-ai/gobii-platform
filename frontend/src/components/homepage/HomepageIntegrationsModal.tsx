@@ -58,6 +58,12 @@ function fallbackAppForSlug(slug: string): PipedreamAppSummary {
   }
 }
 
+function scrollPageToTop() {
+  window.scrollTo(0, 0)
+  document.documentElement.scrollTop = 0
+  document.body.scrollTop = 0
+}
+
 async function ensureHomepageCsrf(): Promise<string> {
   const response = await fetch('/api/homepage/csrf-token/', {
     credentials: 'same-origin',
@@ -231,9 +237,16 @@ export function HomepageIntegrationsModal({
 
   const nativePickerMutation = useMutation({
     mutationFn: async (provider: NativeIntegrationProvider) => {
-      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
-      const selectedCount = await openGoogleDrivePicker(token)
-      return { provider, selectedCount }
+      const previousScrollX = window.scrollX
+      const previousScrollY = window.scrollY
+      try {
+        scrollPageToTop()
+        const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+        const selectedCount = await openGoogleDrivePicker(token)
+        return { provider, selectedCount }
+      } finally {
+        window.scrollTo(previousScrollX, previousScrollY)
+      }
     },
     onMutate: (provider) => {
       setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
@@ -562,6 +575,7 @@ export function HomepageIntegrationsModal({
           icon={Sparkles}
           iconBgClass="bg-blue-100"
           iconColorClass="text-blue-700"
+          dismissible={!nativePickerMutation.isPending}
         >
           {body}
         </Modal>
