@@ -407,32 +407,38 @@ describe('AgentComposer pending action insights panel', () => {
     expect(screen.getByText('Database password')).toBeInTheDocument()
   })
 
-  it('shows the Google Drive tab when the Sheets integration is enabled', () => {
-    renderAgentComposer({
-      googleSheetsDriveTabEnabled: true,
-    })
+  const nativeTabCases = [
+    {
+      name: 'Google Drive',
+      ariaLabel: 'View Google Drive files',
+      panelTestId: 'google-drive-panel',
+      enabledProps: { googleSheetsDriveTabEnabled: true },
+      disabledProps: { googleSheetsDriveTabEnabled: false },
+    },
+    {
+      name: 'Apollo',
+      ariaLabel: 'View Apollo connection',
+      panelTestId: 'apollo-panel',
+      enabledProps: { apolloNativeTabEnabled: true },
+      disabledProps: { apolloNativeTabEnabled: false },
+    },
+  ] as const
 
-    expect(screen.getByRole('button', { name: 'View Google Drive files' })).toBeInTheDocument()
-    expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+  it.each(nativeTabCases)('shows the $name native tab when enabled', ({ ariaLabel, enabledProps, panelTestId }) => {
+    renderAgentComposer(enabledProps)
+
+    expect(screen.getByRole('button', { name: ariaLabel })).toBeInTheDocument()
+    expect(screen.getByTestId(panelTestId)).toBeInTheDocument()
   })
 
-  it('shows the Apollo tab when the Apollo native integration is enabled', () => {
-    renderAgentComposer({
-      apolloNativeTabEnabled: true,
-    })
-
-    expect(screen.getByRole('button', { name: 'View Apollo connection' })).toBeInTheDocument()
-    expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
-  })
-
-  it('auto-selects Google Drive once when Sheets becomes enabled', async () => {
+  it.each(nativeTabCases)('auto-selects $name once when it becomes enabled', async ({ disabledProps, enabledProps, panelTestId }) => {
     const { rerender } = renderAgentComposer({
       insights: [makeInsight()],
-      googleSheetsDriveTabEnabled: false,
+      ...disabledProps,
     })
 
     expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
-    expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId(panelTestId)).not.toBeInTheDocument()
 
     rerender(
       <AgentComposer
@@ -446,49 +452,19 @@ describe('AgentComposer pending action insights panel', () => {
         insightsLoading={false}
         isProcessing={false}
         processingTasks={[]}
-        googleSheetsDriveTabEnabled
+        {...enabledProps}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+      expect(screen.getByTestId(panelTestId)).toBeInTheDocument()
     })
   })
 
-  it('auto-selects Apollo once when Apollo native becomes enabled', async () => {
+  it.each(nativeTabCases)('does not override a manual tab choice after $name auto-selects', async ({ disabledProps, enabledProps, panelTestId }) => {
     const { rerender } = renderAgentComposer({
       insights: [makeInsight()],
-      apolloNativeTabEnabled: false,
-    })
-
-    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
-    expect(screen.queryByTestId('apollo-panel')).not.toBeInTheDocument()
-
-    rerender(
-      <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
-        onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
-        pendingActionRequests={[]}
-        insights={[makeInsight()]}
-        insightsLoading={false}
-        isProcessing={false}
-        processingTasks={[]}
-        apolloNativeTabEnabled
-      />,
-    )
-
-    await waitFor(() => {
-      expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
-    })
-  })
-
-  it('does not override a manual tab choice after Google Drive auto-selects', async () => {
-    const { rerender } = renderAgentComposer({
-      insights: [makeInsight()],
-      googleSheetsDriveTabEnabled: false,
+      ...disabledProps,
     })
 
     rerender(
@@ -503,12 +479,12 @@ describe('AgentComposer pending action insights panel', () => {
         insightsLoading={false}
         isProcessing={false}
         processingTasks={[]}
-        googleSheetsDriveTabEnabled
+        {...enabledProps}
       />,
     )
 
     await waitFor(() => {
-      expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+      expect(screen.getByTestId(panelTestId)).toBeInTheDocument()
     })
 
     fireEvent.click(screen.getByRole('button', { name: 'View burn rate insight' }))
@@ -527,61 +503,11 @@ describe('AgentComposer pending action insights panel', () => {
         insightsLoading={false}
         isProcessing={false}
         processingTasks={[]}
-        googleSheetsDriveTabEnabled
+        {...enabledProps}
       />,
     )
 
     expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
-    expect(screen.queryByTestId('google-drive-panel')).not.toBeInTheDocument()
-  })
-
-  it('does not override a manual tab choice after Apollo auto-selects', async () => {
-    const { rerender } = renderAgentComposer({
-      insights: [makeInsight()],
-      apolloNativeTabEnabled: false,
-    })
-
-    rerender(
-      <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
-        onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
-        pendingActionRequests={[]}
-        insights={[makeInsight()]}
-        insightsLoading={false}
-        isProcessing={false}
-        processingTasks={[]}
-        apolloNativeTabEnabled
-      />,
-    )
-
-    await waitFor(() => {
-      expect(screen.getByTestId('apollo-panel')).toBeInTheDocument()
-    })
-
-    fireEvent.click(screen.getByRole('button', { name: 'View burn rate insight' }))
-
-    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
-
-    rerender(
-      <AgentComposer
-        agentId="agent-1"
-        agentName="Test Agent"
-        agentFirstName="Test"
-        onSubmit={vi.fn(async () => undefined)}
-        currentInsightIndex={0}
-        pendingActionRequests={[]}
-        insights={[makeInsight()]}
-        insightsLoading={false}
-        isProcessing={false}
-        processingTasks={[]}
-        apolloNativeTabEnabled
-      />,
-    )
-
-    expect(screen.getByTestId('insight-card')).toHaveTextContent('Usage')
-    expect(screen.queryByTestId('apollo-panel')).not.toBeInTheDocument()
+    expect(screen.queryByTestId(panelTestId)).not.toBeInTheDocument()
   })
 })

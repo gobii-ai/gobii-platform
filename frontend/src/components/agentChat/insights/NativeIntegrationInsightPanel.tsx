@@ -137,48 +137,35 @@ export function NativeIntegrationInsightPanelFrame({
   actions = null,
   statusMessage = null,
 }: NativeIntegrationInsightPanelFrameProps) {
+  let headerConnected = connected
+  let content: ReactNode
+
   if (unavailableMessage) {
-    return (
-      <section className="google-drive-insight-panel" aria-label={ariaLabel}>
-        <NativeIntegrationPanelHeader
-          provider={provider}
-          providerLabel={providerLabel}
-          connected={false}
-          fallbackIcon={fallbackIcon}
-        />
-        <p className="google-drive-insight-panel__text">{unavailableMessage}</p>
-      </section>
+    headerConnected = false
+    content = <p className="google-drive-insight-panel__text">{unavailableMessage}</p>
+  } else if (loadingMessage) {
+    headerConnected = false
+    content = (
+      <div className="google-drive-insight-panel__inline-status">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+        {loadingMessage}
+      </div>
     )
-  }
-
-  if (loadingMessage) {
-    return (
-      <section className="google-drive-insight-panel" aria-label={ariaLabel}>
-        <NativeIntegrationPanelHeader
-          provider={provider}
-          providerLabel={providerLabel}
-          connected={false}
-          fallbackIcon={fallbackIcon}
-        />
-        <div className="google-drive-insight-panel__inline-status">
-          <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-          {loadingMessage}
+  } else if (errorMessage || !provider) {
+    headerConnected = false
+    content = <p className="google-drive-insight-panel__error">{errorMessage ?? notConfiguredMessage}</p>
+  } else {
+    content = (
+      <>
+        <div className="google-drive-insight-panel__body">
+          <div className="google-drive-insight-panel__copy">
+            {title ? <p className="google-drive-insight-panel__title">{title}</p> : null}
+            {text ? <p className="google-drive-insight-panel__text">{text}</p> : null}
+          </div>
+          {actions ? <div className="google-drive-insight-panel__actions">{actions}</div> : null}
         </div>
-      </section>
-    )
-  }
-
-  if (errorMessage || !provider) {
-    return (
-      <section className="google-drive-insight-panel" aria-label={ariaLabel}>
-        <NativeIntegrationPanelHeader
-          provider={provider}
-          providerLabel={providerLabel}
-          connected={false}
-          fallbackIcon={fallbackIcon}
-        />
-        <p className="google-drive-insight-panel__error">{errorMessage ?? notConfiguredMessage}</p>
-      </section>
+        {statusMessage ? <p className="google-drive-insight-panel__status">{statusMessage}</p> : null}
+      </>
     )
   }
 
@@ -187,18 +174,10 @@ export function NativeIntegrationInsightPanelFrame({
       <NativeIntegrationPanelHeader
         provider={provider}
         providerLabel={providerLabel}
-        connected={connected}
+        connected={headerConnected}
         fallbackIcon={fallbackIcon}
       />
-      <div className="google-drive-insight-panel__body">
-        <div className="google-drive-insight-panel__copy">
-          {title ? <p className="google-drive-insight-panel__title">{title}</p> : null}
-          {text ? <p className="google-drive-insight-panel__text">{text}</p> : null}
-        </div>
-        {actions ? <div className="google-drive-insight-panel__actions">{actions}</div> : null}
-      </div>
-
-      {statusMessage ? <p className="google-drive-insight-panel__status">{statusMessage}</p> : null}
+      {content}
     </section>
   )
 }
