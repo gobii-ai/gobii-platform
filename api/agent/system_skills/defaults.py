@@ -10,6 +10,7 @@ from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillFiel
 
 
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
+APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
 
 
 def _format_runtime_planning_context(agent) -> str:
@@ -103,6 +104,29 @@ def _google_sheets_native_prompt_instructions(agent) -> str:
         "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
         "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
         "integration at `" + integrations_url + "` before making Sheets API calls for that file."
+    )
+
+
+def _apollo_native_prompt_instructions(agent) -> str:
+    integrations_url = _app_integrations_url()
+    return (
+        "Use `http_request` for Apollo REST API calls. Native Apollo OAuth is applied automatically for "
+        "`https://api.apollo.io/` requests and the Apollo profile endpoint "
+        "`https://app.apollo.io/api/v1/users/api_profile`.\n"
+        "If setup is needed, tell the user to open `" + integrations_url + "` and connect Apollo. Use "
+        "`https://api.apollo.io/api/v1/...` for Apollo API work unless a documented OAuth metadata endpoint "
+        "specifically uses `https://app.apollo.io/api/v1/...`.\n"
+        "Use bounded requests with explicit filters plus `page` and `per_page`; avoid broad unbounded exports or "
+        "searches, and report when more pages remain.\n"
+        "Representative calls: POST `/mixed_people/api_search` for people search, POST `/mixed_companies/search` "
+        "for organization search, POST `/people/match` or `/people/bulk_match` for enrichment, and Apollo's "
+        "accounts, contacts, sequences, tasks, analytics, usage, and user endpoints for the corresponding user request.\n"
+        "For write-heavy, sequence-changing, contact/account creation, phone reveal, personal email reveal, "
+        "waterfall enrichment, or other credit-sensitive operations, summarize scope, filters, side effects, "
+        "and credit/plan sensitivity before proceeding unless the user has already clearly approved that operation.\n"
+        "Never invent webhook URLs. For phone reveal, personal-email reveal, or webhook-based enrichment, use only "
+        "an explicitly configured HTTPS webhook URL or ask the user for one. Do not use legacy `apollo_io-*` tools, "
+        "browser automation, or web search when the connected native Apollo API can do the work."
     )
 
 
@@ -258,6 +282,48 @@ GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "drive file spreadsheet",
     ),
     prompt_instructions_renderer=_google_sheets_native_prompt_instructions,
+)
+
+
+APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=APOLLO_NATIVE_SYSTEM_SKILL_KEY,
+    name="Apollo",
+    search_summary="Use connected Apollo REST APIs for lead sourcing, enrichment, CRM, sequencing, analytics, and sales intelligence.",
+    tool_names=("http_request",),
+    enables=(
+        "search Apollo people and organizations",
+        "enrich Apollo people and organizations",
+        "work with Apollo accounts, contacts, sequences, tasks, calls, conversations, deals, analytics, and users",
+        "use native Apollo OAuth with scoped partner-app access",
+        "inspect Apollo usage stats and rate limits",
+    ),
+    use_when=(
+        "the user asks to use Apollo or Apollo.io",
+        "the user asks for lead sourcing or prospect search through Apollo",
+        "the user asks to enrich people, contacts, accounts, or organizations with Apollo data",
+        "the user asks to create, update, or manage Apollo contacts, accounts, sequences, tasks, calls, conversations, or deals",
+        "the user asks to check Apollo API usage, rate limits, email accounts, or connected user profile",
+        "the work references sales intelligence data available through Apollo",
+    ),
+    query_aliases=(
+        "apollo",
+        "apollo.io",
+        "apollo api",
+        "apollo leads",
+        "lead sourcing",
+        "prospect search",
+        "people enrichment",
+        "contact enrichment",
+        "account enrichment",
+        "organization enrichment",
+        "apollo contacts",
+        "apollo accounts",
+        "apollo sequences",
+        "sales intelligence",
+        "usage stats",
+        "rate limits",
+    ),
+    prompt_instructions_renderer=_apollo_native_prompt_instructions,
 )
 
 
@@ -620,6 +686,7 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
+    APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

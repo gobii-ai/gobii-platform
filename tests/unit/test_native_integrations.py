@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 from waffle.models import Flag
 
-from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+from api.agent.system_skills.defaults import APOLLO_NATIVE_SYSTEM_SKILL_KEY, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
 from api.agent.system_skills.registry import get_system_skill_definition, shortlist_system_skills
 from api.agent.system_skills.service import enable_system_skills
 from api.agent.core.prompt_context import _get_secrets_block
@@ -25,6 +25,7 @@ from api.models import (
     PersistentAgentEnabledTool,
 )
 from api.services.native_integrations import (
+    APOLLO_PROVIDER,
     GOOGLE_DRIVE_PROVIDER,
     apply_native_integration_auth,
     get_native_integration_provider,
@@ -63,6 +64,8 @@ def _mock_response(content: bytes = b"{}", content_type: str = "application/json
     GOOGLE_DRIVE_CLIENT_SECRET="google-client-secret",
     GOOGLE_PICKER_API_KEY="picker-api-key",
     GOOGLE_PICKER_APP_ID="123456789",
+    APOLLO_CLIENT_ID="apollo-client-id",
+    APOLLO_CLIENT_SECRET="apollo-client-secret",
     GOBII_PROPRIETARY_MODE=False,
     PERSONAL_FREE_TRIAL_ENFORCEMENT_ENABLED=False,
     SEGMENT_WRITE_KEY="",
@@ -121,43 +124,60 @@ class NativeIntegrationTests(TestCase):
             expires_at=(timezone.now() - timedelta(minutes=1)).isoformat(),
         )
 
-    def _create_integration_secret(self, *, owner_user=None, owner_org=None, credentials=None):
+    def _apollo_credentials(self, *, access_token="apollo-access-token", refresh_token="apollo-refresh-token", expires_at=None):
+        return {
+            "provider_key": APOLLO_PROVIDER.key,
+            "auth_type": "oauth2",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "Bearer",
+            "scope": APOLLO_PROVIDER.scope_string,
+            "expires_at": expires_at or (timezone.now() + timedelta(hours=1)).isoformat(),
+        }
+
+    def _expired_apollo_credentials(self, *, access_token="expired-apollo-token"):
+        return self._apollo_credentials(
+            access_token=access_token,
+            expires_at=(timezone.now() - timedelta(minutes=1)).isoformat(),
+        )
+
+    def _create_integration_secret(self, *, owner_user=None, owner_org=None, credentials=None, provider=GOOGLE_DRIVE_PROVIDER):
         payload = credentials or self._credentials()
         secret = GlobalSecret(
             user=owner_user,
             organization=owner_org,
-            name=GOOGLE_DRIVE_PROVIDER.display_name,
-            description=GOOGLE_DRIVE_PROVIDER.description,
+            name=provider.display_name,
+            description=provider.description,
             secret_type=GlobalSecret.SecretType.INTEGRATION,
             domain_pattern=GlobalSecret.INTEGRATION_DOMAIN_SENTINEL,
-            key=GOOGLE_DRIVE_PROVIDER.secret_key,
+            key=provider.secret_key,
         )
         secret.set_value(json.dumps(payload))
         secret.save()
         return secret
 
-    def _token_response(self, *, access_token, refresh_token=None):
+    def _token_response(self, *, access_token, refresh_token=None, provider=GOOGLE_DRIVE_PROVIDER):
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {
             "access_token": access_token,
             "token_type": "Bearer",
             "expires_in": 3600,
-            "scope": GOOGLE_DRIVE_PROVIDER.scope_string,
+            "scope": provider.scope_string,
         }
         if refresh_token is not None:
             response.json.return_value["refresh_token"] = refresh_token
         return response
 
-    def _start_oauth(self, *, headers=None):
+    def _start_oauth(self, *, headers=None, provider_key="google_drive"):
         kwargs = {"headers": headers} if headers else {}
-        response = self.client.post(reverse("console-native-integration-connect", args=["google_drive"]), **kwargs)
+        response = self.client.post(reverse("console-native-integration-connect", args=[provider_key]), **kwargs)
         return response.json()["state"]
 
-    def _post_oauth_callback(self, state, *, headers=None):
+    def _post_oauth_callback(self, state, *, headers=None, provider_key="google_drive"):
         kwargs = {"headers": headers} if headers else {}
         return self.client.post(
-            reverse("console-native-integration-callback", args=["google_drive"]),
+            reverse("console-native-integration-callback", args=[provider_key]),
             data=json.dumps({"authorization_code": "auth-code", "state": state}),
             content_type="application/json",
             **kwargs,
@@ -180,6 +200,17 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(provider.key, "google_drive")
 
+    def test_provider_registry_serializes_apollo(self):
+        provider = get_native_integration_provider("apollo")
+
+        self.assertEqual(provider.display_name, "Apollo")
+        self.assertEqual(provider.auth_type, "oauth2")
+        self.assertEqual(provider.authorization_endpoint, "https://app.apollo.io/#/oauth/authorize")
+        self.assertEqual(provider.token_endpoint, "https://app.apollo.io/api/v1/oauth/token")
+        self.assertEqual(provider.api_url_prefixes[0], "https://api.apollo.io/")
+        self.assertIn("read_user_profile", provider.scopes)
+        self.assertIn("app_scopes", provider.scopes)
+
     def test_list_reports_connected_state_for_user_context(self):
         self._create_integration_secret(owner_user=self.user)
 
@@ -197,6 +228,23 @@ class NativeIntegrationTests(TestCase):
             provider["picker_token_url"],
             reverse("console-native-integration-picker-token", args=["google_drive"]),
         )
+
+    def test_list_reports_connected_state_for_apollo(self):
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
+
+        response = self.client.get(reverse("console-native-integration-list"))
+
+        self.assertEqual(response.status_code, 200)
+        providers = {provider["provider_key"]: provider for provider in response.json()["providers"]}
+        provider = providers["apollo"]
+        self.assertTrue(provider["connected"])
+        self.assertEqual(provider["display_name"], "Apollo")
+        self.assertEqual(provider["connect_url"], reverse("console-native-integration-connect", args=["apollo"]))
+        self.assertEqual(provider["revoke_url"], reverse("console-native-integration-revoke", args=["apollo"]))
 
     def test_list_treats_legacy_google_sheets_secret_as_connected(self):
         self._create_integration_secret(owner_user=self.user)
@@ -244,6 +292,18 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(payload["provider_key"], "google_drive")
         self.assertIn("https://accounts.google.com/o/oauth2/v2/auth", payload["authorization_url"])
         self.assertIn("scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive.file", payload["authorization_url"])
+        self.assertIn("redirect_uri=http%3A%2F%2Ftestserver%2Fintegrations%2Foauth%2Fcallback%2F", payload["authorization_url"])
+        self.assertIn("state=", payload["authorization_url"])
+
+    def test_connect_returns_apollo_authorization_url(self):
+        response = self.client.post(reverse("console-native-integration-connect", args=["apollo"]))
+
+        self.assertEqual(response.status_code, 201, response.content)
+        payload = response.json()
+        self.assertEqual(payload["provider_key"], "apollo")
+        self.assertIn("https://app.apollo.io/#/oauth/authorize", payload["authorization_url"])
+        self.assertIn("client_id=apollo-client-id", payload["authorization_url"])
+        self.assertIn("scope=read_user_profile+app_scopes", payload["authorization_url"])
         self.assertIn("redirect_uri=http%3A%2F%2Ftestserver%2Fintegrations%2Foauth%2Fcallback%2F", payload["authorization_url"])
         self.assertIn("state=", payload["authorization_url"])
 
@@ -329,6 +389,15 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(response.status_code, 404)
         self.assertEqual(response.json(), {"error": "Google Drive is not connected."})
 
+    def test_apollo_does_not_support_picker_or_files(self):
+        picker_response = self.client.get(reverse("console-native-integration-picker-token", args=["apollo"]))
+        files_response = self.client.get(reverse("console-native-integration-files", args=["apollo"]))
+
+        self.assertEqual(picker_response.status_code, 400)
+        self.assertEqual(picker_response.json(), {"error": "Apollo does not support file picking."})
+        self.assertEqual(files_response.status_code, 400)
+        self.assertEqual(files_response.json(), {"error": "Apollo does not expose files."})
+
     @override_settings(GOOGLE_PICKER_API_KEY="", GOOGLE_PICKER_APP_ID="")
     def test_picker_token_requires_picker_configuration(self):
         self._create_integration_secret(owner_user=self.user)
@@ -371,6 +440,28 @@ class NativeIntegrationTests(TestCase):
             mock_post.call_args.kwargs["data"]["redirect_uri"],
             "http://testserver/integrations/oauth/callback/",
         )
+
+    @patch("api.services.native_integrations.httpx.post")
+    def test_callback_stores_hidden_apollo_integration_secret(self, mock_post):
+        state = self._start_oauth(provider_key="apollo")
+        mock_post.return_value = self._token_response(
+            access_token="new-apollo-access-token",
+            refresh_token="new-apollo-refresh-token",
+            provider=APOLLO_PROVIDER,
+        )
+
+        response = self._post_oauth_callback(state, provider_key="apollo")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        secret = GlobalSecret.objects.get(user=self.user, secret_type=GlobalSecret.SecretType.INTEGRATION)
+        self.assertEqual(secret.key, "native_apollo")
+        self.assertEqual(secret.domain_pattern, GlobalSecret.INTEGRATION_DOMAIN_SENTINEL)
+        stored = json.loads(secret.get_value())
+        self.assertEqual(stored["provider_key"], "apollo")
+        self.assertEqual(stored["access_token"], "new-apollo-access-token")
+        self.assertEqual(stored["refresh_token"], "new-apollo-refresh-token")
+        self.assertEqual(mock_post.call_args.kwargs["data"]["client_id"], "apollo-client-id")
+        self.assertEqual(mock_post.call_args.kwargs["data"]["client_secret"], "apollo-client-secret")
 
     @patch("api.services.native_integrations.httpx.post")
     def test_callback_accepts_matching_organization_context_override(self, mock_post):
@@ -443,6 +534,29 @@ class NativeIntegrationTests(TestCase):
 
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_injects_apollo_auth_for_apollo_api(self, mock_request, mock_proxy):
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(b'{"ok": true}')
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.apollo.io/api/v1/users",
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        request_kwargs = mock_request.call_args.kwargs
+        self.assertEqual(request_kwargs["headers"]["Authorization"], "Bearer apollo-access-token")
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
     def test_http_request_returns_native_integration_not_connected_before_google_call(self, mock_request, mock_proxy):
         mock_proxy.return_value = None
 
@@ -457,6 +571,26 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(result["status"], "error")
         self.assertIn("native_integration_not_connected", result["message"])
+        self.assertIn("/app/integrations", result["message"])
+        mock_request.assert_not_called()
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_returns_native_integration_not_connected_before_apollo_call(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.apollo.io/api/v1/users",
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("native_integration_not_connected", result["message"])
+        self.assertIn("connect Apollo", result["message"])
         self.assertIn("/app/integrations", result["message"])
         mock_request.assert_not_called()
 
@@ -476,6 +610,27 @@ class NativeIntegrationTests(TestCase):
                 else:
                     self.assertNotIn("Authorization", headers)
 
+    def test_native_integration_auth_matches_apollo_api_urls(self):
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
+
+        cases = (
+            ("https://api.apollo.io/api/v1/mixed_people/api_search", True),
+            ("https://app.apollo.io/api/v1/users/api_profile", True),
+            ("https://app.apollo.io/api/v1/oauth/token", False),
+            ("https://www.apollo.io/pricing", False),
+        )
+        for url, should_match in cases:
+            with self.subTest(url=url):
+                headers = apply_native_integration_auth(self.agent, url, {})
+                if should_match:
+                    self.assertEqual(headers["Authorization"], "Bearer apollo-access-token")
+                else:
+                    self.assertNotIn("Authorization", headers)
+
     @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
     @patch("api.agent.tools.http_request.requests.request")
     @patch("api.services.native_integrations.httpx.post")
@@ -492,6 +647,31 @@ class NativeIntegrationTests(TestCase):
             {
                 "method": "GET",
                 "url": "https://sheets.googleapis.com/v4/spreadsheets/test",
+                "headers": {"Authorization": "Bearer explicit-token"},
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mock_request.call_args.kwargs["headers"]["Authorization"], "Bearer explicit-token")
+        mock_refresh.assert_not_called()
+
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    @patch("api.services.native_integrations.httpx.post")
+    def test_http_request_does_not_override_explicit_apollo_authorization(self, mock_refresh, mock_request, mock_proxy):
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._expired_apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(b'{"ok": true}')
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.apollo.io/api/v1/users",
                 "headers": {"Authorization": "Bearer explicit-token"},
             },
         )
@@ -526,15 +706,49 @@ class NativeIntegrationTests(TestCase):
         self.assertEqual(json.loads(secret.get_value())["access_token"], "refreshed-token")
         mock_refresh.assert_called_once()
 
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    @patch("api.services.native_integrations.httpx.post")
+    def test_http_request_refreshes_expired_apollo_token(self, mock_refresh, mock_request, mock_proxy):
+        secret = self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._expired_apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
+        mock_refresh.return_value = self._token_response(access_token="refreshed-apollo-token", provider=APOLLO_PROVIDER)
+        mock_proxy.return_value = None
+        mock_request.return_value = _mock_response(b'{"ok": true}')
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://api.apollo.io/api/v1/users",
+            },
+        )
+
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual(mock_request.call_args.kwargs["headers"]["Authorization"], "Bearer refreshed-apollo-token")
+        secret.refresh_from_db()
+        self.assertEqual(json.loads(secret.get_value())["access_token"], "refreshed-apollo-token")
+        mock_refresh.assert_called_once()
+
     def test_prompt_mentions_native_integration_without_secret_key(self):
         self._create_integration_secret(owner_user=self.user)
+        self._create_integration_secret(
+            owner_user=self.user,
+            credentials=self._apollo_credentials(),
+            provider=APOLLO_PROVIDER,
+        )
 
         block = _get_secrets_block(self.agent)
 
         self.assertIn("Native integrations available through tools", block)
         self.assertIn("Google Drive", block)
+        self.assertIn("Apollo", block)
         self.assertNotIn("native_google_drive", block)
         self.assertNotIn("native_google_sheets", block)
+        self.assertNotIn("native_apollo", block)
 
     def test_google_sheets_native_system_skill_is_registered_and_enables_http_request(self):
         definition = get_system_skill_definition(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)
@@ -551,6 +765,25 @@ class NativeIntegrationTests(TestCase):
 
         self.assertEqual(result["invalid"], [])
         self.assertIn(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY, result["enabled"])
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").exists()
+        )
+
+    def test_apollo_native_system_skill_is_registered_and_enables_http_request(self):
+        definition = get_system_skill_definition(APOLLO_NATIVE_SYSTEM_SKILL_KEY)
+
+        self.assertIsNotNone(definition)
+        self.assertEqual(definition.name, "Apollo")
+        self.assertEqual(definition.tool_names, ("http_request",))
+        search_results = shortlist_system_skills("search Apollo prospects", available_tool_names={"http_request"})
+        self.assertIn(APOLLO_NATIVE_SYSTEM_SKILL_KEY, [result.skill_key for result in search_results])
+        search_results = shortlist_system_skills("enrich contacts in Apollo", available_tool_names={"http_request"})
+        self.assertIn(APOLLO_NATIVE_SYSTEM_SKILL_KEY, [result.skill_key for result in search_results])
+
+        result = enable_system_skills(self.agent, [APOLLO_NATIVE_SYSTEM_SKILL_KEY])
+
+        self.assertEqual(result["invalid"], [])
+        self.assertIn(APOLLO_NATIVE_SYSTEM_SKILL_KEY, result["enabled"])
         self.assertTrue(
             PersistentAgentEnabledTool.objects.filter(agent=self.agent, tool_full_name="http_request").exists()
         )
@@ -577,3 +810,22 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("?q=name%20contains%20", block)
         self.assertIn("omit the name predicate", block)
         self.assertIn("drive.file", block)
+
+    @override_settings(PUBLIC_SITE_URL="https://app.example.test")
+    def test_apollo_prompt_tells_agent_how_to_use_native_rest_api(self):
+        enable_system_skills(self.agent, [APOLLO_NATIVE_SYSTEM_SKILL_KEY])
+
+        block = format_recent_skills_for_prompt(self.agent, limit=3)
+
+        self.assertIn("System Skill: Apollo", block)
+        self.assertIn("Tools: http_request", block)
+        self.assertIn("https://api.apollo.io/api/v1", block)
+        self.assertIn("Native Apollo OAuth is applied automatically", block)
+        self.assertIn("page", block)
+        self.assertIn("per_page", block)
+        self.assertIn("credit-sensitive", block)
+        self.assertIn("Never invent webhook URLs", block)
+        self.assertIn("/app/integrations", block)
+        self.assertIn("mixed_people/api_search", block)
+        self.assertIn("mixed_companies/search", block)
+        self.assertIn("people/match", block)

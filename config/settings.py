@@ -1617,6 +1617,15 @@ GOOGLE_PICKER_APP_ID = GOOGLE_CLOUD_PROJECT_NUMBER or (
     os.getenv("GOOGLE_CLOUD_PROJECT", "") if os.getenv("GOOGLE_CLOUD_PROJECT", "").isdigit() else ""
 )
 
+# Apollo
+APOLLO_CLIENT_ID = env("APOLLO_CLIENT_ID", default="")
+APOLLO_CLIENT_SECRET = env("APOLLO_CLIENT_SECRET", default="")
+APOLLO_OAUTH_SCOPES = tuple(
+    scope
+    for scope in env("APOLLO_OAUTH_SCOPES", default="read_user_profile app_scopes").replace(",", " ").split()
+    if scope
+)
+
 # ────────── Native Discord Bot ──────────
 DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
 DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")

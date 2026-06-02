@@ -29,6 +29,10 @@ from api.evals.scenarios.google_sheets_native import (
     GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
     GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
 )
+from api.evals.scenarios.apollo_native import (
+    APOLLO_NATIVE_SCENARIO_SLUGS,
+    APOLLO_NATIVE_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -99,6 +103,11 @@ register_builtin_suites(
             slug=GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
             description="Native Google Sheets system-skill evals over mocked Drive and Sheets REST APIs.",
             scenario_slugs=GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=APOLLO_NATIVE_SUITE_SLUG,
+            description="Native Apollo system-skill evals over mocked Apollo REST APIs.",
+            scenario_slugs=APOLLO_NATIVE_SCENARIO_SLUGS,
         ),
     ]
 )
