@@ -132,6 +132,7 @@
       width="2528"
       height="1696"
       loading="eager"
+      fetchpriority="high"
       decoding="async"
     >
   </div>
@@ -478,9 +479,19 @@
         <div class="relative rounded-3xl overflow-hidden shadow-2xl shadow-violet-200/40 border border-white/60">
           <img
             src="{% static 'images/solutions/candidate-found.jpg' %}"
+            srcset="{% static 'images/solutions/candidate-found-320.jpg' %} 320w,
+                    {% static 'images/solutions/candidate-found-480.jpg' %} 480w,
+                    {% static 'images/solutions/candidate-found-640.jpg' %} 640w,
+                    {% static 'images/solutions/candidate-found-960.jpg' %} 960w,
+                    {% static 'images/solutions/candidate-found-1280.jpg' %} 1280w,
+                    {% static 'images/solutions/candidate-found.jpg' %} 2048w"
+            sizes="(min-width: 1024px) 640px, calc(100vw - 48px)"
             alt="Gobii AI agent sending a Candidate Found notification to your phone"
             class="w-full h-auto"
+            width="2048"
+            height="2048"
             loading="lazy"
+            decoding="async"
           >
           <!-- Subtle overlay gradient for polish -->
           <div class="absolute inset-0 bg-gradient-to-t from-violet-900/10 via-transparent to-white/10 pointer-events-none"></div>
