@@ -1137,6 +1137,9 @@ TOOL_CREDIT_COSTS = {
 # error. Names are normalized case-insensitively by the credit helpers.
 TOOL_CREDIT_NO_CHARGE_ON_ERROR_TOOLS = {
     "create_video",
+    "send_chat_message",
+    "send_email",
+    "send_sms",
 }
 
 # Analytics
