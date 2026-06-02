@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { GoogleDriveInsightPanel } from './GoogleDriveInsightPanel'
 import {
-  fetchNativeIntegrationFiles,
   fetchNativeIntegrationPickerToken,
   fetchNativeIntegrations,
   startNativeIntegrationConnect,
@@ -16,25 +15,16 @@ import {
 
 vi.mock('../../../api/nativeIntegrations', () => ({
   fetchNativeIntegrations: vi.fn(),
-  fetchNativeIntegrationFiles: vi.fn(),
   fetchNativeIntegrationPickerToken: vi.fn(),
   startNativeIntegrationConnect: vi.fn(),
 }))
 
 vi.mock('../../mcp/NativeIntegrationShared', () => ({
   NativeProviderIcon: () => <img src="/static/images/integrations/native/google_drive.svg" alt="" />,
-  nativeIntegrationFilesQueryKey: (provider: { providerKey: string; filesUrl: string }) => [
-    'native-integration-files',
-    provider.providerKey,
-    provider.filesUrl,
-  ],
   nativeOAuthContextPayload: () => ({ providerKey: 'google_drive' }),
   openGoogleDrivePicker: vi.fn(),
   openNativeOAuthPopup: vi.fn(),
   storePendingNativeOAuth: vi.fn(),
-  supportsNativeIntegrationFileList: (provider: { connected: boolean; filesUrl: string }) => (
-    provider.connected && Boolean(provider.filesUrl)
-  ),
   supportsNativeIntegrationPicker: (provider: { providerKey: string; pickerTokenUrl: string }) => (
     provider.providerKey === 'google_drive' && Boolean(provider.pickerTokenUrl)
   ),
@@ -75,7 +65,6 @@ function renderPanel() {
 describe('GoogleDriveInsightPanel', () => {
   beforeEach(() => {
     vi.mocked(fetchNativeIntegrations).mockReset()
-    vi.mocked(fetchNativeIntegrationFiles).mockReset()
     vi.mocked(fetchNativeIntegrationPickerToken).mockReset()
     vi.mocked(startNativeIntegrationConnect).mockReset()
     vi.mocked(openGoogleDrivePicker).mockReset()
@@ -112,22 +101,11 @@ describe('GoogleDriveInsightPanel', () => {
     expect((popup.location as Location).href).toBe('https://accounts.google.com/oauth')
   })
 
-  it('opens Google Picker and refreshes selected files when connected', async () => {
+  it('opens Google Picker when connected', async () => {
     vi.mocked(fetchNativeIntegrations).mockResolvedValue({
       ownerScope: 'personal',
       ownerLabel: 'Personal',
       providers: [{ ...googleDriveProvider, connected: true }],
-    })
-    vi.mocked(fetchNativeIntegrationFiles).mockResolvedValue({
-      providerKey: 'google_drive',
-      files: [
-        {
-          externalId: 'sheet-1',
-          name: 'Sales Tracker',
-          mimeType: 'application/vnd.google-apps.spreadsheet',
-          webUrl: 'https://docs.google.com/spreadsheets/d/sheet-1/edit',
-        },
-      ],
     })
     vi.mocked(fetchNativeIntegrationPickerToken).mockResolvedValue({
       accessToken: 'token',
@@ -140,7 +118,7 @@ describe('GoogleDriveInsightPanel', () => {
 
     renderPanel()
 
-    expect(await screen.findByText('Sales Tracker')).toBeInTheDocument()
+    expect(await screen.findByText('Google Drive connected')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Select files' }))
 
     await waitFor(() => {

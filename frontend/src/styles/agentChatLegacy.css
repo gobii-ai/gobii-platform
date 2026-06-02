@@ -2875,7 +2875,6 @@
 .google-drive-insight-panel__body,
 .google-drive-insight-panel__actions,
 .google-drive-insight-panel__inline-status,
-.google-drive-insight-panel__file,
 .google-drive-insight-panel__connected {
   display: flex;
   align-items: center;
@@ -2928,7 +2927,6 @@
 }
 
 .google-drive-insight-panel__text,
-.google-drive-insight-panel__empty,
 .google-drive-insight-panel__status,
 .google-drive-insight-panel__error,
 .google-drive-insight-panel__inline-status {
@@ -2938,7 +2936,6 @@
 }
 
 .google-drive-insight-panel__text,
-.google-drive-insight-panel__empty,
 .google-drive-insight-panel__inline-status {
   color: #475569;
 }
@@ -2992,62 +2989,6 @@
 .google-drive-insight-panel__button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
-}
-
-.google-drive-insight-panel__files {
-  min-width: 0;
-}
-
-.google-drive-insight-panel__file-list {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  min-width: 0;
-  overflow-x: auto;
-  padding: 0;
-  margin: 0;
-  list-style: none;
-  scrollbar-width: none;
-}
-
-.google-drive-insight-panel__file-list::-webkit-scrollbar {
-  display: none;
-}
-
-.google-drive-insight-panel__file {
-  max-width: 13rem;
-  min-width: 0;
-  gap: 0.35rem;
-  border-radius: 0.5rem;
-  background: rgba(255, 255, 255, 0.62);
-  padding: 0.35rem 0.5rem;
-  color: #0f766e;
-  font-size: 0.72rem;
-  font-weight: 650;
-}
-
-.google-drive-insight-panel__file:hover {
-  color: #064e3b;
-}
-
-.google-drive-insight-panel__file-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-  color: #0f9d58;
-}
-
-.google-drive-insight-panel__file-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.google-drive-insight-panel__file-more {
-  flex-shrink: 0;
-  color: #64748b;
-  font-size: 0.72rem;
-  font-weight: 700;
 }
 
 @container (max-width: 520px) {

@@ -132,7 +132,6 @@ export function GoogleDriveInsightPanel({ nativeIntegrationsUrl = null }: Google
     )
   }
 
-  const files = filesQuery.data?.files ?? []
   const busy = connectMutation.isPending || pickerMutation.isPending || pendingAction !== null
   const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
 
