@@ -171,6 +171,45 @@ function parseToolUrl(value: string | null): URL | null {
   }
 }
 
+const APOLLO_EXACT_ENDPOINT_LABELS: Record<string, { label: string; captionSubject: string }> = {
+  'mixed_people/api_search': { label: 'Search Apollo people', captionSubject: 'people search' },
+  'mixed_companies/search': { label: 'Search Apollo companies', captionSubject: 'company search' },
+  'people/match': { label: 'Enrich Apollo person', captionSubject: 'person enrichment' },
+  'users/api_profile': { label: 'Read Apollo profile', captionSubject: 'profile' },
+}
+
+const APOLLO_ENDPOINT_FAMILY_LABELS: Record<string, { label: string; captionSubject: string }> = {
+  organizations: { label: 'Enrich Apollo organization', captionSubject: 'organization enrichment' },
+  accounts: { label: 'Manage Apollo accounts', captionSubject: 'accounts' },
+  sequences: { label: 'Manage Apollo sequences', captionSubject: 'sequences' },
+  tasks: { label: 'Manage Apollo tasks', captionSubject: 'tasks' },
+  deals: { label: 'Manage Apollo deals', captionSubject: 'deals' },
+  calls: { label: 'Manage Apollo calls', captionSubject: 'calls' },
+  analytics: { label: 'Read Apollo analytics', captionSubject: 'analytics' },
+  users: { label: 'Manage Apollo users', captionSubject: 'users' },
+  usage_stats: { label: 'Read Apollo usage stats', captionSubject: 'usage stats' },
+  email_accounts: { label: 'Manage Apollo email accounts', captionSubject: 'email accounts' },
+}
+
+function describeApolloEndpoint(method: string, endpointPath: string): { label: string; captionSubject: string } {
+  const exactMatch = APOLLO_EXACT_ENDPOINT_LABELS[endpointPath]
+  if (exactMatch) {
+    return exactMatch
+  }
+
+  const endpointRoot = endpointPath.split('/').filter(Boolean)[0] ?? ''
+  if (endpointRoot === 'contacts') {
+    return {
+      label: method === 'POST' ? 'Create Apollo contact' : 'Manage Apollo contacts',
+      captionSubject: 'contacts',
+    }
+  }
+  return APOLLO_ENDPOINT_FAMILY_LABELS[endpointRoot] ?? {
+    label: 'Apollo API request',
+    captionSubject: endpointPath || 'api request',
+  }
+}
+
 function deriveApolloApiRequest(parameters: Record<string, unknown> | null): ToolDescriptorTransform | null {
   const rawUrl = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
   const parsedUrl = parseToolUrl(rawUrl)
@@ -190,54 +229,7 @@ function deriveApolloApiRequest(parameters: Record<string, unknown> | null): Too
   }
 
   const endpointPath = isApolloProfileUrl ? 'users/api_profile' : pathname.slice(apiPrefix.length)
-  const endpointParts = endpointPath.split('/').filter(Boolean)
-  const endpointRoot = endpointParts[0] ?? ''
-  let label = 'Apollo API request'
-  let captionSubject = endpointPath || 'api request'
-
-  if (endpointPath === 'mixed_people/api_search') {
-    label = 'Search Apollo people'
-    captionSubject = 'people search'
-  } else if (endpointPath === 'mixed_companies/search') {
-    label = 'Search Apollo companies'
-    captionSubject = 'company search'
-  } else if (endpointPath === 'people/match') {
-    label = 'Enrich Apollo person'
-    captionSubject = 'person enrichment'
-  } else if (endpointRoot === 'organizations') {
-    label = 'Enrich Apollo organization'
-    captionSubject = 'organization enrichment'
-  } else if (endpointRoot === 'contacts') {
-    label = method === 'POST' ? 'Create Apollo contact' : 'Manage Apollo contacts'
-    captionSubject = 'contacts'
-  } else if (endpointRoot === 'accounts') {
-    label = 'Manage Apollo accounts'
-    captionSubject = 'accounts'
-  } else if (endpointRoot === 'sequences') {
-    label = 'Manage Apollo sequences'
-    captionSubject = 'sequences'
-  } else if (endpointRoot === 'tasks') {
-    label = 'Manage Apollo tasks'
-    captionSubject = 'tasks'
-  } else if (endpointRoot === 'deals') {
-    label = 'Manage Apollo deals'
-    captionSubject = 'deals'
-  } else if (endpointRoot === 'calls') {
-    label = 'Manage Apollo calls'
-    captionSubject = 'calls'
-  } else if (endpointRoot === 'analytics') {
-    label = 'Read Apollo analytics'
-    captionSubject = 'analytics'
-  } else if (endpointRoot === 'users') {
-    label = endpointPath === 'users/api_profile' ? 'Read Apollo profile' : 'Manage Apollo users'
-    captionSubject = endpointPath === 'users/api_profile' ? 'profile' : 'users'
-  } else if (endpointRoot === 'usage_stats') {
-    label = 'Read Apollo usage stats'
-    captionSubject = 'usage stats'
-  } else if (endpointRoot === 'email_accounts') {
-    label = 'Manage Apollo email accounts'
-    captionSubject = 'email accounts'
-  }
+  const { label, captionSubject } = describeApolloEndpoint(method, endpointPath)
 
   return {
     label,

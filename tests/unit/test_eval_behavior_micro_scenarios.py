@@ -173,9 +173,24 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         self.assertIn("sqlite_batch", by_slug["common_use_case_062_send_attachment_email"].allowed_preamble_tools)
         self.assertIn("Action items", by_slug["common_use_case_075_create_markdown_file"].prompt)
         self.assertEqual(by_slug["common_use_case_069_secure_api_key_request"].forbidden_tools, ())
-        self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].allowed_preamble_tools, ("search_tools",))
-        self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].allowed_preamble_tools, ("search_tools",))
-        self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].allowed_preamble_tools, ("search_tools",))
+        self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].expected_tools, ("http_request",))
+        self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].expected_tools, ("http_request",))
+        self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].expected_tools, ("http_request",))
+        self.assertEqual(by_slug["common_use_case_036_apollo_contacts"].allowed_preamble_tools, ("search_tools", "enable_system_skills"))
+        self.assertEqual(by_slug["common_use_case_037_apollo_accounts"].allowed_preamble_tools, ("search_tools", "enable_system_skills"))
+        self.assertEqual(by_slug["common_use_case_038_apollo_enrich_person"].allowed_preamble_tools, ("search_tools", "enable_system_skills"))
+        self.assertEqual(
+            by_slug["common_use_case_036_apollo_contacts"].accepted_tool_alternatives,
+            {"http_request": ("apollo_io-search-contacts",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_037_apollo_accounts"].accepted_tool_alternatives,
+            {"http_request": ("apollo_io-search-accounts",)},
+        )
+        self.assertEqual(
+            by_slug["common_use_case_038_apollo_enrich_person"].accepted_tool_alternatives,
+            {"http_request": ("apollo_io-people-enrichment",)},
+        )
         self.assertEqual(
             by_slug["common_use_case_036_apollo_contacts"].eval_synthetic_tools,
             ("apollo_io-search-contacts",),
@@ -295,7 +310,11 @@ class BehaviorMicroScenarioRegistrationTests(TestCase):
         )
         self.assertEqual(
             by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].expected_tools,
-            ("apollo_io-search-contacts", "sqlite_batch"),
+            ("http_request", "sqlite_batch"),
+        )
+        self.assertEqual(
+            by_slug["common_use_case_118_apollo_dedupe_contacts_sqlite"].accepted_tool_alternatives,
+            {"http_request": ("apollo_io-search-contacts",)},
         )
         self.assertEqual(
             by_slug["common_use_case_122_custom_tool_bulk_api_sqlite"].expected_tools,
