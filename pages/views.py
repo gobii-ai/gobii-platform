@@ -1615,17 +1615,79 @@ class PretrainedWorkerDetailView(TemplateView):
         return context
 
 
+def _get_pretrained_worker_template_or_404(code: str | None):
+    template = PretrainedWorkerTemplateService.get_template_by_code(code)
+    if not template:
+        raise Http404("This pretrained worker is no longer available.")
+    return template
+
+
+def _seed_pretrained_worker_session(request, template) -> None:
+    request.session["agent_charter"] = template.charter
+    request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
+    request.session["agent_charter_source"] = "template"
+    request.session.modified = True
+
+
+def _pretrained_worker_analytics_properties(request, template, *, default_source_page: str) -> dict:
+    source_page = request.POST.get("source_page") or request.GET.get("source_page") or default_source_page
+    flow = (request.POST.get("flow") or request.GET.get("flow") or "").strip().lower()
+    properties = {
+        "source_page": source_page,
+        "template_code": template.code,
+    }
+    if flow:
+        properties["flow"] = flow
+    return properties
+
+
+class PretrainedWorkerLaunchView(View):
+    def get(self, request, *args, **kwargs):
+        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
+
+        _seed_pretrained_worker_session(request, template)
+        _set_template_launch_trial_onboarding_if_needed(request)
+
+        analytics_properties = _pretrained_worker_analytics_properties(
+            request,
+            template,
+            default_source_page="pretrained_worker_launch",
+        )
+        _track_web_event_for_request(
+            request,
+            event=AnalyticsEvent.PERSISTENT_AGENT_CHARTER_SUBMIT,
+            properties=analytics_properties,
+        )
+
+        app_next_url = _build_template_launch_app_url(request)
+        if request.user.is_authenticated:
+            return redirect(app_next_url)
+
+        response = _build_anonymous_cta_auth_response(
+            request,
+            next_url=app_next_url,
+        )
+        charter_data = _build_oauth_charter_cookie_payload(
+            request,
+            charter=template.charter,
+            charter_source="template",
+            template_code=template.code,
+        )
+        attribution_data = _build_oauth_attribution_cookie_payload(request)
+        _set_oauth_stash_cookies(
+            response,
+            request,
+            charter_data=charter_data,
+            attribution_data=attribution_data,
+            server_side_charter=True,
+        )
+        return response
+
+
 class PretrainedWorkerHireView(View):
     def post(self, request, *args, **kwargs):
-        code = kwargs.get('slug')
-        template = PretrainedWorkerTemplateService.get_template_by_code(code)
-        if not template:
-            raise Http404("This pretrained worker is no longer available.")
-
-        request.session['agent_charter'] = template.charter
-        request.session[PretrainedWorkerTemplateService.TEMPLATE_SESSION_KEY] = template.code
-        request.session['agent_charter_source'] = 'template'
-        request.session.modified = True
+        template = _get_pretrained_worker_template_or_404(kwargs.get("slug"))
+        _seed_pretrained_worker_session(request, template)
 
         source_page = request.POST.get('source_page') or 'home_pretrained_workers'
         flow = (request.POST.get("flow") or "").strip().lower()
@@ -1791,7 +1853,7 @@ def _track_anonymous_public_template_capture(request, template: PersistentAgentT
     )
 
 
-def _build_public_template_launch_app_url(request) -> str:
+def _build_template_launch_app_url(request) -> str:
     params = request.GET.copy()
     params["spawn"] = "1"
 
@@ -1813,7 +1875,7 @@ def _build_public_template_launch_app_url(request) -> str:
     return f"{app_base_url}?{app_query}" if app_query else app_base_url
 
 
-def _set_public_template_trial_onboarding_if_needed(request) -> None:
+def _set_template_launch_trial_onboarding_if_needed(request) -> None:
     if not settings.GOBII_PROPRIETARY_MODE:
         return
 
@@ -1987,7 +2049,7 @@ class PublicTemplateLaunchView(View):
             return _public_template_redirect_with_query(request, canonical_launch_path)
 
         previous_referrer_code = _seed_public_template_session(request, template)
-        _set_public_template_trial_onboarding_if_needed(request)
+        _set_template_launch_trial_onboarding_if_needed(request)
         _track_anonymous_public_template_capture(request, template, previous_referrer_code)
 
         analytics_properties = _public_template_analytics_properties(
@@ -2011,7 +2073,7 @@ class PublicTemplateLaunchView(View):
             properties=analytics_properties,
         )
 
-        app_next_url = _build_public_template_launch_app_url(request)
+        app_next_url = _build_template_launch_app_url(request)
         if request.user.is_authenticated:
             return redirect(app_next_url)
 
