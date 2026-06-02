@@ -113,10 +113,66 @@
     </div>
 
     <div class="grid grid-cols-2 gap-3 self-center sm:gap-4">
-      <img src="{% static 'images/solutions/sales-hero.jpg' %}" alt="AI sales agent workspace" class="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100" width="2816" height="1536" loading="eager" decoding="async">
-      <img src="{% static 'images/solutions/recruiting-hero.jpg' %}" alt="AI recruiting agent reviewing candidates" class="mt-8 aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100" width="2528" height="1696" loading="eager" decoding="async">
-      <img src="{% static 'images/solutions/healthcare-hero.jpg' %}" alt="Healthcare AI agent workflow" class="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100" width="2816" height="1536" loading="lazy" decoding="async">
-      <img src="{% static 'images/solutions/engineering-hero.jpg' %}" alt="Developer workflow for AI browser agents" class="mt-8 aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100" width="3168" height="1344" loading="lazy" decoding="async">
+      <img
+        src="{% static 'images/solutions/sales-hero.jpg' %}"
+        srcset="{% static 'images/solutions/sales-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/sales-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/sales-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/sales-hero-1920.jpg' %} 1920w,
+                {% static 'images/solutions/sales-hero.jpg' %} 2816w"
+        sizes="(max-width: 1023px) 50vw, 300px"
+        alt="AI sales agent workspace"
+        class="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100"
+        width="1200"
+        height="900"
+        loading="eager"
+        decoding="async"
+      >
+      <img
+        src="{% static 'images/solutions/recruiting-hero.jpg' %}"
+        srcset="{% static 'images/solutions/recruiting-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/recruiting-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/recruiting-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/recruiting-hero-1920.jpg' %} 1920w,
+                {% static 'images/solutions/recruiting-hero.jpg' %} 2528w"
+        sizes="(max-width: 1023px) 50vw, 300px"
+        alt="AI recruiting agent reviewing candidates"
+        class="mt-8 aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100"
+        width="1200"
+        height="900"
+        loading="eager"
+        decoding="async"
+      >
+      <img
+        src="{% static 'images/solutions/healthcare-hero.jpg' %}"
+        srcset="{% static 'images/solutions/healthcare-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/healthcare-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/healthcare-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/healthcare-hero-1920.jpg' %} 1920w,
+                {% static 'images/solutions/healthcare-hero.jpg' %} 2816w"
+        sizes="(max-width: 1023px) 50vw, 300px"
+        alt="Healthcare AI agent workflow"
+        class="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100"
+        width="1200"
+        height="900"
+        loading="lazy"
+        decoding="async"
+      >
+      <img
+        src="{% static 'images/solutions/engineering-hero.jpg' %}"
+        srcset="{% static 'images/solutions/engineering-hero-640.jpg' %} 640w,
+                {% static 'images/solutions/engineering-hero-960.jpg' %} 960w,
+                {% static 'images/solutions/engineering-hero-1280.jpg' %} 1280w,
+                {% static 'images/solutions/engineering-hero-1920.jpg' %} 1920w,
+                {% static 'images/solutions/engineering-hero.jpg' %} 2560w"
+        sizes="(max-width: 1023px) 50vw, 300px"
+        alt="Developer workflow for AI browser agents"
+        class="mt-8 aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-indigo-100"
+        width="1200"
+        height="900"
+        loading="lazy"
+        decoding="async"
+      >
     </div>
   </div>
 </section>
