@@ -35,6 +35,10 @@ class ConsoleUserPreferencesApiTests(TestCase):
             preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [],
         )
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE),
+            UserPreference.AgentRosterGalleryViewMode.GRID,
+        )
         self.assertIsNone(
             preferences.get(UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED),
         )
@@ -137,6 +141,41 @@ class ConsoleUserPreferencesApiTests(TestCase):
             (stored.preferences or {}).get(UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS),
             [favorite_agent_id, second_agent_id],
         )
+
+    def test_patch_updates_agent_roster_gallery_view_mode(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE: "org_chart",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        preferences = response.json().get("preferences", {})
+        self.assertEqual(
+            preferences.get(UserPreference.KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE),
+            UserPreference.AgentRosterGalleryViewMode.ORG_CHART,
+        )
+
+    def test_patch_rejects_invalid_agent_roster_gallery_view_mode(self):
+        response = self.client.patch(
+            self.url,
+            data=json.dumps(
+                {
+                    "preferences": {
+                        UserPreference.KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE: "tree",
+                    }
+                }
+            ),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
     def test_patch_updates_insights_panel_expanded_preference(self):
         response = self.client.patch(

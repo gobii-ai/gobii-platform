@@ -949,8 +949,13 @@ class UserPreference(models.Model):
         RECENT = "recent", "Most recent"
         ALPHABETICAL = "alphabetical", "Alphabetical (A-Z)"
 
+    class AgentRosterGalleryViewMode(models.TextChoices):
+        GRID = "grid", "Grid"
+        ORG_CHART = "org_chart", "Org Chart"
+
     KEY_AGENT_CHAT_ROSTER_SORT_MODE = "agent.chat.roster.sort_mode"
     KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS = "agent.chat.roster.favorite_agent_ids"
+    KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE = "agent.chat.roster.gallery_view_mode"
     KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED = "agent.chat.insights_panel.expanded"
     KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED = "agent.chat.notifications.enabled"
     KEY_USER_TIMEZONE = "user.timezone"
@@ -963,6 +968,11 @@ class UserPreference(models.Model):
         KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS: {
             "default": [],
             "type": "uuid_list",
+        },
+        KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE: {
+            "default": AgentRosterGalleryViewMode.GRID,
+            "type": "choice",
+            "allowed_values": frozenset(AgentRosterGalleryViewMode.values),
         },
         KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED: {
             "default": None,
@@ -11661,6 +11671,152 @@ class AgentPeerLink(models.Model):
 
         self.full_clean()
         return super().save(*args, **kwargs)
+
+
+class AgentOrgChart(models.Model):
+    """Shared workspace org chart for arranging agents and peer links."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    owner_user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_org_charts",
+    )
+    organization = models.ForeignKey(
+        "Organization",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="agent_org_charts",
+    )
+    viewport = models.JSONField(default=dict, blank=True)
+    revision = models.PositiveIntegerField(default=1)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_agent_org_charts",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_agent_org_charts",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(owner_user__isnull=False, organization__isnull=True)
+                    | Q(owner_user__isnull=True, organization__isnull=False)
+                ),
+                name="agent_org_chart_one_owner_scope",
+            ),
+            models.UniqueConstraint(
+                fields=["owner_user"],
+                condition=Q(owner_user__isnull=False, organization__isnull=True),
+                name="unique_personal_agent_org_chart",
+            ),
+            models.UniqueConstraint(
+                fields=["organization"],
+                condition=Q(owner_user__isnull=True, organization__isnull=False),
+                name="unique_org_agent_org_chart",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        owner = self.organization_id or self.owner_user_id
+        return f"AgentOrgChart<{owner}>"
+
+
+class AgentOrgChartNode(models.Model):
+    """Saved position for an agent in an org chart."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chart = models.ForeignKey(
+        AgentOrgChart,
+        on_delete=models.CASCADE,
+        related_name="nodes",
+    )
+    agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="org_chart_nodes",
+    )
+    x = models.FloatField(default=0)
+    y = models.FloatField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chart", "agent"],
+                name="unique_agent_org_chart_node",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["chart", "agent"], name="agent_org_node_lookup"),
+        ]
+
+
+class AgentOrgChartEdge(models.Model):
+    """Directed org chart relationship backed by a peer messaging link."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    chart = models.ForeignKey(
+        AgentOrgChart,
+        on_delete=models.CASCADE,
+        related_name="edges",
+    )
+    parent_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="org_chart_child_edges",
+    )
+    child_agent = models.ForeignKey(
+        "PersistentAgent",
+        on_delete=models.CASCADE,
+        related_name="org_chart_parent_edges",
+    )
+    peer_link = models.ForeignKey(
+        AgentPeerLink,
+        on_delete=models.CASCADE,
+        related_name="org_chart_edges",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chart", "child_agent"],
+                name="unique_agent_org_chart_child",
+            ),
+            models.UniqueConstraint(
+                fields=["chart", "parent_agent", "child_agent"],
+                name="unique_agent_org_chart_edge",
+            ),
+            models.UniqueConstraint(
+                fields=["chart", "peer_link"],
+                name="unique_agent_org_chart_peer_link",
+            ),
+            models.CheckConstraint(
+                condition=~Q(parent_agent=models.F("child_agent")),
+                name="agent_org_chart_no_self_edge",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["chart", "parent_agent"], name="agent_org_edge_parent"),
+            models.Index(fields=["chart", "child_agent"], name="agent_org_edge_child"),
+        ]
 
 
 class AgentCommPeerState(models.Model):

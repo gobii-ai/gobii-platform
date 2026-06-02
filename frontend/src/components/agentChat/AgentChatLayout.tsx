@@ -39,7 +39,7 @@ import type {
   PlanSnapshot,
 } from '../../types/agentChat'
 import type { InsightEvent } from '../../types/insight'
-import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterGalleryViewMode, AgentRosterSortMode } from '../../types/agentRoster'
 import type { PlanningState, SignupPreviewState } from '../../types/agentRoster'
 import type { ConsoleContext } from '../../api/context'
 import {
@@ -213,6 +213,8 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   onBlockedCreateAgent?: (location: 'sidebar') => void
   agentRosterSortMode?: AgentRosterSortMode
   onAgentRosterSortModeChange?: (mode: AgentRosterSortMode) => void
+  agentRosterGalleryViewMode?: AgentRosterGalleryViewMode
+  onAgentRosterGalleryViewModeChange?: (mode: AgentRosterGalleryViewMode) => void
   onInsightsPanelExpandedPreferenceChange?: (expanded: boolean) => void
   contextSwitcher?: AgentChatContextSwitcherData
   currentContext?: ConsoleContext | null
@@ -406,6 +408,8 @@ export function AgentChatLayout({
   onBlockedCreateAgent,
   agentRosterSortMode = 'recent',
   onAgentRosterSortModeChange,
+  agentRosterGalleryViewMode = 'grid',
+  onAgentRosterGalleryViewModeChange,
   onInsightsPanelExpandedPreferenceChange,
   contextSwitcher,
   currentContext = null,
@@ -1530,6 +1534,8 @@ export function AgentChatLayout({
         onBlockedCreateAgent={onBlockedCreateAgent}
         rosterSortMode={agentRosterSortMode}
         onRosterSortModeChange={onAgentRosterSortModeChange}
+        galleryViewMode={agentRosterGalleryViewMode}
+        onGalleryViewModeChange={onAgentRosterGalleryViewModeChange}
         contextSwitcher={contextSwitcher}
         settings={sidebarSettings}
         galleryShellPage={galleryShellPage}

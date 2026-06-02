@@ -1,4 +1,5 @@
 export type AgentRosterSortMode = 'recent' | 'alphabetical'
+export type AgentRosterGalleryViewMode = 'grid' | 'org_chart'
 
 export type SignupPreviewState =
   | 'none'

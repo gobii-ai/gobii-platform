@@ -1,6 +1,6 @@
 export type AgentChatSidebarMode = 'collapsed' | 'list' | 'gallery'
 
-export type AgentDrawerViewMode = 'list' | 'gallery'
+export type AgentDrawerViewMode = 'list' | 'gallery' | 'org_chart'
 
 export const SIDEBAR_MOBILE_BREAKPOINT_PX = 768
 

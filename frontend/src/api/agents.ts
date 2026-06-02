@@ -1,6 +1,6 @@
 import { jsonFetch, jsonRequest } from './http'
 import type { ConsoleContext } from './context'
-import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterGalleryViewMode, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AccountPauseInfo, BillingStatusInfo } from '../types/agentAddons'
 import type { LlmIntelligenceConfig } from '../types/llmIntelligence'
 
@@ -28,6 +28,7 @@ type AgentRosterPayload = {
   requested_agent_status?: 'deleted' | 'missing' | null
   agent_roster_sort_mode?: AgentRosterSortMode
   favorite_agent_ids?: string[]
+  agent_roster_gallery_view_mode?: AgentRosterGalleryViewMode
   insights_panel_expanded?: boolean | null
   agent_chat_notifications_enabled?: boolean
   billingStatus?: BillingStatusInfo | null
@@ -77,6 +78,7 @@ export async function fetchAgentRoster(
   context: ConsoleContext
   agents: AgentRosterEntry[]
   agentRosterSortMode: AgentRosterSortMode
+  agentRosterGalleryViewMode: AgentRosterGalleryViewMode
   favoriteAgentIds: string[]
   insightsPanelExpanded: boolean | null
   agentChatNotificationsEnabled: boolean
@@ -129,6 +131,7 @@ export async function fetchAgentRoster(
     context: payload.context,
     agents,
     agentRosterSortMode: payload.agent_roster_sort_mode ?? 'recent',
+    agentRosterGalleryViewMode: payload.agent_roster_gallery_view_mode === 'org_chart' ? 'org_chart' : 'grid',
     favoriteAgentIds: Array.isArray(payload.favorite_agent_ids)
       ? payload.favorite_agent_ids.filter((value): value is string => typeof value === 'string')
       : [],
@@ -139,6 +142,87 @@ export async function fetchAgentRoster(
     accountPause: payload.accountPause ?? null,
     llmIntelligence: payload.llmIntelligence,
   }
+}
+
+export type AgentOrgChartNodePayload = {
+  agentId: string
+  x: number | null
+  y: number | null
+}
+
+export type AgentOrgChartEdgePayload = {
+  id?: string
+  parentAgentId: string
+  childAgentId: string
+  peerLinkId?: string
+}
+
+export type AgentOrgChartUnplacedPeerLink = {
+  peerLinkId: string
+  agentAId: string
+  agentBId: string
+  agentAName: string
+  agentBName: string
+  reason: string
+}
+
+export type AgentOrgChartPayload = {
+  context: ConsoleContext
+  revision: number
+  viewport: {
+    x?: number
+    y?: number
+    zoom?: number
+  }
+  nodes: AgentOrgChartNodePayload[]
+  edges: AgentOrgChartEdgePayload[]
+  unplacedPeerLinks: AgentOrgChartUnplacedPeerLink[]
+}
+
+type AgentOrgChartResponsePayload = Omit<AgentOrgChartPayload, 'unplacedPeerLinks'> & {
+  unplacedPeerLinks?: AgentOrgChartUnplacedPeerLink[]
+  unplaced_peer_links?: AgentOrgChartUnplacedPeerLink[]
+}
+
+function normalizeAgentOrgChartPayload(payload: AgentOrgChartResponsePayload): AgentOrgChartPayload {
+  return {
+    context: payload.context,
+    revision: Number.isFinite(payload.revision) ? payload.revision : 1,
+    viewport: payload.viewport && typeof payload.viewport === 'object' ? payload.viewport : {},
+    nodes: Array.isArray(payload.nodes) ? payload.nodes : [],
+    edges: Array.isArray(payload.edges) ? payload.edges : [],
+    unplacedPeerLinks: Array.isArray(payload.unplacedPeerLinks)
+      ? payload.unplacedPeerLinks
+      : Array.isArray(payload.unplaced_peer_links)
+        ? payload.unplaced_peer_links
+        : [],
+  }
+}
+
+export async function fetchAgentOrgChart(): Promise<AgentOrgChartPayload> {
+  const payload = await jsonFetch<AgentOrgChartResponsePayload>('/console/api/agents/org-chart/')
+  return normalizeAgentOrgChartPayload(payload)
+}
+
+export async function saveAgentOrgChart(payload: {
+  revision: number
+  viewport: AgentOrgChartPayload['viewport']
+  nodes: Array<{
+    agentId: string
+    x: number
+    y: number
+  }>
+  edges: Array<{
+    parentAgentId: string
+    childAgentId: string
+  }>
+}): Promise<AgentOrgChartPayload> {
+  const response = await jsonRequest<AgentOrgChartResponsePayload>('/console/api/agents/org-chart/', {
+    method: 'PUT',
+    json: payload,
+    includeCsrf: true,
+  })
+  return normalizeAgentOrgChartPayload(response)
 }
 
 export function updateAgent(agentId: string, payload: UpdateAgentPayload): Promise<void> {

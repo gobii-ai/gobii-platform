@@ -35,11 +35,13 @@ import { fetchAgentSpawnIntent, type AgentSpawnIntent } from '../api/agentSpawnI
 import {
   parseBooleanPreference,
   parseNullableBooleanPreference,
+  parseAgentRosterGalleryViewMode,
   updateUserPreferences,
   parseFavoriteAgentIdsPreference,
   USER_PREFERENCE_KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED,
   USER_PREFERENCE_KEY_AGENT_CHAT_NOTIFICATIONS_ENABLED,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
+  USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE,
   USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_SORT_MODE,
 } from '../api/userPreferences'
 import type { ConsoleContext } from '../api/context'
@@ -86,7 +88,7 @@ import { usePageLifecycle } from '../hooks/usePageLifecycle'
 import { normalizeHexColor } from '../util/color'
 import { HttpError } from '../api/http'
 import { safeErrorMessage } from '../api/safeErrorMessage'
-import type { AgentRosterEntry, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterGalleryViewMode, AgentRosterSortMode, PlanningState, SignupPreviewState } from '../types/agentRoster'
 import type { AgentMessageNotification, PendingActionRequest, PendingHumanInputRequest, PlanSnapshot, TimelineEvent } from '../types/agentChat'
 import type { DailyCreditsUpdatePayload } from '../types/dailyCredits'
 import type { AgentSetupMetadata } from '../types/insight'
@@ -606,6 +608,7 @@ function prunePendingAvatarTracking(
 type AgentRosterQueryData = {
   context: ConsoleContext
   agentRosterSortMode?: AgentRosterSortMode
+  agentRosterGalleryViewMode?: AgentRosterGalleryViewMode
   favoriteAgentIds?: string[]
   insightsPanelExpanded?: boolean | null
   agentChatNotificationsEnabled?: boolean
@@ -615,12 +618,14 @@ type AgentRosterQueryData = {
 
 type AgentRosterPreferenceField =
   | 'agentRosterSortMode'
+  | 'agentRosterGalleryViewMode'
   | 'favoriteAgentIds'
   | 'insightsPanelExpanded'
   | 'agentChatNotificationsEnabled'
 
 type AgentRosterPreferenceState = {
   agentRosterSortMode: AgentRosterSortMode
+  agentRosterGalleryViewMode: AgentRosterGalleryViewMode
   favoriteAgentIds: string[]
   insightsPanelExpanded: boolean | null
   agentChatNotificationsEnabled: boolean
@@ -1686,6 +1691,7 @@ export function AgentChatPage({
     refetchIntervalMs: rosterRefreshIntervalMs,
   })
   const [agentRosterSortMode, setAgentRosterSortMode] = useState<AgentRosterSortMode>('recent')
+  const [agentRosterGalleryViewMode, setAgentRosterGalleryViewMode] = useState<AgentRosterGalleryViewMode>('grid')
   const [favoriteAgentIds, setFavoriteAgentIds] = useState<string[]>([])
   const [insightsPanelExpandedPreference, setInsightsPanelExpandedPreference] = useState<boolean | null>(null)
   const [agentChatNotificationsEnabled, setAgentChatNotificationsEnabled] = useState<boolean>(() => (
@@ -1694,6 +1700,7 @@ export function AgentChatPage({
       : parseBooleanPreference(rosterQuery.data.agentChatNotificationsEnabled)
   ))
   const hasHydratedAgentRosterSortModeRef = useRef(false)
+  const hasHydratedAgentRosterGalleryViewModeRef = useRef(false)
   const hasHydratedInsightsPanelExpandedPreferenceRef = useRef(false)
   const hasHydratedAgentChatNotificationsEnabledRef = useRef(false)
   const notificationPermissionPromptAttemptedRef = useRef(false)
@@ -1703,6 +1710,13 @@ export function AgentChatPage({
     hasHydratedAgentRosterSortModeRef,
     setAgentRosterSortMode,
     parseAgentRosterSortMode,
+  )
+
+  useHydratedAgentRosterPreference(
+    rosterQuery.data?.agentRosterGalleryViewMode,
+    hasHydratedAgentRosterGalleryViewModeRef,
+    setAgentRosterGalleryViewMode,
+    parseAgentRosterGalleryViewMode,
   )
 
   useEffect(() => {
@@ -1791,6 +1805,19 @@ export function AgentChatPage({
       })
     },
     [agentRosterSortMode, persistAgentRosterPreference],
+  )
+
+  const handleAgentRosterGalleryViewModeChange = useCallback(
+    (nextViewMode: AgentRosterGalleryViewMode) => {
+      persistAgentRosterPreference(nextViewMode, {
+        field: 'agentRosterGalleryViewMode',
+        preferenceKey: USER_PREFERENCE_KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE,
+        setState: setAgentRosterGalleryViewMode,
+        parsePersistedValue: parseAgentRosterGalleryViewMode,
+        currentValue: agentRosterGalleryViewMode,
+      })
+    },
+    [agentRosterGalleryViewMode, persistAgentRosterPreference],
   )
 
   const handleToggleAgentFavorite = useCallback(
@@ -4108,6 +4135,8 @@ export function AgentChatPage({
     createAgentDisabledReason,
     rosterSortMode: agentRosterSortMode,
     onRosterSortModeChange: handleAgentRosterSortModeChange,
+    galleryViewMode: agentRosterGalleryViewMode,
+    onGalleryViewModeChange: handleAgentRosterGalleryViewModeChange,
     desktopMode: selectionSidebarMode,
     onDesktopModeChange: handleSelectionSidebarModeChange,
     contextSwitcher: contextSwitcher ?? undefined,
@@ -4834,6 +4863,8 @@ export function AgentChatPage({
         onBlockedCreateAgent={previewCreateAgentBlocked ? handleBlockedCreateAgent : undefined}
         agentRosterSortMode={agentRosterSortMode}
         onAgentRosterSortModeChange={handleAgentRosterSortModeChange}
+        agentRosterGalleryViewMode={agentRosterGalleryViewMode}
+        onAgentRosterGalleryViewModeChange={handleAgentRosterGalleryViewModeChange}
         onInsightsPanelExpandedPreferenceChange={handleInsightsPanelExpandedPreferenceChange}
         contextSwitcher={contextSwitcher ?? undefined}
         currentContext={effectiveContext}

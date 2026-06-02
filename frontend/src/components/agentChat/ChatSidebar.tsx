@@ -1,13 +1,14 @@
 import { memo, useState, useCallback, useEffect, useMemo, type CSSProperties, type ReactNode } from 'react'
-import { ArrowLeftRight, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
+import { ArrowLeftRight, Building2, LayoutGrid, List, PanelLeft, PanelLeftClose, PanelRightClose, Plus } from 'lucide-react'
 
 import type { ConsoleContext } from '../../api/context'
-import type { AgentRosterEntry, AgentRosterSortMode } from '../../types/agentRoster'
+import type { AgentRosterEntry, AgentRosterGalleryViewMode, AgentRosterSortMode } from '../../types/agentRoster'
 import { buildAgentSearchBlob } from '../../util/agentCards'
 import { AgentAvatarBadge } from '../common/AgentAvatarBadge'
 import { AgentChatContextSwitcher, type AgentChatContextSwitcherData } from './AgentChatContextSwitcher'
 import { AgentChatMobileSheet } from './AgentChatMobileSheet'
 import { ChatSidebarGallery } from './ChatSidebarGallery'
+import { AgentOrgChartView } from './AgentOrgChartView'
 import {
   SelectionShellPageSwitcher,
   SELECTION_SHELL_PAGE_LABELS,
@@ -42,6 +43,8 @@ type ChatSidebarProps = {
   onBlockedCreateAgent?: (location: 'sidebar') => void
   rosterSortMode?: AgentRosterSortMode
   onRosterSortModeChange?: (mode: AgentRosterSortMode) => void
+  galleryViewMode?: AgentRosterGalleryViewMode
+  onGalleryViewModeChange?: (mode: AgentRosterGalleryViewMode) => void
   contextSwitcher?: AgentChatContextSwitcherData
   settings?: SidebarSettingsInfo
   galleryShellPage?: SelectionShellPage
@@ -70,6 +73,8 @@ export const ChatSidebar = memo(function ChatSidebar({
   onBlockedCreateAgent,
   rosterSortMode = 'recent',
   onRosterSortModeChange,
+  galleryViewMode = 'grid',
+  onGalleryViewModeChange,
   contextSwitcher,
   settings,
   galleryShellPage = 'agents',
@@ -153,6 +158,15 @@ export const ChatSidebar = memo(function ChatSidebar({
     }
   }, [isMobile, showCustomGalleryShellPanel, galleryShellPage])
 
+  useEffect(() => {
+    if (!isMobile || showSettingsView || showCustomGalleryShellPanel || !drawerOpen) {
+      return
+    }
+    if (galleryViewMode === 'org_chart') {
+      setDrawerViewMode('org_chart')
+    }
+  }, [drawerOpen, galleryViewMode, isMobile, showCustomGalleryShellPanel, showSettingsView])
+
   const handleStepLeft = useCallback(() => {
     if (showSettingsView) {
       onDesktopModeChange?.('list')
@@ -180,6 +194,7 @@ export const ChatSidebar = memo(function ChatSidebar({
 
   const hasAgents = agents.length > 0
   const showSortToggle = agents.length >= 2
+  const showGalleryViewToggle = hasAgents && !showCustomGalleryShellPanel
   const createAgentDisabled = Boolean(createAgentDisabledReason)
   const trackableCreateAgentDisabled = createAgentDisabled && Boolean(onBlockedCreateAgent)
   const createAgentButtonDisabled = createAgentDisabled && !trackableCreateAgentDisabled
@@ -439,10 +454,25 @@ export const ChatSidebar = memo(function ChatSidebar({
                 type="button"
                 className="agent-drawer-view-toggle-button"
                 data-active={drawerViewMode === 'gallery' ? 'true' : 'false'}
-                onClick={() => setDrawerViewMode('gallery')}
+                onClick={() => {
+                  setDrawerViewMode('gallery')
+                  onGalleryViewModeChange?.('grid')
+                }}
               >
                 <LayoutGrid className="h-4 w-4" />
                 <span>Grid</span>
+              </button>
+              <button
+                type="button"
+                className="agent-drawer-view-toggle-button"
+                data-active={drawerViewMode === 'org_chart' ? 'true' : 'false'}
+                onClick={() => {
+                  setDrawerViewMode('org_chart')
+                  onGalleryViewModeChange?.('org_chart')
+                }}
+              >
+                <Building2 className="h-4 w-4" />
+                <span>Org</span>
               </button>
             </div>
           ) : null}
@@ -456,7 +486,16 @@ export const ChatSidebar = memo(function ChatSidebar({
               />
             </div>
           ) : null}
-          {!showSettingsView && drawerViewMode === 'gallery' ? (
+          {!showSettingsView && drawerViewMode === 'org_chart' ? (
+            <div className="agent-drawer-gallery-scroll">
+              <AgentOrgChartView
+                agents={filteredAgents}
+                activeAgentId={activeAgentId}
+                switchingAgentId={switchingAgentId}
+                onSelectAgent={handleAgentSelect}
+              />
+            </div>
+          ) : !showSettingsView && drawerViewMode === 'gallery' ? (
             showCustomGalleryShellPanel ? (
               <div className="agent-drawer-gallery-scroll">
                 {galleryShellPanel}
@@ -585,6 +624,29 @@ export const ChatSidebar = memo(function ChatSidebar({
             </div>
           ) : null}
 
+          {!collapsed && galleryMode && !showSettingsView && showGalleryViewToggle ? (
+            <div className="chat-sidebar-gallery-view-toggle" role="group" aria-label="Agent gallery view">
+              <button
+                type="button"
+                className="chat-sidebar-gallery-view-toggle-button"
+                data-active={galleryViewMode === 'grid' ? 'true' : 'false'}
+                onClick={() => onGalleryViewModeChange?.('grid')}
+              >
+                <LayoutGrid className="h-4 w-4" />
+                <span>Grid</span>
+              </button>
+              <button
+                type="button"
+                className="chat-sidebar-gallery-view-toggle-button"
+                data-active={galleryViewMode === 'org_chart' ? 'true' : 'false'}
+                onClick={() => onGalleryViewModeChange?.('org_chart')}
+              >
+                <Building2 className="h-4 w-4" />
+                <span>Org Chart</span>
+              </button>
+            </div>
+          ) : null}
+
           {showSettingsView ? (
             <div className="min-h-0 flex-1 overflow-y-auto">
               {embeddedSettingsPanel}
@@ -593,6 +655,13 @@ export const ChatSidebar = memo(function ChatSidebar({
             <div className="chat-sidebar-gallery-scroll">
               {galleryShellPanel}
             </div>
+          ) : galleryMode && galleryViewMode === 'org_chart' ? (
+            <AgentOrgChartView
+              agents={filteredAgents}
+              activeAgentId={activeAgentId}
+              switchingAgentId={switchingAgentId}
+              onSelectAgent={handleAgentSelect}
+            />
           ) : galleryMode ? (
             <ChatSidebarGallery
               variant="sidebar"

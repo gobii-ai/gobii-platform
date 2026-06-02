@@ -130,6 +130,10 @@ from api.models import (
     Organization,
     OrganizationMembership,
     AgentCollaborator,
+    AgentOrgChart,
+    AgentOrgChartEdge,
+    AgentOrgChartNode,
+    AgentPeerLink,
     UserPreference,
     UserEmail,
     AddonEntitlement,
@@ -3116,6 +3120,402 @@ def _web_chat_properties(agent: PersistentAgent, extra: dict[str, Any] | None = 
     return Analytics.with_org_properties(payload, organization=getattr(agent, "organization", None))
 
 
+def _agent_org_chart_context_payload(context) -> dict[str, str]:
+    return {
+        "type": context.type,
+        "id": context.id,
+        "name": context.name,
+    }
+
+
+def _agent_org_chart_context_agents(user, context) -> list[PersistentAgent]:
+    return list(
+        agent_queryset_for(
+            user,
+            context,
+            allow_delinquent_personal_chat=True,
+        )
+        .select_related("agent_color")
+        .order_by("name", "id")
+    )
+
+
+def _get_agent_org_chart(context_info, user, *, for_update: bool = False) -> AgentOrgChart:
+    query = AgentOrgChart.objects
+    if for_update:
+        query = query.select_for_update()
+
+    if context_info.current_context.type == "organization":
+        chart, _ = query.get_or_create(
+            organization_id=context_info.current_context.id,
+            defaults={"created_by": user, "updated_by": user},
+        )
+        return chart
+
+    chart, _ = query.get_or_create(
+        owner_user=user,
+        defaults={"created_by": user, "updated_by": user},
+    )
+    return chart
+
+
+def _agent_org_chart_edge_would_cycle(edges: list[tuple[str, str]], parent_id: str, child_id: str) -> bool:
+    adjacency: dict[str, list[str]] = {}
+    for existing_parent, existing_child in edges:
+        adjacency.setdefault(existing_parent, []).append(existing_child)
+    adjacency.setdefault(parent_id, []).append(child_id)
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(agent_id: str) -> bool:
+        if agent_id in visiting:
+            return True
+        if agent_id in visited:
+            return False
+        visiting.add(agent_id)
+        for next_agent_id in adjacency.get(agent_id, []):
+            if visit(next_agent_id):
+                return True
+        visiting.remove(agent_id)
+        visited.add(agent_id)
+        return False
+
+    return any(visit(agent_id) for agent_id in list(adjacency.keys()))
+
+
+def _serialize_agent_org_chart_unplaced_link(link: AgentPeerLink, reason: str) -> dict[str, str]:
+    return {
+        "peerLinkId": str(link.id),
+        "agentAId": str(link.agent_a_id),
+        "agentBId": str(link.agent_b_id),
+        "agentAName": link.agent_a.name or "Agent",
+        "agentBName": link.agent_b.name or "Agent",
+        "reason": reason,
+    }
+
+
+def _reconcile_agent_org_chart_peer_links(chart: AgentOrgChart, agent_ids: set[str]) -> list[dict[str, str]]:
+    chart_edges = list(
+        chart.edges
+        .select_related("parent_agent", "child_agent", "peer_link")
+        .filter(parent_agent_id__in=agent_ids, child_agent_id__in=agent_ids)
+        .order_by("created_at", "id")
+    )
+    represented_edges = [
+        (str(edge.parent_agent_id), str(edge.child_agent_id))
+        for edge in chart_edges
+    ]
+    represented_child_ids = {str(edge.child_agent_id) for edge in chart_edges}
+    represented_peer_link_ids = {str(edge.peer_link_id) for edge in chart_edges}
+    unplaced_links: list[dict[str, str]] = []
+    imported = False
+
+    peer_links = (
+        AgentPeerLink.objects
+        .select_related("agent_a", "agent_b")
+        .filter(agent_a_id__in=agent_ids, agent_b_id__in=agent_ids)
+        .order_by("agent_a__name", "agent_b__name", "id")
+    )
+    for link in peer_links:
+        link_id = str(link.id)
+        if link_id in represented_peer_link_ids:
+            continue
+
+        parent_id = str(link.agent_a_id)
+        child_id = str(link.agent_b_id)
+        if child_id in represented_child_ids:
+            unplaced_links.append(
+                _serialize_agent_org_chart_unplaced_link(link, "child_already_has_parent")
+            )
+            continue
+        if _agent_org_chart_edge_would_cycle(represented_edges, parent_id, child_id):
+            unplaced_links.append(
+                _serialize_agent_org_chart_unplaced_link(link, "would_create_cycle")
+            )
+            continue
+
+        try:
+            AgentOrgChartEdge.objects.create(
+                chart=chart,
+                parent_agent_id=parent_id,
+                child_agent_id=child_id,
+                peer_link=link,
+            )
+        except IntegrityError:
+            unplaced_links.append(
+                _serialize_agent_org_chart_unplaced_link(link, "chart_conflict")
+            )
+            continue
+        represented_edges.append((parent_id, child_id))
+        represented_child_ids.add(child_id)
+        represented_peer_link_ids.add(link_id)
+        imported = True
+
+    if imported:
+        chart.revision += 1
+        chart.save(update_fields=["revision", "updated_at"])
+
+    return unplaced_links
+
+
+def _serialize_agent_org_chart(
+    chart: AgentOrgChart,
+    context_info,
+    agents: list[PersistentAgent],
+    unplaced_links: list[dict[str, str]],
+) -> dict[str, Any]:
+    agent_ids = {str(agent.id) for agent in agents}
+    saved_nodes = {
+        str(node.agent_id): node
+        for node in chart.nodes.filter(agent_id__in=agent_ids)
+    }
+    nodes = []
+    for agent in agents:
+        node = saved_nodes.get(str(agent.id))
+        nodes.append(
+            {
+                "agentId": str(agent.id),
+                "x": node.x if node else None,
+                "y": node.y if node else None,
+            }
+        )
+
+    edges = []
+    for edge in (
+        chart.edges
+        .select_related("peer_link")
+        .filter(parent_agent_id__in=agent_ids, child_agent_id__in=agent_ids)
+        .order_by("created_at", "id")
+    ):
+        edges.append(
+            {
+                "id": str(edge.id),
+                "parentAgentId": str(edge.parent_agent_id),
+                "childAgentId": str(edge.child_agent_id),
+                "peerLinkId": str(edge.peer_link_id),
+            }
+        )
+
+    return {
+        "context": _agent_org_chart_context_payload(context_info.current_context),
+        "revision": chart.revision,
+        "viewport": chart.viewport if isinstance(chart.viewport, dict) else {},
+        "nodes": nodes,
+        "edges": edges,
+        "unplacedPeerLinks": unplaced_links,
+        "unplaced_peer_links": unplaced_links,
+    }
+
+
+def _normalize_agent_org_chart_viewport(raw_viewport: object) -> dict[str, float]:
+    if not isinstance(raw_viewport, dict):
+        return {}
+    viewport: dict[str, float] = {}
+    for key in ("x", "y", "zoom"):
+        raw_value = raw_viewport.get(key)
+        if isinstance(raw_value, bool):
+            continue
+        if isinstance(raw_value, (int, float)) and math.isfinite(float(raw_value)):
+            viewport[key] = float(raw_value)
+    return viewport
+
+
+def _extract_agent_org_chart_agent_id(payload: dict[str, Any], camel_key: str, snake_key: str) -> str:
+    value = payload.get(camel_key, payload.get(snake_key))
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"{camel_key} is required.")
+    return str(UUID(value.strip()))
+
+
+def _normalize_agent_org_chart_nodes(
+    raw_nodes: object,
+    agent_ids: set[str],
+) -> dict[str, tuple[float, float]]:
+    if not isinstance(raw_nodes, list):
+        raise ValueError("nodes must be an array.")
+
+    positions: dict[str, tuple[float, float]] = {}
+    for raw_node in raw_nodes:
+        if not isinstance(raw_node, dict):
+            raise ValueError("Each node must be an object.")
+        agent_id = _extract_agent_org_chart_agent_id(raw_node, "agentId", "agent_id")
+        if agent_id not in agent_ids:
+            raise ValueError("Node agent is not available in this workspace.")
+        x = raw_node.get("x")
+        y = raw_node.get("y")
+        if isinstance(x, bool) or isinstance(y, bool) or not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            raise ValueError("Node x and y must be numbers.")
+        if not math.isfinite(float(x)) or not math.isfinite(float(y)):
+            raise ValueError("Node x and y must be finite numbers.")
+        positions[agent_id] = (float(x), float(y))
+
+    return positions
+
+
+def _normalize_agent_org_chart_edges(
+    raw_edges: object,
+    agent_ids: set[str],
+) -> list[tuple[str, str]]:
+    if not isinstance(raw_edges, list):
+        raise ValueError("edges must be an array.")
+
+    edges: list[tuple[str, str]] = []
+    seen_pairs: set[tuple[str, str]] = set()
+    seen_children: set[str] = set()
+    for raw_edge in raw_edges:
+        if not isinstance(raw_edge, dict):
+            raise ValueError("Each edge must be an object.")
+        parent_id = _extract_agent_org_chart_agent_id(raw_edge, "parentAgentId", "parent_agent_id")
+        child_id = _extract_agent_org_chart_agent_id(raw_edge, "childAgentId", "child_agent_id")
+        if parent_id not in agent_ids or child_id not in agent_ids:
+            raise ValueError("Edge agents must be available in this workspace.")
+        if parent_id == child_id:
+            raise ValueError("An agent cannot report to itself.")
+        pair = (parent_id, child_id)
+        if pair in seen_pairs:
+            raise ValueError("Duplicate org chart edge.")
+        if child_id in seen_children:
+            raise ValueError("Each agent can only have one manager.")
+        if _agent_org_chart_edge_would_cycle(edges, parent_id, child_id):
+            raise ValueError("Org chart edges cannot create a cycle.")
+        seen_pairs.add(pair)
+        seen_children.add(child_id)
+        edges.append(pair)
+
+    return edges
+
+
+def _get_or_create_agent_org_chart_peer_link(
+    parent: PersistentAgent,
+    child: PersistentAgent,
+    user,
+) -> AgentPeerLink:
+    pair_key = AgentPeerLink.build_pair_key(parent.id, child.id)
+    link = AgentPeerLink.objects.filter(pair_key=pair_key).first()
+    if link:
+        return link
+    try:
+        return AgentPeerLink.objects.create(
+            agent_a=parent,
+            agent_b=child,
+            created_by=user,
+        )
+    except IntegrityError:
+        return AgentPeerLink.objects.get(pair_key=pair_key)
+
+
+class AgentOrgChartAPIView(LoginRequiredMixin, View):
+    http_method_names = ["get", "put"]
+
+    def _resolve_context_info(self, request: HttpRequest):
+        return resolve_console_context(
+            request.user,
+            request.session,
+            override=get_context_override(request),
+        )
+
+    def get(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        context_info = self._resolve_context_info(request)
+        agents = _agent_org_chart_context_agents(request.user, context_info.current_context)
+        agent_ids = {str(agent.id) for agent in agents}
+        with transaction.atomic():
+            chart = _get_agent_org_chart(context_info, request.user, for_update=True)
+            unplaced_links = _reconcile_agent_org_chart_peer_links(chart, agent_ids)
+            payload = _serialize_agent_org_chart(chart, context_info, agents, unplaced_links)
+        return JsonResponse(payload)
+
+    def put(self, request: HttpRequest, *args: Any, **kwargs: Any):
+        context_info = self._resolve_context_info(request)
+        if (
+            context_info.current_context.type == "organization"
+            and not context_info.can_manage_org_agents
+        ):
+            return JsonResponse({"error": "You do not have permission to update this org chart."}, status=403)
+
+        try:
+            payload = _parse_json_body(request)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+        if not isinstance(payload, dict):
+            return HttpResponseBadRequest("JSON body must be an object.")
+
+        agents = _agent_org_chart_context_agents(request.user, context_info.current_context)
+        agent_map = {str(agent.id): agent for agent in agents}
+        agent_ids = set(agent_map.keys())
+
+        try:
+            expected_revision = int(payload.get("revision"))
+        except (TypeError, ValueError):
+            return HttpResponseBadRequest("revision is required.")
+
+        try:
+            viewport = _normalize_agent_org_chart_viewport(payload.get("viewport"))
+            node_positions = _normalize_agent_org_chart_nodes(payload.get("nodes", []), agent_ids)
+            edge_pairs = _normalize_agent_org_chart_edges(payload.get("edges", []), agent_ids)
+        except ValueError as exc:
+            return HttpResponseBadRequest(str(exc))
+
+        with transaction.atomic():
+            chart = _get_agent_org_chart(context_info, request.user, for_update=True)
+            if chart.revision != expected_revision:
+                return JsonResponse(
+                    {
+                        "error": "Org chart has changed. Reload and try again.",
+                        "revision": chart.revision,
+                    },
+                    status=409,
+                )
+
+            next_peer_link_ids: set[str] = set()
+            next_edges: list[tuple[str, str, AgentPeerLink]] = []
+            for parent_id, child_id in edge_pairs:
+                parent = agent_map[parent_id]
+                child = agent_map[child_id]
+                link = _get_or_create_agent_org_chart_peer_link(parent, child, request.user)
+                next_peer_link_ids.add(str(link.id))
+                next_edges.append((parent_id, child_id, link))
+
+            removed_links = [
+                edge.peer_link
+                for edge in chart.edges.select_related("peer_link").all()
+                if str(edge.peer_link_id) not in next_peer_link_ids
+            ]
+            chart.edges.all().delete()
+            for link in removed_links:
+                link.remove_preserving_history()
+
+            chart.nodes.exclude(agent_id__in=node_positions.keys()).delete()
+            for agent_id, (x, y) in node_positions.items():
+                AgentOrgChartNode.objects.update_or_create(
+                    chart=chart,
+                    agent_id=agent_id,
+                    defaults={"x": x, "y": y},
+                )
+
+            for parent_id, child_id, link in next_edges:
+                AgentOrgChartEdge.objects.create(
+                    chart=chart,
+                    parent_agent_id=parent_id,
+                    child_agent_id=child_id,
+                    peer_link=link,
+                )
+
+            chart.viewport = viewport
+            chart.revision += 1
+            chart.updated_by = request.user
+            chart.save(update_fields=["viewport", "revision", "updated_by", "updated_at"])
+            unplaced_links = _reconcile_agent_org_chart_peer_links(chart, agent_ids)
+            response_payload = _serialize_agent_org_chart(
+                chart,
+                context_info,
+                agents,
+                unplaced_links,
+            )
+
+        return JsonResponse(response_payload)
+
+
 @method_decorator(csrf_exempt, name="dispatch")
 class AgentChatRosterAPIView(LoginRequiredMixin, View):
     http_method_names = ["get"]
@@ -3149,6 +3549,9 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
         favorite_agent_ids = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_ROSTER_FAVORITE_AGENT_IDS,
             [],
+        )
+        agent_roster_gallery_view_mode = resolved_preferences.get(
+            UserPreference.KEY_AGENT_CHAT_ROSTER_GALLERY_VIEW_MODE
         )
         insights_panel_expanded = resolved_preferences.get(
             UserPreference.KEY_AGENT_CHAT_INSIGHTS_PANEL_EXPANDED
@@ -3347,6 +3750,7 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 "requested_agent_status": requested_agent_status,
                 "agent_roster_sort_mode": agent_roster_sort_mode,
                 "favorite_agent_ids": favorite_agent_ids,
+                "agent_roster_gallery_view_mode": agent_roster_gallery_view_mode,
                 "insights_panel_expanded": insights_panel_expanded,
                 "agent_chat_notifications_enabled": agent_chat_notifications_enabled,
                 "billingStatus": billing_status,
