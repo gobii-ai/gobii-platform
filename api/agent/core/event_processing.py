@@ -1799,7 +1799,7 @@ class _FinalizedToolBatch:
 def _plan_has_unfinished_items(agent: PersistentAgent) -> bool:
     try:
         snapshot = build_plan_snapshot(agent)
-    except (DatabaseError, LookupError, RuntimeError):
+    except Exception:
         logger.debug("Failed to build plan snapshot for terminal-send check.", exc_info=True)
         return False
     return snapshot.todo_count > 0 or snapshot.doing_count > 0
