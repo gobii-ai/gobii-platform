@@ -441,6 +441,25 @@ class NativeIntegrationTests(TestCase):
         request_kwargs = mock_request.call_args.kwargs
         self.assertEqual(request_kwargs["headers"]["Authorization"], "Bearer access-token")
 
+    @patch("api.agent.tools.http_request.select_proxy_for_persistent_agent")
+    @patch("api.agent.tools.http_request.requests.request")
+    def test_http_request_returns_native_integration_not_connected_before_google_call(self, mock_request, mock_proxy):
+        mock_proxy.return_value = None
+
+        result = execute_http_request(
+            self.agent,
+            {
+                "method": "GET",
+                "url": "https://sheets.googleapis.com/v4/spreadsheets/test",
+                "will_continue_work": True,
+            },
+        )
+
+        self.assertEqual(result["status"], "error")
+        self.assertIn("native_integration_not_connected", result["message"])
+        self.assertIn("/app/integrations", result["message"])
+        mock_request.assert_not_called()
+
     def test_native_integration_auth_matches_google_api_urls(self):
         self._create_integration_secret(owner_user=self.user)
 
@@ -558,5 +577,7 @@ class NativeIntegrationTests(TestCase):
         self.assertIn("?q=name%20contains%20", block)
         self.assertIn("omit the name predicate", block)
         self.assertIn("drive.file", block)
+        self.assertIn("native_integration_not_connected", block)
+        self.assertIn("do not retry Google API calls", block)
         self.assertIn("https://app.example.test/app/integrations", block)
         self.assertNotIn("{integrations_url}", block)

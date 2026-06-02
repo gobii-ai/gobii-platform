@@ -328,6 +328,13 @@ def find_provider_for_url(url: str) -> NativeIntegrationProvider | None:
     return None
 
 
+def native_integration_setup_url() -> str:
+    public_site_url = str(settings.PUBLIC_SITE_URL or "").strip().rstrip("/")
+    if public_site_url:
+        return f"{public_site_url}/app/integrations"
+    return "/app/integrations"
+
+
 def _parse_expires_at(value: object):
     if not value:
         return None
@@ -461,7 +468,11 @@ def apply_native_integration_auth(agent: PersistentAgent, url: str, headers: dic
     owner_user, owner_org = resolve_global_secret_owner_for_agent(agent)
     secret = get_native_integration_secret(provider.key, owner_user, owner_org)
     if secret is None:
-        return headers
+        raise NativeIntegrationAuthError(
+            f"native_integration_not_connected: {provider.display_name} is not connected. "
+            f"Ask the user to open {native_integration_setup_url()}, connect Google Drive, "
+            "and choose the relevant file."
+        )
 
     credentials = load_native_integration_credentials(secret)
     credentials = refresh_oauth_credentials_if_needed(provider, secret, credentials)
