@@ -109,6 +109,7 @@ from api.models import (
     PersistentAgentJudgeSuggestion,
     PersistentAgentMessage,
     PersistentAgentSecret,
+    PersistentAgentSystemSkillState,
     PersistentAgentSystemMessage,
     PersistentAgentSystemStep,
     PersistentAgentStep,
@@ -3205,6 +3206,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
             queryset=PersistentAgentCommsEndpoint.objects.filter(channel=CommsChannel.SMS),
             to_attr="primary_sms_endpoints",
         )
+        enabled_system_skills_prefetch = models.Prefetch(
+            "system_skill_states",
+            queryset=PersistentAgentSystemSkillState.objects.filter(is_enabled=True).order_by("skill_key"),
+            to_attr="enabled_system_skill_states_for_roster",
+        )
         agents_qs = (
             agent_queryset_for(
                 request.user,
@@ -3212,13 +3218,13 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                 allow_delinquent_personal_chat=True,
             )
             .select_related("agent_color")
-            .prefetch_related(email_prefetch, sms_prefetch)
+            .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
             .order_by("name")
         )
         shared_qs = (
             shared_agent_queryset_for(request.user)
             .select_related("agent_color")
-            .prefetch_related(email_prefetch, sms_prefetch)
+            .prefetch_related(email_prefetch, sms_prefetch, enabled_system_skills_prefetch)
         )
         agent_ids = list(agents_qs.values_list("id", flat=True))
         if agent_ids:
@@ -3321,6 +3327,11 @@ class AgentChatRosterAPIView(LoginRequiredMixin, View):
                     "last_interaction_at": agent.last_interaction_at.isoformat() if agent.last_interaction_at else None,
                     "signup_preview_state": agent.signup_preview_state,
                     "planning_state": agent.planning_state,
+                    "enabled_system_skills": [
+                        state.skill_key
+                        for state in getattr(agent, "enabled_system_skill_states_for_roster", [])
+                        if state.skill_key
+                    ],
                     **serialize_latest_agent_message_read_state(
                         message_read_state_by_agent_id.get(str(agent.id), {})
                     ),

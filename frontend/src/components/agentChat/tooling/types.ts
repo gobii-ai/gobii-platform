@@ -15,6 +15,7 @@ export type ToolEntryDisplay = {
   timestamp?: string | null
   status?: ToolCallEntry['status']
   icon: LucideIcon
+  iconSrc?: string | null
   iconBgClass: string
   iconColorClass: string
   parameters: Record<string, unknown> | null
@@ -65,6 +66,7 @@ export type ToolClusterTransform = ToolClusterDisplay & {
 export type ToolDescriptorTransform = {
   label?: string
   icon?: LucideIcon
+  iconSrc?: string | null
   iconBgClass?: string
   iconColorClass?: string
   caption?: string | null

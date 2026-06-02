@@ -61,6 +61,7 @@ import { HighPriorityBanner } from '../components/agentChat/HighPriorityBanner'
 import { type SelectionShellPage } from '../components/agentChat/SelectionShellPageSwitcher'
 import { getInitialAgentChatSidebarMode } from '../components/agentChat/sidebarMode'
 import { findLatestStatusExpansionTargets } from '../components/agentChat/statusExpansion'
+import { parseToolSearchResult } from '../components/agentChat/tooling/searchUtils'
 import type { ConnectionStatusTone } from '../components/agentChat/AgentChatBanner'
 import { useAgentChatSocket } from '../hooks/useAgentChatSocket'
 import { useAgentWebSession } from '../hooks/useAgentWebSession'
@@ -118,6 +119,39 @@ const TIMELINE_SCROLLABILITY_EPSILON_PX = 1
 const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
+const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
+
+function timelineHasGoogleSheetsNativeSkillEnablement(events: TimelineEvent[]): boolean {
+  for (const event of events) {
+    if (event.kind !== 'steps') {
+      continue
+    }
+    for (const entry of event.entries) {
+      const toolName = (entry.toolName ?? '').toLowerCase()
+      if (toolName !== 'search_tools' || entry.result === null || entry.result === undefined) {
+        continue
+      }
+      const outcome = (() => {
+        try {
+          return parseToolSearchResult(entry.result)
+        } catch {
+          return null
+        }
+      })()
+      if (!outcome) {
+        continue
+      }
+      const enabledSystemSkills = [
+        ...outcome.enabledSystemSkills,
+        ...outcome.alreadyEnabledSystemSkills,
+      ]
+      if (enabledSystemSkills.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)) {
+        return true
+      }
+    }
+  }
+  return false
+}
 const SELECTION_SIDEBAR_MODE_STORAGE_KEY = 'gobii:immersive:selection-sidebar-mode'
 
 type IntelligenceGateReason = 'plan' | 'credits' | 'both'
@@ -1016,6 +1050,7 @@ export function AgentChatPage({
     charterOverride?: string | null
     selectedPipedreamAppSlugs?: string[]
   } | null>(null)
+  const googleSheetsRosterRefreshAgentsRef = useRef<Set<string>>(new Set())
   const previewEnteredAgentIdsRef = useRef<Set<string>>(new Set())
   const [intelligenceGate, setIntelligenceGate] = useState<IntelligenceGateState | null>(null)
   const pendingAgentMetaRef = useRef<AgentSwitchMeta | null>(null)
@@ -2321,6 +2356,24 @@ export function AgentChatPage({
     () => rosterAgents.find((agent) => agent.id === activeAgentId) ?? null,
     [activeAgentId, rosterAgents],
   )
+  const rosterGoogleSheetsDriveTabEnabled = Boolean(
+    activeRosterMeta?.enabledSystemSkills?.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY),
+  )
+  const liveGoogleSheetsDriveTabEnabled = useMemo(
+    () => Boolean(activeAgentId && timelineHasGoogleSheetsNativeSkillEnablement(timelineEvents)),
+    [activeAgentId, timelineEvents],
+  )
+  const googleSheetsDriveTabEnabled = rosterGoogleSheetsDriveTabEnabled || liveGoogleSheetsDriveTabEnabled
+  useEffect(() => {
+    if (!activeAgentId || !liveGoogleSheetsDriveTabEnabled) {
+      return
+    }
+    if (googleSheetsRosterRefreshAgentsRef.current.has(activeAgentId)) {
+      return
+    }
+    googleSheetsRosterRefreshAgentsRef.current.add(activeAgentId)
+    void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
+  }, [activeAgentId, liveGoogleSheetsDriveTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -4838,6 +4891,7 @@ export function AgentChatPage({
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
+        googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

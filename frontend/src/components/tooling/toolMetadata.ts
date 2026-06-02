@@ -62,6 +62,8 @@ export const SKIP_TOOL_NAMES = CHAT_SKIP_TOOL_NAMES
 const LINKEDIN_ICON_BG_CLASS = 'bg-sky-100'
 const LINKEDIN_ICON_COLOR_CLASS = 'text-sky-700'
 const TOOL_SEARCH_TOOL_NAMES = new Set(['search_tools', 'search_web', 'web_search', 'search'])
+const GOOGLE_SHEETS_ICON_SRC = '/static/images/integrations/pipedream/google_sheets.svg'
+const GOOGLE_DRIVE_ICON_SRC = '/static/images/integrations/native/google_drive.svg'
 
 export type ToolMetadataConfig = {
   name: string
@@ -155,6 +157,88 @@ function summarizeCode(value: string | null | undefined, fallback: string, max =
     return truncate(firstLine, max)
   }
   return fallback
+}
+
+function parseToolUrl(value: string | null): URL | null {
+  if (!value) {
+    return null
+  }
+  try {
+    return new URL(value)
+  } catch {
+    return null
+  }
+}
+
+function cleanGoogleSheetsRange(value: string): string | null {
+  let decoded = value
+  try {
+    decoded = decodeURIComponent(value)
+  } catch {
+    decoded = value
+  }
+  const cleaned = decoded
+    .replace(/:append$/i, '')
+    .trim()
+  if (!cleaned) {
+    return null
+  }
+  return truncate(cleaned, 48)
+}
+
+function deriveGoogleApiRequest(parameters: Record<string, unknown> | null): ToolDescriptorTransform | null {
+  const rawUrl = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
+  const parsedUrl = parseToolUrl(rawUrl)
+  if (!parsedUrl) {
+    return null
+  }
+
+  const method = (coerceString(parameters?.method) || 'GET').toUpperCase()
+  const host = parsedUrl.hostname.toLowerCase()
+  const pathname = parsedUrl.pathname
+
+  if (host === 'sheets.googleapis.com' && pathname.startsWith('/v4/spreadsheets/')) {
+    const valuesMatch = pathname.match(/^\/v4\/spreadsheets\/[^/]+\/values\/(.+)$/)
+    let label = 'Inspect Google Sheets'
+    let captionSubject = 'spreadsheet metadata'
+
+    if (valuesMatch) {
+      const range = cleanGoogleSheetsRange(valuesMatch[1] ?? '')
+      captionSubject = range ?? 'sheet values'
+      if (pathname.endsWith(':append')) {
+        label = 'Append to Google Sheets'
+      } else if (['PUT', 'PATCH', 'POST'].includes(method)) {
+        label = 'Update Google Sheets'
+      } else {
+        label = 'Read Google Sheets'
+      }
+    }
+
+    return {
+      label,
+      caption: [method, captionSubject].filter(Boolean).join(' • '),
+      icon: Network,
+      iconSrc: GOOGLE_SHEETS_ICON_SRC,
+      iconBgClass: 'bg-emerald-100',
+      iconColorClass: 'text-emerald-700',
+    }
+  }
+
+  const isDriveApiHost = host === 'drive.googleapis.com' || host === 'www.googleapis.com'
+  if (isDriveApiHost && pathname.startsWith('/drive/v3/files')) {
+    const q = parsedUrl.searchParams.get('q')
+    const label = q && q.trim() ? 'Search Google Drive' : 'List Google Drive files'
+    return {
+      label,
+      caption: [method, q && q.trim() ? 'file discovery' : 'selected files'].filter(Boolean).join(' • '),
+      icon: Network,
+      iconSrc: GOOGLE_DRIVE_ICON_SRC,
+      iconBgClass: 'bg-sky-100',
+      iconColorClass: 'text-sky-700',
+    }
+  }
+
+  return null
 }
 
 
@@ -456,6 +540,10 @@ export const TOOL_METADATA_CONFIGS: ToolMetadataConfig[] = [
     iconColorClass: 'text-cyan-600',
     detailKind: 'apiRequest',
     derive(_, parameters) {
+      const googleApiRequest = deriveGoogleApiRequest(parameters)
+      if (googleApiRequest) {
+        return googleApiRequest
+      }
       const url = coerceString(parameters?.url) || coerceString(parameters?.endpoint)
       const method = coerceString(parameters?.method)
       const captionPieces = [method ? method.toUpperCase() : null, url ? truncate(url, 36) : null].filter(Boolean)
