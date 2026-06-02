@@ -25,6 +25,7 @@ type McpServersScreenProps = {
   allowCommands?: boolean
   pipedreamAppsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
   oauthStartUrl: string
   oauthMetadataUrl: string
   oauthCallbackPath: string
@@ -43,6 +44,7 @@ export function McpServersScreen({
   allowCommands = false,
   pipedreamAppsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
   oauthStartUrl,
   oauthMetadataUrl,
   oauthCallbackPath,
@@ -278,11 +280,11 @@ export function McpServersScreen({
           {errorBanner}
         </div>
       )}
-      {pipedreamAppsUrl && pipedreamAppSearchUrl ? (
+      {(pipedreamAppsUrl && pipedreamAppSearchUrl) || nativeIntegrationsUrl ? (
         <PipedreamAppsPanel
           settingsUrl={pipedreamAppsUrl}
           searchUrl={pipedreamAppSearchUrl}
-          onSuccess={handleSuccess}
+          nativeIntegrationsUrl={nativeIntegrationsUrl}
           onError={handleError}
           embedded={isEmbedded}
         />

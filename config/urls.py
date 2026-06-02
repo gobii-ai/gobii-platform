@@ -194,6 +194,14 @@ from console.secrets_api_views import (
     AgentSecretDetailAPIView,
     AgentSecretPromoteAPIView,
 )
+from console.native_integrations_api import (
+    NativeIntegrationCallbackAPIView,
+    NativeIntegrationConnectAPIView,
+    NativeIntegrationFilesAPIView,
+    NativeIntegrationListAPIView,
+    NativeIntegrationPickerTokenAPIView,
+    NativeIntegrationRevokeAPIView,
+)
 from console.system_skill_profiles_api_views import (
     SystemSkillProfileListAPIView,
     SystemSkillProfileDetailAPIView,
@@ -228,6 +236,7 @@ from console.views import (
     SystemSkillProfilesView,
     MCPOAuthCallbackPageView,
     AgentEmailOAuthCallbackPageView,
+    NativeIntegrationOAuthCallbackPageView,
     AgentAvatarProxyView,
     AgentAvatarThumbnailProxyView,
     PublicAgentAvatarThumbnailView,
@@ -358,6 +367,11 @@ urlpatterns = [
     path("console/advanced/mcp-servers/", MCPServerManagementView.as_view(), name="console-mcp-servers"),
     path("console/mcp/oauth/callback/", MCPOAuthCallbackPageView.as_view(), name="console-mcp-oauth-callback-view"),
     path("console/email/oauth/callback/", AgentEmailOAuthCallbackPageView.as_view(), name="console-email-oauth-callback-view"),
+    path(
+        "integrations/oauth/callback/",
+        NativeIntegrationOAuthCallbackPageView.as_view(),
+        name="console-native-integration-oauth-callback-view",
+    ),
     path("console/switch-context/", SwitchContextView.as_view(), name="switch_context"),
     path("console/api/organizations/", OrganizationCreateAPIView.as_view(), name="console-organization-create"),
     path("console/api-keys/", LegacyConsoleRedirectView.as_view(), name="api_keys"),
@@ -604,6 +618,32 @@ urlpatterns = [
     path("console/api/mcp/oauth/callback/", MCPOAuthCallbackView.as_view(), name="console-mcp-oauth-callback"),
     path("console/api/mcp/oauth/status/<uuid:server_config_id>/", MCPOAuthStatusView.as_view(), name="console-mcp-oauth-status"),
     path("console/api/mcp/oauth/revoke/<uuid:server_config_id>/", MCPOAuthRevokeView.as_view(), name="console-mcp-oauth-revoke"),
+    path("console/api/native-integrations/", NativeIntegrationListAPIView.as_view(), name="console-native-integration-list"),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/connect/",
+        NativeIntegrationConnectAPIView.as_view(),
+        name="console-native-integration-connect",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/callback/",
+        NativeIntegrationCallbackAPIView.as_view(),
+        name="console-native-integration-callback",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/picker-token/",
+        NativeIntegrationPickerTokenAPIView.as_view(),
+        name="console-native-integration-picker-token",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/files/",
+        NativeIntegrationFilesAPIView.as_view(),
+        name="console-native-integration-files",
+    ),
+    path(
+        "console/api/native-integrations/<slug:provider_key>/revoke/",
+        NativeIntegrationRevokeAPIView.as_view(),
+        name="console-native-integration-revoke",
+    ),
     path("console/api/email/oauth/start/", AgentEmailOAuthStartView.as_view(), name="console-email-oauth-start"),
     path("console/api/email/oauth/session/<uuid:session_id>/verifier/", AgentEmailOAuthSessionVerifierView.as_view(), name="console-email-oauth-session-verifier"),
     path("console/api/email/oauth/callback/", AgentEmailOAuthCallbackView.as_view(), name="console-email-oauth-callback"),

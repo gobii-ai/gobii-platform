@@ -1,16 +1,18 @@
 import { useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Plus, Sparkles } from 'lucide-react'
+import { CheckCircle2, Loader2, Plus, Sparkles } from 'lucide-react'
 
 import { fetchPipedreamAppSettings, type PipedreamAppSummary } from '../../api/mcp'
+import { fetchNativeIntegrations, type NativeIntegrationProvider } from '../../api/nativeIntegrations'
 import { useModal } from '../../hooks/useModal'
+import { NativeProviderIcon } from './NativeIntegrationShared'
 import { PipedreamAppsModal } from './PipedreamAppsModal'
 import { PipedreamAppIcon, resolvePipedreamAppsErrorMessage } from './PipedreamAppsShared'
 
 type PipedreamAppsPanelProps = {
-  settingsUrl: string
-  searchUrl: string
-  onSuccess: (message: string) => void
+  settingsUrl?: string | null
+  searchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
   onError: (message: string) => void
   embedded?: boolean
 }
@@ -18,7 +20,7 @@ type PipedreamAppsPanelProps = {
 export function PipedreamAppsPanel({
   settingsUrl,
   searchUrl,
-  onSuccess,
+  nativeIntegrationsUrl = null,
   onError,
   embedded = false,
 }: PipedreamAppsPanelProps) {
@@ -26,24 +28,57 @@ export function PipedreamAppsPanel({
   const queryKey = useMemo(() => ['pipedream-app-settings', settingsUrl] as const, [settingsUrl])
   const settingsQuery = useQuery({
     queryKey,
-    queryFn: () => fetchPipedreamAppSettings(settingsUrl),
+    queryFn: () => fetchPipedreamAppSettings(settingsUrl as string),
+    enabled: Boolean(settingsUrl && searchUrl),
+  })
+  const nativeQueryKey = useMemo(
+    () => ['native-integrations', nativeIntegrationsUrl] as const,
+    [nativeIntegrationsUrl],
+  )
+  const nativeIntegrationsQuery = useQuery({
+    queryKey: nativeQueryKey,
+    queryFn: () => fetchNativeIntegrations(nativeIntegrationsUrl as string),
+    enabled: Boolean(nativeIntegrationsUrl),
   })
 
+  const emptySettings = useMemo(() => ({
+    ownerScope: '',
+    ownerLabel: '',
+    platformApps: [],
+    selectedApps: [],
+    effectiveApps: [],
+  }), [])
+  const effectiveSettings = settingsQuery.data ?? emptySettings
+  const hasPipedreamApps = Boolean(settingsUrl && searchUrl)
+  const canOpenModal = hasPipedreamApps ? Boolean(settingsQuery.data) : Boolean(nativeIntegrationsUrl)
+
   const openModal = useCallback(() => {
-    if (!settingsQuery.data) {
+    if (!hasPipedreamApps && !nativeIntegrationsUrl) {
+      return
+    }
+    if (hasPipedreamApps && !settingsQuery.data) {
       return
     }
     showModal((onClose) => (
       <PipedreamAppsModal
-        settingsUrl={settingsUrl}
-        searchUrl={searchUrl}
-        initialSettings={settingsQuery.data}
+        settingsUrl={settingsUrl ?? null}
+        searchUrl={searchUrl ?? null}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
+        initialSettings={effectiveSettings}
         onClose={onClose}
-        onSuccess={onSuccess}
         onError={onError}
       />
     ))
-  }, [onError, onSuccess, searchUrl, settingsQuery.data, settingsUrl, showModal])
+  }, [
+    effectiveSettings,
+    hasPipedreamApps,
+    nativeIntegrationsUrl,
+    onError,
+    searchUrl,
+    settingsQuery.data,
+    settingsUrl,
+    showModal,
+  ])
 
   const sectionClassName = embedded
     ? 'settings-card-surface settings-card-surface--embedded overflow-hidden rounded-xl border border-slate-200/20'
@@ -82,30 +117,40 @@ export function PipedreamAppsPanel({
             type="button"
             className={buttonClassName}
             onClick={openModal}
-            disabled={!settingsQuery.data || settingsQuery.isLoading}
+            disabled={!canOpenModal || settingsQuery.isLoading || nativeIntegrationsQuery.isLoading}
           >
             <Plus className="h-4 w-4" aria-hidden="true" />
             Add Apps
           </button>
         </div>
 
-        {settingsQuery.isLoading ? (
+        {(hasPipedreamApps && settingsQuery.isLoading) || nativeIntegrationsQuery.isLoading ? (
           <div className={loadingClassName}>
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading apps…
           </div>
-        ) : settingsQuery.isError ? (
+        ) : (hasPipedreamApps && settingsQuery.isError) || nativeIntegrationsQuery.isError ? (
           <div className="px-6 py-5">
             <div className={errorClassName}>
-              {resolvePipedreamAppsErrorMessage(settingsQuery.error, 'Unable to load apps right now.')}
+              {resolvePipedreamAppsErrorMessage(settingsQuery.error ?? nativeIntegrationsQuery.error, 'Unable to load apps right now.')}
             </div>
           </div>
-        ) : settingsQuery.data ? (
-          <div className="grid gap-6 px-6 py-5 lg:grid-cols-[1.2fr_1fr]">
+        ) : (
+          <div className={`grid gap-6 px-6 py-5 ${nativeIntegrationsUrl && hasPipedreamApps ? 'lg:grid-cols-3' : 'lg:grid-cols-2'}`}>
+            {nativeIntegrationsUrl ? (
+              <NativeAppColumn
+                title="Native apps"
+                caption="Connected at the workspace level."
+                providers={nativeIntegrationsQuery.data?.providers ?? []}
+                embedded={embedded}
+              />
+            ) : null}
+            {hasPipedreamApps ? (
+              <>
             <AppColumn
               title="Included apps"
               caption="Available automatically for this workspace."
-              apps={settingsQuery.data.platformApps}
+              apps={effectiveSettings.platformApps}
               emptyText="No included apps configured."
               tone="platform"
               embedded={embedded}
@@ -113,16 +158,71 @@ export function PipedreamAppsPanel({
             <AppColumn
               title="Your apps"
               caption="Additional apps enabled for your Agents"
-              apps={settingsQuery.data.selectedApps}
+              apps={effectiveSettings.selectedApps}
               emptyText="No additional apps enabled yet."
               tone="selected"
               embedded={embedded}
             />
+              </>
+            ) : null}
           </div>
-        ) : null}
+        )}
       </section>
       {modal}
     </>
+  )
+}
+
+function NativeAppColumn({
+  title,
+  caption,
+  providers,
+  embedded = false,
+}: {
+  title: string
+  caption: string
+  providers: NativeIntegrationProvider[]
+  embedded?: boolean
+}) {
+  const titleClassName = embedded ? 'text-sm font-semibold text-slate-100' : 'text-sm font-semibold text-slate-900'
+  const captionClassName = embedded ? 'text-sm text-slate-400' : 'text-sm text-slate-600'
+  const connectedClassName = embedded
+    ? 'border-emerald-300/25 bg-emerald-950/45 text-emerald-100'
+    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+  const disconnectedClassName = embedded
+    ? 'border-slate-200/20 bg-slate-900/45 text-slate-200'
+    : 'border-slate-200 bg-white text-slate-700'
+  const emptyClassName = embedded
+    ? 'rounded-lg border border-dashed border-slate-200/20 bg-slate-950/25 px-4 py-4 text-sm text-slate-400'
+    : 'rounded-lg border border-dashed border-slate-200 bg-white px-4 py-4 text-sm text-slate-600'
+
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className={titleClassName}>{title}</h3>
+        <p className={captionClassName}>{caption}</p>
+      </div>
+      {providers.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {providers.map((provider) => (
+            <span
+              key={provider.providerKey}
+              className={`inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium ${
+                provider.connected ? connectedClassName : disconnectedClassName
+              }`}
+            >
+              <NativeProviderIcon provider={provider} />
+              <span>{provider.displayName}</span>
+              {provider.connected ? <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" /> : null}
+            </span>
+          ))}
+        </div>
+      ) : (
+        <div className={emptyClassName}>
+          No native apps configured.
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from decimal import Decimal
 from typing import Callable, List, Tuple, Union, Optional, Dict, Any, Literal
+from urllib.parse import unquote_plus
 from uuid import UUID
 
 import sqlparse
@@ -1986,6 +1987,17 @@ def _eval_mock_rule_matches(rule: Dict[str, Any], exec_params: Dict[str, Any]) -
     if url_contains is not None:
         url = str(exec_params.get("url") or "").lower()
         expected_parts = [url_contains] if isinstance(url_contains, str) else list(url_contains)
+        if not all(str(part).lower() in url for part in expected_parts):
+            return False
+
+    url_decoded_contains = rule.get("url_decoded_contains")
+    if url_decoded_contains is not None:
+        url = unquote_plus(str(exec_params.get("url") or "")).lower()
+        expected_parts = (
+            [url_decoded_contains]
+            if isinstance(url_decoded_contains, str)
+            else list(url_decoded_contains)
+        )
         if not all(str(part).lower() in url for part in expected_parts):
             return False
 

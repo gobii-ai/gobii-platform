@@ -66,3 +66,8 @@ from .message_quality import (
     MESSAGE_QUALITY_SUITE_SLUG,
     MessageQualityScenario,
 )
+from .google_sheets_native import (
+    GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
+    GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
+    GoogleSheetsNativeScenario,
+)

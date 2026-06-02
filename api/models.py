@@ -8844,8 +8844,9 @@ class SecretModelMixin:
     lives in one place.
 
     Subclasses must define:
-      - ``SecretType`` TextChoices with CREDENTIAL and ENV_VAR members
-      - ``ENV_VAR_DOMAIN_SENTINEL`` and ``ENV_VAR_KEY_PATTERN`` class attrs
+      - ``SecretType`` TextChoices with CREDENTIAL and ENV_VAR members, optionally INTEGRATION
+      - ``ENV_VAR_DOMAIN_SENTINEL`` and ``ENV_VAR_KEY_PATTERN`` class attrs, plus
+        ``INTEGRATION_DOMAIN_SENTINEL`` when INTEGRATION is supported
       - ``secret_type``, ``domain_pattern``, ``name``, ``key``,
         ``encrypted_value`` fields
     They must also implement ``_get_existing_keys_queryset()`` which
@@ -8875,8 +8876,11 @@ class SecretModelMixin:
 
     def _clean_secret_fields(self):
         """Validate type-specific scope, domain, and key formatting."""
+        integration_type = getattr(self.SecretType, "INTEGRATION", None)
         if self.secret_type == self.SecretType.ENV_VAR:
             self.domain_pattern = self.ENV_VAR_DOMAIN_SENTINEL
+        elif integration_type is not None and self.secret_type == integration_type:
+            self.domain_pattern = self.INTEGRATION_DOMAIN_SENTINEL
         elif self.domain_pattern:
             from .domain_validation import DomainPatternValidator
             try:
@@ -9031,8 +9035,10 @@ class GlobalSecret(SecretModelMixin, models.Model):
     class SecretType(models.TextChoices):
         CREDENTIAL = "credential", "Credential"
         ENV_VAR = "env_var", "Environment Variable"
+        INTEGRATION = "integration", "Integration"
 
     ENV_VAR_DOMAIN_SENTINEL = "__gobii_env_var__"
+    INTEGRATION_DOMAIN_SENTINEL = "__gobii_integration__"
     ENV_VAR_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
     MAX_GLOBAL_SECRETS_PER_OWNER = 100
@@ -9141,6 +9147,8 @@ class GlobalSecret(SecretModelMixin, models.Model):
         owner = self.organization.name if self.organization_id else f"user {self.user_id}"
         if self.secret_type == self.SecretType.ENV_VAR:
             return f"Global Env Var '{self.name}' ({self.key}) for {owner}"
+        if self.secret_type == self.SecretType.INTEGRATION:
+            return f"Global Integration '{self.name}' ({self.key}) for {owner}"
         return f"Global Secret '{self.name}' ({self.key}) for {owner} on {self.domain_pattern}"
 
 

@@ -4,6 +4,7 @@ from django.core.cache import cache
 from django.test import TestCase, override_settings, tag
 from django.utils import timezone
 
+from api.models import MCPServerConfig
 from pages.homepage_cache import (
     HOMEPAGE_INTEGRATIONS_CACHE_FRESH_SECONDS,
     HOMEPAGE_INTEGRATIONS_CACHE_STALE_SECONDS,
@@ -146,7 +147,7 @@ class HomepageIntegrationsCacheTests(TestCase):
     def test_build_payload_returns_disabled_when_platform_server_is_inactive(self, _mock_is_active):
         result = _build_homepage_integrations_payload()
 
-        self.assertEqual(result, {"enabled": False, "builtins": []})
+        self.assertEqual(result, {"enabled": True, "pipedream_enabled": False, "builtins": []})
 
     @override_settings(
         PIPEDREAM_CLIENT_ID="",
@@ -157,4 +158,43 @@ class HomepageIntegrationsCacheTests(TestCase):
     def test_build_payload_returns_disabled_when_pipedream_is_not_configured(self, _mock_is_active):
         result = _build_homepage_integrations_payload()
 
-        self.assertEqual(result, {"enabled": False, "builtins": []})
+        self.assertEqual(result, {"enabled": True, "pipedream_enabled": False, "builtins": []})
+
+    @override_settings(
+        PIPEDREAM_CLIENT_ID="test-client-id",
+        PIPEDREAM_CLIENT_SECRET="test-client-secret",
+        PIPEDREAM_PROJECT_ID="test-project-id",
+    )
+    @patch("pages.homepage_cache.PipedreamCatalogService.get_apps")
+    def test_build_payload_hides_deprecated_platform_apps(self, mock_get_apps):
+        MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://remote.mcp.pipedream.net",
+            is_active=True,
+            prefetch_apps=["google_sheets", "google_docs"],
+            metadata={"deprecated_apps": ["google_sheets"]},
+        )
+        mock_get_apps.side_effect = lambda slugs: [
+            type(
+                "App",
+                (),
+                {
+                    "slug": slug,
+                    "to_dict": lambda self, slug=slug: {
+                        "slug": slug,
+                        "name": slug.replace("_", " ").title(),
+                        "description": "",
+                        "icon_url": "",
+                    },
+                },
+            )()
+            for slug in slugs
+        ]
+
+        result = _build_homepage_integrations_payload()
+
+        self.assertTrue(result["enabled"])
+        self.assertTrue(result["pipedream_enabled"])
+        self.assertEqual([app["slug"] for app in result["builtins"]], ["google_docs"])

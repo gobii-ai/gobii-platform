@@ -73,6 +73,7 @@ function normalizeAgentSettingsPathname(pathname: string): string {
 }
 
 type AgentChatMessageLinkSubview = Exclude<AgentChatShellSubview, 'chat'>
+type AppMessageLinkShellPage = Exclude<SelectionShellPage, 'agents'>
 
 function isAgentChatMessageLinkSubview(value?: string | null): value is AgentChatMessageLinkSubview {
   switch (value) {
@@ -131,6 +132,36 @@ function getCurrentAgentMessageLinkSubview(href: string, agentId: string): Agent
     }
 
     return null
+  } catch {
+    return null
+  }
+}
+
+function getAppMessageLinkShellPage(href: string): AppMessageLinkShellPage | null {
+  if (typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const url = new URL(href, window.location.origin)
+    const pathname = normalizeAgentSettingsPathname(url.pathname)
+    const parts = pathname.split('/').filter(Boolean)
+
+    if (parts[0] !== 'app' || parts.length !== 2) {
+      return null
+    }
+
+    switch (parts[1]) {
+      case 'billing':
+      case 'profile':
+      case 'organization':
+      case 'secrets':
+      case 'usage':
+      case 'integrations':
+      case 'api-keys':
+        return parts[1]
+      default:
+        return null
+    }
   } catch {
     return null
   }
@@ -304,6 +335,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   maxAttachmentBytes?: number | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -490,6 +522,7 @@ export function AgentChatLayout({
   maxAttachmentBytes = null,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1021,6 +1054,33 @@ export function AgentChatLayout({
   const canOpenQuickSettings = Boolean(onUpdateDailyCredits || (llmIntelligence && onLlmTierChange))
 
   const handleMessageLinkClick = useCallback((href: string) => {
+    const linkedShellPage = getAppMessageLinkShellPage(href)
+    if (linkedShellPage) {
+      const openShellPage = (() => {
+        switch (linkedShellPage) {
+          case 'billing':
+            return onOpenBilling
+          case 'profile':
+            return onOpenProfile
+          case 'organization':
+            return onOpenOrganization
+          case 'secrets':
+            return onOpenSecrets
+          case 'usage':
+            return onOpenUsage
+          case 'integrations':
+            return onOpenIntegrations
+          case 'api-keys':
+            return onOpenApiKeys
+        }
+      })()
+      if (!openShellPage) {
+        return false
+      }
+      openShellPage()
+      return true
+    }
+
     if (!agentId) {
       return false
     }
@@ -1081,11 +1141,18 @@ export function AgentChatLayout({
     canOpenQuickSettings,
     handleSettingsOpen,
     onBlockedSettingsClick,
+    onOpenApiKeys,
     onOpenAgentEmailSettings,
     onOpenAgentFiles,
     onOpenAgentSecretRequests,
     onOpenAgentSecrets,
+    onOpenBilling,
     onOpenFullSettings,
+    onOpenIntegrations,
+    onOpenOrganization,
+    onOpenProfile,
+    onOpenSecrets,
+    onOpenUsage,
     onViewAllContactRequests,
     previewActionsDisabled,
   ])
@@ -1824,6 +1891,7 @@ export function AgentChatLayout({
               maxAttachmentBytes={maxAttachmentBytes}
               pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+              nativeIntegrationsUrl={nativeIntegrationsUrl}
             />
           )}
           </div>

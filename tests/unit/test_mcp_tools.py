@@ -1614,6 +1614,41 @@ class MCPToolFunctionsTests(TestCase):
         config.save()
         invalidate_tool_settings_cache()
 
+    def _pipedream_server(self, *, deprecated_apps=()):
+        return MCPServerConfig.objects.create(
+            scope=MCPServerConfig.Scope.PLATFORM,
+            name="pipedream",
+            display_name="Pipedream",
+            url="https://remote.mcp.pipedream.net",
+            metadata={"deprecated_apps": list(deprecated_apps)},
+        )
+
+    def _mock_search_tools_state(self, mock_get_config, mock_get_manager, mock_run_completion, *, tools=()):
+        mock_manager = MagicMock()
+        mock_manager._initialized = True
+        mock_manager.get_tools_for_agent.return_value = list(tools)
+        mock_get_manager.return_value = mock_manager
+        mock_get_config.return_value = [("openai", "gpt-4o-mini", {})]
+
+        msg = MagicMock()
+        msg.content = "No relevant tools."
+        setattr(msg, "tool_calls", [])
+        choice = MagicMock()
+        choice.message = msg
+        mock_response = MagicMock()
+        mock_response.choices = [choice]
+        mock_run_completion.return_value = mock_response
+
+    def _completion_user_message(self, mock_run_completion):
+        return mock_run_completion.call_args.kwargs["messages"][1]["content"]
+
+    def _tool_def_names(self, definitions):
+        return {
+            entry.get("function", {}).get("name")
+            for entry in definitions
+            if isinstance(entry, dict)
+        }
+
     def _seed_create_image_tier(self) -> None:
         provider = LLMProvider.objects.create(
             key=f"img-provider-{uuid.uuid4().hex[:6]}",
@@ -2972,6 +3007,109 @@ class MCPToolFunctionsTests(TestCase):
         self.assertEqual([tool_def["function"]["name"] for tool_def in tool_defs], ["enable_tools", "enable_apps"])
         mock_enable_tools.assert_not_called()
 
+    @patch("api.services.pipedream_apps.get_connected_pipedream_app_slugs_for_agent", return_value=set())
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools.get_effective_pipedream_app_slugs_for_agent')
+    @patch('api.agent.tools.search_tools.PipedreamCatalogService.search_apps')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=True)
+    def test_search_tools_filters_deprecated_pipedream_apps_by_connection(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_search_apps,
+        mock_get_effective_pipedream_app_slugs_for_agent,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_connected_app_slugs,
+    ):
+        self._pipedream_server(deprecated_apps=["slack"])
+        mock_search_apps.return_value = [
+            SimpleNamespace(slug="slack", name="Slack"),
+            SimpleNamespace(slug="trello", name="Trello"),
+        ]
+        self._mock_search_tools_state(mock_get_config, mock_get_manager, mock_run_completion)
+
+        cases = (
+            (set(), False),
+            ({"slack"}, True),
+        )
+        for connected_slugs, shows_slack in cases:
+            with self.subTest(connected_slugs=connected_slugs):
+                mock_connected_app_slugs.return_value = connected_slugs
+                mock_get_effective_pipedream_app_slugs_for_agent.return_value = list(connected_slugs)
+
+                result = search_tools(self.agent, "apps")
+
+                self.assertEqual(result["status"], "success")
+                user_message = self._completion_user_message(mock_run_completion)
+                self.assertIn("Available Pipedream apps:", user_message)
+                self.assertIn("- trello | Trello [not enabled]", user_message)
+                if shows_slack:
+                    self.assertIn("- slack | Slack [enabled]", user_message)
+                else:
+                    self.assertNotIn("- slack | Slack", user_message)
+        mock_enable_tools.assert_not_called()
+
+    @patch("api.services.pipedream_apps.get_connected_pipedream_app_slugs_for_agent", return_value=set())
+    @patch('api.agent.tools.search_tools.enable_tools')
+    @patch('api.agent.tools.search_tools.run_completion')
+    @patch('api.agent.tools.search_tools.get_mcp_manager')
+    @patch('api.agent.tools.search_tools.get_llm_config_with_failover')
+    @patch('api.agent.tools.search_tools._has_active_pipedream_runtime', return_value=False)
+    def test_search_tools_hides_deprecated_pipedream_tools_when_unconnected(
+        self,
+        _mock_has_active_pipedream_runtime,
+        mock_get_config,
+        mock_get_manager,
+        mock_run_completion,
+        mock_enable_tools,
+        mock_connected_app_slugs,
+    ):
+        pipedream_server = self._pipedream_server(deprecated_apps=["slack"])
+        self._mock_search_tools_state(
+            mock_get_config,
+            mock_get_manager,
+            mock_run_completion,
+            tools=[
+                MCPToolInfo(
+                    str(pipedream_server.id),
+                    "slack-send-message",
+                    "pipedream",
+                    "slack-send-message",
+                    "Send Slack message",
+                    {},
+                ),
+                MCPToolInfo(
+                    str(pipedream_server.id),
+                    "trello-create-card",
+                    "pipedream",
+                    "trello-create-card",
+                    "Create card",
+                    {},
+                ),
+            ],
+        )
+
+        result = search_tools(self.agent, "send updates")
+
+        self.assertEqual(result["status"], "success")
+        user_message = self._completion_user_message(mock_run_completion)
+        self.assertNotIn("- slack-send-message", user_message)
+        self.assertIn("- trello-create-card", user_message)
+        mock_enable_tools.assert_not_called()
+
+        mock_connected_app_slugs.return_value = {"slack"}
+        result = search_tools(self.agent, "send updates")
+
+        self.assertEqual(result["status"], "success")
+        connected_user_message = self._completion_user_message(mock_run_completion)
+        self.assertIn("- slack-send-message", connected_user_message)
+        self.assertIn("- trello-create-card", connected_user_message)
+
     @override_settings(PUBLIC_SITE_URL="https://gobii.ai")
     @patch('api.agent.tools.search_tools.enable_tools')
     @patch('api.agent.tools.search_tools.run_completion')
@@ -3690,7 +3828,64 @@ class MCPToolFunctionsTests(TestCase):
             tool_def["function"]["parameters"]["properties"]["sql"]["properties"]["params"]["items"],
             {"type": "string"},
         )
-        
+
+    @tag("batch_mcp_tools")
+    @patch("api.services.pipedream_apps.get_connected_pipedream_app_slugs_for_agent", return_value=set())
+    @patch("api.agent.tools.tool_manager.is_custom_tools_available_for_agent", return_value=False)
+    @patch("api.agent.tools.tool_manager._get_manager")
+    def test_get_enabled_tool_definitions_hides_unconnected_deprecated_pipedream_tools(
+        self,
+        mock_get_manager,
+        _mock_custom_available,
+        mock_connected_app_slugs,
+    ):
+        pipedream_server = self._pipedream_server(deprecated_apps=["slack"])
+        for tool_name in ("slack-send-message", "trello-create-card"):
+            PersistentAgentEnabledTool.objects.create(
+                agent=self.agent,
+                tool_full_name=tool_name,
+                tool_server="pipedream",
+                tool_name=tool_name,
+                server_config=pipedream_server,
+            )
+        mock_manager = MagicMock()
+        mock_manager.get_enabled_tools_definitions.return_value = [
+            {
+                "type": "function",
+                "function": {
+                    "name": "slack-send-message",
+                    "description": "Send Slack message",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "trello-create-card",
+                    "description": "Create card",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            },
+        ]
+        mock_get_manager.return_value = mock_manager
+
+        definitions = get_enabled_tool_definitions(self.agent)
+        names = self._tool_def_names(definitions)
+
+        self.assertNotIn("slack-send-message", names)
+        self.assertIn("trello-create-card", names)
+        self.assertTrue(
+            PersistentAgentEnabledTool.objects.filter(
+                agent=self.agent,
+                tool_full_name="slack-send-message",
+            ).exists()
+        )
+
+        mock_connected_app_slugs.return_value = {"slack"}
+        connected_definitions = get_enabled_tool_definitions(self.agent)
+        connected_names = self._tool_def_names(connected_definitions)
+        self.assertIn("slack-send-message", connected_names)
+
     @patch('api.agent.tools.tool_manager.enable_mcp_tool')
     @patch('api.agent.tools.mcp_manager._mcp_manager.get_tools_for_agent')
     @patch('api.agent.tools.mcp_manager._mcp_manager.initialize')

@@ -1603,6 +1603,17 @@ PIPEDREAM_ENVIRONMENT = env("PIPEDREAM_ENVIRONMENT", default=_default_pipedream_
 # Comma-separated list of app slugs to prefetch tools for (e.g., "google_sheets,google_docs,greenhouse")
 PIPEDREAM_PREFETCH_APPS = env("PIPEDREAM_PREFETCH_APPS", default="google_sheets,google_docs,greenhouse,trello")
 
+# Google
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+GOOGLE_DRIVE_CLIENT_ID = os.getenv("GOOGLE_DRIVE_CLIENT_ID", "")
+GOOGLE_DRIVE_CLIENT_SECRET = os.getenv("GOOGLE_DRIVE_CLIENT_SECRET", "")
+GOOGLE_PICKER_API_KEY = os.getenv("GOOGLE_PICKER_API_KEY", "")
+GOOGLE_CLOUD_PROJECT_NUMBER = os.getenv("GOOGLE_CLOUD_PROJECT_NUMBER", "")
+GOOGLE_PICKER_APP_ID = GOOGLE_CLOUD_PROJECT_NUMBER or (
+    os.getenv("GOOGLE_CLOUD_PROJECT", "") if os.getenv("GOOGLE_CLOUD_PROJECT", "").isdigit() else ""
+)
+
 # ────────── Native Discord Bot ──────────
 DISCORD_CLIENT_ID = env("DISCORD_CLIENT_ID", default="")
 DISCORD_CLIENT_SECRET = env("DISCORD_CLIENT_SECRET", default="")

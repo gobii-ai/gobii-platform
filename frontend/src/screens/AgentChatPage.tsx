@@ -912,6 +912,7 @@ export type AgentChatPageProps = {
   isCollaborator?: boolean | null
   pipedreamAppsSettingsUrl?: string | null
   pipedreamAppSearchUrl?: string | null
+  nativeIntegrationsUrl?: string | null
   onClose?: () => void
   onCreateAgent?: () => void
   onAgentCreated?: (agentId: string) => void
@@ -965,6 +966,7 @@ export function AgentChatPage({
   isCollaborator,
   pipedreamAppsSettingsUrl = null,
   pipedreamAppSearchUrl = null,
+  nativeIntegrationsUrl = null,
   onClose,
   onCreateAgent,
   onAgentCreated,
@@ -4835,6 +4837,7 @@ export function AgentChatPage({
         maxAttachmentBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsSettingsUrl}
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

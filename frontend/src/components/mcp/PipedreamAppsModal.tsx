@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Users } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, FolderOpen, Loader2, Plug, Unplug, Users } from 'lucide-react'
 
 import {
   disconnectAgentPipedreamApp,
@@ -13,6 +13,14 @@ import {
   type PipedreamAppSettings,
   type PipedreamAppSummary,
 } from '../../api/mcp'
+import {
+  fetchNativeIntegrationPickerToken,
+  fetchNativeIntegrations,
+  revokeNativeIntegration,
+  startNativeIntegrationConnect,
+  type NativeIntegrationProvider,
+} from '../../api/nativeIntegrations'
+import { safeErrorMessage } from '../../api/safeErrorMessage'
 import {
   AgentConnectionAvatar,
   PipedreamAppIcon,
@@ -32,13 +40,24 @@ import {
   useWindowFocusRefetch,
   type PipedreamStatusMessage,
 } from './PipedreamAppsShared'
+import {
+  NativeProviderIcon,
+  NativeIntegrationFilesDisclosure,
+  nativeIntegrationFilesQueryKey,
+  nativeOAuthContextPayload,
+  openGoogleDrivePicker,
+  openNativeOAuthPopup,
+  storePendingNativeOAuth,
+  supportsNativeIntegrationPicker,
+  useNativeIntegrationRefreshEffects,
+} from './NativeIntegrationShared'
 
 type PipedreamAppsModalProps = {
-  settingsUrl: string
-  searchUrl: string
+  settingsUrl: string | null
+  searchUrl: string | null
+  nativeIntegrationsUrl?: string | null
   initialSettings: PipedreamAppSettings
   onClose: () => void
-  onSuccess: (message: string) => void
   onError: (message: string) => void
 }
 
@@ -46,9 +65,18 @@ type WorkspacePipedreamAppRow = PipedreamAppSummary & {
   source: AgentPipedreamAppSource
 }
 
+type WorkspaceAppRow =
+  | (WorkspacePipedreamAppRow & { kind: 'pipedream' })
+  | (NativeIntegrationProvider & { kind: 'native' })
+
 type PendingAppAction = {
   slug: string
   kind: 'remove'
+} | null
+
+type PendingNativeAction = {
+  providerKey: string
+  kind: 'connect' | 'disconnect' | 'picker'
 } | null
 
 type PendingAgentAction = {
@@ -59,9 +87,9 @@ type PendingAgentAction = {
 export function PipedreamAppsModal({
   settingsUrl,
   searchUrl,
+  nativeIntegrationsUrl = null,
   initialSettings,
   onClose,
-  onSuccess,
   onError,
 }: PipedreamAppsModalProps) {
   const queryClient = useQueryClient()
@@ -72,8 +100,14 @@ export function PipedreamAppsModal({
   const [settings, setSettings] = useState(initialSettings)
   const [activeApp, setActiveApp] = useState<WorkspacePipedreamAppRow | null>(null)
   const [pendingAppAction, setPendingAppAction] = useState<PendingAppAction>(null)
+  const [pendingNativeAction, setPendingNativeAction] = useState<PendingNativeAction>(null)
   const [pendingAgentAction, setPendingAgentAction] = useState<PendingAgentAction>(null)
   const [statusMessage, setStatusMessage] = useState<PipedreamStatusMessage>(null)
+  const nativeQueryKey = useMemo(
+    () => ['native-integrations', nativeIntegrationsUrl] as const,
+    [nativeIntegrationsUrl],
+  )
+  useNativeIntegrationRefreshEffects({ queryKey: nativeQueryKey, onError })
 
   useEffect(() => {
     setSettings(initialSettings)
@@ -86,8 +120,14 @@ export function PipedreamAppsModal({
 
   const searchQuery = useQuery({
     queryKey: ['pipedream-app-search', searchUrl, debouncedSearchTerm],
-    queryFn: () => searchPipedreamApps(searchUrl, debouncedSearchTerm),
-    enabled: debouncedSearchTerm.length > 0 && activeApp === null,
+    queryFn: () => searchPipedreamApps(searchUrl as string, debouncedSearchTerm),
+    enabled: Boolean(searchUrl) && debouncedSearchTerm.length > 0 && activeApp === null,
+  })
+
+  const nativeIntegrationsQuery = useQuery({
+    queryKey: nativeQueryKey,
+    queryFn: () => fetchNativeIntegrations(nativeIntegrationsUrl as string),
+    enabled: Boolean(nativeIntegrationsUrl) && activeApp === null,
   })
 
   const activeAppSlug = activeApp?.slug ?? ''
@@ -111,34 +151,63 @@ export function PipedreamAppsModal({
     [settings.selectedApps],
   )
 
-  const rows = useMemo<WorkspacePipedreamAppRow[]>(() => {
+  const rows = useMemo<WorkspaceAppRow[]>(() => {
     const visibleApps = debouncedSearchTerm ? (searchQuery.data ?? []) : settings.effectiveApps
-    return visibleApps.map((app) => ({
-      ...app,
-      source: platformSlugSet.has(app.slug)
+    const normalizedSearch = debouncedSearchTerm.toLowerCase()
+    const nativeRows = (nativeIntegrationsQuery.data?.providers ?? [])
+      .filter((provider) => {
+        if (!normalizedSearch) {
+          return true
+        }
+        return [
+          provider.providerKey,
+          provider.displayName,
+          provider.description,
+        ].some((value) => value.toLowerCase().includes(normalizedSearch))
+      })
+      .map((provider) => ({
+        ...provider,
+        kind: 'native' as const,
+      }))
+    const pipedreamRows = visibleApps.map((app) => {
+      const source: AgentPipedreamAppSource = platformSlugSet.has(app.slug)
         ? 'built_in'
         : selectedSlugSet.has(app.slug)
           ? 'added'
-          : 'available',
-    }))
-  }, [debouncedSearchTerm, platformSlugSet, searchQuery.data, selectedSlugSet, settings.effectiveApps])
+          : 'available'
+      return {
+        ...app,
+        kind: 'pipedream' as const,
+        source,
+      }
+    })
+    return [...nativeRows, ...pipedreamRows]
+  }, [
+    debouncedSearchTerm,
+    nativeIntegrationsQuery.data?.providers,
+    platformSlugSet,
+    searchQuery.data,
+    selectedSlugSet,
+    settings.effectiveApps,
+  ])
 
   const removeMutation = useMutation({
     mutationFn: (app: WorkspacePipedreamAppRow) => {
       const nextSelectedSlugs = settings.selectedApps
         .map((selectedApp) => selectedApp.slug)
         .filter((slug) => slug !== app.slug)
+      if (!settingsUrl) {
+        throw new Error('Pipedream app settings are unavailable.')
+      }
       return updatePipedreamAppSettings(settingsUrl, nextSelectedSlugs)
     },
     onMutate: (app) => {
       setPendingAppAction({ slug: app.slug, kind: 'remove' })
       setStatusMessage(null)
     },
-    onSuccess: (updatedSettings, app) => {
+    onSuccess: (updatedSettings) => {
       setSettings(updatedSettings)
       queryClient.setQueryData(settingsQueryKey, updatedSettings)
-      setStatusMessage({ text: `${app.name} removed.`, tone: 'info' })
-      onSuccess(updatedSettings.message ?? 'Apps updated.')
     },
     onError: (error) => {
       const message = resolvePipedreamAppsErrorMessage(error, 'Unable to remove app.')
@@ -155,7 +224,7 @@ export function PipedreamAppsModal({
       setPendingAgentAction({ agentId: agent.agentId, kind: 'connect' })
       setStatusMessage(null)
     },
-    onSuccess: (result, { app, agent }) => {
+    onSuccess: (result, { app }) => {
       window.open(result.connectUrl, '_blank', 'noopener,noreferrer')
       setSettings((current) => {
         if (current.selectedApps.some((selectedApp) => selectedApp.slug === result.app.slug)) {
@@ -169,7 +238,6 @@ export function PipedreamAppsModal({
             : [...current.effectiveApps, result.app],
         }
       })
-      setStatusMessage({ text: `Connect ${app.name} for ${agent.name} in the new tab, then return here.`, tone: 'info' })
       void queryClient.invalidateQueries({ queryKey: ['pipedream-app-settings'], exact: false })
       void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', settingsUrl, app.slug] })
     },
@@ -188,8 +256,7 @@ export function PipedreamAppsModal({
       setPendingAgentAction({ agentId: agent.agentId, kind: 'disconnect' })
       setStatusMessage(null)
     },
-    onSuccess: (_result, { app, agent }) => {
-      setStatusMessage({ text: `${app.name} disconnected from ${agent.name}.`, tone: 'info' })
+    onSuccess: (_result, { app }) => {
       void queryClient.invalidateQueries({ queryKey: ['pipedream-app-agent-connections', settingsUrl, app.slug] })
     },
     onError: (error) => {
@@ -200,7 +267,83 @@ export function PipedreamAppsModal({
     onSettled: () => setPendingAgentAction(null),
   })
 
-  const isBusy = removeMutation.isPending || connectMutation.isPending || disconnectMutation.isPending
+  const nativeConnectMutation = useMutation({
+    mutationFn: ({ provider }: { provider: NativeIntegrationProvider; popup: Window | null }) =>
+      startNativeIntegrationConnect(provider.connectUrl),
+    onMutate: ({ provider }) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'connect' })
+      setStatusMessage(null)
+    },
+    onSuccess: (payload, { popup }) => {
+      storePendingNativeOAuth(payload.state, nativeOAuthContextPayload(payload.providerKey, payload.state, popup))
+      if (popup && !popup.closed) {
+        popup.location.href = payload.authorizationUrl
+        popup.focus()
+        return
+      }
+      if (popup?.closed) {
+        const message = 'Connection window was closed before Google opened.'
+        setStatusMessage({ text: message, tone: 'error' })
+        onError(message)
+        return
+      }
+      window.location.href = payload.authorizationUrl
+    },
+    onError: (error, { popup }) => {
+      if (popup && !popup.closed) {
+        popup.close()
+      }
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const nativeRevokeMutation = useMutation({
+    mutationFn: (provider: NativeIntegrationProvider) => revokeNativeIntegration(provider.revokeUrl).then(() => provider),
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'disconnect' })
+      setStatusMessage(null)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: nativeQueryKey })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const nativePickerMutation = useMutation({
+    mutationFn: async (provider: NativeIntegrationProvider) => {
+      const token = await fetchNativeIntegrationPickerToken(provider.pickerTokenUrl)
+      const selectedCount = await openGoogleDrivePicker(token)
+      return { provider, selectedCount }
+    },
+    onMutate: (provider) => {
+      setPendingNativeAction({ providerKey: provider.providerKey, kind: 'picker' })
+      setStatusMessage(null)
+    },
+    onSuccess: ({ provider }) => {
+      void queryClient.invalidateQueries({ queryKey: nativeIntegrationFilesQueryKey(provider) })
+    },
+    onError: (error) => {
+      const message = safeErrorMessage(error)
+      setStatusMessage({ text: message, tone: 'error' })
+      onError(message)
+    },
+    onSettled: () => setPendingNativeAction(null),
+  })
+
+  const isBusy = removeMutation.isPending
+    || connectMutation.isPending
+    || disconnectMutation.isPending
+    || nativeConnectMutation.isPending
+    || nativeRevokeMutation.isPending
+    || nativePickerMutation.isPending
   const body = activeApp ? (
     <AppConnectionsScreen
       app={activeApp}
@@ -223,13 +366,14 @@ export function PipedreamAppsModal({
     <AppListScreen
       apps={rows}
       searchTerm={searchTerm}
-      isLoading={searchQuery.isLoading}
-      isFetching={searchQuery.isFetching}
-      isError={searchQuery.isError}
-      error={searchQuery.error}
+      isLoading={searchQuery.isLoading || nativeIntegrationsQuery.isLoading}
+      isFetching={searchQuery.isFetching || nativeIntegrationsQuery.isFetching}
+      isError={searchQuery.isError || nativeIntegrationsQuery.isError}
+      error={searchQuery.error ?? nativeIntegrationsQuery.error}
       isBusy={isBusy}
       isMobile={isMobile}
       pendingAppAction={pendingAppAction}
+      pendingNativeAction={pendingNativeAction}
       statusMessage={statusMessage}
       onSearchTermChange={setSearchTerm}
       onManageConnections={(app) => {
@@ -237,6 +381,9 @@ export function PipedreamAppsModal({
         setStatusMessage(null)
       }}
       onRemove={(app) => removeMutation.mutate(app)}
+      onNativeConnect={(provider) => nativeConnectMutation.mutate({ provider, popup: openNativeOAuthPopup(provider) })}
+      onNativeDisconnect={(provider) => nativeRevokeMutation.mutate(provider)}
+      onNativePicker={(provider) => nativePickerMutation.mutate(provider)}
     />
   )
 
@@ -262,12 +409,16 @@ function AppListScreen({
   isBusy,
   isMobile,
   pendingAppAction,
+  pendingNativeAction,
   statusMessage,
   onSearchTermChange,
   onManageConnections,
   onRemove,
+  onNativeConnect,
+  onNativeDisconnect,
+  onNativePicker,
 }: {
-  apps: WorkspacePipedreamAppRow[]
+  apps: WorkspaceAppRow[]
   searchTerm: string
   isLoading: boolean
   isFetching: boolean
@@ -276,10 +427,14 @@ function AppListScreen({
   isBusy: boolean
   isMobile: boolean
   pendingAppAction: PendingAppAction
+  pendingNativeAction: PendingNativeAction
   statusMessage: PipedreamStatusMessage
   onSearchTermChange: (term: string) => void
   onManageConnections: (app: WorkspacePipedreamAppRow) => void
   onRemove: (app: WorkspacePipedreamAppRow) => void
+  onNativeConnect: (provider: NativeIntegrationProvider) => void
+  onNativeDisconnect: (provider: NativeIntegrationProvider) => void
+  onNativePicker: (provider: NativeIntegrationProvider) => void
 }) {
   return (
     <div className="space-y-4 p-1">
@@ -299,9 +454,19 @@ function AppListScreen({
         <PipedreamEmptyState label="No apps matched your search." />
       ) : (
         <PipedreamListFrame isMobile={isMobile}>
-          {apps.map((app) => (
+          {apps.map((app) => app.kind === 'native' ? (
+            <NativeAppRowItem
+              key={`native-${app.providerKey}`}
+              provider={app}
+              pendingNativeAction={pendingNativeAction}
+              disabled={isBusy}
+              onConnect={() => onNativeConnect(app)}
+              onDisconnect={() => onNativeDisconnect(app)}
+              onPicker={() => onNativePicker(app)}
+            />
+          ) : (
             <PipedreamAppRowItem
-              key={app.slug}
+              key={`pipedream-${app.slug}`}
               app={app}
               pendingAppAction={pendingAppAction}
               disabled={isBusy}
@@ -311,6 +476,114 @@ function AppListScreen({
           ))}
         </PipedreamListFrame>
       )}
+    </div>
+  )
+}
+
+function NativeAppRowItem({
+  provider,
+  pendingNativeAction,
+  disabled,
+  onConnect,
+  onDisconnect,
+  onPicker,
+}: {
+  provider: NativeIntegrationProvider
+  pendingNativeAction: PendingNativeAction
+  disabled: boolean
+  onConnect: () => void
+  onDisconnect: () => void
+  onPicker: () => void
+}) {
+  const isPending = pendingNativeAction?.providerKey === provider.providerKey
+  const pendingKind = isPending ? pendingNativeAction?.kind : null
+  const pickerEnabled = provider.connected && supportsNativeIntegrationPicker(provider)
+
+  return (
+    <div className="px-4 py-3">
+      <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_8rem_8rem_8rem] sm:items-start">
+        <NativeIntegrationSummaryCell provider={provider} />
+        <div>
+          {provider.connected ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden="true" />
+              Connected
+            </span>
+          ) : (
+            <span className="inline-flex rounded-full border border-slate-200 px-2.5 py-1 text-xs font-semibold text-slate-500">
+              Workspace
+            </span>
+          )}
+        </div>
+        <div className="flex justify-start md:justify-end">
+          {pickerEnabled ? (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-blue-200 bg-white px-3 py-2 text-sm font-semibold text-blue-700 transition hover:bg-blue-50 disabled:opacity-60"
+              onClick={onPicker}
+              disabled={disabled}
+            >
+              {pendingKind === 'picker' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <FolderOpen className="h-4 w-4" aria-hidden="true" />
+              )}
+              Select Files
+            </button>
+          ) : null}
+        </div>
+        <div className="flex justify-start md:justify-end">
+          {provider.connected ? (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md border border-red-200 bg-white px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:opacity-60"
+              onClick={onDisconnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'disconnect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Unplug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Disconnect
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="inline-flex min-w-28 items-center justify-center gap-2 rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:opacity-60"
+              onClick={onConnect}
+              disabled={disabled}
+            >
+              {pendingKind === 'connect' ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              ) : (
+                <Plug className="h-4 w-4" aria-hidden="true" />
+              )}
+              Connect
+            </button>
+          )}
+        </div>
+      </div>
+      <NativeIntegrationFilesDisclosure provider={provider} />
+    </div>
+  )
+}
+
+function NativeIntegrationSummaryCell({ provider }: { provider: NativeIntegrationProvider }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <span className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700">
+        <NativeProviderIcon provider={provider} />
+      </span>
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="truncate text-sm font-semibold text-slate-900">{provider.displayName}</p>
+          <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-emerald-700">
+            Native
+          </span>
+        </div>
+        {provider.description ? <p className="mt-1 line-clamp-2 text-sm text-slate-600">{provider.description}</p> : null}
+      </div>
     </div>
   )
 }

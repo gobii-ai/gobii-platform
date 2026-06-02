@@ -6,6 +6,9 @@
        data-detail-url-template="{{ mcp_server_detail_url_template }}"
        data-assign-url-template="{{ mcp_server_assign_url_template }}"
        data-test-url-template="{{ mcp_server_test_url_template }}"
+       {% if owner_scope != 'platform' %}
+       data-native-integrations-url="{% url 'console-native-integration-list' %}"
+       {% endif %}
        {% if pipedream_integrations_enabled %}
        data-pipedream-apps-url="{% url 'console-pipedream-apps' %}"
        data-pipedream-app-search-url="{% url 'console-pipedream-app-search' %}"

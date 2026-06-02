@@ -25,6 +25,10 @@ from api.evals.scenarios.message_quality import (
     MESSAGE_QUALITY_SCENARIO_SLUGS,
     MESSAGE_QUALITY_SUITE_SLUG,
 )
+from api.evals.scenarios.google_sheets_native import (
+    GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
+    GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
+)
 from api.evals.meta_gobii import META_GOBII_EVAL_SCENARIO_SLUGS, META_GOBII_EVAL_SUITE_SLUG
 from api.evals.suites import EvalSuite, register_builtin_suites
 
@@ -90,6 +94,11 @@ register_builtin_suites(
             slug=MESSAGE_QUALITY_SUITE_SLUG,
             description="Message formatting evals for rich reports and restrained simple emails.",
             scenario_slugs=MESSAGE_QUALITY_SCENARIO_SLUGS,
+        ),
+        EvalSuite(
+            slug=GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
+            description="Native Google Sheets system-skill evals over mocked Drive and Sheets REST APIs.",
+            scenario_slugs=GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS,
         ),
     ]
 )

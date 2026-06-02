@@ -251,6 +251,21 @@ class ConsoleSecretsTests(TestCase):
         self.assertEqual(secret.name, "Updated Agent Name")
         self.assertEqual(secret.key, original_key)
 
+    def test_update_agent_secret_rejects_hidden_integration_type(self):
+        secret = self._make_agent_secret(name="Visible Agent Secret")
+        self._set_org_context()
+
+        response = self.client.patch(
+            reverse("console-agent-secret-detail", args=[self.org_agent.id, secret.id]),
+            data=json.dumps({"secret_type": "integration"}),
+            content_type="application/json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["errors"]["secret_type"], ["Unsupported secret type."])
+        secret.refresh_from_db()
+        self.assertEqual(secret.secret_type, PersistentAgentSecret.SecretType.CREDENTIAL)
+
     def test_promote_agent_secret_returns_created_and_moves_secret(self):
         secret = self._make_agent_secret(name="Promote Me")
         self._set_org_context()

@@ -1,10 +1,105 @@
 """Default code-defined system skill definitions."""
 
+from django.conf import settings
+
 from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.agent.tools.attachment_guidance import SEND_TOOL_ATTACHMENTS_DESCRIPTION
 from api.agent.tools.meta_gobii_names import META_GOBII_SYSTEM_SKILL_KEY, META_GOBII_TOOL_NAMES
 
 from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillField
+
+
+GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
+
+
+def _format_runtime_planning_context(agent) -> str:
+    from api.models import PersistentAgentKanbanCard
+
+    cards = list(
+        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
+        .only("title", "status", "priority", "created_at")
+        .order_by("-priority", "created_at")
+    )
+    if not cards:
+        return "Current plan: none"
+
+    groups = {
+        PersistentAgentKanbanCard.Status.DOING: [],
+        PersistentAgentKanbanCard.Status.TODO: [],
+        PersistentAgentKanbanCard.Status.DONE: [],
+    }
+    for card in cards:
+        if card.status in groups:
+            groups[card.status].append(card.title)
+
+    lines = [
+        "Current plan:",
+        f"- Doing: {len(groups[PersistentAgentKanbanCard.Status.DOING])}",
+        f"- Todo: {len(groups[PersistentAgentKanbanCard.Status.TODO])}",
+        f"- Done: {len(groups[PersistentAgentKanbanCard.Status.DONE])}",
+    ]
+    for label, status in (
+        ("Doing", PersistentAgentKanbanCard.Status.DOING),
+        ("Todo", PersistentAgentKanbanCard.Status.TODO),
+        ("Done", PersistentAgentKanbanCard.Status.DONE),
+    ):
+        titles = groups[status]
+        if titles:
+            lines.append(f"{label}:")
+            lines.extend(f"- {title}" for title in titles[:20])
+    return "\n".join(lines)
+
+
+def _custom_tool_development_prompt_available(agent) -> bool:
+    from api.agent.system_skills.service import get_available_system_skill_tool_names
+
+    return CREATE_CUSTOM_TOOL_NAME in get_available_system_skill_tool_names(agent)
+
+
+def _format_custom_tool_development_context(agent) -> str:
+    from api.agent.tools.custom_tools import format_custom_tools_state_for_prompt
+
+    summary = format_custom_tools_state_for_prompt(agent, recent_limit=3)
+    if not summary:
+        return ""
+    return "Current custom-tool state:\n" + summary
+
+
+def _app_integrations_url() -> str:
+    return f"{str(settings.PUBLIC_SITE_URL or '').strip().rstrip('/')}/app/integrations"
+
+
+def _google_sheets_native_prompt_instructions(agent) -> str:
+    integrations_url = _app_integrations_url()
+    return (
+        "Use `http_request` for Google Sheets and Drive API calls. Native Google Drive OAuth is applied "
+        "automatically for `https://sheets.googleapis.com/` and `https://www.googleapis.com/drive/` requests.\n"
+        "If the user supplies a concrete spreadsheet ID, use it directly with the Sheets API; do not search Drive "
+        "for that ID first unless the Sheets API says the file is missing or inaccessible. List accessible spreadsheets "
+        "when the user gives a sheet title/name instead of an ID, or when troubleshooting missing access. This integration "
+        "uses Google `drive.file`, so missing spreadsheets may need to be selected in Google Picker first.\n"
+        "When the user asks to find or search for one of their sheets by name, use Drive file discovery over "
+        "connected files. Do not use web search or public `docs.google.com` results to choose a private sheet.\n"
+        "If setup is needed, tell the user to open `" + integrations_url + "`, connect Google Drive, "
+        "then choose the spreadsheet(s) the agent should be allowed to access.\n"
+        "Drive `q` filters must be complete before calling `http_request`, then URL-encoded. Never call partial "
+        "Drive URLs like `?q=mimeType%3D`, `?q=name%20%3D`, or `?q=name%20contains%20`. If you do not know "
+        "the name text yet, omit the name predicate and use a complete spreadsheet list query instead. Always include "
+        "`mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false` in Drive spreadsheet discovery.\n"
+        "Common calls:\n"
+        "- Search/list accessible spreadsheets: GET https://www.googleapis.com/drive/v3/files with "
+        "fields=files(id,name,mimeType,webViewLink), pageSize=100, and a complete `q` filter such as "
+        "mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false; add name contains 'text' "
+        "when searching by title.\n"
+        "- Spreadsheet metadata and sheet tabs: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}\n"
+        "- Read values: GET https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/{url_encoded_range}\n"
+        "- Update values: PUT https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
+        "{url_encoded_range}?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "- Append rows: POST https://sheets.googleapis.com/v4/spreadsheets/{spreadsheetId}/values/"
+        "{url_encoded_range}:append?valueInputOption=USER_ENTERED with JSON body {\"values\": [[...]]}\n"
+        "If the requested spreadsheet is not listed, ask the user to choose it through the Google Drive native "
+        "integration at `" + integrations_url + "` before making Sheets API calls for that file."
+    )
 
 
 RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
@@ -32,6 +127,7 @@ RUNTIME_PLANNING_SYSTEM_SKILL = SystemSkillDefinition(
         "Keep plans short, current, and verifiable; each call replaces the full active plan. "
         "Send the final user-facing report before any final completion update."
     ),
+    prompt_context_renderer=_format_runtime_planning_context,
     default_enabled=True,
 )
 
@@ -122,6 +218,42 @@ CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL = SystemSkillDefinition(
         "Useful pattern: fetch/call tools -> normalize -> write SQLite tables -> return summary, counts, outputs, "
         "remaining work, and verification. Once stable, save the workflow as a skill referencing the canonical `custom_*` tool id."
     ),
+    prompt_available=_custom_tool_development_prompt_available,
+    prompt_context_renderer=_format_custom_tool_development_context,
+)
+
+
+GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY,
+    name="Google Sheets",
+    search_summary="Read and update selected Google Sheets through the native Google Drive integration.",
+    tool_names=("http_request",),
+    enables=(
+        "read Google Sheets metadata and worksheet names",
+        "read spreadsheet ranges and rows",
+        "append rows to selected spreadsheets",
+        "update ranges in selected spreadsheets",
+        "use native Google Drive OAuth with drive.file access",
+    ),
+    use_when=(
+        "the user asks to read a Google Sheet",
+        "the user asks to update, append, or write spreadsheet rows",
+        "the user asks to find or search for one of their Google Sheets by name",
+        "the user asks to inspect worksheets, tabs, ranges, cells, or formulas in Google Sheets",
+        "the work references a spreadsheet selected through the native Google Drive integration",
+    ),
+    query_aliases=(
+        "google sheets",
+        "sheets",
+        "spreadsheet",
+        "worksheet",
+        "google sheet",
+        "find my spreadsheet",
+        "search my sheets",
+        "sheets api",
+        "drive file spreadsheet",
+    ),
+    prompt_instructions_renderer=_google_sheets_native_prompt_instructions,
 )
 
 
@@ -483,6 +615,7 @@ META_GOBII_SYSTEM_SKILL = SystemSkillDefinition(
 DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     RUNTIME_PLANNING_SYSTEM_SKILL.skill_key: RUNTIME_PLANNING_SYSTEM_SKILL,
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
+    GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

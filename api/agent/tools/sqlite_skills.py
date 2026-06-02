@@ -17,7 +17,6 @@ from django.utils import timezone
 
 from api.models import (
     GlobalSecret,
-    PersistentAgentKanbanCard,
     PersistentAgentSecret,
     PersistentAgentSkill,
     PersistentAgentSystemSkillState,
@@ -25,11 +24,9 @@ from api.models import (
 from api.agent.system_skills.registry import get_system_skill_definition
 from api.agent.system_skills.service import (
     ensure_default_system_skills_enabled,
-    get_available_system_skill_tool_names,
     get_enabled_system_skill_states,
     refresh_system_skills_for_tool,
 )
-from api.agent.tools.custom_tool_names import CREATE_CUSTOM_TOOL_NAME, CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY
 from api.services.skill_analytics import (
     SKILL_ORIGIN_FORKED_FROM_GLOBAL,
     infer_agent_skill_origin,
@@ -496,58 +493,14 @@ def _render_saved_skill_for_prompt(skill: PersistentAgentSkill, secret_status_se
     return "\n".join(lines)
 
 
-def _format_current_plan_state(agent) -> str:
-    cards = list(
-        PersistentAgentKanbanCard.objects.filter(assigned_agent=agent)
-        .only("title", "status", "priority", "created_at")
-        .order_by("-priority", "created_at")
-    )
-    if not cards:
-        return "Current plan: none"
-
-    groups = {
-        PersistentAgentKanbanCard.Status.DOING: [],
-        PersistentAgentKanbanCard.Status.TODO: [],
-        PersistentAgentKanbanCard.Status.DONE: [],
-    }
-    for card in cards:
-        if card.status in groups:
-            groups[card.status].append(card.title)
-
-    lines = [
-        "Current plan:",
-        f"- Doing: {len(groups[PersistentAgentKanbanCard.Status.DOING])}",
-        f"- Todo: {len(groups[PersistentAgentKanbanCard.Status.TODO])}",
-        f"- Done: {len(groups[PersistentAgentKanbanCard.Status.DONE])}",
-    ]
-    for label, status in (
-        ("Doing", PersistentAgentKanbanCard.Status.DOING),
-        ("Todo", PersistentAgentKanbanCard.Status.TODO),
-        ("Done", PersistentAgentKanbanCard.Status.DONE),
-    ):
-        titles = groups[status]
-        if titles:
-            lines.append(f"{label}:")
-            lines.extend(f"- {title}" for title in titles[:20])
-    return "\n".join(lines)
-
-
-def _format_custom_tool_development_state(agent) -> str:
-    from .custom_tools import format_custom_tools_state_for_prompt
-
-    summary = format_custom_tools_state_for_prompt(agent, recent_limit=3)
-    if not summary:
-        return ""
-    return "Current custom-tool state:\n" + summary
-
-
 def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillState) -> str | None:
     definition = get_system_skill_definition(state.skill_key)
-    if definition is None or not definition.prompt_instructions:
+    if definition is None or not definition.should_render_prompt(agent):
         return None
-    if definition.skill_key == CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY:
-        if CREATE_CUSTOM_TOOL_NAME not in get_available_system_skill_tool_names(agent):
-            return None
+
+    instructions = definition.render_prompt_instructions(agent).strip()
+    if not instructions:
+        return None
 
     tool_text = ", ".join(definition.tool_names) if definition.tool_names else "(none)"
     lines = [
@@ -555,14 +508,11 @@ def _render_system_skill_for_prompt(agent, state: PersistentAgentSystemSkillStat
         f"Key: {definition.skill_key}",
         f"Tools: {tool_text}",
         "Instructions:",
-        definition.prompt_instructions.strip(),
+        instructions,
     ]
-    if definition.skill_key == "runtime_planning":
-        lines.extend(["", _format_current_plan_state(agent)])
-    elif definition.skill_key == CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL_KEY:
-        state_text = _format_custom_tool_development_state(agent)
-        if state_text:
-            lines.extend(["", state_text])
+    context = definition.render_prompt_context(agent).strip()
+    if context:
+        lines.extend(["", context])
     return "\n".join(lines)
 
 

@@ -26,6 +26,8 @@ from ...services.pipedream_apps import (
     PipedreamCatalogError,
     PipedreamCatalogService,
     enable_pipedream_apps_for_agent,
+    filter_deprecated_pipedream_apps_for_agent,
+    filter_deprecated_pipedream_tools_for_agent,
     get_effective_pipedream_app_slugs_for_agent,
 )
 from ...services.tool_blacklist import get_agent_tool_blacklist
@@ -1376,7 +1378,8 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
     blacklisted_tools = get_agent_tool_blacklist(agent)
     hide_pipedream_tools = is_eval_agent(agent)
     mcp_tools = [
-        tool for tool in manager.get_tools_for_agent(agent)
+        tool
+        for tool in filter_deprecated_pipedream_tools_for_agent(agent, manager.get_tools_for_agent(agent))
         if tool.full_name not in blacklisted_tools
         and not (hide_pipedream_tools and tool.server_name == PIPEDREAM_TOOL_SERVER_NAME)
     ]
@@ -1421,7 +1424,10 @@ def search_tools(agent: PersistentAgent, query: str) -> ToolSearchResult:
         auto_enable_apps = get_tool_settings_for_owner(owner).tool_search_auto_enable_apps
     if not hide_pipedream_tools and _has_active_pipedream_runtime():
         try:
-            pipedream_app_catalog = PipedreamCatalogService().search_apps(query, limit=20)
+            pipedream_app_catalog = filter_deprecated_pipedream_apps_for_agent(
+                agent,
+                PipedreamCatalogService().search_apps(query, limit=20),
+            )
             enabled_app_slugs = get_effective_pipedream_app_slugs_for_agent(agent)
         except PipedreamCatalogError as exc:
             logger.warning("search_tools: unable to search Pipedream apps for agent %s: %s", agent.id, exc)

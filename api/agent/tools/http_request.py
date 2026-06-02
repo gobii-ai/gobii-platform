@@ -20,6 +20,11 @@ from django.conf import settings
 
 from ...models import GlobalSecret, PersistentAgent, PersistentAgentSecret
 from ...proxy_selection import select_proxy_for_persistent_agent
+from ...services.native_integrations import (
+    NativeIntegrationAuthError,
+    NativeIntegrationConfigurationError,
+    apply_native_integration_auth,
+)
 from ...services.persistent_agent_secrets import global_secrets_queryset_for_agent
 from ..files.attachment_helpers import build_signed_filespace_download_url
 from ..files.filespace_service import DOWNLOADS_DIR_NAME, write_bytes_to_dir
@@ -422,6 +427,13 @@ def execute_http_request(agent: PersistentAgent, params: Dict[str, Any]) -> Dict
     url = _replace_placeholders(url)
     headers = {k: _replace_placeholders(v) for k, v in headers.items()}
     body = _replace_placeholders(body)
+
+    try:
+        headers = apply_native_integration_auth(agent, url, headers)
+    except NativeIntegrationConfigurationError as exc:
+        return {"status": "error", "message": str(exc)}
+    except NativeIntegrationAuthError as exc:
+        return {"status": "error", "message": str(exc)}
 
     # Log secret placeholder usage (without actual values)
     if found_placeholders:

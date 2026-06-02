@@ -8,8 +8,10 @@ from api.models import MCPServerConfig
 from api.services.pipedream_apps import (
     PIPEDREAM_RUNTIME_NAME,
     PipedreamCatalogService,
+    filter_deprecated_pipedream_apps_without_agent,
     get_platform_pipedream_app_slugs,
 )
+from api.services.native_integrations import list_native_integration_providers
 from util.integrations import pipedream_status
 
 logger = logging.getLogger(__name__)
@@ -132,20 +134,25 @@ def _platform_pipedream_server_is_active() -> bool:
 
 
 def _build_homepage_integrations_payload() -> dict[str, object]:
-    if not pipedream_status().enabled or not _platform_pipedream_server_is_active():
-        return {"enabled": False, "builtins": []}
+    native_enabled = bool(list_native_integration_providers())
+    pipedream_enabled = pipedream_status().enabled and _platform_pipedream_server_is_active()
+    if not pipedream_enabled:
+        return {"enabled": native_enabled, "pipedream_enabled": False, "builtins": []}
 
     app_slugs = get_platform_pipedream_app_slugs()
     if not app_slugs:
-        return {"enabled": True, "builtins": []}
+        return {"enabled": True, "pipedream_enabled": True, "builtins": []}
 
     builtins = [
         app.to_dict()
-        for app in PipedreamCatalogService().get_apps(app_slugs)
+        for app in filter_deprecated_pipedream_apps_without_agent(
+            PipedreamCatalogService().get_apps(app_slugs)
+        )
     ]
 
     return {
         "enabled": True,
+        "pipedream_enabled": True,
         "builtins": builtins,
     }
 

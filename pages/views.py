@@ -135,6 +135,7 @@ from api.services.pipedream_apps import (
     PipedreamCatalogService,
     get_owner_selected_app_slugs,
 )
+from api.services.native_integrations import list_native_integration_providers
 from api.pipedream_app_utils import normalize_app_slugs
 from marketing_events.custom_events import ConfiguredCustomEvent, emit_configured_custom_capi_event
 from middleware.utm_capture import UTMTrackingMiddleware
@@ -232,6 +233,29 @@ def _with_homepage_inline_integration_icon(app: dict) -> dict:
     if not icon_path:
         return app
     return {**app, "inline_icon_url": static(icon_path)}
+
+
+def _homepage_native_integration_providers() -> list[dict[str, object]]:
+    return [
+        {
+            "provider_key": provider.key,
+            "display_name": provider.display_name,
+            "description": provider.description,
+            "auth_type": provider.auth_type,
+            "icon": provider.icon,
+            "api_hosts": list(provider.api_hosts),
+            "scopes": list(provider.scopes),
+            "connected": False,
+            "scope": "",
+            "expires_at": None,
+            "connect_url": reverse("console-native-integration-connect", args=[provider.key]),
+            "files_url": reverse("console-native-integration-files", args=[provider.key]),
+            "picker_token_url": reverse("console-native-integration-picker-token", args=[provider.key]),
+            "revoke_url": reverse("console-native-integration-revoke", args=[provider.key]),
+        }
+        for provider in list_native_integration_providers()
+    ]
+
 
 def _get_price_info_from_item(item: dict) -> tuple[str | None, str]:
     """
@@ -1176,6 +1200,9 @@ class HomePage(TemplateView):
                     "initialSearchTerm": (self.request.GET.get("integration_search") or "").strip(),
                     "initialSelectedAppSlugs": initial_selected_pipedream_app_slugs,
                     "searchUrl": reverse("pages:homepage_integrations_search"),
+                    "nativeIntegrationsUrl": reverse("console-native-integration-list"),
+                    "nativeProviders": _homepage_native_integration_providers(),
+                    "isAuthenticated": self.request.user.is_authenticated,
                     "selectedFieldsContainerId": "homepage-integrations-selected-fields",
                 },
             }
@@ -1412,7 +1439,8 @@ class HomepageIntegrationsSearchView(View):
             return JsonResponse({"results": []})
 
         integrations_payload = get_homepage_integrations_payload()
-        if not integrations_payload.get("enabled"):
+        pipedream_enabled = integrations_payload.get("pipedream_enabled", integrations_payload.get("enabled"))
+        if not integrations_payload.get("enabled") or not pipedream_enabled:
             return JsonResponse({"results": []})
 
         builtin_slugs = {

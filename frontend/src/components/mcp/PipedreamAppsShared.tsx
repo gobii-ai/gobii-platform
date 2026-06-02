@@ -9,7 +9,7 @@ export { useIsMobile } from '../../hooks/useIsMobile'
 
 export type PipedreamStatusMessage = {
   text: string
-  tone: 'info' | 'error'
+  tone?: 'error'
 } | null
 
 type PipedreamAppIconProps = {
@@ -112,11 +112,8 @@ export function PipedreamStatusBanner({ statusMessage }: { statusMessage: Pipedr
   if (!statusMessage) {
     return null
   }
-  const classes = statusMessage.tone === 'error'
-    ? 'border-red-200 bg-red-50 text-red-700'
-    : 'border-blue-200 bg-blue-50 text-blue-800'
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm ${classes}`}>
+    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
       {statusMessage.text}
     </div>
   )

@@ -227,8 +227,8 @@ def get_send_chat_tool() -> Dict[str, Any]:
         "function": {
             "name": "send_chat_message",
             "description": (
-                "Send a user-facing web chat message for non-blocking context, config changes, or findings. "
-                "Do not use this for questions that block the task; use request_human_input so the question is tracked. "
+                "Send a user-facing web chat message for context, config changes, findings, or finals. "
+                "Use request_human_input instead when the agent has been blocked repeatedly or for a while and needs a tracked answer. "
                 "Do not narrate what you will do next or send progress-only notes about tool sequencing, plan mechanics, or internal reasoning."
             ),
             "parameters": {

@@ -206,6 +206,8 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
         if max_chat_upload_size_bytes
         else ""
     )
+    native_integrations_url = reverse("console-native-integration-list")
+    native_integrations_attr = f' data-native-integrations-url="{native_integrations_url}"'
     pipedream_attrs = ""
     if pipedream_status().enabled:
         pipedream_apps_url = reverse("console-pipedream-apps")
@@ -238,7 +240,7 @@ def _build_shell_html(*, fish_collateral_enabled: bool) -> str:
   {vite_tags}
 </head>
 <body class="min-h-screen bg-white">
-  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"{max_chat_upload_size_attr}{pipedream_attrs}></div>
+  <div id="gobii-frontend-root" data-app="immersive-app" data-fish-collateral-enabled="{fish_collateral_data_attr}"{max_chat_upload_size_attr}{native_integrations_attr}{pipedream_attrs}></div>
 </body>
 </html>"""
 

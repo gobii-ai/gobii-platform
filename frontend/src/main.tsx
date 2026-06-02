@@ -72,6 +72,7 @@ function readJsonScript<T>(scriptId?: string): T {
 const pipedreamAppsUrl = mountNode.dataset.pipedreamAppsUrl || null
 const pipedreamAppSearchUrl = mountNode.dataset.pipedreamAppSearchUrl || null
 const pipedreamAppsEnabled = Boolean(pipedreamAppsUrl && pipedreamAppSearchUrl)
+const nativeIntegrationsUrl = mountNode.dataset.nativeIntegrationsUrl || null
 
 switch (appName) {
   case 'diagnostics':
@@ -138,6 +139,7 @@ switch (appName) {
         ownerScope={mountNode.dataset.ownerScope}
         ownerLabel={mountNode.dataset.ownerLabel}
         allowCommands={allowCommands}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
         pipedreamAppsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
         oauthStartUrl={oauthStartUrl}
@@ -197,6 +199,7 @@ switch (appName) {
         maxChatUploadSizeBytes={maxChatUploadSizeBytes}
         pipedreamAppsSettingsUrl={pipedreamAppsEnabled ? pipedreamAppsUrl : null}
         pipedreamAppSearchUrl={pipedreamAppsEnabled ? pipedreamAppSearchUrl : null}
+        nativeIntegrationsUrl={nativeIntegrationsUrl}
       />
     )
     break

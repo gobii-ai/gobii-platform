@@ -190,6 +190,10 @@ class AppShellAuthenticationTests(TestCase):
             response,
             f'data-pipedream-app-search-url="{reverse("console-pipedream-app-search")}"',
         )
+        self.assertContains(
+            response,
+            f'data-native-integrations-url="{reverse("console-native-integration-list")}"',
+        )
 
     def test_authenticated_agents_detail_serves_shell(self):
         User = get_user_model()

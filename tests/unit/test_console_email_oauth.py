@@ -100,14 +100,7 @@ class AgentEmailOAuthApiTests(TestCase):
         )
         self.assertEqual(response.status_code, 404)
 
-    @patch.dict(
-        os.environ,
-        {
-            "GOOGLE_CLIENT_ID": "managed-client-id",
-            "GOOGLE_CLIENT_SECRET": "managed-secret",
-        },
-        clear=False,
-    )
+    @override_settings(GOOGLE_CLIENT_ID="managed-client-id", GOOGLE_CLIENT_SECRET="managed-secret")
     def test_start_uses_managed_app(self):
         url = reverse("console-email-oauth-start")
         response = self.client.post(
