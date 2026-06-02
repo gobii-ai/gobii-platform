@@ -586,6 +586,8 @@ class PublicTemplateViewsTests(TestCase):
         self.assertEqual(response.status_code, 302)
         mock_emit_custom_event.assert_called_once()
         call_kwargs = mock_emit_custom_event.call_args.kwargs
+        self.assertIsNone(call_kwargs["user"])
+        self.assertIsNone(call_kwargs["plan_owner"])
         self.assertEqual(call_kwargs["event_name"], "TemplateLaunched")
         self.assertEqual(call_kwargs["properties"]["template_id"], str(template.id))
         self.assertEqual(call_kwargs["properties"]["template_code"], template.code)

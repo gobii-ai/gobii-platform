@@ -2067,7 +2067,7 @@ class PublicTemplateLaunchView(View):
             default_source_page="public_template_launch",
         )
         emit_configured_custom_capi_event(
-            user=request.user,
+            user=request.user if request.user.is_authenticated else None,
             event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
             plan_owner=request.user if request.user.is_authenticated else None,
             properties={
@@ -2133,7 +2133,7 @@ class PublicTemplateHireView(View):
             analytics_properties["flow"] = flow
 
         emit_configured_custom_capi_event(
-            user=request.user,
+            user=request.user if request.user.is_authenticated else None,
             event_name=ConfiguredCustomEvent.TEMPLATE_LAUNCHED,
             plan_owner=request.user if request.user.is_authenticated else None,
             properties={
