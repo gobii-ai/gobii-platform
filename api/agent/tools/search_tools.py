@@ -551,7 +551,7 @@ def _build_search_tool_definitions(
                 "function": {
                     "name": "enable_apps",
                     "description": (
-                        "Enable exact Pipedream app slugs for future tool discovery."
+                        "Enable exact Pipedream app slugs for named integration connection/use requests before a follow-up tool search."
                     ),
                     "parameters": {
                         "type": "object",
@@ -561,7 +561,7 @@ def _build_search_tool_definitions(
                                 "items": {"type": "string"},
                                 "minItems": 1,
                                 "maxItems": 20,
-                                "description": "List of exact Pipedream app slugs to enable",
+                                "description": "List of exact Pipedream app slugs to enable for integration tool discovery",
                             },
                         },
                         "required": ["app_slugs"],
@@ -1468,7 +1468,7 @@ def get_search_tools_tool() -> Dict[str, Any]:
             "name": "search_tools",
             "description": (
                 "Discover and enable the right tools and skills for the current task, including saved custom tools. "
-                "Use this when no currently enabled tool clearly fits. "
+                "Use this when no currently enabled tool clearly fits, including named integration connection/use requests. "
                 "Use it when you need to choose between structured extractors, web search, scraping, browser automation, or a specialized integration. "
                 "Use already-enabled direct tools such as sqlite_batch, create_csv, or a named integration tool; do not rediscover a matching enabled app/tool. "
                 "Call it again when the task changes and you need different capabilities."

@@ -45,6 +45,7 @@ PLANNING_ONE_OFF_RESEARCH_REPORT_ENDS_PLANNING_FIRST = "planning_one_off_researc
 PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES = "planning_no_direct_schedule_or_config_updates"
 PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME = "planning_dismiss_after_greeting_does_not_resume"
 PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN = "planning_final_report_completes_visible_plan"
+PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION = "planning_integration_setup_searches_before_question"
 CHARTER_ADDS_DURABLE_PREFERENCE_PRESERVING_EXISTING = "charter_adds_durable_preference_preserving_existing"
 CHARTER_ADDS_INFERRED_PREFERENCE_PRESERVING_EXISTING = "charter_adds_inferred_preference_preserving_existing"
 CHARTER_EXPANDS_SPARSE_CHARTER_WITH_DETAIL = "charter_expands_sparse_charter_with_detail"
@@ -326,6 +327,8 @@ COMMON_USE_CASE_RAW_EVAL_CASES = [
     {"slug": "common_use_case_133_http_sqlite_dedupe_report", "category": "intelligent_work", "prompt": "Fetch https://api.example.test/accounts.json and use SQLite to dedupe domains before reporting export-ready rows.", "expected_tools": ["http_request", "sqlite_batch"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
     {"slug": "common_use_case_134_file_support_group_report", "category": "intelligent_work", "prompt": "Read /uploads/support-dump.json and group tickets by account in SQLite before reporting counts.", "expected_tools": ["read_file", "sqlite_batch"], "forbidden_tools": ["mcp_brightdata_search_engine"], "plan_expected": False},
     {"slug": "common_use_case_135_search_scrape_two_sources", "category": "web_research", "prompt": "Search current warehouse robotics funding, scrape two strong sources, and cite both without extra query variants.", "expected_tools": ["mcp_brightdata_search_engine", "mcp_brightdata_scrape_as_markdown"], "forbidden_tools": ["spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_136_apollo_connect_tool_search", "category": "integration_discovery", "prompt": "Connect my Apollo.io account so you can use it for lead sourcing.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
+    {"slug": "common_use_case_137_slack_connect_tool_search", "category": "integration_discovery", "prompt": "Connect Slack so you can read and summarize customer feedback from our support channel.", "expected_tools": ["search_tools"], "forbidden_tools": ["request_human_input", "secure_credentials_request", "spawn_web_task"], "plan_expected": False},
 ]
 
 COMMON_USE_CASE_EVAL_CASES = tuple(
@@ -343,6 +346,7 @@ PLANNING_MICRO_SCENARIO_SLUGS = [
     PLANNING_NO_DIRECT_SCHEDULE_OR_CONFIG_UPDATES,
     PLANNING_DISMISS_AFTER_GREETING_DOES_NOT_RESUME,
     PLANNING_FINAL_REPORT_COMPLETES_VISIBLE_PLAN,
+    PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION,
 ]
 
 CHARTER_MEMORY_MICRO_SCENARIO_SLUGS = [
@@ -700,6 +704,96 @@ class PlanningFirstTurnAsksBoundedQuestionsScenario(BehaviorMicroScenario):
             inbound.timestamp,
             "verify_no_substantive_work",
             SUBSTANTIVE_WORK_TOOL_NAMES,
+        )
+
+
+@register_scenario
+class PlanningIntegrationSetupSearchesBeforeQuestionScenario(BehaviorMicroScenario):
+    slug = PLANNING_INTEGRATION_SETUP_SEARCHES_BEFORE_QUESTION
+    description = "A named integration setup request should discover integration tools before asking how to connect."
+    category = "planning"
+    tags = ("agent_behavior", "micro", "planning", "tool_choice", "integration_discovery")
+    tasks = [
+        ScenarioTask(name="inject_prompt", assertion_type="manual"),
+        ScenarioTask(name="verify_search_before_questions", assertion_type="manual"),
+    ]
+
+    def _mock_config(self):
+        return {
+            **self._planning_guardrail_mocks(),
+            "search_tools": {
+                "status": "success",
+                "message": "Mocked integration discovery for Apollo.io.",
+                "tools": [],
+            },
+        }
+
+    def _eval_stop_policy(self):
+        return {
+            "ignored_tool_names": list(IGNORED_FIRST_ACTION_TOOL_NAMES),
+            "stop_on_first_relevant_tool": True,
+            "stop_on_human_input_request": True,
+        }
+
+    def run(self, run_id, agent_id):
+        self._set_planning_state(agent_id, PersistentAgent.PlanningState.PLANNING)
+
+        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
+        with self.wait_for_agent_idle(agent_id, timeout=120):
+            inbound = self.inject_message(
+                agent_id,
+                (
+                    "Hi there, I would like you to help me find some leads. "
+                    "But first, would you connect to my Apollo.io account?"
+                ),
+                trigger_processing=True,
+                eval_run_id=run_id,
+                mock_config=self._mock_config(),
+                eval_stop_policy=self._eval_stop_policy(),
+            )
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.PASSED,
+            task_name="inject_prompt",
+            observed_summary="Prompt injected and processing completed.",
+            artifacts={"message": inbound},
+        )
+
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.RUNNING,
+            task_name="verify_search_before_questions",
+        )
+        first_call = get_first_relevant_tool_call(
+            run_id,
+            after=inbound.timestamp,
+            ignored_tool_names=IGNORED_FIRST_ACTION_TOOL_NAMES,
+        )
+        requests = get_pending_human_input_requests(agent_id, run_id, after=inbound.timestamp)
+        if first_call and first_call.tool_name == "search_tools" and not requests:
+            self.record_task_result(
+                run_id,
+                None,
+                EvalRunTask.Status.PASSED,
+                task_name="verify_search_before_questions",
+                observed_summary="Agent called search_tools before asking any tracked connection questions.",
+                artifacts={"step": first_call.step},
+            )
+            return
+
+        seen = first_call.tool_name if first_call else "none"
+        self.record_task_result(
+            run_id,
+            None,
+            EvalRunTask.Status.FAILED,
+            task_name="verify_search_before_questions",
+            observed_summary=(
+                "Expected search_tools before request_human_input for a named integration setup; "
+                f"saw first relevant tool {seen} and {len(requests)} pending human-input request(s)."
+            ),
+            artifacts={"step": first_call.step} if first_call else {},
         )
 
 
