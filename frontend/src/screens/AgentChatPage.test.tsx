@@ -181,6 +181,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       onSidebarNotificationsEnabledChange,
       googleSheetsDriveTabEnabled,
       apolloNativeTabEnabled,
+      hubspotNativeTabEnabled,
     }: {
       spawnIntentLoading?: boolean
       signupPreviewState?: string
@@ -195,6 +196,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
       onSidebarNotificationsEnabledChange?: (enabled: boolean) => void
       googleSheetsDriveTabEnabled?: boolean
       apolloNativeTabEnabled?: boolean
+      hubspotNativeTabEnabled?: boolean
     }) => {
       const {
         isUpgradeModalOpen,
@@ -212,6 +214,7 @@ vi.mock('../components/agentChat/AgentChatLayout', async () => {
           <div data-testid="notification-status">{sidebarNotificationStatus ?? ''}</div>
           <div data-testid="google-sheets-drive-tab-enabled">{String(Boolean(googleSheetsDriveTabEnabled))}</div>
           <div data-testid="apollo-native-tab-enabled">{String(Boolean(apolloNativeTabEnabled))}</div>
+          <div data-testid="hubspot-native-tab-enabled">{String(Boolean(hubspotNativeTabEnabled))}</div>
           <button
             type="button"
             data-testid="configure-agent"
@@ -828,10 +831,11 @@ describe('AgentChatPage trial onboarding', () => {
       expect(screen.getByTestId('google-sheets-drive-tab-enabled')).toHaveTextContent('false')
     })
     expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('false')
+    expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('false')
   })
 
-  it('passes Apollo tab enablement from roster system skills', async () => {
-    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native'])]
+  it('passes native tab enablement from roster system skills', async () => {
+    rosterState.agents = [buildRosterAgent('agent-1', 'Agent One', ['apollo_native', 'hubspot_native'])]
     window.history.pushState({}, '', '/app/agents/agent-1')
 
     renderAgentChatPage({ agentId: 'agent-1' })
@@ -839,9 +843,10 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('true')
     })
+    expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
   })
 
-  it('passes Apollo tab enablement from live tool search results', async () => {
+  it('passes native tab enablement from live tool search results', async () => {
     rosterState.agents = [buildRosterAgent('agent-1', 'Agent One')]
     timelineState.flatEvents = [
       {
@@ -862,7 +867,7 @@ describe('AgentChatPage trial onboarding', () => {
             result: {
               status: 'success',
               system_skills: {
-                enabled: ['apollo_native'],
+                enabled: ['apollo_native', 'hubspot_native'],
               },
             },
             status: 'complete',
@@ -877,6 +882,7 @@ describe('AgentChatPage trial onboarding', () => {
     await waitFor(() => {
       expect(screen.getByTestId('apollo-native-tab-enabled')).toHaveTextContent('true')
     })
+    expect(screen.getByTestId('hubspot-native-tab-enabled')).toHaveTextContent('true')
   })
 
   it('opens embedded settings from the direct console shell settings route', async () => {

@@ -130,4 +130,40 @@ describe('transformToolCluster Google API display', () => {
       iconSrc: '/static/images/integrations/native/apollo.svg',
     })
   })
+
+  it('labels HubSpot contact search with the official HubSpot icon', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.hubapi.com/crm/v3/objects/contacts/search', 'POST'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Search HubSpot contacts',
+      caption: 'POST • contacts search',
+      iconSrc: '/static/images/integrations/native/hubspot.svg',
+    })
+  })
+
+  it('labels HubSpot company creation', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.hubapi.com/crm/v3/objects/companies', 'POST'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Create HubSpot company',
+      caption: 'POST • companies',
+      iconSrc: '/static/images/integrations/native/hubspot.svg',
+    })
+  })
+
+  it('labels HubSpot deal updates', () => {
+    const transformed = transformToolCluster(
+      clusterForRequest('https://api.hubapi.com/crm/v3/objects/deals/deal_123', 'PATCH'),
+    )
+
+    expect(transformed.entries[0]).toMatchObject({
+      label: 'Update HubSpot deal',
+      caption: 'PATCH • deal_123',
+      iconSrc: '/static/images/integrations/native/hubspot.svg',
+    })
+  })
 })

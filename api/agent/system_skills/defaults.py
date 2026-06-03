@@ -11,6 +11,7 @@ from .registry import SystemSkillDefinition, SystemSkillDocLink, SystemSkillFiel
 
 GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = "google_sheets_native"
 APOLLO_NATIVE_SYSTEM_SKILL_KEY = "apollo_native"
+HUBSPOT_NATIVE_SYSTEM_SKILL_KEY = "hubspot_native"
 
 
 def _format_runtime_planning_context(agent) -> str:
@@ -129,6 +130,31 @@ def _apollo_native_prompt_instructions(agent) -> str:
         "Never invent webhook URLs. For phone reveal, personal-email reveal, or webhook-based enrichment, use only "
         "an explicitly configured HTTPS webhook URL or ask the user for one. Do not use legacy `apollo_io-*` tools, "
         "browser automation, or web search when the connected native Apollo API can do the work."
+    )
+
+
+def _hubspot_native_prompt_instructions(agent) -> str:
+    integrations_url = _app_integrations_url()
+    return (
+        "Use `http_request` for HubSpot REST API calls. Native HubSpot OAuth is applied automatically for "
+        "`https://api.hubapi.com/` requests.\n"
+        "If setup is needed, tell the user to open `" + integrations_url + "` and connect HubSpot.\n"
+        "Use HubSpot CRM v3 endpoints for core CRM work. Keep requests bounded with explicit filters, "
+        "`limit`, and `after` pagination where applicable; report when more pages remain.\n"
+        "Representative calls:\n"
+        "- Search contacts: POST `https://api.hubapi.com/crm/v3/objects/contacts/search`\n"
+        "- Search companies: POST `https://api.hubapi.com/crm/v3/objects/companies/search`\n"
+        "- Search deals: POST `https://api.hubapi.com/crm/v3/objects/deals/search`\n"
+        "- Read, create, update contacts/companies/deals: use `/crm/v3/objects/{objectType}` and "
+        "`/crm/v3/objects/{objectType}/{objectId}` with explicit `properties`.\n"
+        "- Read owners: GET `https://api.hubapi.com/crm/v3/owners/`\n"
+        "- Read properties: GET `https://api.hubapi.com/crm/v3/properties/{objectType}`\n"
+        "- Work with associations only when the user asks for relationships between CRM records.\n"
+        "For creates, updates, deletes, merges, bulk changes, association changes, lifecycle-stage changes, "
+        "or other side-effecting operations, summarize the exact records, properties, filters, and side effects "
+        "before proceeding unless the user has already clearly approved that operation.\n"
+        "Do not use Pipedream HubSpot tools, browser automation, web search, or manually supplied private-app "
+        "tokens when the connected native HubSpot API can do the work."
     )
 
 
@@ -326,6 +352,42 @@ APOLLO_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
         "rate limits",
     ),
     prompt_instructions_renderer=_apollo_native_prompt_instructions,
+)
+
+
+HUBSPOT_NATIVE_SYSTEM_SKILL = SystemSkillDefinition(
+    skill_key=HUBSPOT_NATIVE_SYSTEM_SKILL_KEY,
+    name="HubSpot",
+    search_summary="Use connected HubSpot REST APIs for contacts, companies, deals, owners, properties, and CRM workflows.",
+    tool_names=("http_request",),
+    enables=(
+        "search HubSpot contacts, companies, and deals",
+        "read and update HubSpot CRM records",
+        "create HubSpot contacts, companies, and deals after clear user intent",
+        "inspect HubSpot owners, properties, and associations",
+        "use native HubSpot OAuth with scoped CRM access",
+    ),
+    use_when=(
+        "the user asks to use HubSpot",
+        "the user asks to search, read, create, or update HubSpot contacts",
+        "the user asks to search, read, create, or update HubSpot companies or deals",
+        "the user asks to inspect HubSpot owners, properties, associations, lifecycle stage, pipeline, or CRM data",
+        "the work references CRM records available through HubSpot",
+    ),
+    query_aliases=(
+        "hubspot",
+        "hubspot api",
+        "hubspot crm",
+        "hubspot contacts",
+        "hubspot companies",
+        "hubspot deals",
+        "crm contacts",
+        "crm companies",
+        "crm deals",
+        "hubspot owners",
+        "hubspot properties",
+    ),
+    prompt_instructions_renderer=_hubspot_native_prompt_instructions,
 )
 
 
@@ -689,6 +751,7 @@ DEFAULT_SYSTEM_SKILL_DEFINITIONS = {
     CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL.skill_key: CUSTOM_TOOL_DEVELOPMENT_SYSTEM_SKILL,
     GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL.skill_key: GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL,
     APOLLO_NATIVE_SYSTEM_SKILL.skill_key: APOLLO_NATIVE_SYSTEM_SKILL,
+    HUBSPOT_NATIVE_SYSTEM_SKILL.skill_key: HUBSPOT_NATIVE_SYSTEM_SKILL,
     META_ADS_SYSTEM_SKILL.skill_key: META_ADS_SYSTEM_SKILL,
     CONNECTED_APP_CHANNELS_SYSTEM_SKILL.skill_key: CONNECTED_APP_CHANNELS_SYSTEM_SKILL,
     META_GOBII_SYSTEM_SKILL.skill_key: META_GOBII_SYSTEM_SKILL,

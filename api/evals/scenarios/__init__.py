@@ -78,3 +78,8 @@ from .apollo_native import (
     APOLLO_NATIVE_SUITE_SLUG,
     ApolloNativeScenario,
 )
+from .hubspot_native import (
+    HUBSPOT_NATIVE_SCENARIO_SLUGS,
+    HUBSPOT_NATIVE_SUITE_SLUG,
+    HubSpotNativeScenario,
+)

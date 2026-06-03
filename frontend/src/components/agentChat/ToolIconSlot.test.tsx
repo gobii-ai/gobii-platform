@@ -58,4 +58,20 @@ describe('ToolIconSlot', () => {
     )
     expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
   })
+
+  it('keeps the HubSpot branded icon visible while a tool call is pending', () => {
+    const { container } = render(<ToolIconSlot entry={entry({
+      label: 'Search HubSpot contacts',
+      caption: 'POST • contacts search',
+      iconSrc: '/static/images/integrations/native/hubspot.svg',
+      iconBgClass: 'bg-orange-100',
+      iconColorClass: 'text-orange-700',
+    })} />)
+
+    expect(container.querySelector('img')).toHaveAttribute(
+      'src',
+      '/static/images/integrations/native/hubspot.svg',
+    )
+    expect(document.querySelector('.tool-chip-spinner--icon')).not.toBeInTheDocument()
+  })
 })

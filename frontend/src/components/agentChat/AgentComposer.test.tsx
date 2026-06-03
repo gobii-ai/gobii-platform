@@ -43,6 +43,12 @@ vi.mock('./insights/ApolloInsightPanel', () => ({
   ),
 }))
 
+vi.mock('./insights/HubSpotInsightPanel', () => ({
+  HubSpotInsightPanel: () => (
+    <div data-testid="hubspot-panel">HubSpot panel</div>
+  ),
+}))
+
 vi.mock('./AgentIntelligenceSelector', () => ({
   AgentIntelligenceSelector: () => null,
 }))
@@ -421,6 +427,13 @@ describe('AgentComposer pending action insights panel', () => {
       panelTestId: 'apollo-panel',
       enabledProps: { apolloNativeTabEnabled: true },
       disabledProps: { apolloNativeTabEnabled: false },
+    },
+    {
+      name: 'HubSpot',
+      ariaLabel: 'View HubSpot connection',
+      panelTestId: 'hubspot-panel',
+      enabledProps: { hubspotNativeTabEnabled: true },
+      disabledProps: { hubspotNativeTabEnabled: false },
     },
   ] as const
 

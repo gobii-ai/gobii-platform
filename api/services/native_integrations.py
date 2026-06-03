@@ -136,6 +136,20 @@ APOLLO_PROVIDER = NativeIntegrationProvider(
     authorization_params={},
 )
 
+HUBSPOT_PROVIDER = NativeIntegrationProvider(
+    key="hubspot",
+    display_name="HubSpot",
+    description="Connect HubSpot for contacts, companies, deals, owners, properties, and CRM workflows.",
+    auth_type="oauth2",
+    authorization_endpoint="https://app.hubspot.com/oauth/authorize",
+    token_endpoint="https://api.hubapi.com/oauth/v3/token",
+    scopes=tuple(settings.HUBSPOT_OAUTH_SCOPES),
+    api_hosts=(),
+    api_url_prefixes=("https://api.hubapi.com/",),
+    icon="hubspot",
+    authorization_params={},
+)
+
 GOOGLE_SHEETS_PROVIDER = GOOGLE_DRIVE_PROVIDER
 GOOGLE_DRIVE_PROVIDER_ALIASES = ("google_sheets",)
 GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
@@ -143,6 +157,7 @@ GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
 NATIVE_INTEGRATION_PROVIDERS = {
     GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
     APOLLO_PROVIDER.key: APOLLO_PROVIDER,
+    HUBSPOT_PROVIDER.key: HUBSPOT_PROVIDER,
 }
 
 
@@ -165,6 +180,8 @@ def native_integration_client_credentials(provider: NativeIntegrationProvider) -
         return settings.GOOGLE_DRIVE_CLIENT_ID, settings.GOOGLE_DRIVE_CLIENT_SECRET
     if provider.key == APOLLO_PROVIDER.key:
         return settings.APOLLO_CLIENT_ID, settings.APOLLO_CLIENT_SECRET
+    if provider.key == HUBSPOT_PROVIDER.key:
+        return settings.HUBSPOT_CLIENT_ID, settings.HUBSPOT_CLIENT_SECRET
     return "", ""
 
 
@@ -276,13 +293,17 @@ def build_oauth_credentials_bundle(
         except (TypeError, ValueError):
             expires_at = None
 
+    scope = token_payload.get("scope")
+    if not scope and isinstance(token_payload.get("scopes"), list):
+        scope = " ".join(str(item) for item in token_payload.get("scopes") if item)
+
     return {
         "provider_key": provider.key,
         "auth_type": provider.auth_type,
         "access_token": access_token,
         "refresh_token": str(refresh_token or ""),
         "token_type": str(token_payload.get("token_type") or "Bearer"),
-        "scope": str(token_payload.get("scope") or provider.scope_string),
+        "scope": str(scope or provider.scope_string),
         "expires_at": expires_at,
         "metadata": {
             "api_hosts": list(provider.api_hosts),
