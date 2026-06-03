@@ -38,16 +38,17 @@
               {% static 'images/solutions/engineering-hero.jpg' %} 2560w"
       sizes="100vw"
       alt="AI agent platform evaluation workspace"
-      class="absolute inset-0 h-full w-full object-cover opacity-40"
+      class="absolute inset-0 h-full w-full object-cover"
       width="1600"
       height="900"
       loading="eager"
       decoding="async"
       fetchpriority="high"
+      style="opacity: 0.72;"
     >
-    <div class="absolute inset-0 bg-slate-950/70"></div>
+    <div class="absolute inset-0" style="background: linear-gradient(90deg, rgba(2, 6, 23, 0.82) 0%, rgba(15, 23, 42, 0.68) 48%, rgba(15, 23, 42, 0.34) 100%);"></div>
     <div class="relative mx-auto max-w-6xl px-6 py-20 sm:px-8 sm:py-24 lg:px-12 lg:py-28">
-      <div class="max-w-3xl">
+      <div class="max-w-3xl rounded-lg border border-white/15 p-6 sm:p-8 lg:p-10" style="background: rgba(2, 6, 23, 0.58); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);">
         <p class="text-sm font-semibold uppercase text-cyan-200">Gobii comparisons</p>
         <h1 class="mt-5 text-4xl font-light leading-[1.08] text-white sm:text-5xl lg:text-6xl">
           AI agent platform comparisons
@@ -56,11 +57,11 @@
           Evaluate Gobii against other AI agent platforms with practical criteria for deployment, browser automation, operations, and production readiness.
         </p>
         <div class="mt-9 flex flex-col gap-3 sm:flex-row">
-          <a href="#planned-comparisons" class="inline-flex items-center justify-center rounded-lg bg-cyan-300 px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-200">
-            View planned comparisons
+          <a href="#planned-comparisons" class="inline-flex items-center justify-center rounded-lg bg-white px-6 py-3 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50">
+            View available comparisons
             <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
           </a>
-          <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-white/40 bg-white/10 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/20">
+          <a href="{% url 'pages:library' %}" class="inline-flex items-center justify-center rounded-lg border border-white/50 bg-slate-950/35 px-6 py-3 text-sm font-semibold text-white transition hover:bg-white/15">
             Browse agent templates
           </a>
         </div>

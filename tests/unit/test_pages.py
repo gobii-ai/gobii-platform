@@ -1667,6 +1667,13 @@ class ComparisonPageTests(TestCase):
         self.assertIn("Create Your First Gobii Agent", content)
         self.assertIn("Source note", content)
         self.assertIn("June 2026", content)
+        main = soup.find("main")
+        self.assertIsNotNone(main)
+        self.assertGreaterEqual(
+            len(main.find_all("a", {"href": "https://github.com/gobii-ai/gobii-platform"})),
+            2,
+        )
+        self.assertIsNone(main.find("a", {"href": "https://github.com/gobii-ai"}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
