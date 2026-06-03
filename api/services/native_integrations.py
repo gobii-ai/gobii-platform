@@ -119,12 +119,30 @@ GOOGLE_DRIVE_PROVIDER = NativeIntegrationProvider(
     },
 )
 
+APOLLO_PROVIDER = NativeIntegrationProvider(
+    key="apollo",
+    display_name="Apollo",
+    description="Connect Apollo for lead sourcing, enrichment, CRM, sequencing, analytics, and sales intelligence APIs.",
+    auth_type="oauth2",
+    authorization_endpoint="https://app.apollo.io/#/oauth/authorize",
+    token_endpoint="https://app.apollo.io/api/v1/oauth/token",
+    scopes=tuple(settings.APOLLO_OAUTH_SCOPES),
+    api_hosts=(),
+    api_url_prefixes=(
+        "https://api.apollo.io/",
+        "https://app.apollo.io/api/v1/users/api_profile",
+    ),
+    icon="apollo",
+    authorization_params={},
+)
+
 GOOGLE_SHEETS_PROVIDER = GOOGLE_DRIVE_PROVIDER
 GOOGLE_DRIVE_PROVIDER_ALIASES = ("google_sheets",)
 GOOGLE_DRIVE_LEGACY_SECRET_KEYS = ("native_google_sheets",)
 
 NATIVE_INTEGRATION_PROVIDERS = {
     GOOGLE_DRIVE_PROVIDER.key: GOOGLE_DRIVE_PROVIDER,
+    APOLLO_PROVIDER.key: APOLLO_PROVIDER,
 }
 
 
@@ -145,6 +163,8 @@ def get_native_integration_provider(provider_key: str) -> NativeIntegrationProvi
 def native_integration_client_credentials(provider: NativeIntegrationProvider) -> tuple[str, str]:
     if provider.key == GOOGLE_DRIVE_PROVIDER.key:
         return settings.GOOGLE_DRIVE_CLIENT_ID, settings.GOOGLE_DRIVE_CLIENT_SECRET
+    if provider.key == APOLLO_PROVIDER.key:
+        return settings.APOLLO_CLIENT_ID, settings.APOLLO_CLIENT_SECRET
     return "", ""
 
 
@@ -168,6 +188,16 @@ def _native_integration_secret_keys(provider: NativeIntegrationProvider) -> list
     if provider.key == GOOGLE_DRIVE_PROVIDER.key:
         keys.extend(GOOGLE_DRIVE_LEGACY_SECRET_KEYS)
     return keys
+
+
+def _native_integration_not_connected_guidance(provider: NativeIntegrationProvider) -> str:
+    setup_url = native_integration_setup_url()
+    if provider.key == GOOGLE_DRIVE_PROVIDER.key:
+        return (
+            f"Ask the user to open {setup_url}, connect Google Drive, "
+            "and choose the relevant file."
+        )
+    return f"Ask the user to open {setup_url} and connect {provider.display_name}."
 
 
 def get_native_integration_secret(provider_key: str, owner_user, owner_org) -> GlobalSecret | None:
@@ -470,8 +500,7 @@ def apply_native_integration_auth(agent: PersistentAgent, url: str, headers: dic
     if secret is None:
         raise NativeIntegrationAuthError(
             f"native_integration_not_connected: {provider.display_name} is not connected. "
-            f"Ask the user to open {native_integration_setup_url()}, connect Google Drive, "
-            "and choose the relevant file."
+            f"{_native_integration_not_connected_guidance(provider)}"
         )
 
     credentials = load_native_integration_credentials(secret)

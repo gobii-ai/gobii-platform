@@ -1,21 +1,18 @@
-import json
-from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import parse_qs, unquote_plus, urlparse
 
 from api.agent.system_skills.defaults import GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
-from api.agent.system_skills.service import enable_system_skills
-from api.evals.base import EvalScenario, ScenarioTask
-from api.evals.execution import ScenarioExecutionTools
-from api.evals.registry import ScenarioRegistry
-from api.models import (
-    EvalRunTask,
-    PersistentAgent,
-    PersistentAgentMessage,
-    PersistentAgentSystemStep,
-    PersistentAgentStep,
-    PersistentAgentToolCall,
+from api.evals.base import ScenarioTask
+from api.evals.scenarios.native_http import (
+    HttpRequestExpectation,
+    NativeHttpCase as GoogleSheetsNativeCase,
+    NativeHttpScenarioBase,
+    call_matches_expectation as _call_matches_expectation,
+    decoded_url as _decoded_url,
+    query_value as _query_value,
+    register_native_http_scenarios,
+    tool_calls_for_run as _tool_calls_for_run,
 )
+from api.models import EvalRunTask, PersistentAgentToolCall
 
 
 GOOGLE_SHEETS_NATIVE_SUITE_SLUG = "google_sheets_native"
@@ -28,43 +25,6 @@ GOOGLE_SHEETS_NATIVE_APPEND_ROW = "google_sheets_native_append_row"
 GOOGLE_SHEETS_NATIVE_MISSING_SELECTED_FILE = "google_sheets_native_missing_selected_file"
 
 FORBIDDEN_DISCOVERY_TOOL_NAMES = ("search_tools", "enable_system_skills")
-
-
-@dataclass(frozen=True)
-class HttpRequestExpectation:
-    name: str
-    url_terms: tuple[str, ...]
-    method: str = "GET"
-    body_terms: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class GoogleSheetsNativeCase:
-    slug: str
-    prompt: str
-    description: str
-    http_rules: tuple[dict[str, Any], ...]
-    expected_http_requests: tuple[HttpRequestExpectation, ...]
-    forbidden_url_terms: tuple[tuple[str, ...], ...] = ()
-    response_term_groups: tuple[tuple[str, ...], ...] = ()
-    tags: tuple[str, ...] = field(default_factory=tuple)
-
-    def mock_config(self) -> dict[str, dict[str, Any]]:
-        return {
-            "http_request": {
-                "rules": list(self.http_rules),
-                "default": {
-                    "status": "error",
-                    "status_code": 404,
-                    "message": "Unexpected Google Sheets native eval URL.",
-                    "content": {"ok": False},
-                },
-            }
-        }
-
-
-def _json_body(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=True)
 
 
 def _http_result(url: str, content: Any, *, status_code: int = 200) -> dict[str, Any]:
@@ -363,61 +323,6 @@ GOOGLE_SHEETS_NATIVE_CASES = (
 GOOGLE_SHEETS_NATIVE_SCENARIO_SLUGS = tuple(case.slug for case in GOOGLE_SHEETS_NATIVE_CASES)
 
 
-def _tool_calls_for_run(run_id: str, *, after=None, tool_names=None):
-    queryset = PersistentAgentToolCall.objects.filter(step__eval_run_id=run_id)
-    if after is not None:
-        queryset = queryset.filter(step__created_at__gte=after)
-    if tool_names is not None:
-        queryset = queryset.filter(tool_name__in=list(tool_names))
-    return list(queryset.select_related("step").order_by("step__created_at", "step__id"))
-
-
-def _decoded_url(call: PersistentAgentToolCall) -> str:
-    params = call.tool_params or {}
-    return unquote_plus(str(params.get("url") or "")).lower()
-
-
-def _query_value(call: PersistentAgentToolCall, key: str) -> str:
-    raw_url = str((call.tool_params or {}).get("url") or "")
-    parsed = urlparse(raw_url)
-    values = parse_qs(parsed.query).get(key) or []
-    if not values:
-        return ""
-    return unquote_plus(str(values[0] or "")).strip().lower()
-
-
-def _request_body(call: PersistentAgentToolCall) -> str:
-    body = (call.tool_params or {}).get("body")
-    if isinstance(body, str):
-        return body.lower()
-    if body is None:
-        return ""
-    return _json_body(body).lower()
-
-
-def _request_method(call: PersistentAgentToolCall) -> str:
-    return str((call.tool_params or {}).get("method") or "GET").strip().upper()
-
-
-def _call_matches_expectation(call: PersistentAgentToolCall, expectation: HttpRequestExpectation) -> bool:
-    if str(getattr(call, "status", "") or "").lower() != "complete":
-        return False
-    url = _decoded_url(call)
-    body = _request_body(call)
-    if _request_method(call) != expectation.method.upper():
-        return False
-    if not all(term.lower() in url for term in expectation.url_terms):
-        return False
-    if not all(term.lower() in body for term in expectation.body_terms):
-        return False
-    return True
-
-
-def _call_matches_url_terms(call: PersistentAgentToolCall, url_terms: tuple[str, ...]) -> bool:
-    url = _decoded_url(call)
-    return all(term.lower() in url for term in url_terms)
-
-
 def _call_has_partial_drive_query(call: PersistentAgentToolCall) -> bool:
     if call.tool_name != "http_request":
         return False
@@ -436,7 +341,7 @@ def _call_has_partial_drive_query(call: PersistentAgentToolCall) -> bool:
     return False
 
 
-class GoogleSheetsNativeScenario(EvalScenario, ScenarioExecutionTools):
+class GoogleSheetsNativeScenario(NativeHttpScenarioBase):
     tier = "core"
     category = "google_sheets_native"
     expected_runtime = "short"
@@ -452,87 +357,15 @@ class GoogleSheetsNativeScenario(EvalScenario, ScenarioExecutionTools):
         ScenarioTask(name="verify_response", assertion_type="exact_match"),
     ]
     case: GoogleSheetsNativeCase | None = None
+    system_skill_key = GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY
+    system_skill_name = "Google Sheets"
+    forbidden_tool_names = FORBIDDEN_DISCOVERY_TOOL_NAMES
+    forbidden_tool_prefixes = ("google_sheets-",)
+    expected_requests_summary = "Agent completed the expected Google Drive/Sheets REST request(s)."
+    forbidden_pass_summary = "Agent avoided legacy Sheets tools, skill discovery, and forbidden Google API URLs."
+    response_pass_summary = "Final response included the expected mocked Sheets result or setup guidance."
 
-    def _seed_prior_processing_run(self, agent_id: str) -> None:
-        if PersistentAgentSystemStep.objects.filter(
-            step__agent_id=agent_id,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-        ).exists():
-            return
-
-        prior_step = PersistentAgentStep.objects.create(
-            agent_id=agent_id,
-            description="Process events",
-        )
-        PersistentAgentSystemStep.objects.create(
-            step=prior_step,
-            code=PersistentAgentSystemStep.Code.PROCESS_EVENTS,
-        )
-
-    def _prepare_agent(self, agent_id: str) -> None:
-        PersistentAgent.objects.filter(id=agent_id).update(planning_state=PersistentAgent.PlanningState.SKIPPED)
-        self._seed_prior_processing_run(agent_id)
-        agent = PersistentAgent.objects.get(id=agent_id)
-        result = enable_system_skills(agent, [GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY])
-        if result.get("invalid"):
-            raise ValueError(f"Could not enable Google Sheets native system skill: {result}")
-
-    def _eval_stop_policy(self) -> dict[str, Any]:
-        return {
-            "allowed_tool_names": ["http_request", "send_chat_message"],
-            "ignored_tool_names": ["sleep_until_next_trigger"],
-            "stop_on_unexpected_relevant_tool": True,
-            "stop_on_tool_names": list(FORBIDDEN_DISCOVERY_TOOL_NAMES),
-            "stop_on_tool_names_after_finish": ["send_chat_message"],
-            "max_relevant_tool_calls": 12,
-        }
-
-    def _record_expected_http_requests(self, run_id: str, inbound) -> None:
-        case = self.case
-        if case is None:
-            raise ValueError("GoogleSheetsNativeScenario.case must be set.")
-
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.RUNNING,
-            task_name="verify_expected_http_requests",
-        )
-        http_calls = _tool_calls_for_run(run_id, after=inbound.timestamp, tool_names=["http_request"])
-        missing = [
-            expectation.name
-            for expectation in case.expected_http_requests
-            if not any(_call_matches_expectation(call, expectation) for call in http_calls)
-        ]
-        if not missing:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_expected_http_requests",
-                observed_summary="Agent completed the expected Google Drive/Sheets REST request(s).",
-                artifacts={"step": http_calls[0].step} if http_calls else {},
-            )
-            return
-
-        seen = [
-            {
-                "method": _request_method(call),
-                "url": (call.tool_params or {}).get("url"),
-                "body": _request_body(call)[:500],
-            }
-            for call in http_calls
-        ]
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.FAILED,
-            task_name="verify_expected_http_requests",
-            observed_summary=f"Missing expected HTTP request(s): {missing}; saw {seen}.",
-            artifacts={"step": http_calls[0].step} if http_calls else {},
-        )
-
-    def _record_no_partial_drive_queries(self, run_id: str, inbound) -> None:
+    def _extra_checks(self, run_id: str, inbound) -> None:
         self.record_task_result(
             run_id,
             None,
@@ -566,142 +399,4 @@ class GoogleSheetsNativeScenario(EvalScenario, ScenarioExecutionTools):
             observed_summary="Agent avoided partial Google Drive q filter URLs.",
         )
 
-    def _record_forbidden_absence(self, run_id: str, inbound) -> None:
-        case = self.case
-        if case is None:
-            raise ValueError("GoogleSheetsNativeScenario.case must be set.")
-
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.RUNNING,
-            task_name="verify_no_forbidden_tools",
-        )
-        calls = _tool_calls_for_run(run_id, after=inbound.timestamp)
-        forbidden_tool_calls = [
-            call
-            for call in calls
-            if call.tool_name.startswith("google_sheets-") or call.tool_name in FORBIDDEN_DISCOVERY_TOOL_NAMES
-        ]
-        forbidden_http_calls = [
-            call
-            for call in calls
-            if call.tool_name == "http_request"
-            and any(_call_matches_url_terms(call, terms) for terms in case.forbidden_url_terms)
-        ]
-        bad_calls = [*forbidden_tool_calls, *forbidden_http_calls]
-        if bad_calls:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.FAILED,
-                task_name="verify_no_forbidden_tools",
-                observed_summary=(
-                    "Agent used forbidden tool or URL: "
-                    f"{[(call.tool_name, (call.tool_params or {}).get('url')) for call in bad_calls]}."
-                ),
-                artifacts={"step": bad_calls[0].step},
-            )
-            return
-
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.PASSED,
-            task_name="verify_no_forbidden_tools",
-            observed_summary="Agent avoided legacy Sheets tools, skill discovery, and forbidden Google API URLs.",
-        )
-
-    def _record_response(self, run_id: str, agent_id: str, inbound) -> None:
-        case = self.case
-        if case is None:
-            raise ValueError("GoogleSheetsNativeScenario.case must be set.")
-
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="verify_response")
-        if not case.response_term_groups:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_response",
-                observed_summary="No response content terms configured for this case.",
-            )
-            return
-
-        final_response = (
-            PersistentAgentMessage.objects
-            .filter(owner_agent_id=agent_id, is_outbound=True, timestamp__gt=inbound.timestamp)
-            .order_by("-timestamp")
-            .first()
-        )
-        body = final_response.body if final_response else ""
-        missing_groups = [
-            terms
-            for terms in case.response_term_groups
-            if not any(term.lower() in body.lower() for term in terms)
-        ]
-        if not missing_groups:
-            self.record_task_result(
-                run_id,
-                None,
-                EvalRunTask.Status.PASSED,
-                task_name="verify_response",
-                observed_summary="Final response included the expected mocked Sheets result or setup guidance.",
-                artifacts={"message": final_response} if final_response else {},
-            )
-            return
-
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.FAILED,
-            task_name="verify_response",
-            observed_summary=f"Final response missing expected term group(s) {missing_groups}; body={body[:800]!r}.",
-            artifacts={"message": final_response} if final_response else {},
-        )
-
-    def run(self, run_id: str, agent_id: str) -> None:
-        case = self.case
-        if case is None:
-            raise ValueError("GoogleSheetsNativeScenario.case must be set.")
-
-        self._prepare_agent(agent_id)
-
-        self.record_task_result(run_id, None, EvalRunTask.Status.RUNNING, task_name="inject_prompt")
-        with self.wait_for_agent_idle(agent_id, timeout=120):
-            inbound = self.inject_message(
-                agent_id,
-                case.prompt,
-                trigger_processing=True,
-                eval_run_id=run_id,
-                mock_config=case.mock_config(),
-                eval_stop_policy=self._eval_stop_policy(),
-            )
-        self.record_task_result(
-            run_id,
-            None,
-            EvalRunTask.Status.PASSED,
-            task_name="inject_prompt",
-            observed_summary="Prompt injected and processing completed.",
-            artifacts={"message": inbound},
-        )
-
-        self._record_expected_http_requests(run_id, inbound)
-        self._record_no_partial_drive_queries(run_id, inbound)
-        self._record_forbidden_absence(run_id, inbound)
-        self._record_response(run_id, agent_id, inbound)
-
-
-def _google_sheets_native_scenario_class(case: GoogleSheetsNativeCase):
-    class _GoogleSheetsNativeCaseScenario(GoogleSheetsNativeScenario):
-        slug = case.slug
-        description = case.description
-        tags = GoogleSheetsNativeScenario.tags + case.tags
-
-    _GoogleSheetsNativeCaseScenario.case = case
-    _GoogleSheetsNativeCaseScenario.__name__ = "".join(part.title() for part in case.slug.split("_")) + "Scenario"
-    return _GoogleSheetsNativeCaseScenario
-
-
-for google_sheets_native_case in GOOGLE_SHEETS_NATIVE_CASES:
-    ScenarioRegistry.register(_google_sheets_native_scenario_class(google_sheets_native_case)())
+register_native_http_scenarios(GOOGLE_SHEETS_NATIVE_CASES, GoogleSheetsNativeScenario)

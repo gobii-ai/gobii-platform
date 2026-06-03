@@ -337,6 +337,7 @@ type AgentChatLayoutProps = AgentTimelineProps & {
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
   googleSheetsDriveTabEnabled?: boolean
+  apolloNativeTabEnabled?: boolean
   pendingActionRequests?: PendingActionRequest[]
   onRespondHumanInputRequest?: (
     response:
@@ -525,6 +526,7 @@ export function AgentChatLayout({
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
   googleSheetsDriveTabEnabled = false,
+  apolloNativeTabEnabled = false,
   pendingActionRequests = [],
   onRespondHumanInputRequest,
   onDismissHumanInputRequest,
@@ -1895,6 +1897,7 @@ export function AgentChatLayout({
               pipedreamAppSearchUrl={pipedreamAppSearchUrl}
               nativeIntegrationsUrl={nativeIntegrationsUrl}
               googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
+              apolloNativeTabEnabled={apolloNativeTabEnabled}
             />
           )}
           </div>

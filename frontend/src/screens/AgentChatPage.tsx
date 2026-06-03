@@ -120,8 +120,9 @@ const SIGNUP_PREVIEW_PANEL_SOURCE = 'signup_preview_panel'
 const INSIGHTS_IDLE_FETCH_DELAY_MS = 1200
 const RESOLVED_NOISE_DARK_TEXTURE_URL = new URL(noiseDarkTextureUrl, import.meta.url).toString()
 const GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY = 'google_sheets_native'
+const APOLLO_NATIVE_SYSTEM_SKILL_KEY = 'apollo_native'
 
-function timelineHasGoogleSheetsNativeSkillEnablement(events: TimelineEvent[]): boolean {
+function timelineHasSystemSkillEnablement(events: TimelineEvent[], skillKey: string): boolean {
   for (const event of events) {
     if (event.kind !== 'steps') {
       continue
@@ -145,7 +146,7 @@ function timelineHasGoogleSheetsNativeSkillEnablement(events: TimelineEvent[]): 
         ...outcome.enabledSystemSkills,
         ...outcome.alreadyEnabledSystemSkills,
       ]
-      if (enabledSystemSkills.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)) {
+      if (enabledSystemSkills.includes(skillKey)) {
         return true
       }
     }
@@ -2359,21 +2360,30 @@ export function AgentChatPage({
   const rosterGoogleSheetsDriveTabEnabled = Boolean(
     activeRosterMeta?.enabledSystemSkills?.includes(GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY),
   )
+  const rosterApolloNativeTabEnabled = Boolean(
+    activeRosterMeta?.enabledSystemSkills?.includes(APOLLO_NATIVE_SYSTEM_SKILL_KEY),
+  )
   const liveGoogleSheetsDriveTabEnabled = useMemo(
-    () => Boolean(activeAgentId && timelineHasGoogleSheetsNativeSkillEnablement(timelineEvents)),
+    () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY)),
+    [activeAgentId, timelineEvents],
+  )
+  const liveApolloNativeTabEnabled = useMemo(
+    () => Boolean(activeAgentId && timelineHasSystemSkillEnablement(timelineEvents, APOLLO_NATIVE_SYSTEM_SKILL_KEY)),
     [activeAgentId, timelineEvents],
   )
   const googleSheetsDriveTabEnabled = rosterGoogleSheetsDriveTabEnabled || liveGoogleSheetsDriveTabEnabled
+  const apolloNativeTabEnabled = rosterApolloNativeTabEnabled || liveApolloNativeTabEnabled
   useEffect(() => {
-    if (!activeAgentId || !liveGoogleSheetsDriveTabEnabled) {
+    if (!activeAgentId || (!liveGoogleSheetsDriveTabEnabled && !liveApolloNativeTabEnabled)) {
       return
     }
-    if (googleSheetsRosterRefreshAgentsRef.current.has(activeAgentId)) {
+    const refreshKey = `${activeAgentId}:${liveGoogleSheetsDriveTabEnabled ? GOOGLE_SHEETS_NATIVE_SYSTEM_SKILL_KEY : ''}:${liveApolloNativeTabEnabled ? APOLLO_NATIVE_SYSTEM_SKILL_KEY : ''}`
+    if (googleSheetsRosterRefreshAgentsRef.current.has(refreshKey)) {
       return
     }
-    googleSheetsRosterRefreshAgentsRef.current.add(activeAgentId)
+    googleSheetsRosterRefreshAgentsRef.current.add(refreshKey)
     void queryClient.invalidateQueries({ queryKey: ['agent-roster'] })
-  }, [activeAgentId, liveGoogleSheetsDriveTabEnabled, queryClient])
+  }, [activeAgentId, liveApolloNativeTabEnabled, liveGoogleSheetsDriveTabEnabled, queryClient])
   const visibleRosterAgentIds = useMemo(
     () => rosterAgents.map((agent) => agent.id),
     [rosterAgents],
@@ -4892,6 +4902,7 @@ export function AgentChatPage({
         pipedreamAppSearchUrl={pipedreamAppSearchUrl}
         nativeIntegrationsUrl={nativeIntegrationsUrl}
         googleSheetsDriveTabEnabled={googleSheetsDriveTabEnabled}
+        apolloNativeTabEnabled={apolloNativeTabEnabled}
         pendingActionRequests={pendingActionRequests}
         events={timelineEvents}
         displayEvents={displayEvents}

@@ -72,3 +72,8 @@ from .google_sheets_native import (
     GOOGLE_SHEETS_NATIVE_SUITE_SLUG,
     GoogleSheetsNativeScenario,
 )
+from .apollo_native import (
+    APOLLO_NATIVE_SCENARIO_SLUGS,
+    APOLLO_NATIVE_SUITE_SLUG,
+    ApolloNativeScenario,
+)

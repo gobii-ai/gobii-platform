@@ -64,6 +64,22 @@ type NativeOAuthCompleteMessage = {
 
 let googlePickerApiPromise: Promise<void> | null = null
 
+const DEFAULT_NATIVE_PROVIDER_TILE_CLASS_NAME = 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700'
+
+const NATIVE_PROVIDER_ICONS: Record<string, { className: string; framedClassName: string; src: string; tileClassName?: string }> = {
+  apollo: {
+    className: 'h-4 w-4 object-contain',
+    framedClassName: 'h-7 w-7 object-contain',
+    src: '/static/images/integrations/native/apollo.svg',
+    tileClassName: 'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-[#F8FF2C] text-slate-950',
+  },
+  google_drive: {
+    className: 'h-5 w-5 object-contain',
+    framedClassName: 'h-5 w-5 object-contain',
+    src: '/static/images/integrations/native/google_drive.svg',
+  },
+}
+
 export function useNativeIntegrationRefreshEffects({
   queryKey,
   onError,
@@ -189,18 +205,29 @@ export function nativeIntegrationFilesQueryKey(provider: NativeIntegrationProvid
   return ['native-integration-files', provider.providerKey, provider.filesUrl] as const
 }
 
-export function NativeProviderIcon({ provider }: { provider: NativeIntegrationProvider }) {
-  if (provider.icon === 'google_drive') {
-    return (
-      <img
-        src="/static/images/integrations/native/google_drive.svg"
-        alt=""
-        className="h-5 w-5 object-contain"
-        loading="lazy"
-      />
-    )
+export function NativeProviderIcon({ framed = false, provider }: { framed?: boolean; provider: NativeIntegrationProvider }) {
+  const icon = provider.icon ? NATIVE_PROVIDER_ICONS[provider.icon] : null
+  if (icon) {
+    const image = <img src={icon.src} alt="" className={framed ? icon.framedClassName : icon.className} loading="lazy" />
+    if (provider.icon === 'apollo' && !framed) {
+      return (
+        <span className="inline-flex h-5 w-5 items-center justify-center rounded bg-[#F8FF2C]">
+          {image}
+        </span>
+      )
+    }
+    return image
   }
   return <Plug className="h-5 w-5" aria-hidden="true" />
+}
+
+export function NativeProviderIconTile({ provider }: { provider: NativeIntegrationProvider }) {
+  const icon = provider.icon ? NATIVE_PROVIDER_ICONS[provider.icon] : null
+  return (
+    <span className={icon?.tileClassName ?? DEFAULT_NATIVE_PROVIDER_TILE_CLASS_NAME}>
+      <NativeProviderIcon provider={provider} framed />
+    </span>
+  )
 }
 
 export function NativeIntegrationFilesDisclosure({ provider }: { provider: NativeIntegrationProvider }) {

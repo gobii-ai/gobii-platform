@@ -4,6 +4,7 @@ import { Button, Dialog, DialogTrigger, Popover } from 'react-aria-components'
 import { ArrowUp, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Gauge, Loader2, MessageSquare, MessageSquareQuote, OctagonAlert, Paperclip, Plus, Rocket, Sparkles, TriangleAlert, Zap, X } from 'lucide-react'
 
 import { InsightEventCard } from './insights'
+import { ApolloInsightPanel } from './insights/ApolloInsightPanel'
 import { GoogleDriveInsightPanel } from './insights/GoogleDriveInsightPanel'
 import { AgentIntelligenceSelector } from './AgentIntelligenceSelector'
 import { ComposerPipedreamAppsControl } from './ComposerPipedreamAppsControl'
@@ -46,16 +47,18 @@ function getBurnRateUsageLevel(metadata: BurnRateMetadata): 'normal' | 'warning'
   return 'normal'
 }
 
+const DEFAULT_INSIGHT_TAB_COLOR = '#AA74CE'
+
 function getInsightTabColor(insight: InsightEvent): string {
   if (insight.insightType === 'burn_rate') {
     const meta = insight.metadata as BurnRateMetadata
     const level = getBurnRateUsageLevel(meta)
     if (level === 'critical') return '#dc2626'
     if (level === 'warning') return '#d97706'
-    return '#AA74CE'
+    return DEFAULT_INSIGHT_TAB_COLOR
   }
   if (insight.insightType === 'agent_setup') {
-    return '#AA74CE'
+    return DEFAULT_INSIGHT_TAB_COLOR
   }
   return '#6b7280' // gray-500 fallback
 }
@@ -138,7 +141,30 @@ type HumanInputComposerBatchResponse = {
 
 type WorkingPanelTab =
   | { id: string; kind: 'insight'; insight: InsightEvent; insightIndex: number }
-  | { id: 'google_drive'; kind: 'google_drive' }
+  | { id: NativeWorkingTabKind; kind: NativeWorkingTabKind }
+
+type NativeWorkingTabKind = 'google_drive' | 'apollo'
+
+const NATIVE_WORKING_TAB_CONFIG = {
+  google_drive: {
+    label: 'Drive',
+    title: 'Google Drive',
+    ariaLabel: 'View Google Drive files',
+    panel: GoogleDriveInsightPanel,
+    icon: <img src="/static/images/integrations/native/google_drive.svg" alt="" className="composer-insight-tab-image" />,
+  },
+  apollo: {
+    label: 'Apollo',
+    title: 'Apollo',
+    ariaLabel: 'View Apollo connection',
+    panel: ApolloInsightPanel,
+    icon: (
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-sm bg-[#F8FF2C]">
+        <img src="/static/images/integrations/native/apollo.svg" alt="" className="h-3 w-3 object-contain" />
+      </span>
+    ),
+  },
+} as const
 
 function hasHumanInputComposerResponse(
   request: PendingHumanInputRequest,
@@ -356,6 +382,7 @@ type AgentComposerProps = {
   pipedreamAppSearchUrl?: string | null
   nativeIntegrationsUrl?: string | null
   googleSheetsDriveTabEnabled?: boolean
+  apolloNativeTabEnabled?: boolean
 }
 
 export const AgentComposer = memo(function AgentComposer({
@@ -412,6 +439,7 @@ export const AgentComposer = memo(function AgentComposer({
   pipedreamAppSearchUrl = null,
   nativeIntegrationsUrl = null,
   googleSheetsDriveTabEnabled = false,
+  apolloNativeTabEnabled = false,
 }: AgentComposerProps) {
   const [body, setBody] = useState('')
   const [attachments, setAttachments] = useState<File[]>([])
@@ -432,10 +460,10 @@ export const AgentComposer = memo(function AgentComposer({
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const dragCounter = useRef(0)
   const [activeWorkingTabId, setActiveWorkingTabId] = useState<string | null>(null)
-  const googleDriveAutoSwitchStateRef = useRef<{
+  const nativeAutoSwitchStateRef = useRef<Partial<Record<NativeWorkingTabKind, {
     key: string
     previousEnabled: boolean
-  } | null>(null)
+  }>>>({})
 
   // Countdown timer state for auto-rotation indicator
   const [countdownProgress, setCountdownProgress] = useState(0)
@@ -521,6 +549,14 @@ export const AgentComposer = memo(function AgentComposer({
   const currentInsight = insights[currentInsightIndex % Math.max(1, totalInsights)] ?? null
   const hasInsights = totalInsights > 0
   const googleDriveTabAvailable = Boolean(googleSheetsDriveTabEnabled && canManageAgent)
+  const apolloTabAvailable = Boolean(apolloNativeTabEnabled && canManageAgent)
+  const nativeTabAvailability = useMemo(
+    () => [
+      { kind: 'google_drive', available: googleDriveTabAvailable },
+      { kind: 'apollo', available: apolloTabAvailable },
+    ] as const,
+    [apolloTabAvailable, googleDriveTabAvailable],
+  )
   const currentInsightTabId = currentInsight ? `insight:${currentInsight.insightId}` : null
   const workingTabs = useMemo<WorkingPanelTab[]>(() => {
     const insightTabs = insights.map((insight, index): WorkingPanelTab => ({
@@ -529,14 +565,14 @@ export const AgentComposer = memo(function AgentComposer({
       insight,
       insightIndex: index,
     }))
-    if (!googleDriveTabAvailable) {
-      return insightTabs
-    }
+    const nativeTabs = nativeTabAvailability
+      .filter(({ available }) => available)
+      .map(({ kind }): WorkingPanelTab => ({ id: kind, kind }))
     return [
       ...insightTabs,
-      { id: 'google_drive', kind: 'google_drive' },
+      ...nativeTabs,
     ]
-  }, [googleDriveTabAvailable, insights])
+  }, [insights, nativeTabAvailability])
   const workingTabIds = useMemo(() => new Set(workingTabs.map((tab) => tab.id)), [workingTabs])
   const effectiveWorkingTabId = (
     activeWorkingTabId && workingTabIds.has(activeWorkingTabId)
@@ -547,6 +583,9 @@ export const AgentComposer = memo(function AgentComposer({
   )
   const activeWorkingTab = workingTabs.find((tab) => tab.id === effectiveWorkingTabId) ?? null
   const activeInsightTab = activeWorkingTab?.kind === 'insight' ? activeWorkingTab : null
+  const ActiveNativePanel = activeWorkingTab && activeWorkingTab.kind !== 'insight'
+    ? NATIVE_WORKING_TAB_CONFIG[activeWorkingTab.kind].panel
+    : null
   const visibleInsight = activeInsightTab?.insight ?? null
   const hasWorkingTabs = workingTabs.length > 0
   const isTouchDevice = typeof window !== 'undefined' && ('ontouchstart' in window || navigator.maxTouchPoints > 0)
@@ -560,6 +599,20 @@ export const AgentComposer = memo(function AgentComposer({
     }
   }, [isTouchDevice])
 
+  const selectWorkingTab = useCallback((tabId: string) => {
+    if (!resolvedWorkingExpanded) {
+      if (onInsightsPanelExpandedPreferenceChange) {
+        onInsightsPanelExpandedPreferenceChange(true)
+      } else {
+        setAutoWorkingExpanded(true)
+      }
+    }
+    setActiveWorkingTabId(tabId)
+    onPauseChange?.(true)
+    lastRotationTimeRef.current = Date.now()
+    setCountdownProgress(0)
+  }, [onInsightsPanelExpandedPreferenceChange, onPauseChange, resolvedWorkingExpanded])
+
   useEffect(() => {
     if (activeWorkingTabId && !workingTabIds.has(activeWorkingTabId)) {
       setActiveWorkingTabId(null)
@@ -568,59 +621,28 @@ export const AgentComposer = memo(function AgentComposer({
 
   useEffect(() => {
     const key = agentId ?? focusKey ?? 'new-agent'
-    const previousState = googleDriveAutoSwitchStateRef.current
-    if (!previousState || previousState.key !== key) {
-      googleDriveAutoSwitchStateRef.current = {
+    let nextAutoSelectedTab: NativeWorkingTabKind | null = null
+    for (const { kind, available } of nativeTabAvailability) {
+      const previousState = nativeAutoSwitchStateRef.current[kind]
+      if (!nextAutoSelectedTab && previousState && previousState.key === key && !previousState.previousEnabled && available) {
+        nextAutoSelectedTab = kind
+      }
+      nativeAutoSwitchStateRef.current[kind] = {
         key,
-        previousEnabled: googleDriveTabAvailable,
+        previousEnabled: available,
       }
-      return
     }
-
-    if (!previousState.previousEnabled && googleDriveTabAvailable) {
-      setActiveWorkingTabId('google_drive')
-      if (!resolvedWorkingExpanded) {
-        if (onInsightsPanelExpandedPreferenceChange) {
-          onInsightsPanelExpandedPreferenceChange(true)
-        } else {
-          setAutoWorkingExpanded(true)
-        }
-      }
-      onPauseChange?.(true)
-      lastRotationTimeRef.current = Date.now()
-      setCountdownProgress(0)
+    if (nextAutoSelectedTab) {
+      selectWorkingTab(nextAutoSelectedTab)
     }
-
-    googleDriveAutoSwitchStateRef.current = {
-      key,
-      previousEnabled: googleDriveTabAvailable,
-    }
-  }, [
-    agentId,
-    focusKey,
-    googleDriveTabAvailable,
-    onInsightsPanelExpandedPreferenceChange,
-    onPauseChange,
-    resolvedWorkingExpanded,
-  ])
+  }, [agentId, focusKey, nativeTabAvailability, selectWorkingTab])
 
   // Handle tab click - select that insight, expand panel if collapsed, and pause auto-rotation
   const handleTabClick = useCallback((tab: WorkingPanelTab) => {
-    // Expand panel if collapsed
-    if (!resolvedWorkingExpanded) {
-      if (onInsightsPanelExpandedPreferenceChange) {
-        onInsightsPanelExpandedPreferenceChange(true)
-      } else {
-        setAutoWorkingExpanded(true)
-      }
-    }
-    setActiveWorkingTabId(tab.id)
+    selectWorkingTab(tab.id)
     if (tab.kind === 'insight') {
       onInsightIndexChange?.(tab.insightIndex)
     }
-    onPauseChange?.(true) // Pause when user manually selects
-    lastRotationTimeRef.current = Date.now()
-    setCountdownProgress(0)
 
     // Track the tab click
     if (tab.kind === 'insight') {
@@ -632,15 +654,16 @@ export const AgentComposer = memo(function AgentComposer({
         totalInsights: insights.length,
       })
     } else {
-      track(AnalyticsEvent.INSIGHT_TAB_CLICKED + " - Google Drive", {
-        insightType: 'google_drive',
-        insightId: 'google_drive',
-        title: 'Google Drive',
+      const title = NATIVE_WORKING_TAB_CONFIG[tab.kind].title
+      track(AnalyticsEvent.INSIGHT_TAB_CLICKED + " - " + title, {
+        insightType: tab.kind,
+        insightId: tab.id,
+        title,
         tabIndex: workingTabs.findIndex((candidate) => candidate.id === tab.id),
         totalInsights: insights.length,
       })
     }
-  }, [insights.length, onInsightIndexChange, onInsightsPanelExpandedPreferenceChange, onPauseChange, resolvedWorkingExpanded, workingTabs])
+  }, [insights.length, onInsightIndexChange, selectWorkingTab, workingTabs])
 
   // Handle hover - pause auto-rotation
   const handleInsightMouseEnter = useCallback(() => {
@@ -1683,8 +1706,11 @@ export const AgentComposer = memo(function AgentComposer({
                   <div className="composer-insight-tabs-scroll">
                     {workingTabs.map((tab) => {
                       const isActive = tab.id === effectiveWorkingTabId
-                      const color = tab.kind === 'google_drive' ? '#0F9D58' : getInsightTabColor(tab.insight)
-                      const label = tab.kind === 'google_drive' ? 'Drive' : getInsightTabLabel(tab.insight)
+                      const nativeTabConfig = tab.kind === 'insight' ? null : NATIVE_WORKING_TAB_CONFIG[tab.kind]
+                      const color = tab.kind === 'insight' ? getInsightTabColor(tab.insight) : DEFAULT_INSIGHT_TAB_COLOR
+                      const label = nativeTabConfig?.label ?? (tab.kind === 'insight' ? getInsightTabLabel(tab.insight) : '')
+                      const ariaLabel = nativeTabConfig?.ariaLabel
+                        ?? (tab.kind === 'insight' ? `View ${tab.insight.insightType.replace('_', ' ')} insight` : undefined)
                       return (
                         <button
                           key={tab.id}
@@ -1692,7 +1718,7 @@ export const AgentComposer = memo(function AgentComposer({
                           className="composer-insight-tab"
                           data-active={isActive ? 'true' : 'false'}
                           onClick={() => handleTabClick(tab)}
-                          aria-label={tab.kind === 'google_drive' ? 'View Google Drive files' : `View ${tab.insight.insightType.replace('_', ' ')} insight`}
+                          aria-label={ariaLabel}
                           style={{
                             '--tab-color': color,
                             '--tab-progress': tab.kind === 'insight' && isActive && !isInsightsPaused && isProcessing ? `${countdownProgress}%` : '0%',
@@ -1700,11 +1726,7 @@ export const AgentComposer = memo(function AgentComposer({
                         >
                           <span className="composer-insight-tab-inner" />
                           <span className="composer-insight-tab-icon" aria-hidden="true">
-                            {tab.kind === 'google_drive' ? (
-                              <img src="/static/images/integrations/native/google_drive.svg" alt="" className="composer-insight-tab-image" />
-                            ) : (
-                              getInsightTabIcon(tab.insight)
-                            )}
+                            {nativeTabConfig?.icon ?? (tab.kind === 'insight' ? getInsightTabIcon(tab.insight) : null)}
                           </span>
                           <span className="composer-insight-tab-label">{label}</span>
                           {tab.kind === 'insight' && isActive && !isInsightsPaused && isProcessing && (
@@ -1769,8 +1791,8 @@ export const AgentComposer = memo(function AgentComposer({
                     data-loading={!activeWorkingTab && insightsLoading ? 'true' : 'false'}
                     key={activeWorkingTab?.id ?? 'insights-loading'}
                   >
-                    {activeWorkingTab?.kind === 'google_drive' ? (
-                      <GoogleDriveInsightPanel nativeIntegrationsUrl={nativeIntegrationsUrl} />
+                    {ActiveNativePanel ? (
+                      <ActiveNativePanel nativeIntegrationsUrl={nativeIntegrationsUrl} />
                     ) : visibleInsight ? (
                       <InsightEventCard
                         insight={visibleInsight}
