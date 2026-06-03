@@ -1532,7 +1532,7 @@ class SitemapTests(TestCase):
 @tag("batch_pages")
 class ComparisonPageTests(TestCase):
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_comparisons_page_renders_with_metadata_and_openclaw_placeholder(self):
+    def test_comparisons_page_renders_with_metadata_and_openclaw_link(self):
         response = self.client.get(reverse("proprietary:comparisons"))
 
         self.assertEqual(response.status_code, 200)
@@ -1550,6 +1550,7 @@ class ComparisonPageTests(TestCase):
             soup.find("meta", {"name": "description"}).get("content"),
             expected_description,
         )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
         self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
         self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), expected_title)
         self.assertEqual(
@@ -1605,8 +1606,67 @@ class ComparisonPageTests(TestCase):
         openclaw_card = soup.find("article", {"id": "openclaw"})
         self.assertIsNotNone(openclaw_card)
         self.assertIn("Gobii vs OpenClaw", openclaw_card.get_text(" ", strip=True))
-        self.assertIn("Coming soon", openclaw_card.get_text(" ", strip=True))
-        self.assertIsNone(soup.find("a", {"href": re.compile(r"/comparisons/gobii-vs-openclaw/?")}))
+        self.assertIn("Published", openclaw_card.get_text(" ", strip=True))
+        self.assertIsNotNone(
+            soup.find(
+                "a",
+                {"href": reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})},
+            )
+        )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_openclaw_comparison_page_renders_with_metadata_and_decision_copy(self):
+        response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison("gobii-vs-openclaw")
+        expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
+        expected_image_url = response.wsgi_request.build_absolute_uri(
+            static(page_views.ComparisonDetailView.social_image_path)
+        )
+
+        self.assertEqual(soup.title.get_text(strip=True), comparison["seo_title"])
+        self.assertEqual(len(soup.find_all("meta", {"name": "description"})), 1)
+        self.assertEqual(
+            soup.find("meta", {"name": "description"}).get("content"),
+            comparison["seo_description"],
+        )
+        self.assertEqual(soup.find("link", {"rel": "canonical"}).get("href"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:type"}).get("content"), "website")
+        self.assertEqual(soup.find("meta", {"property": "og:title"}).get("content"), comparison["seo_title"])
+        self.assertEqual(soup.find("meta", {"property": "og:url"}).get("content"), expected_url)
+        self.assertEqual(soup.find("meta", {"property": "og:image"}).get("content"), expected_image_url)
+        self.assertEqual(soup.find("meta", {"name": "twitter:card"}).get("content"), "summary_large_image")
+
+        json_ld_scripts = soup.find_all("script", {"type": "application/ld+json"})
+        self.assertEqual(len(json_ld_scripts), 2)
+        structured_data = json.loads(json_ld_scripts[0].string)
+        self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["name"], comparison["seo_title"])
+        self.assertEqual(structured_data["url"], expected_url)
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["Gobii", "OpenClaw"],
+        )
+
+        breadcrumb_data = json.loads(json_ld_scripts[1].string)
+        self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
+        self.assertEqual(
+            [item["name"] for item in breadcrumb_data["itemListElement"]],
+            ["Home", "Comparisons", "Gobii vs OpenClaw"],
+        )
+
+        content = soup.get_text(" ", strip=True)
+        self.assertIn("Choose Gobii for AI agents that need to run real business workflows", content)
+        self.assertIn("Choose OpenClaw if", content)
+        self.assertIn("Choose Gobii if", content)
+        self.assertIn("Production team automation", content)
+        self.assertIn("Create Your First Gobii Agent", content)
+        self.assertIn("Source note", content)
+        self.assertIn("June 2026", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_footer_includes_comparisons_hub_link_in_proprietary_mode(self):
@@ -1621,12 +1681,21 @@ class ComparisonPageTests(TestCase):
         comparisons_link = footer.find("a", {"href": reverse("proprietary:comparisons")})
         self.assertIsNotNone(comparisons_link)
         self.assertEqual(comparisons_link.get_text(strip=True), "AI agent comparisons")
-        self.assertNotIn("OpenClaw", footer.get_text(" ", strip=True))
+        openclaw_link = footer.find(
+            "a",
+            {"href": reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})},
+        )
+        self.assertIsNotNone(openclaw_link)
+        self.assertEqual(openclaw_link.get_text(strip=True), "Gobii vs OpenClaw")
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
-    def test_comparisons_page_and_footer_column_are_absent_in_community_mode(self):
+    def test_comparison_pages_and_footer_column_are_absent_in_community_mode(self):
         comparisons_response = self.client.get(reverse("proprietary:comparisons"))
         self.assertEqual(comparisons_response.status_code, 404)
+        detail_response = self.client.get(
+            reverse("proprietary:comparison_detail", kwargs={"slug": "gobii-vs-openclaw"})
+        )
+        self.assertEqual(detail_response.status_code, 404)
 
         home_response = self.client.get(reverse("pages:home"))
         self.assertEqual(home_response.status_code, 200)
@@ -1637,18 +1706,27 @@ class ComparisonPageTests(TestCase):
         self.assertIsNone(footer.find("a", {"href": reverse("proprietary:comparisons")}))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
-    def test_proprietary_sitemap_includes_comparisons_url(self):
+    def test_unknown_comparison_page_returns_404(self):
+        response = self.client.get(reverse("proprietary:comparison_detail", kwargs={"slug": "unknown"}))
+        self.assertEqual(response.status_code, 404)
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_proprietary_sitemap_includes_comparison_urls(self):
         response = self.client.get("/sitemap.xml")
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("<loc>http://example.com/comparisons/</loc>", response.content.decode())
+        content = response.content.decode()
+        self.assertIn("<loc>http://example.com/comparisons/</loc>", content)
+        self.assertIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
     @override_settings(GOBII_PROPRIETARY_MODE=False)
-    def test_community_sitemap_excludes_comparisons_url(self):
+    def test_community_sitemap_excludes_comparison_urls(self):
         response = self.client.get("/sitemap.xml")
 
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("<loc>http://example.com/comparisons/</loc>", response.content.decode())
+        content = response.content.decode()
+        self.assertNotIn("<loc>http://example.com/comparisons/</loc>", content)
+        self.assertNotIn("<loc>http://example.com/comparisons/gobii-vs-openclaw/</loc>", content)
 
 
 @tag("batch_pages")

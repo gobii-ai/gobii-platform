@@ -19,6 +19,7 @@ from .views import (
     HomepageIntegrationsSearchView,
     StartupCheckoutView,
     StaticViewSitemap,
+    ComparisonsSitemap,
     PretrainedWorkerTemplateSitemap,
     LandingRedirectView,
     LandingLaunchView,
@@ -77,6 +78,7 @@ sitemaps['pretrained_workers'] = PretrainedWorkerTemplateSitemap
 sitemaps['public_template_categories'] = PublicTemplateCategorySitemap
 sitemaps['public_templates'] = PublicTemplateSitemap
 sitemaps['solutions'] = SolutionsSitemap
+sitemaps['comparisons'] = ComparisonsSitemap
 
 urlpatterns = [
     path("", HomePage.as_view(), name="home"),

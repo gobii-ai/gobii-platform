@@ -3,6 +3,10 @@
 
 {% block title %}{{ comparisons_seo_title }}{% endblock %}
 
+{% block canonical_link %}
+<link rel="canonical" href="{{ canonical_url }}">
+{% endblock %}
+
 {% block head_extras %}
 {{ block.super }}
 <meta name="description" content="{{ comparisons_seo_description }}">
@@ -128,9 +132,9 @@
   <section id="planned-comparisons" class="bg-indigo-950 py-16 text-white sm:py-20">
     <div class="mx-auto max-w-6xl px-6 sm:px-8 lg:px-12">
       <div class="max-w-3xl">
-        <h2 class="text-3xl font-light sm:text-4xl">Planned comparisons</h2>
+        <h2 class="text-3xl font-light sm:text-4xl">Available comparisons</h2>
         <p class="mt-4 text-base leading-7 text-indigo-100">
-          These pages are planned as static comparison guides. We will publish each one when the detail page has enough current research and source-backed copy to be useful.
+          Start with focused, source-aware comparison guides for teams evaluating where to run production AI agent workflows.
         </p>
       </div>
 
@@ -142,8 +146,8 @@
                 <p class="text-sm font-semibold text-indigo-700">{{ comparison.competitor_name }}</p>
                 <h3 class="mt-2 text-2xl font-semibold text-slate-950">{{ comparison.title }}</h3>
               </div>
-              {% if comparison.status == "coming_soon" %}
-                <span class="inline-flex w-fit rounded-md bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-900">Coming soon</span>
+              {% if comparison.status == "published" %}
+                <span class="inline-flex w-fit rounded-md bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-900">Published</span>
               {% endif %}
             </div>
             <p class="mt-5 text-sm leading-6 text-slate-700">{{ comparison.summary }}</p>
@@ -152,6 +156,12 @@
                 <span class="rounded-md bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800">{{ keyword }}</span>
               {% endfor %}
             </div>
+            {% if comparison.status == "published" %}
+              <a href="{% url 'proprietary:comparison_detail' slug=comparison.slug %}" class="mt-7 inline-flex items-center text-sm font-semibold text-indigo-700 hover:text-indigo-900">
+                Read the comparison
+                <i aria-hidden="true" data-lucide="arrow-right" class="ml-2 size-4"></i>
+              </a>
+            {% endif %}
           </article>
         {% endfor %}
       </div>
