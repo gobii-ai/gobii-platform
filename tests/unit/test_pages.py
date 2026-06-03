@@ -1539,6 +1539,7 @@ class ComparisonPageTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         soup = BeautifulSoup(response.content, "html.parser")
+        comparison = page_views.get_comparison(self.comparison_slug)
         expected_title = page_views.ComparisonsIndexView.seo_title
         expected_description = page_views.ComparisonsIndexView.seo_description
         expected_url = response.wsgi_request.build_absolute_uri(response.wsgi_request.path)
@@ -1577,10 +1578,43 @@ class ComparisonPageTests(TestCase):
         structured_data = json.loads(json_ld_scripts[0].string)
         self.assertEqual(structured_data["@context"], "https://schema.org")
         self.assertEqual(structured_data["@type"], "CollectionPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#collection")
         self.assertEqual(structured_data["name"], expected_title)
         self.assertEqual(structured_data["description"], expected_description)
         self.assertEqual(structured_data["url"], expected_url)
-        self.assertIn({"@type": "Thing", "name": "OpenClaw"}, structured_data["about"])
+        self.assertEqual(structured_data["dateModified"], page_views.ComparisonsIndexView.last_modified_date)
+        self.assertEqual(
+            structured_data["publisher"],
+            {
+                "@type": "Organization",
+                "name": "Gobii",
+                "url": response.wsgi_request.build_absolute_uri(reverse("pages:home")),
+            },
+        )
+        self.assertEqual(structured_data["mainEntity"]["@type"], "ItemList")
+        self.assertEqual(
+            structured_data["mainEntity"]["itemListElement"],
+            [
+                {
+                    "@type": "ListItem",
+                    "position": 1,
+                    "url": response.wsgi_request.build_absolute_uri(
+                        reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})
+                    ),
+                    "name": "OpenClaw vs Gobii",
+                    "description": comparison["summary"],
+                }
+            ],
+        )
+        self.assertIn(
+            {
+                "@type": "SoftwareApplication",
+                "name": "OpenClaw",
+                "applicationCategory": "AI agent platform",
+                "url": comparison["competitor_url"],
+            },
+            structured_data["about"],
+        )
 
         breadcrumb_data = json.loads(json_ld_scripts[1].string)
         self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
@@ -1605,6 +1639,19 @@ class ComparisonPageTests(TestCase):
         headings = soup.find_all("h1")
         self.assertEqual(len(headings), 1)
         self.assertEqual(headings[0].get_text(" ", strip=True), "AI agent platform comparisons")
+        webp_source = soup.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        self.assertNotContains(response, "django_htmx/htmx")
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+        self.assertNotContains(response, "libphonenumber-js")
+        self.assertNotContains(response, "js/phone_format.js")
         openclaw_card = soup.find("article", {"id": "openclaw"})
         self.assertIsNotNone(openclaw_card)
         self.assertIn("OpenClaw vs Gobii", openclaw_card.get_text(" ", strip=True))
@@ -1615,6 +1662,48 @@ class ComparisonPageTests(TestCase):
                 {"href": reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})},
             )
         )
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_comparisons_page_schema_ignores_unpublished_comparisons_without_competitor_url(self):
+        published_comparison = page_views.get_comparison(self.comparison_slug)
+        coming_soon_comparison = {
+            "slug": "future-platform-vs-gobii",
+            "competitor_name": "Future Platform",
+            "title": "Future Platform vs Gobii",
+            "summary": "A planned comparison for a future AI agent platform.",
+            "status": "coming_soon",
+            "target_keywords": ("Future Platform alternative",),
+        }
+
+        with (
+            patch.object(
+                page_views,
+                "COMPARISON_CATALOG",
+                (published_comparison, coming_soon_comparison),
+            ),
+            patch.object(
+                page_views,
+                "get_published_comparisons",
+                return_value=(published_comparison,),
+            ),
+        ):
+            response = self.client.get(reverse("proprietary:comparisons"))
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(
+            soup.find_all("script", {"type": "application/ld+json"})[0].string
+        )
+
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["OpenClaw"],
+        )
+        self.assertEqual(
+            [item["name"] for item in structured_data["mainEntity"]["itemListElement"]],
+            ["OpenClaw vs Gobii"],
+        )
+        self.assertIn("Future Platform vs Gobii", soup.get_text(" ", strip=True))
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_openclaw_comparison_page_renders_with_metadata_and_decision_copy(self):
@@ -1647,12 +1736,18 @@ class ComparisonPageTests(TestCase):
         self.assertEqual(len(json_ld_scripts), 2)
         structured_data = json.loads(json_ld_scripts[0].string)
         self.assertEqual(structured_data["@type"], "WebPage")
+        self.assertEqual(structured_data["@id"], f"{expected_url}#webpage")
         self.assertEqual(structured_data["name"], comparison["seo_title"])
         self.assertEqual(structured_data["url"], expected_url)
+        self.assertEqual(structured_data["datePublished"], comparison["published_date"])
+        self.assertEqual(structured_data["dateModified"], comparison["last_reviewed_date"])
+        self.assertEqual(structured_data["publisher"]["url"], response.wsgi_request.build_absolute_uri(reverse("pages:home")))
+        self.assertEqual(structured_data["reviewedBy"]["name"], comparison["reviewed_by"])
         self.assertEqual(
             [item["name"] for item in structured_data["about"]],
             ["Gobii", "OpenClaw"],
         )
+        self.assertEqual(structured_data["about"][1]["url"], comparison["competitor_url"])
 
         breadcrumb_data = json.loads(json_ld_scripts[1].string)
         self.assertEqual(breadcrumb_data["@type"], "BreadcrumbList")
@@ -1663,13 +1758,26 @@ class ComparisonPageTests(TestCase):
 
         content = soup.get_text(" ", strip=True)
         self.assertIn("OpenClaw vs Gobii", content)
-        self.assertIn("Choose Gobii for AI agents that need to run real business workflows", content)
+        self.assertIn("OpenClaw vs Gobii: AI agents for real business workflows", content)
         self.assertIn("Choose OpenClaw if", content)
         self.assertIn("Choose Gobii if", content)
         self.assertIn("Production team automation", content)
         self.assertIn("Create Your First Gobii Agent", content)
         self.assertIn("Source note", content)
         self.assertIn("June 2026", content)
+        self.assertIn("Last reviewed June 3, 2026 by Gobii editorial team.", content)
+        webp_source = soup.find("source", {"type": "image/webp"})
+        self.assertIsNotNone(webp_source)
+        self.assertIn("engineering-hero-1280.webp", webp_source.get("srcset"))
+        hero_image = soup.find("img", {"alt": "AI agent platform evaluation workspace"})
+        self.assertIsNotNone(hero_image)
+        self.assertIn("engineering-hero-1280.jpg", hero_image.get("src"))
+        self.assertNotIn("engineering-hero.jpg", hero_image.get("src"))
+        self.assertNotContains(response, "https://js.stripe.com")
+        self.assertNotContains(response, "js/account_auth_forms.js")
+        self.assertNotContains(response, "js/cta_signup_modal.js")
+        self.assertNotContains(response, "libphonenumber-js")
+        self.assertNotContains(response, "js/phone_format.js")
         main = soup.find("main")
         self.assertIsNotNone(main)
         self.assertGreaterEqual(

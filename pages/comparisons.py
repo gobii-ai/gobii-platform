@@ -22,6 +22,11 @@ COMPARISON_CATALOG = (
             "OpenClaw alternative",
             "AI agent platform comparison",
         ),
+        "competitor_url": "https://github.com/openclaw/openclaw",
+        "published_date": "2026-06-03",
+        "last_reviewed_date": "2026-06-03",
+        "last_reviewed_display": "June 3, 2026",
+        "reviewed_by": "Gobii editorial team",
         "source_reviewed": "June 2026",
     },
 )
