@@ -95,6 +95,30 @@ class ApolloNativeScenarioTests(SimpleTestCase):
         self.assertFalse(_call_matches_expectation(pending_call, expectation))
         self.assertTrue(_call_matches_expectation(complete_call, expectation))
 
+    def test_missing_connection_expected_http_request_accepts_error_tool_call(self):
+        expectation = ApolloHttpRequestExpectation(
+            name="apollo_search_attempt",
+            url_terms=("api.apollo.io/api/v1/mixed_people/api_search",),
+            allowed_statuses=("error",),
+        )
+        error_call = SimpleNamespace(
+            status="error",
+            tool_params={
+                "method": "POST",
+                "url": "https://api.apollo.io/api/v1/mixed_people/api_search",
+            },
+        )
+        complete_call = SimpleNamespace(
+            status="complete",
+            tool_params={
+                "method": "POST",
+                "url": "https://api.apollo.io/api/v1/mixed_people/api_search",
+            },
+        )
+
+        self.assertTrue(_call_matches_expectation(error_call, expectation))
+        self.assertFalse(_call_matches_expectation(complete_call, expectation))
+
     def test_expected_http_request_can_require_body_terms(self):
         create_case = next(case for case in APOLLO_NATIVE_CASES if case.slug == APOLLO_NATIVE_CREATE_CONTACT)
         expectation = create_case.expected_http_requests[0]

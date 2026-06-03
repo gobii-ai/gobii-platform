@@ -461,6 +461,36 @@ describe('AgentComposer pending action insights panel', () => {
     })
   })
 
+  it('auto-selects the first native tab when multiple tabs become enabled together', async () => {
+    const { rerender } = renderAgentComposer({
+      insights: [makeInsight()],
+      googleSheetsDriveTabEnabled: false,
+      apolloNativeTabEnabled: false,
+    })
+
+    rerender(
+      <AgentComposer
+        agentId="agent-1"
+        agentName="Test Agent"
+        agentFirstName="Test"
+        onSubmit={vi.fn(async () => undefined)}
+        currentInsightIndex={0}
+        pendingActionRequests={[]}
+        insights={[makeInsight()]}
+        insightsLoading={false}
+        isProcessing={false}
+        processingTasks={[]}
+        googleSheetsDriveTabEnabled
+        apolloNativeTabEnabled
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByTestId('google-drive-panel')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('apollo-panel')).not.toBeInTheDocument()
+  })
+
   it.each(nativeTabCases)('does not override a manual tab choice after $name auto-selects', async ({ disabledProps, enabledProps, panelTestId }) => {
     const { rerender } = renderAgentComposer({
       insights: [makeInsight()],

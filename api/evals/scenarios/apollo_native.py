@@ -34,8 +34,15 @@ class ApolloHttpRequestExpectation(HttpRequestExpectation):
         url_terms: tuple[str, ...],
         method: str = "POST",
         body_terms: tuple[str, ...] = (),
+        allowed_statuses: tuple[str, ...] = ("complete",),
     ):
-        super().__init__(name=name, url_terms=url_terms, method=method, body_terms=body_terms)
+        super().__init__(
+            name=name,
+            url_terms=url_terms,
+            method=method,
+            body_terms=body_terms,
+            allowed_statuses=allowed_statuses,
+        )
 
 
 def _http_result(url: str, content: Any, *, status_code: int = 200, status: str = "ok") -> dict[str, Any]:
@@ -175,6 +182,7 @@ APOLLO_NATIVE_CASES = (
             ApolloHttpRequestExpectation(
                 name="apollo_search_attempt",
                 url_terms=("api.apollo.io/api/v1/mixed_people/api_search",),
+                allowed_statuses=("error",),
             ),
         ),
         response_term_groups=(("Apollo",), ("/app/integrations",), ("connect", "connected")),

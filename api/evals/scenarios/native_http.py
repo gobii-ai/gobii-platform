@@ -23,6 +23,7 @@ class HttpRequestExpectation:
     url_terms: tuple[str, ...]
     method: str = "GET"
     body_terms: tuple[str, ...] = ()
+    allowed_statuses: tuple[str, ...] = ("complete",)
 
 
 @dataclass(frozen=True)
@@ -90,7 +91,8 @@ def request_method(call: PersistentAgentToolCall) -> str:
 
 
 def call_matches_expectation(call: PersistentAgentToolCall, expectation: HttpRequestExpectation) -> bool:
-    if str(getattr(call, "status", "") or "").lower() != "complete":
+    allowed_statuses = {status.lower() for status in expectation.allowed_statuses}
+    if str(getattr(call, "status", "") or "").lower() not in allowed_statuses:
         return False
     if request_method(call) != expectation.method.upper():
         return False

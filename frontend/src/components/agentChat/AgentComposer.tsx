@@ -624,7 +624,7 @@ export const AgentComposer = memo(function AgentComposer({
     let nextAutoSelectedTab: NativeWorkingTabKind | null = null
     for (const { kind, available } of nativeTabAvailability) {
       const previousState = nativeAutoSwitchStateRef.current[kind]
-      if (previousState && previousState.key === key && !previousState.previousEnabled && available) {
+      if (!nextAutoSelectedTab && previousState && previousState.key === key && !previousState.previousEnabled && available) {
         nextAutoSelectedTab = kind
       }
       nativeAutoSwitchStateRef.current[kind] = {
