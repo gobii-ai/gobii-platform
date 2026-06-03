@@ -3228,6 +3228,7 @@ class ComparisonsIndexView(TemplateView):
         canonical_url = self.request.build_absolute_uri(self.request.path)
         home_url = self.request.build_absolute_uri(reverse("pages:home"))
         social_image_url = self.request.build_absolute_uri(static(self.social_image_path))
+        published_comparisons = get_published_comparisons()
         item_list_elements = [
             {
                 "@type": "ListItem",
@@ -3238,7 +3239,7 @@ class ComparisonsIndexView(TemplateView):
                 "name": comparison["title"],
                 "description": comparison["summary"],
             }
-            for index, comparison in enumerate(get_published_comparisons(), start=1)
+            for index, comparison in enumerate(published_comparisons, start=1)
         ]
 
         structured_data = {
@@ -3271,7 +3272,7 @@ class ComparisonsIndexView(TemplateView):
                     "applicationCategory": "AI agent platform",
                     "url": comparison["competitor_url"],
                 }
-                for comparison in COMPARISON_CATALOG
+                for comparison in published_comparisons
             ],
         }
         breadcrumb_data = {

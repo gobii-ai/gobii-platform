@@ -1664,6 +1664,48 @@ class ComparisonPageTests(TestCase):
         )
 
     @override_settings(GOBII_PROPRIETARY_MODE=True)
+    def test_comparisons_page_schema_ignores_unpublished_comparisons_without_competitor_url(self):
+        published_comparison = page_views.get_comparison(self.comparison_slug)
+        coming_soon_comparison = {
+            "slug": "future-platform-vs-gobii",
+            "competitor_name": "Future Platform",
+            "title": "Future Platform vs Gobii",
+            "summary": "A planned comparison for a future AI agent platform.",
+            "status": "coming_soon",
+            "target_keywords": ("Future Platform alternative",),
+        }
+
+        with (
+            patch.object(
+                page_views,
+                "COMPARISON_CATALOG",
+                (published_comparison, coming_soon_comparison),
+            ),
+            patch.object(
+                page_views,
+                "get_published_comparisons",
+                return_value=(published_comparison,),
+            ),
+        ):
+            response = self.client.get(reverse("proprietary:comparisons"))
+
+        self.assertEqual(response.status_code, 200)
+        soup = BeautifulSoup(response.content, "html.parser")
+        structured_data = json.loads(
+            soup.find_all("script", {"type": "application/ld+json"})[0].string
+        )
+
+        self.assertEqual(
+            [item["name"] for item in structured_data["about"]],
+            ["OpenClaw"],
+        )
+        self.assertEqual(
+            [item["name"] for item in structured_data["mainEntity"]["itemListElement"]],
+            ["OpenClaw vs Gobii"],
+        )
+        self.assertIn("Future Platform vs Gobii", soup.get_text(" ", strip=True))
+
+    @override_settings(GOBII_PROPRIETARY_MODE=True)
     def test_openclaw_comparison_page_renders_with_metadata_and_decision_copy(self):
         response = self.client.get(
             reverse("proprietary:comparison_detail", kwargs={"slug": self.comparison_slug})
